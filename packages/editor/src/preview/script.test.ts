@@ -138,7 +138,7 @@ describe('subscript and superscript in the preview (#310)', () => {
     expect(classes.get('rl-sub')).toBeUndefined();
   });
 
-  it('is not drawn in Raw, which shows the source as written', () => {
+  it('is not drawn in Plain, which shows the source as written', () => {
     const editor = editorAt('H<sub>2</sub>O', 0);
     editor.setViewMode('raw');
     expect(drawn(editor).classes.get('rl-sub')).toBeUndefined();

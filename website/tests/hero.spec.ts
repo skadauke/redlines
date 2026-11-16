@@ -129,12 +129,12 @@ async function clickAfter(page: Page, word: string) {
 const caption = (page: Page) =>
   sheet(page).locator('p', { hasText: /^(Type anywhere|Track Changes is off)/ });
 
-test('types a tracked insertion, shows it in Raw, and resets', async ({ page }) => {
+test('types a tracked insertion, shows it in Plain, and resets', async ({ page }) => {
   await open(page);
   const inserts = editor(page).locator('.rl-ins');
   const before = await inserts.count();
   const markers = async () => (await editor(page).innerText()).split('<!--ins').length - 1;
-  await sheet(page).getByRole('button', { name: 'Raw' }).click();
+  await sheet(page).getByRole('button', { name: 'Plain' }).click();
   const rawBefore = await markers();
   await sheet(page).getByRole('button', { name: 'Redlines' }).click();
   await clickAfter(page, 'importer');
@@ -142,7 +142,7 @@ test('types a tracked insertion, shows it in Raw, and resets', async ({ page }) 
   await expect(inserts).toHaveCount(before + 1);
   await expect(caption(page)).toHaveText('Type anywhere. Your edits are tracked, in your color.');
 
-  await sheet(page).getByRole('button', { name: 'Raw' }).click();
+  await sheet(page).getByRole('button', { name: 'Plain' }).click();
   expect(await markers()).toBe(rawBefore + 1);
 
   await sheet(page).getByRole('button', { name: 'Reset' }).click();
@@ -182,7 +182,7 @@ test('Tab reaches the controls and the editor, and leaves it', async ({ page }) 
   expect(seen.slice(0, 8)).toEqual([
     'Clean',
     'Redlines',
-    'Raw',
+    'Plain',
     'Track Changes',
     'Comment',
     'Review',

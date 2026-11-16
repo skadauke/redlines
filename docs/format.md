@@ -195,7 +195,7 @@ mark's markers there than the file had.
   later one gets a new one.
 - In a live session, an id may change until the server confirms the edit, and never after that.
 - People don't see ids. The editor numbers changes in document order ("Change 3 of 17"), as
-  Word's Reviewing pane does. Ids appear only in the raw view, the inspector and the agent API.
+  Word's Reviewing pane does. Ids appear only in the Plain view, the inspector and the agent API.
 
 Sequential numbers would be shorter, but they collide whenever two people work in parallel. In
 simulated live sessions, 14–30% of new sequential ids were already taken by another client, and
@@ -2334,6 +2334,19 @@ insertion too, and writes no marks: rejecting the column removes it.
   can't be inserted while the header is itself a pending inserted row, with Track Changes on or off
   ("Accept or reject the column changes in this table first." or "… the row changes …").
 
+**What the rules below hold back is written as a replacement.** Where this section says that an
+operation with Track Changes on is refused for another person's pending change, a row or column
+that is pending, or a mark that has no place ("Decide it first", "Accept or reject the … changes in
+this table first", a marker that can't follow), the operation is made as Track Changes off makes it
+on the table as the newest view reads it, and written as the replacement of the table (§3.12), with
+other people's pending changes in its old text. The words stay for what no unit holds (a table that is the
+whole text, where the closer would stand alone on its line; a marker inside an unclosed comment; a
+row with no leading pipe; a header alignment while the header's row change is pending), for the
+operations with Track Changes off (also those inside another person's pending replacement of the
+table, which can't be made without changing the text around it), for a paste that needs more of a
+table beside another person's change, and for the requests that have no meaning (an index outside
+the table, the last row or column, a request that changes nothing).
+
 **Deleted rows and columns** leave the table and are kept in deletions after one blank line below
 it, one per line:
 
@@ -2358,9 +2371,10 @@ it, one per line:
   the row or column takes when restored. The serializer rewrites positions whenever the table
   changes, and several deletions at one position keep their order.
 - **Rule 3, deleting a row with Track Changes on.** Another person's pending changes stay theirs. A
-  row with another person's pending change in it can't be deleted until that change is decided
-  ("Bo Chen's pending change is in this row. Decide it first."), and nor can a row that is another
-  person's pending insertion or move ("Bo Chen's inserted row is pending. Decide it first."). Your own
+  row with another person's pending change in it, and a row that is another person's pending
+  insertion or move, can't be deleted as a row of fine marks, which their decisions would leave
+  reading otherwise: the deletion is a replacement of the table (§3.12), with their change in its
+  old text, as it was. Your own
   pending row is removed outright, as rejecting it would, and your own pending changes in a row you
   delete fold into the deletion, which keeps the row as it reads with them rejected, as deleting your
   own insertion removes it. Deleting your own moved row removes the row at its new place and leaves
@@ -2373,10 +2387,9 @@ it, one per line:
   pipe at its start, which could not hold the marker, there too). A comment with a part that stays
   loses only the part in the row, and one with an end in the row keeps its other end, the end that
   left standing where the point goes. A highlight has no point form and goes.
-- **Rules 3 and 4 for columns.** A column with another person's pending change in it can't be
-  deleted until that change is decided ("Bo Chen's pending change is in this column. Decide it
-  first."), nor can a column that is another person's pending insertion or move ("Bo Chen's inserted
-  column is pending. Decide it first."); it can be moved, and its changes travel with it. Your own
+- **Rules 3 and 4 for columns.** A column with another person's pending change in it, and a column
+  that is another person's pending insertion or move, is deleted as a replacement of the table
+  (§3.12), with their change in its old text; it can be moved, and its changes travel with it. Your own
   pending column is removed outright, deleting your own moved column removes the column at its new
   place and leaves the old place a plain deletion, and your own pending changes in a column you
   delete fold into the deletion. A comment in a column that leaves the table, deleted or rejected,
@@ -2385,13 +2398,12 @@ it, one per line:
   change that ends that cell, rule 5); a comment in a moved column moves with it, both ways. A
   comment that starts above the table, on a line of its own because a marker can't
   start the line of a header without a leading pipe, and ends in a column that moves or is deleted,
-  refuses the operation with Track Changes on, in words that name its author ("Ada Lovelace's
-  comment starts above this table and ends in this column. Delete it first, or turn off Track
-  Changes."): its end would leave without its start, and the change could not be rejected. Another
-  column of the table, and the operation with Track Changes off, are not refused. A table keeps at
-  least one column: deleting the last, or rejecting the insertion of the last, is refused ("Delete
-  the table instead."). With Track Changes off the columns go from the original as well, so the last
-  column that is not pending can't be taken out ("Accept or reject the column changes in this table
+  would leave its end without its start: the operation with Track Changes on is a replacement of the
+  table, which takes the comment's blocks into the unit (§3.12). Another column of the table, and the
+  operation with Track Changes off, are written as they were. A table keeps at least one column:
+  deleting the last, or rejecting the insertion of the last, is refused ("Delete the table
+  instead."). With Track Changes off the columns go from the original as well, so the last column
+  that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
 - **Rule 6, deleting the table.** This is what the operation writes; an edit that merely covers the
   table is §3.4's ordinary deletion and is held to none of these bullets. A table that goes whole
@@ -2404,8 +2416,12 @@ it, one per line:
     move, or that holds their pending change: the operation is a replacement of the table where its
     fine form is not sound. That is a change in a cell, an inserted or moved row or column, a row or
     column deleted and kept below the table, an alignment change, and a pending change whose text
-    holds the table. Comments and highlights are no changes. The refusals "Decide it first" of
-    rows, columns and alignment in rules 2, 3 and 5 are replacements of the table in the same way.
+    holds the table. Comments and highlights are no changes. The operations that rules 2, 3 and 5
+    held back ("Decide it first": rows, columns and alignment beside another person's pending
+    change) are replacements of the table in the same way, and so is a format change in a cell that
+    another person's change holds (`widenedCellFormat`). What no unit holds (a table that is the
+    whole text, where the closer would stand alone on its line; a marker inside an unclosed
+    comment; a table with a row that has no leading pipe) is refused, in the words it was.
   - **Your own fold into the deletion,** as rejecting them would. A row or column you inserted is
     removed outright, rows and columns you deleted or moved are in the payload as they were, and
     your alignment change is undone. The deletion lines the table kept go with it, and their ledger
@@ -2656,7 +2672,7 @@ it, one per line:
     text the ones before leave, so that every order of decisions writes the same bytes. A mark
     whose table has other columns than `SPEC` has, and a mark that no table holds, can be accepted
     and not rejected: "This alignment change can't be rejected, because its table no longer has
-    the columns it had. Accept it, or change the text in Raw with Track Changes off."
+    the columns it had. Accept it, or change the text in Plain with Track Changes off."
   - **One change per table.** The author's own pending alignment change is changed in place, the
     mark staying where it is, and is taken away, with its old row written back as it was, when the
     new alignments are the old ones. Another person's pending alignment change refuses yours: "Bo
@@ -2709,7 +2725,7 @@ it, one per line:
       cells and the rows of a table, so a column that goes or moves can put the mark inside code or
       a comment. The words are those of any change that an edit would hide there ("This edit would
       hide other changes in code or an HTML comment, where they would no longer be read. Accept or
-      reject them first, or edit the source in Raw with Track Changes off."; deleting columns says
+      reject them first, or edit the source in Plain with Track Changes off."; deleting columns says
       "This decision would hide other changes in code or an HTML comment, where they would no longer
       be read. Decide the changes next to it first.", as it does beside any other change).
   - A table keeps its alignment when its columns are inserted (a new column has none), deleted or
@@ -3070,7 +3086,7 @@ backslash typed, or left by a deletion, right in front of a marker, which would 
 refused with Track Changes off, as it is with it on (§3.1, rule 4), in words that name the change
 ("A backslash can't stand right in front of the marker of Bo Chen's insertion while Track Changes
 is off: other Markdown readers would show the marker as text. Decide Bo Chen's insertion first, or
-turn on Track Changes."). In Raw, with Track Changes off, the editor edits the source as written,
+turn on Track Changes."). In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
@@ -3193,8 +3209,9 @@ table), and nothing about its markers differs from theirs.
 
 The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
 and the views read the replacements it writes, and the writers that refuse today call it one unit at
-a time (tables, lists, blocks, code). Until a writer calls it, it still refuses, in the words of its
-own section.
+a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format change in a cell),
+and the lists, blocks and code follow. Until a writer calls it, it still refuses, in the words of
+its own section.
 
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
 bullet outside), a list, a code block or a table. The edit is written as the replacement of the
@@ -3252,7 +3269,7 @@ Every order of decisions reads the same, judged against micromark 4.0.2 with GFM
 
 ### 3.13 Untracked edits
 
-An edit that can't be tracked, and that no unit holds, or that is in front matter or in Raw while
+An edit that can't be tracked, and that no unit holds, or that is in front matter or in Plain while
 Track Changes is on, is made without tracking after the person is asked, and leaves no mark and no
 ledger entry. In a file that keeps its full history it is an `edit` event, as every edit with Track
 Changes off is (§3.10, §6.2). An agent's edit is never made so: it is refused, with words for the
@@ -3277,6 +3294,34 @@ results, as one step, so that one Undo gives back the file as it was. Rejecting 
 the person. It is asked every time, since no answer to it stands for the next edit: the changes are
 gone after the first. Where accepting them doesn't let the edit be made either, the refusal stands as
 before. The same words are used for an input method's composition, asked about when it ends.
+
+### 3.14 Moving blocks
+
+A move of whole blocks to another place among their siblings (⌥↑ and ⌥↓, a drag to a drop line) is
+written with no mark of its own: it is the deletion of the blocks where they stood and the insertion
+of the same text where they land, which every edit can already be written as, with one `group` on
+the marks (§2.2), so that they are accepted or rejected together, and every order of deciding them
+reads alike, like any deletion and insertion. Accepting both gives the blocks at the new place,
+rejecting both at the old. (Rows and columns of a table are moved by `move` links; they are not
+blocks of the document's own flow, §3.7.)
+
+- **The unit.** A move takes a run of siblings under one parent, as `widen-units.ts` reads them: a
+  paragraph, a heading, a code block, a table, a quote or a list at the top of the file, a block of
+  a quote, an item of a list. A caret in a paragraph moves the paragraph; in an item, the item with
+  what is nested in it; in an item's own nested list or quote, the unit there; a selection that
+  covers a whole list, quote or item moves it, and one across several siblings moves them all. A
+  block moves among its own siblings only: an item stays in its list, and a block in its quote.
+  Nothing moves above the first sibling or below the last, and the command says so.
+- **The text.** The moved text is the newest view of the blocks, with the break that the siblings
+  have between them. Another person's pending changes in the blocks are not carried: they stay in
+  the deleted text at the old place, as in any deletion (§3.4), and the copy at the new place has the
+  text they would give if accepted. Ordered lists keep their written numbers.
+- **When a fine write isn't sound.** The same text can be written by the siblings that the run passes
+  moving the other way (the same file when accepted), and if neither is sound the move is widened to
+  the blocks from the old place to the new, one substitution that keeps others' changes in its
+  old text (§3.12). A move that reaches more blocks than a widened edit may is not refused: the
+  person is asked first, and the move is made as plain edits, untracked, as Word does (§3.13).
+- **Track Changes off.** The same two edits are made plain.
 
 ## 4. Comments
 
@@ -3574,8 +3619,8 @@ same values.
     that only records how it was left, open in Clean, whatever view was used last and whatever the
     ledger says, since there is nothing for another view to show. A file that gains redlines is
     saved with its view, and opens in it.
-  - Clean, Redlines and Simple are written. Raw never is: nobody wants a document to open as
-    source, and a save made in Raw leaves the view the file had.
+  - Clean, Redlines and Simple are written. Plain never is: nobody wants a document to open as
+    source, and a save made in Plain leaves the view the file had.
   - Switching views never changes the file, and so never makes a document edited. The view is
     written when the file is written for another reason, a Save, so reading a document changes
     nothing and its history stays quiet. An agent's edits, and the `redlines` command line, leave

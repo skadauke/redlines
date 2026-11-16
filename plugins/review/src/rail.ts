@@ -366,7 +366,7 @@ const ANCHOR_CHANGED =
 const THREAD_GONE =
   'The comment this replied to is gone. Copy what you wrote, or Cancel to let it go.';
 
-const REFUSED_IN_RAW = "A comment can't be added in Raw. Switch to Redlines to add one.";
+const REFUSED_IN_RAW = "A comment can't be added in Plain. Switch to Redlines to add one.";
 
 /** What a new comment is on: the selection, or else the word under the caret, or else the caret. */
 function newCommentRange(state: EditorState): Range {
@@ -880,7 +880,7 @@ class Rail {
     // A stable sort, as in `notesIn`.
     notes.sort((a, b) => a.pos - b.pos);
     // The host's elements stay while the rail shows its notes in full: not as dots, and not with
-    // no note of its own, which is also what Clean and Raw leave it.
+    // no note of its own, which is also what Clean and Plain leave it.
     if (this.hosted.size && (this.compact || !notes.length)) this.dropHosted();
     // While a new comment is written, its anchor is the one to see.
     const selected = (shown && writing) || selectedNote(state, notes);
@@ -1397,7 +1397,7 @@ class Rail {
   }
 
   /**
-   * Opens a box for a new comment. Raw takes none, and says so, and a document shown Clean switches
+   * Opens a box for a new comment. Plain takes none, and says so, and a document shown Clean switches
    * to Redlines. A comment already being written keeps its place and its draft, but an empty box
    * moves to the selection, and so does a draft that was refused where it was, since the message
    * asks for another selection. On the anchor of what Escape set aside, that comes back. With
@@ -1464,7 +1464,7 @@ class Rail {
    * again and nothing more.
    *
    * The rail lays out only what it shows in full. In a narrow editor, where the notes are dots, and
-   * while it has no note of its own, as in Clean and Raw, or in a document with no comment (the
+   * while it has no note of its own, as in Clean and Plain, or in a document with no comment (the
    * column makes room for notes only), it takes nothing, and returns null: the host places the
    * element as it would without a rail. One it holds is let go when it stops showing them, and
    * `lost` is called once, after the update that did it (a host that places the element reads the
@@ -1598,7 +1598,7 @@ class Rail {
   }
 
   /**
-   * Shows a thread's note: Clean or Raw switch to the markup view, the note is selected and scrolled into
+   * Shows a thread's note: Clean or Plain switch to the markup view, the note is selected and scrolled into
    * view, and in a narrow editor pinned over the page from its dot. Returns false, changing
    * nothing, when no note would be drawn for it.
    */

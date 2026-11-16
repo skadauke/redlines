@@ -43,10 +43,10 @@ describe('stillThere', () => {
 describe('shownRecent', () => {
   it('shows the documents that are still there, in order, and no other file', async () => {
     // An earlier version could list a file of another kind, which would now open nothing.
-    const there = new Set(['/a.md', '/logo.svg', '/c.txt', '/notes', '/e.qmd', '/f.Rmd']);
+    const there = new Set(['/a.md', '/logo.heic', '/c.txt', '/notes', '/e.qmd', '/f.Rmd']);
     const asked: string[] = [];
     const shown = await shownRecent(
-      ['/a.md', '/logo.svg', '/c.txt', '/gone.md', '/notes', '/e.qmd', '/f.Rmd'],
+      ['/a.md', '/logo.heic', '/c.txt', '/gone.md', '/notes', '/e.qmd', '/f.Rmd'],
       (path) => {
         asked.push(path);
         return Promise.resolve(there.has(path));

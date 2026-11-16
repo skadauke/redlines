@@ -2,18 +2,19 @@
 // author's edits through the format's trackedEdit: typing becomes an insertion, deleting a
 // deletion and replacing a substitution, each with the markers and the ledger entry the format
 // writes for it, in one transaction, so one Undo takes it back exactly. A tracked edit made in
-// Clean switches the view to Redlines, and Raw is read-only while Track Changes is on, because
+// Clean switches the view to Redlines, and Plain is read-only while Track Changes is on, because
 // typing there could forge or break markers.
 //
-// With Track Changes off, outside Raw, an edit is an edit of the text itself (format §3.10), which
+// With Track Changes off, outside Plain, an edit is an edit of the text itself (format §3.10), which
 // the format's untrackedEdit writes: what is typed never becomes part of a pending change, and what
 // is deleted is gone for good, with the marks that have no text left. It is one transaction too.
 //
-// With Track Changes on or off, outside Raw, Backspace and Delete never delete a marker: next to
+// With Track Changes on or off, outside Plain, Backspace and Delete never delete a marker: next to
 // hidden text they act on the visible character beyond it, and nothing is typed after the ledger
 // at the end of the file.
 
 import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
+import { syntaxTree } from '@codemirror/language';
 import {
   Annotation,
   ChangeSet,
@@ -60,6 +61,7 @@ import {
   untrackedEdit,
   untrackedFormat,
 } from '@redlines/format';
+import type { SyntaxNode } from '@lezer/common';
 import { lineChanges } from '../diff.ts';
 import {
   annotationsOfTransaction,
@@ -120,9 +122,9 @@ export const refusedEditEffect = StateEffect.define<string>();
 export const editGroupAnnotation = Annotation.define<boolean>();
 
 export const RAW_READ_ONLY =
-  'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+  'Plain is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
 
-/** Raw shows markers as text, which typing could forge or break while edits are tracked. */
+/** Plain shows markers as text, which typing could forge or break while edits are tracked. */
 export function rawIsReadOnly(state: EditorState): boolean {
   return state.field(trackingField) && state.field(viewModeField) === 'raw';
 }
@@ -225,6 +227,56 @@ function inBody(edits: Edit[], end: number | null): Edit[] {
     const from = Math.min(edit.from, end);
     return from < end || edit.insert ? [{ ...edit, from, to: end }] : [];
   });
+}
+
+/**
+ * A deletion of all the text between the markers of an inline format (`**a**`, `~~a~~`, a code
+ * span) takes the markers too, from the outermost format it empties: what is left, `****`, is no
+ * format and no text, and read again it would be something else (#584).
+ */
+function emptiedFormats(state: EditorState, edits: Edit[]): Edit[] {
+  const tree = syntaxTree(state);
+  const widened = edits.map((edit) => {
+    if (edit.insert || edit.from >= edit.to) return edit;
+    let { from, to } = edit;
+    for (let moved = true; moved;) {
+      moved = false;
+      for (let node: SyntaxNode | null = tree.resolveInner(from, 1); node; node = node.parent) {
+        const first = node.firstChild;
+        const last = node.lastChild;
+        if (
+          first &&
+          last &&
+          first !== last &&
+          /Mark$/.test(first.name) &&
+          /Mark$/.test(last.name) &&
+          first.to === from &&
+          last.from === to &&
+          /^(StrongEmphasis|Emphasis|Strikethrough|InlineCode)$/.test(node.name)
+        ) {
+          from = node.from;
+          to = node.to;
+          moved = true;
+          break;
+        }
+      }
+    }
+    return from === edit.from && to === edit.to ? edit : { ...edit, from, to };
+  });
+  // Edits that now overlap (several carets) are one.
+  const merged: Edit[] = [];
+  for (const edit of widened) {
+    const previous = merged.at(-1);
+    if (previous && edit.from < previous.to) {
+      merged[merged.length - 1] = {
+        ...previous,
+        to: Math.max(previous.to, edit.to),
+        insert: previous.insert + edit.insert,
+        main: previous.main || edit.main,
+      };
+    } else merged.push(edit);
+  }
+  return merged;
 }
 
 /** The visible character beside `pos`, past any hidden text, or null at the document's edge. */
@@ -621,6 +673,23 @@ export function authoredChanges(
   return untrackEdits(state, text, parsed, made, false).changes;
 }
 
+/** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
+ * question to the person answered Make Edit asks for (`ask.ts`). */
+export function untrackedChanges(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): ChangeSet {
+  return untrackEdits(
+    state,
+    text,
+    parsed,
+    edits.map((edit): Edit => ({ ...edit, main: false })),
+    false,
+  ).changes;
+}
+
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
 function trackedSpec(
   tr: Transaction,
@@ -867,7 +936,7 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
 export const composedTextFacet =
   Facet.define<(state: EditorState, from: number, text: string) => string>();
 
-/** Text an input method composes outside Raw (see `compositionField`). */
+/** Text an input method composes outside Plain (see `compositionField`). */
 function isDeferred(tr: Transaction): boolean {
   return (
     tr.isUserEvent('input.type.compose') &&
@@ -903,6 +972,14 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   const block = tr.isUserEvent('delete.backward.block') || tr.isUserEvent('delete.forward.block');
   if (!block && (backward || tr.isUserEvent('delete.forward'))) {
     edits = pastHiddenText(start, edits, !backward);
+  }
+  // A cut or a drag keeps what it takes as it is: the clipboard holds the text with its markers.
+  if (
+    tr.isUserEvent('delete') &&
+    !tr.isUserEvent('delete.cut') &&
+    !tr.isUserEvent('delete.dragMove')
+  ) {
+    edits = emptiedFormats(start, edits);
   }
   if (start.field(trackingField) && !answered) {
     return trackedSpec(tr, keepingSpaces(tr, edits), backward);
@@ -1107,20 +1184,20 @@ const compositionEnd = ViewPlugin.fromClass(CompositionEnd, {
   },
 });
 
-/** Raw is read-only while Track Changes is on (see `rawIsReadOnly`). */
+/** Plain is read-only while Track Changes is on (see `rawIsReadOnly`). */
 const rawWhileTracking = EditorState.readOnly.compute(
   [trackingField, viewModeField, untrackedAskFacet],
   (state) => rawIsReadOnly(state) && !rawAsks(state),
 );
 
-/** In Raw while it is read-only, says why what the page would edit doesn't go in. */
+/** In Plain while it is read-only, says why what the page would edit doesn't go in. */
 function sayReadOnly(view: EditorView): void {
   if (rawIsReadOnly(view.state) && !rawAsks(view.state))
     view.dispatch({ effects: refusedEditEffect.of(RAW_READ_ONLY) });
 }
 
 /**
- * Typing, deleting, pasting, cutting and dropping in Raw while it is read-only, which the editor
+ * Typing, deleting, pasting, cutting and dropping in Plain while it is read-only, which the editor
  * takes no change from. Undo and Redo say why themselves.
  */
 const rawEditsRefused = EditorView.domEventObservers({

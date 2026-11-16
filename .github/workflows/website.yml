@@ -15,20 +15,14 @@
 name: Website
 
 on:
+  # A pull request runs it only when it changes the site or the embed itself; a change to the
+  # packages and plugins the embed bundles is checked on main (below) and in the Epic's sweep.
   pull_request:
     paths:
       - 'website/**'
       - 'apps/website-embed/**'
       - 'apps/desktop/src-tauri/icons/family/**'
       - 'docs/design.md'
-      - 'packages/editor/**'
-      - 'packages/format/**'
-      - 'packages/plugin-api/**'
-      - 'packages/agent-tools/**'
-      - 'plugins/review/**'
-      - 'plugins/agents/**'
-      - 'plugins/formatting/**'
-      - 'plugins/themes/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/website.yml'
   push:

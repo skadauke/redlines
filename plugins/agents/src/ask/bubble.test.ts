@@ -82,6 +82,19 @@ describe('the bubble’s exchange', () => {
     expect(exchangeOf(bubble).getAttribute('aria-live')).toBe('polite');
   });
 
+  it('says an answer used the web, and only then (#529)', () => {
+    const bubble = make();
+    bubble.render(
+      view({
+        turns: [{ ...turn('Is it true?', 'Yes [1].'), web: true }, turn('And this?', 'No.')],
+      }),
+    );
+    const notes = [...exchangeOf(bubble).children].map(
+      (block) => block.querySelector('.rl-qa-web')?.textContent ?? null,
+    );
+    expect(notes).toEqual(['Used the web for this answer.', null]);
+  });
+
   it('names, over each answer, the agent that gave it', () => {
     const bubble = make();
     bubble.render(

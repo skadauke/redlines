@@ -117,6 +117,8 @@ function hiddenSyntax(state: EditorState, from: number, to: number): Span[] {
         case 'StrikethroughMark':
         case 'SubscriptMark':
         case 'SuperscriptMark':
+        case 'HtmlTagMark':
+        case 'HtmlDropped':
           hide(node.from, node.to);
           break;
         case 'Link':

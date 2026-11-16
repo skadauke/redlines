@@ -355,7 +355,7 @@ async function* follow<S>(
       if (event === null || spec.held?.(state) === true) continue;
       yield flagged(event);
       if (event.type === 'error') stop();
-      if (event.type !== 'status') return;
+      if (event.type !== 'status' && event.type !== 'web') return;
     }
     const end = await ended;
     const failure = spec.failure?.(state);

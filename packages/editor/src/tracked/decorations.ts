@@ -4,7 +4,7 @@
 // inserted line break shows a small pilcrow when line break marks are shown; comments and
 // highlights are tinted, and a bar left of the column marks each line with a pending change. Clean
 // shows the newest text, as if every change were accepted, without markup or ordinary HTML
-// comments. Raw shows the source as written, highlighted in grays.
+// comments. Plain shows the source as written, highlighted in grays.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -975,13 +975,33 @@ function changeSpans(model: Model): ChangeSpan[] {
 }
 
 /** The change bar classes of each line, by line number: which lines hold a change, and whose. */
-function bars(doc: Text, spans: readonly ChangeSpan[]): Map<number, string> {
+function bars(
+  doc: Text,
+  spans: readonly ChangeSpan[],
+  hidden: readonly { from: number; to: number }[] = [],
+): Map<number, string> {
   const colors = new Map<number, Set<number>>();
+  // A line that starts inside a hidden range that began on an earlier line is drawn as one with it
+  // (a bullet and its text over hidden marker lines): the one line the view renders is the first,
+  // which takes the class (#654).
+  const multi = hidden.filter(({ from, to }) => doc.lineAt(from).number !== doc.lineAt(to).number);
+  const firsts = new Map<number, number>();
+  const first = (n: number): number => {
+    const known = firsts.get(n);
+    if (known !== undefined) return known;
+    // A range that ends where the line starts has taken the break before it too.
+    const start = doc.line(n).from;
+    const range = multi.find((r) => r.from < start && start <= r.to);
+    const found = range ? first(doc.lineAt(range.from).number) : n;
+    firsts.set(n, found);
+    return found;
+  };
   for (const { from, to, color } of spans) {
     for (let n = doc.lineAt(from).number, last = doc.lineAt(to).number; n <= last; n++) {
-      const onLine = colors.get(n);
+      const key = multi.length ? first(n) : n;
+      const onLine = colors.get(key);
       if (onLine) onLine.add(color);
-      else colors.set(n, new Set([color]));
+      else colors.set(key, new Set([color]));
     }
   }
   return new Map([...colors].map(([n, onLine]) => [n, barClass(onLine)]));
@@ -1308,7 +1328,7 @@ function draw(doc: Text, model: Model, zone?: Zone): Drawing {
     ranges.push(Decoration.line({ class: className }).range(doc.lineAt(at).from));
   }
   const spans = changeSpans(model).sort((a, b) => a.from - b.from);
-  for (const [n, className] of bars(doc, spans)) {
+  for (const [n, className] of bars(doc, spans, model.hidden)) {
     const line = doc.line(n);
     const block = spanAt(model.blocks, line.from);
     if (block && line.to <= block.to) continue;
@@ -1700,7 +1720,7 @@ export class HiddenRun extends RangeValue {
 
 /**
  * The lines Clean and Redlines hide, each run from the start of its first line to the end of its
- * last (the caret steps over it with the line breaks around it); none in Raw.
+ * last (the caret steps over it with the line breaks around it); none in Plain.
  */
 export function hiddenLines(state: EditorState): RangeSet<HiddenRun> {
   const shown = state.field(trackedField, false);
@@ -1840,7 +1860,7 @@ export function visibleSelection(
   return next.eq(selection) ? selection : next;
 }
 
-/** What the caret steps over in a state: hidden text and hidden lines, none in Raw. */
+/** What the caret steps over in a state: hidden text and hidden lines, none in Plain. */
 export function atomsOf(state: EditorState): RangeSet<Atom> {
   return state.field(trackedField, false)?.atomic ?? RangeSet.of<Atom>([]);
 }
@@ -1879,7 +1899,7 @@ export function pastHidden(state: EditorState, pos: number, forward: boolean): n
 }
 
 /**
- * Leaving Raw, a new version of the file from outside, or an edit the tracked layer dealt with
+ * Leaving Plain, a new version of the file from outside, or an edit the tracked layer dealt with
  * (tracked or plain) or a decision can leave the caret in text that is hidden now: inside markers
  * that an edit brought together, on a blank line under a new own-line marker, or past the hidden
  * ledger. It moves out.
@@ -1905,7 +1925,7 @@ const viewClass = EditorView.editorAttributes.compute([viewModeField], (state) =
   class: `rl-view-${state.field(viewModeField)}`,
 }));
 
-/** Markdown's syntax in Raw, drawn in grays: color means a person. */
+/** Markdown's syntax in Plain, drawn in grays: color means a person. */
 const rawHighlighter = tagHighlighter([
   { tag: tags.heading, class: 'rl-tok-heading' },
   { tag: tags.strong, class: 'rl-tok-strong' },
@@ -1916,7 +1936,7 @@ const rawHighlighter = tagHighlighter([
   { tag: tags.comment, class: 'rl-tok-comment' },
 ]);
 
-/** The highlighting of the visible text, in Raw only: the other views draw the document. */
+/** The highlighting of the visible text, in Plain only: the other views draw the document. */
 function rawDecorations(view: EditorView): DecorationSet {
   if (view.state.field(viewModeField) !== 'raw') return Decoration.none;
   const builder = new RangeSetBuilder<Decoration>();
@@ -2099,7 +2119,7 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-2)', fontSize: '0.85em' },
 
-  // Raw: the source in the code font, a little wider and more open than the document's column,
+  // Plain: the source in the code font, a little wider and more open than the document's column,
   // markers and the ledger in the second ink.
   '&.rl-view-raw .cm-scroller': { fontFamily: 'var(--rl-font-mono)' },
   '&.rl-view-raw .cm-content': {

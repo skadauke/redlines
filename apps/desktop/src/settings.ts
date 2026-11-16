@@ -126,6 +126,11 @@ export interface Settings {
    */
   agentModels: Record<string, string>;
   /**
+   * Whether agents may use the web (#529): one switch for every agent, off by default. Off, an agent
+   * that wants the web asks, and Allow Always turns this on.
+   */
+  webAccess: boolean;
+  /**
    * The people this machine has met, in the order of meeting, each with the author color they were
    * given (design §5.5). Never you, who always have the first color.
    */
@@ -172,6 +177,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   agentHandles: {},
   defaultAgent: null,
   agentModels: {},
+  webAccess: false,
   people: [],
   newDocumentFolder: null,
   imageFolderName: 'images',
@@ -235,6 +241,7 @@ export function loadSettings(): Settings {
         ? value['defaultAgent']
         : null,
     agentModels: agentModelsOf(value['agentModels']),
+    webAccess: value['webAccess'] === true,
     people: peopleOf(value['people']),
     newDocumentFolder:
       typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']

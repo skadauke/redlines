@@ -13,3 +13,7 @@ const FOUND: Record<string, AgentState> = {
 /** The scripted state of an agent of the page. */
 export const devDetect = (id: string): Promise<AgentState> =>
   Promise.resolve(FOUND[id] ?? { found: false, help: 'No such agent.' });
+
+/** The newest version, as the page says: Codex has a newer one, Claude Code is current. */
+export const devLatest = (id: string): Promise<string> =>
+  id === 'codex' ? Promise.resolve('0.41.0') : Promise.resolve('2.1.400');

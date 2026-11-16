@@ -23,6 +23,7 @@ import { leafKind } from '../blocks/structure.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { imageOfNode } from '../image-size.ts';
+import { htmlBreak, htmlChip, htmlElement, htmlWbr } from './html-draw.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import {
@@ -53,6 +54,12 @@ const UNCHECKED_TEXT = Decoration.mark({ attributes: UNCHECKED });
 /** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
 export const BULLETS = ['•', '◦', '▪'] as const;
 
+/** Whether a node is in a table. */
+function inTable(node: SyntaxNode): boolean {
+  for (let up = node.parent; up; up = up.parent) if (up.name === 'Table') return true;
+  return false;
+}
+
 /** How many lists hold a list item, its own included. */
 function listDepth(node: SyntaxNode): number {
   let depth = 0;
@@ -82,6 +89,16 @@ const URL_OWNERS = new Set(['Link', 'Image', 'Autolink', 'LinkReference']);
 /** Whether any selection range touches `from`–`to`, ends included. */
 function touches(state: EditorState, from: number, to: number): boolean {
   return state.selection.ranges.some((range) => range.from <= to && range.to >= from);
+}
+
+/**
+ * Whether a caret is at `from`–`to`, ends included. A selection over text is no caret: a list
+ * item's marker and box are drawn the same with a selection over them (#668).
+ */
+function caretTouches(state: EditorState, from: number, to: number): boolean {
+  return state.selection.ranges.some(
+    (range) => range.empty && range.from <= to && range.to >= from,
+  );
 }
 
 function onLine(state: EditorState, line: Line): boolean {
@@ -422,8 +439,9 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
     // A task's text starts after its box, so its wrapped lines hang there.
     b.indent(line, hang, start);
   }
-  // A task's source shows while the selection is on its marker, as a list marker's does.
-  const shown = touches(state, mark.from, marker ? marker.to : mark.to);
+  // A task's source shows while the caret is on its marker, as a list marker's does; a selection
+  // over it leaves the bullet, the number and the box as they are drawn (#668).
+  const shown = caretTouches(state, mark.from, marker ? marker.to : mark.to);
   // A box is drawn, empty or not (an item with no text yet is an empty box at its indent), unless
   // a pending change we can't draw as a box covers its marker: then it stays source. A box with a
   // pending change of its own is drawn in its new state, in its author's color.
@@ -552,7 +570,7 @@ function frontMatter(b: Builder, node: SyntaxNode): void {
 }
 
 /**
- * The preview's decorations for a state. Exported for tests; the editor caches them. The Raw view
+ * The preview's decorations for a state. Exported for tests; the editor caches them. The Plain view
  * shows the source as written, without them.
  */
 export function previewDecorations(state: EditorState, window?: Window): DecorationSet {
@@ -612,6 +630,16 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
       else if (name === 'HardBreak') hardBreak(b, node);
+      else if (name === 'HtmlElement') htmlElement(b, node);
+      // A `<br>` in a table cell is drawn by the table (table/layout.ts).
+      else if (name === 'HtmlBreak' || name === 'HtmlWbr') {
+        if (!inTable(node)) {
+          const decoration = name === 'HtmlBreak' ? htmlBreak() : htmlWbr();
+          b.push(decoration.range(node.from, node.to));
+        }
+      } else if (name === 'HtmlDropped')
+        b.syntax(node.from, node.to, touches(state, node.from, node.to));
+      else if (name === 'HtmlChip') htmlChip(b, node);
       else if (name === 'Image' || name === 'HTMLTag' || name === 'HTMLBlock') {
         // An `<img>` tag is an image too (#526: it is what an image with a size is written as).
         if (imageOfNode(state, node.node)) {
@@ -746,6 +774,11 @@ const previewField = StateField.define<Preview>({
   ],
 });
 
+/** The hard breaks' hidden spaces and the images in `state`, which the caret steps over (none without a preview). */
+export function hardBreakAtoms(state: EditorState): DecorationSet {
+  return state.field(previewField, false)?.breaks ?? Decoration.none;
+}
+
 /**
  * The caret never rests between the spaces of a hard break (#608): they are one unit that it steps
  * over, hidden. A space typed in front of them makes the run longer, and the caret mapped through
@@ -754,8 +787,8 @@ const previewField = StateField.define<Preview>({
  */
 const hardBreakCaret = Prec.highest(
   EditorState.transactionFilter.of((tr) => {
-    // A change, a selection, or a switch of the view (Raw has no atoms: a caret between the spaces
-    // that Raw allowed goes out when the spaces hide).
+    // A change, a selection, or a switch of the view (Plain has no atoms: a caret between the spaces
+    // that Plain allowed goes out when the spaces hide).
     if (!tr.docChanged && !tr.selection && !tr.effects.some((e) => e.is(setViewModeEffect))) {
       return tr;
     }

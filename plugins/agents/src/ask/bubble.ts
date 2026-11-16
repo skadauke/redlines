@@ -161,8 +161,14 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
     return made;
   };
 
+  const webNote = () => {
+    const note = el('div', 'rl-qa-web');
+    note.textContent = 'Used the web for this answer.';
+    return note;
+  };
+
   /** The agent's name over its answer, and the answer: what a question is answered with. */
-  const answerOf = ({ answer, agent }: AskTurn): Node[] => {
+  const answerOf = ({ answer, agent, web }: AskTurn): Node[] => {
     const head = el('div', 'rl-note-head rl-author-0');
     const dot = el('span', 'rl-dot');
     const name = el('span', 'rl-note-name');
@@ -174,6 +180,8 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
         has: (quote) => handlers.has(quote),
         show: (quote) => handlers.show(quote),
       }),
+      // Said when the agent used the web for this answer (#529), so that its sources are read as such.
+      ...(web === true ? [webNote()] : []),
     ];
   };
 

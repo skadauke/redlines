@@ -319,10 +319,47 @@ fn viewer(file: &Path) -> std::process::Command {
     }
 }
 
-/// The extensions, lowercase, of the documents Redlines opens and edits: Markdown, its R Markdown
-/// and Quarto dialects, and plain text (format §9.1, and `DOCUMENT_EXTENSIONS` in `src/host.ts`).
-/// The app's bundle declares the same, for Finder's Open With (`Info.plist`).
-pub const DOCUMENTS: &[&str] = &["md", "markdown", "qmd", "rmd", "txt"];
+/// The extensions, lowercase, of the Markdown documents: Markdown and its R Markdown and Quarto
+/// dialects (format §9.1). `MARKDOWN_EXTENSIONS` in `src/file-names.ts` is the same table, and a
+/// test says they agree (`document_types.rs`).
+pub const MARKDOWN: &[(&str, &[&str])] =
+    &[("gfm", &["md", "markdown"]), ("pandoc", &["qmd", "rmd"])];
+
+/// The extensions, lowercase, of the Plain-only documents, by group: text and code, which open in
+/// Plain with no ledger (format §9.1). `PLAIN_ONLY_EXTENSIONS` in `src/file-names.ts` is the same
+/// table, and the bundle declares them in `document-types.plist`, for Finder's Open With.
+pub const PLAIN_ONLY: &[(&str, &[&str])] = &[
+    ("text", &["txt", "text", "log"]),
+    (
+        "data",
+        &[
+            "json", "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "csv", "tsv",
+            "xml", "plist",
+        ],
+    ),
+    (
+        "web",
+        &[
+            "html", "htm", "css", "scss", "less", "js", "mjs", "cjs", "jsx", "ts", "mts", "cts",
+            "tsx", "svg",
+        ],
+    ),
+    (
+        "code",
+        &[
+            "py", "rb", "go", "rs", "swift", "java", "kt", "c", "h", "cc", "cpp", "hpp", "cs",
+            "php", "lua", "r", "sql", "sh", "bash", "zsh", "ps1",
+        ],
+    ),
+];
+
+/// Every extension, lowercase, of the documents Redlines opens and edits.
+pub fn document_extensions() -> impl Iterator<Item = &'static str> {
+    MARKDOWN
+        .iter()
+        .chain(PLAIN_ONLY)
+        .flat_map(|(_, each)| each.iter().copied())
+}
 
 /// The folder the sidebar of a window shows for its document: the project folder, or the
 /// document's own folder when the project is too broad (`src/ui/sidebar.ts`).
@@ -472,10 +509,11 @@ pub fn shown_in(
 /// is asked to (`NOT_A_DOCUMENT` in `src/host.ts`).
 pub const NOT_A_DOCUMENT: &str = "Redlines opens Markdown and text files.";
 
-/// Whether the file at `path` is a document, by its name (`DOCUMENTS`).
+/// Whether the file at `path` is a document, by its name (`document_extensions`).
 pub fn is_document(path: &Path) -> bool {
     path.extension().is_some_and(|extension| {
-        DOCUMENTS.contains(&extension.to_string_lossy().to_lowercase().as_str())
+        let own = extension.to_string_lossy().to_lowercase();
+        document_extensions().any(|each| each == own)
     })
 }
 
@@ -1618,19 +1656,19 @@ mod tests {
             &repo,
             &[
                 ".git/",
-                "main.ts",
-                "notes.text",
-                "package.json",
+                "main.zig",
+                "notes.docx",
+                "package.lock",
                 "folder.md/",
-                "agent.plist",
+                "agent.bin",
             ],
         );
         for name in [
-            "main.ts",
-            "notes.text",
-            "package.json",
+            "main.zig",
+            "notes.docx",
+            "package.lock",
             "folder.md",
-            "agent.plist",
+            "agent.bin",
             "missing.md",
             "missing.txt",
         ] {

@@ -55,12 +55,12 @@ test.describe('the alert for an edit that can’t be tracked @views', () => {
     expect(await j.text()).toBe('First newX words here.\n\nSecond paragraph.\n');
   });
 
-  test('Raw asks once for a word, and the answer holds for the run', async ({ start }) => {
+  test('Plain asks once for a word, and the answer holds for the run', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: true, view: 'raw' });
     await j.caretAfter('then more');
     await j.type('a');
     const sheet = j.page.locator('.rl-sheet');
-    await expect(sheet).toContainText("Raw shows the file's own text");
+    await expect(sheet).toContainText("Plain shows the file's own text");
     await j.shot('sheet-raw');
     await sheet.getByRole('button', { name: 'Make Edit' }).click();
     await expect(sheet).toBeHidden();

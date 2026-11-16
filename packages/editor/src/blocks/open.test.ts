@@ -121,7 +121,7 @@ describe('the empty paragraph', () => {
     expect(changes).toEqual([lf('One two.⏎⏎X⏎⏎Next.')]);
   });
 
-  it('goes before the view switches to Raw', () => {
+  it('goes before the view switches to Plain', () => {
     const { editor } = mount('One two.⏎⏎Next.');
     returnAt(editor, 'One two.'.length);
     editor.setViewMode('raw');
