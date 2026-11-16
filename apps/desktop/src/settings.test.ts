@@ -48,11 +48,23 @@ function mockColorScheme(dark: boolean) {
 }
 
 describe('settings', () => {
+  it('keeps the sidebar width in range, and the default for what is not a width (#680)', () => {
+    const load = (width: unknown) => {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sidebarWidth: width }));
+      return loadSettings().sidebarWidth;
+    };
+    expect(load(333)).toBe(333);
+    expect(load(20)).toBe(180);
+    expect(load(5000)).toBe(480);
+    expect(load('wide')).toBe(240);
+  });
+
   it('settings default and persist', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       theme: 'default',
       appearance: 'system',
       sidebarOpen: false,
+      sidebarWidth: 240,
       showResolved: false,
       markupView: 'redlines',
       rotateIcon: true,
@@ -67,12 +79,12 @@ describe('settings', () => {
       smartPunctuation: true,
       closePairs: true,
       emojiSuggestions: true,
-      trackNewDocuments: false,
       showLineBreakMarks: false,
       showWordCount: true,
       toolbarAtBottom: false,
       agentScope: 'folder',
       consent: {},
+      agentHandles: {},
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
@@ -83,6 +95,7 @@ describe('settings', () => {
       theme: 'book',
       appearance: 'dark',
       sidebarOpen: true,
+      sidebarWidth: 320,
       showResolved: true,
       markupView: 'simple',
       rotateIcon: false,
@@ -97,12 +110,12 @@ describe('settings', () => {
       smartPunctuation: false,
       closePairs: false,
       emojiSuggestions: false,
-      trackNewDocuments: true,
       showLineBreakMarks: true,
       showWordCount: false,
       toolbarAtBottom: true,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
+      agentHandles: { claude: 'ada' },
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
@@ -482,7 +495,7 @@ describe('settings', () => {
         smartPunctuation: 0,
         closePairs: null,
         emojiSuggestions: 'sure',
-        trackNewDocuments: 'no',
+        trackNewDocuments: true,
         showLineBreakMarks: 'yes',
         showWordCount: 'no',
         agentScope: 'machine',
@@ -671,5 +684,20 @@ describe('settings', () => {
     });
     const second = meetPeopleInSettings(['di'], first);
     expect(second.map((p) => p.handle)).toEqual(['bo', 'cy', 'di']);
+  });
+
+  it('keeps the handles of agents that are handles, and none that another agent has', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        agentHandles: { claude: 'ada', codex: 'ada', x: 'Bo!', y: 'two-words', z: 3 },
+      }),
+    );
+    expect(loadSettings().agentHandles).toEqual({ claude: 'ada', y: 'two-words' });
+    // The handle of an agent with none of its own is taken, and a default is no choice.
+    localStorage.setItem(SETTINGS_KEY, '{"agentHandles":{"claude":"codex","codex":"codex"}}');
+    expect(loadSettings().agentHandles).toEqual({});
+    localStorage.setItem(SETTINGS_KEY, '{"agentHandles":[1]}');
+    expect(loadSettings().agentHandles).toEqual({});
   });
 });

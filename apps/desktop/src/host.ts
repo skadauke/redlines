@@ -659,8 +659,11 @@ function createBrowserHost(): Host {
     watch: () => Promise.resolve(() => {}),
     // One folder, with no name and no repository.
     projectRoot: () => Promise.resolve({ folder: '', isRepo: false, tooBroad: false }),
+    // The images added in this tab are files of the folder too, to be dragged into the document.
     list: () =>
-      Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
+      Promise.resolve(
+        [...files.keys(), ...images.keys()].map((name) => ({ name, path: name, isDir: false })),
+      ),
     // The development page has a stand-in for Preview (`DevImages`); a tab has no other apps.
     openDefault: (path) => {
       if (!dev)

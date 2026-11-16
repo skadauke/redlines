@@ -170,10 +170,12 @@ describe('Return in a paragraph', () => {
         ...plain('One two.', '⏎⏎‸One two.'),
       },
       {
-        name: 'in the empty paragraph: nothing',
+        // A line of room, `&nbsp;` alone, and the next empty paragraph (#515, `room.test.ts`).
+        name: 'in the empty paragraph: a line of room',
         doc: 'One two.‸⏎⏎Next.',
         keys: ['Enter', 'Enter'],
-        ...plain('One two.⏎⏎Next.', 'One two.⏎⏎‸⏎⏎Next.'),
+        off: { file: 'One two.⏎⏎&nbsp;⏎⏎Next.', caret: 'One two.⏎⏎&nbsp;⏎⏎‸⏎⏎Next.' },
+        on: {},
       },
       {
         name: 'again at the start of a block whose empty paragraph is open above it: nothing',
