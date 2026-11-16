@@ -1014,6 +1014,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'a notice that tells, or shows an error that has its own tier',
   ],
   [
+    'plugins/review/src/index.ts',
+    'NO_CHANGE',
+    'disable',
+    'Accept and Reject are grayed with the caret outside a tracked change, and say why',
+  ],
+  [
     'plugins/outline/src/index.ts',
     'message',
     'info',
