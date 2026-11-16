@@ -24,8 +24,8 @@ bar (`AGENTS.md`). Never a size in em or %, and never under the floors
 A hint says what a control does, and its shortcut. One style for all of them: the card ground,
 `--rl-ink`, a 1 px `--rl-rule` border, `--rl-shadow`, a radius of 8 px, 6 to 7 px of padding above
 and below and 10 px at the sides, at `--rl-size-ui-small`. The shortcut, or an address, is
-`--rl-ink-2`. A hint shows after a pause of 400 ms on hover (`TOOLTIP_MS`), and at once for the
-keyboard's focus; it never takes the pointer (`pointer-events: none`), and Escape puts it away.
+`--rl-ink-2`. A hint shows after a pause of 400 ms on hover (`TOOLTIP_MS`; the icons' hints also show at once for
+the keyboard's focus, a `title`'s only for the pointer); it never takes the pointer (`pointer-events: none`), and Escape puts it away.
 
 - The title bar's icons, the review bar's icons, the table grips, the formatting palette and a
   link's address each have a hint of their own (`.rl-tip`, `.rl-hint`, `.rl-grip-hint`,

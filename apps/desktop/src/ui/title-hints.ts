@@ -28,11 +28,16 @@ export function installTitleHints(doc: Document = document, delay = TITLE_HINT_M
     held = '';
   }
 
-  function hide(): void {
+  /** Takes the hint away, but keeps the title put away while the pointer is still on its element. */
+  function dismiss(): void {
     clearTimeout(timer);
-    release();
     tip?.remove();
     tip = null;
+  }
+
+  function hide(): void {
+    dismiss();
+    release();
   }
 
   function show(el: HTMLElement, text: string): void {
@@ -53,29 +58,44 @@ export function installTitleHints(doc: Document = document, delay = TITLE_HINT_M
     made.style.top = `${below + size.height + 8 > height ? Math.max(8, at.top - size.height - 6) : below}px`;
   }
 
-  const onOver = (event: PointerEvent) => {
+  /** The pointer is over `event.target`, as it comes to it and as it moves, for a title set late. */
+  const look = (event: PointerEvent) => {
     if (event.pointerType === 'touch' || !(event.target instanceof Element)) return;
-    const el = event.target.closest<HTMLElement>('[title]');
-    if (el === target) return;
+    if (target && !target.isConnected) hide();
+    if (target?.contains(event.target)) {
+      // Its owner has set a title again: that one is put away too, and is the one to give back.
+      const again = target.getAttribute('title');
+      if (again) {
+        held = again;
+        target.removeAttribute('title');
+      }
+      return;
+    }
     hide();
+    const el = event.target.closest<HTMLElement>('[title]');
     const text = el?.getAttribute('title')?.trim();
     if (!el || !text) return;
     target = el;
     held = el.getAttribute('title') ?? '';
     el.removeAttribute('title');
-    timer = setTimeout(() => show(el, text), delay);
+    timer = setTimeout(() => {
+      if (el.isConnected) show(el, text);
+      else hide();
+    }, delay);
   };
   const onOut = (event: PointerEvent) => {
     if (target && !(event.relatedTarget instanceof Node && target.contains(event.relatedTarget))) {
       hide();
     }
   };
-  const onAway = () => hide();
+  // A press, a scroll or Escape puts the hint away, but the title stays away until the pointer leaves.
+  const onAway = () => dismiss();
   const onKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') hide();
+    if (event.key === 'Escape') dismiss();
   };
 
-  doc.addEventListener('pointerover', onOver, true);
+  doc.addEventListener('pointerover', look, true);
+  doc.addEventListener('pointermove', look, true);
   doc.addEventListener('pointerout', onOut, true);
   doc.addEventListener('pointerdown', onAway, true);
   doc.addEventListener('keydown', onKey, true);
@@ -86,7 +106,8 @@ export function installTitleHints(doc: Document = document, delay = TITLE_HINT_M
     hide,
     destroy() {
       hide();
-      doc.removeEventListener('pointerover', onOver, true);
+      doc.removeEventListener('pointerover', look, true);
+      doc.removeEventListener('pointermove', look, true);
       doc.removeEventListener('pointerout', onOut, true);
       doc.removeEventListener('pointerdown', onAway, true);
       doc.removeEventListener('keydown', onKey, true);

@@ -44,23 +44,49 @@ describe('title hints', () => {
     expect(button.getAttribute('title')).toBe('Drag to move');
   });
 
-  it('shows nothing for a touch, a press or Escape, and keeps the title', () => {
+  it('shows nothing for a touch, and keeps the title', () => {
     pointer('pointerover', button, { pointerType: 'touch' });
     vi.advanceTimersByTime(TITLE_HINT_MS);
     expect(hint()).toBeNull();
     expect(button.getAttribute('title')).toBe('Drag to move');
+  });
 
+  it('after a press or Escape, shows no hint and keeps the title away until the pointer leaves', () => {
     pointer('pointerover', button);
     pointer('pointerdown', button);
     vi.advanceTimersByTime(TITLE_HINT_MS);
     expect(hint()).toBeNull();
-    expect(button.getAttribute('title')).toBe('Drag to move');
+    expect(button.hasAttribute('title')).toBe(false);
+    pointer('pointermove', button);
+    expect(button.hasAttribute('title')).toBe(false);
 
+    pointer('pointerout', button, { relatedTarget: document.body });
     pointer('pointerover', button);
     vi.advanceTimersByTime(TITLE_HINT_MS);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(hint()).toBeNull();
+    expect(button.hasAttribute('title')).toBe(false);
+    pointer('pointerout', button, { relatedTarget: document.body });
     expect(button.getAttribute('title')).toBe('Drag to move');
+  });
+
+  it('puts away a title that is set after the pointer came, as the title bar sets its own', () => {
+    const bare = document.createElement('div');
+    document.body.append(bare);
+    pointer('pointerover', bare);
+    bare.setAttribute('title', 'Saved just now');
+    pointer('pointermove', bare);
+    expect(bare.hasAttribute('title')).toBe(false);
+    pointer('pointermove', bare);
+    vi.advanceTimersByTime(TITLE_HINT_MS);
+    expect(hint()?.textContent).toBe('Saved just now');
+  });
+
+  it('shows no hint for an element that is gone when the pause ends', () => {
+    pointer('pointerover', button);
+    button.remove();
+    vi.advanceTimersByTime(TITLE_HINT_MS);
+    expect(hint()).toBeNull();
   });
 
   it('does not bring back a title that its owner has taken away or changed meanwhile', () => {
