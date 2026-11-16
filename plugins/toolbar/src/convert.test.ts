@@ -54,6 +54,25 @@ describe('what a selection holds for the List menu', () => {
     expect(holdsAt('paragraph').item).toBe(false);
   });
 
+  it('holds the block a caret is at the edge of, from either side', () => {
+    const paragraph = DOC.indexOf('A paragraph');
+    expect(holdsBetween(DOC, paragraph).paragraph).toBe(true);
+    expect(holdsBetween(DOC, paragraph + 'A paragraph of text.'.length).paragraph).toBe(true);
+    const item = DOC.indexOf('- two');
+    expect(holdsBetween(DOC, item + 2).item).toBe(true);
+    expect(holdsBetween(DOC, item + '- two'.length).item).toBe(true);
+    // The end of a heading is no paragraph's edge.
+    expect(holdsBetween(DOC, DOC.indexOf('Title') + 5)).toEqual({ paragraph: false, item: false });
+  });
+
+  it('holds only the blocks a range reaches: not the next one, when it ends at its first character', () => {
+    const start = DOC.indexOf('# Title');
+    const next = DOC.indexOf('A paragraph');
+    // A triple-click on the heading takes its line break, and ends at the start of the paragraph.
+    expect(holdsBetween(DOC, start, next)).toEqual({ paragraph: false, item: false });
+    expect(holdsBetween(DOC, start, next + 1).paragraph).toBe(true);
+  });
+
   it('holds a list item where the caret is in one', () => {
     // A list item holds its own paragraph.
     expect(holdsAt('two')).toEqual({ paragraph: true, item: true });

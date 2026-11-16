@@ -36,6 +36,11 @@ test.describe('the List menu @lists', () => {
     await j.shot('heading-no-list-menu');
     await j.caretAfter('First');
     await expect(top(j, 'List')).toHaveCount(1);
+    // A caret at the very start or end of a paragraph is in it too.
+    await j.caretBefore('First paragraph.');
+    await expect(top(j, 'List')).toHaveCount(1);
+    await j.caretAfter('First paragraph.');
+    await expect(top(j, 'List')).toHaveCount(1);
     // List sits between Review and Format, so the left of the bar stays put.
     const names = (await toolbar(j).locator('.rl-toolbar-top').allTextContents()).map((n) =>
       n.trim(),
@@ -90,6 +95,6 @@ test.describe('the List menu @lists', () => {
     await j.shot('bullets-tracked');
     // Undo restores the paragraphs.
     await j.press('Meta+z');
-    expect(await j.text()).not.toContain('was=p');
+    await expect.poll(() => j.text()).not.toContain('was=p');
   });
 });
