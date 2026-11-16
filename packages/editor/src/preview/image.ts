@@ -12,6 +12,7 @@ import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import {
   type ImageAlign,
   IMAGE_NODES,
+  imageAt,
   imageOfNode,
   noticeFacet,
   setImageLook,
@@ -366,10 +367,10 @@ const MARKER = new RegExp(
  * pending change around it. Track Changes on writes the markers beside an image it adds, which must
  * not draw it at the left where the same image is centered with it off.
  */
-function aloneInItsLine(state: EditorState, node: SyntaxNode): boolean {
-  const line = state.doc.lineAt(node.from);
-  if (node.to > line.to) return false;
-  const around = state.sliceDoc(line.from, node.from) + state.sliceDoc(node.to, line.to);
+function aloneInItsLine(state: EditorState, range: { from: number; to: number }): boolean {
+  const line = state.doc.lineAt(range.from);
+  if (range.to > line.to) return false;
+  const around = state.sliceDoc(line.from, range.from) + state.sliceDoc(range.to, line.to);
   return around.replace(MARKER, '').trim() === '';
 }
 
@@ -380,15 +381,15 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   const source = sourceOf(image.src);
   let url: string | null = null;
   if (source.kind === 'remote') {
-    url = misread(state) || pending(state, node.from, node.to) ? null : source.url;
+    url = misread(state) || pending(state, image.from, image.to) ? null : source.url;
   } else if (source.kind === 'data') {
     url = source.url;
   } else if (source.kind === 'local') {
     url = state.facet(imageResolver)?.(source.path) ?? null;
   }
-  const own = aloneInItsLine(state, node);
+  const own = aloneInItsLine(state, image);
   const selected = state.selection.ranges.some(
-    (range) => !range.empty && range.from === node.from && range.to === node.to,
+    (range) => !range.empty && range.from === image.from && range.to === image.to,
   );
   // The caret steps over the image as one unit (`imageAtom`), as over a hard break's spaces.
   return Decoration.replace({
@@ -414,7 +415,7 @@ export function heldRemoteImages(state: EditorState): Set<string> | null {
         const image = imageOfNode(state, node.node);
         if (!image) return;
         const source = sourceOf(image.src);
-        if (source.kind === 'remote' && pending(state, node.from, node.to)) held.add(source.url);
+        if (source.kind === 'remote' && pending(state, image.from, image.to)) held.add(source.url);
       },
     });
   }
@@ -429,8 +430,21 @@ function localPathOf(state: EditorState, node: SyntaxNode): string | null {
   return source.kind === 'local' ? source.path : null;
 }
 
+/** The `Image` node whose attribute block ends at `pos`, or null. */
+function imageAtEnd(state: EditorState, pos: number): SyntaxNode | null {
+  const image = imageAt(state, pos);
+  if (image === null || image.to !== pos || image.form !== 'markdown' || image.block === null) {
+    return null;
+  }
+  const node = syntaxTree(state).resolveInner(image.from, 1);
+  return node.name === 'Image' ? node : null;
+}
+
 /** The image node, a `![]()` or an `<img>`, that holds or touches `pos`, or null. */
 function imageNodeAt(state: EditorState, pos: number): SyntaxNode | null {
+  // A caret after a pandoc image's attribute block is beside the image, as one after `)` is.
+  const ended = imageAtEnd(state, pos);
+  if (ended !== null) return ended;
   for (const side of [1, -1] as const) {
     for (
       let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);
@@ -498,7 +512,8 @@ const selectedImageLook = EditorView.editorAttributes.compute(
     if (empty || state.selection.ranges.length !== 1) return {};
     if (state.field(viewModeField, false) === 'raw') return {};
     const node = imageNodeAt(state, from);
-    return node && node.from === from && node.to === to ? { class: 'rl-image-is-selected' } : {};
+    const image = node && imageOfNode(state, node);
+    return image && image.from === from && image.to === to ? { class: 'rl-image-is-selected' } : {};
   },
 );
 
@@ -516,10 +531,11 @@ const clickSelects = EditorView.domEventHandlers({
     } catch {
       return false;
     }
-    if (!node) return false;
+    const image = node && imageOfNode(view.state, node);
+    if (!image) return false;
     view.focus();
     view.dispatch({
-      selection: { anchor: node.from, head: node.to },
+      selection: { anchor: image.from, head: image.to },
       userEvent: 'select.pointer',
     });
     return true;

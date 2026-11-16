@@ -22,7 +22,7 @@ import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
-import { imageOfNode } from '../image-size.ts';
+import { dialectFacet, imageOfNode } from '../image-size.ts';
 import { htmlBreak, htmlChip, htmlElement, htmlWbr } from './html-draw.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
@@ -536,10 +536,11 @@ function autolink(b: Builder, node: SyntaxNode): void {
 /** An image drawn in place of its syntax, while the selection is elsewhere. */
 function image(b: Builder, node: SyntaxNode): void {
   // A tag that is no image, or a block that holds more than one, stays source.
-  if (!imageOfNode(b.state, node)) return;
+  const element = imageOfNode(b.state, node);
+  if (!element) return;
   // The image stays drawn while it is selected or the caret is beside it (a click selects it, #675);
   // only a selection with an end inside its syntax shows the source.
-  if (selectionInside(b.state, node.from, node.to)) {
+  if (selectionInside(b.state, element.from, element.to)) {
     // Its source shows, and the spell check leaves the path alone.
     const url = node.getChild('URL');
     if (url) b.unchecked(url.from, url.to);
@@ -547,9 +548,9 @@ function image(b: Builder, node: SyntaxNode): void {
   }
   // The ledger is hidden, and what it holds is never fetched.
   const ledger = b.state.field(parsedField).ledgerRange;
-  if (ledger && node.from < ledger.to && node.to > ledger.from) return;
+  if (ledger && element.from < ledger.to && element.to > ledger.from) return;
   const decoration = imageDecoration(b.state, node);
-  if (decoration) b.push(decoration.range(node.from, node.to));
+  if (decoration) b.push(decoration.range(element.from, element.to));
 }
 
 /**
@@ -721,7 +722,9 @@ function updatePreview(value: Preview, tr: Transaction): Preview {
     openBlock(tr.startState) !== null ||
     state.field(viewModeField, false) !== tr.startState.field(viewModeField, false) ||
     // The names of emoji that a host gave, or took away, after the text was drawn.
-    state.facet(emojiLookup) !== tr.startState.facet(emojiLookup);
+    state.facet(emojiLookup) !== tr.startState.facet(emojiLookup) ||
+    // A rename to another dialect reads an image's attribute block, or stops reading it.
+    state.facet(dialectFacet) !== tr.startState.facet(dialectFacet);
   const tree = syntaxTree(state);
   // A selection set, even to where it was, ends what a paste has just added (`freshlyAdded`).
   const moved = selectionMoved(tr) || tr.selection !== undefined;

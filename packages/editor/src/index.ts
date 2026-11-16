@@ -28,6 +28,7 @@ import type {
   DocumentKind,
   Editor,
   EditorOptions,
+  MarkdownDialect,
   MetPerson,
   EditorTyping,
   EditorUiState,
@@ -90,7 +91,7 @@ import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
-import { noticeFacet } from './image-size.ts';
+import { dialectFacet, noticeFacet } from './image-size.ts';
 import {
   imageOpening,
   imageResolver,
@@ -276,6 +277,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const typingCompartment = new Compartment();
   const lineBreakMarksCompartment = new Compartment();
   const plainOnlyCompartment = new Compartment();
+  const dialectCompartment = new Compartment();
+  let dialect: MarkdownDialect = options.dialect ?? 'gfm';
   let kind: DocumentKind = options.kind ?? 'markdown';
   let author = options.author;
   let people = options.people;
@@ -424,6 +427,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       extensions: [
         loaded.extension,
         plainOnlyCompartment.of(plainOnlyFacet.of(kind === 'plain-only')),
+        dialectCompartment.of(dialectFacet.of(dialect)),
         markupViewCompartment.of(markupViewFacet.of(markupView)),
         view ? viewModeField.init(() => view) : [],
         tracking === undefined ? [] : trackingField.init(() => tracking),
@@ -546,16 +550,21 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     view,
     commands,
     getDoc: () => fileText(view.state),
-    setKind: (next) => {
-      if (next === kind) return;
+    setKind: (next, nextDialect = 'gfm') => {
+      if (next === kind && nextDialect === dialect) return;
       kind = next;
+      dialect = nextDialect;
       view.dispatch({
-        effects: plainOnlyCompartment.reconfigure(plainOnlyFacet.of(kind === 'plain-only')),
+        effects: [
+          plainOnlyCompartment.reconfigure(plainOnlyFacet.of(kind === 'plain-only')),
+          dialectCompartment.reconfigure(dialectFacet.of(dialect)),
+        ],
       });
       trackingChosen = null;
     },
-    setDoc: (doc, next) => {
+    setDoc: (doc, next, nextDialect) => {
       kind = next ?? 'markdown';
+      dialect = nextDialect ?? 'gfm';
       view.setState(stateFor(loadFile(doc, plain())));
       trackingChosen = null;
       shownLook = lookOf(view.state);

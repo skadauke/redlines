@@ -54,6 +54,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   [
     'packages/editor/src/image-size.ts',
+    'IMAGE_ATTRIBUTES',
+    'disable',
+    'the align commands are disabled, with this reason, for a pandoc image whose attribute block holds more than a size (#630)',
+  ],
+  [
+    'packages/editor/src/image-size.ts',
     'IMAGE_PARTS_PARAGRAPH',
     'widen',
     'a refusal of a lane that came with main: the paragraph is written as a replacement of its block (format §3.12)',

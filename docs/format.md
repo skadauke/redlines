@@ -2122,8 +2122,10 @@ Editing inside one is a substitution of the whole comment.
 ### 3.5.1 Image size and alignment
 
 Markdown's `![alt](src "title")` has no size, so a size is written as an HTML `<img>` tag, which
-GitHub and every Markdown reader that passes HTML read (in every file type, as `<sub>` is, §2.6; a
-pandoc file's `{width=}` is not written yet). The rule:
+GitHub and every Markdown reader that passes HTML read. In a `.md` file that is the only way
+(`{width=}` there is text). In a pandoc file (`.qmd`, `.Rmd`, §9.1) the size is pandoc's attribute
+block, which also keeps pandoc's Word output: `![alt](src){width=300px}`. The rule for the tag
+follows; the pandoc block's is under it.
 
 - **The first size.** An image that is given a width becomes the tag, with its attributes in this
   order: `src`, `alt` (left out when empty), `title` (when it had one), `width`, `align`. Their
@@ -2150,6 +2152,19 @@ pandoc file's `{width=}` is not written yet). The rule:
   alignment is a substitution of the whole image, `![alt](src)` the old text in the payload and the
   tag the new text (or the other way round), which reads the same in every order of decisions. No
   marker goes inside the tag. Undo takes the change back as one.
+- **In a pandoc file.** The attribute block is the `{` right after the image's `)`, with no space,
+  up to the next `}`, with no brace, angle bracket or line break inside. It is part of the image,
+  atomic content like the rest of it (§3.5): the inline scanner keeps the image's range over it in
+  every file type, so that no marker goes inside it. Its `width` is read as pixels (`300`,
+  `300px`) or as another size (`50%`, drawn at the image's own size); its other tokens (`#fig`,
+  `.class`, `key=value`) are kept as written. The first size writes `{width=Npx}` after the
+  image; a new size replaces the `width` token and takes a `height` away; giving the image its
+  own size takes the `width` token away, and the block with it when no token is left. A tag that
+  holds only `src`, `alt`, `title`, `width` and `height` and is given a width becomes the Markdown
+  image with the block; any other tag stays a tag. Pandoc has no alignment: aligning an image makes
+  it a tag with the width it had, and an image whose block holds more than a size (`#fig`) is not
+  aligned, and the person is told so. Track Changes writes the new size as the substitution of the
+  whole image, block included, which reads the same in every order of decisions.
 - **A tag alone on a block's first line** is an HTML block (CommonMark's seventh kind), which runs
   on to the next blank line and reads the lines under it as raw HTML. So an image that stands alone
   on the first line of a paragraph with more lines under it is not turned into a tag as it is: the
