@@ -750,7 +750,10 @@ function acceptWords(
   const n = marks.length;
   const changes = n === 1 ? '1 pending change' : `${n} pending changes`;
   return {
-    title: `This edit can't be made without accepting ${who} ${changes} in this ${word}. Make the edit?`,
+    // Changes of one suggestion are decided together, so some may lie outside the unit.
+    title: `This edit can't be made without accepting ${who} ${changes} in this ${word}${
+      marks.some((mark) => mark.entry.group) ? ', with the rest of their suggestion' : ''
+    }. Make the edit?`,
   };
 }
 
@@ -778,10 +781,13 @@ function acceptPlan(
     );
     const accept = ChangeSet.of(decided, text.length);
     const accepted = applyChanges(text, decided);
-    const moved = edits.map((edit) => {
-      const from = accept.mapPos(edit.from, 1);
-      return { ...edit, from, to: Math.max(from, accept.mapPos(edit.to, -1)) };
-    });
+    const moved = edits.map((edit) => ({
+      ...edit,
+      from: accept.mapPos(edit.from, 1),
+      to: accept.mapPos(edit.to, -1),
+    }));
+    // An edit inside text that accepting takes away has nowhere to go: not this way.
+    if (moved.some((edit) => edit.from > edit.to)) return null;
     const made = untrackEdits(state, accepted, parse(accepted), moved, backward);
     return {
       tracked: { changes: accept.compose(made.changes), caret: made.caret },
