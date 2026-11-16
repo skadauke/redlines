@@ -1078,9 +1078,10 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
   the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. A drop
   over the sidebar, the title bar or the ground below the text goes where the caret is. The image
-  shows at once. The caret ends at the end of the links, as after any paste, and the preview, which
-  draws an image only while the caret is off its link, draws one just added all the same until the
-  caret moves or anything is written. Several images go in as links a space apart, and nothing else
+  shows at once. The caret ends at the end of the links, as after any paste. The preview draws an
+  image whenever the selection has no end inside its syntax: a click on it selects it (an outline
+  and its handles, its Markdown or HTML hidden; the source shows in Plain), and the caret steps over
+  it as one unit with the arrows. Several images go in as links a space apart, and nothing else
   is written. A dropped file, or an image file copied in Finder, keeps its name, and pasted image
   data, which has none worth keeping, gets one made of the time (`image-2026-11-12-153012.png`). A
   name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the

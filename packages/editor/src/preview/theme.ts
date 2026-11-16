@@ -234,6 +234,12 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-image:not(.rl-image-own) .rl-image-frame': { verticalAlign: 'middle' },
   '.rl-image:not(.rl-image-own) .rl-image-frame img': { display: 'block', margin: '0' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
+  // A click selects the image: an outline in the selection's color, and its handles.
+  '.rl-image-selected img': { outline: '2px solid Highlight' },
+  '.rl-image-selected .rl-image-handle': { opacity: '1' },
+  '&.rl-image-is-selected .cm-line::selection, &.rl-image-is-selected .cm-line *::selection': {
+    backgroundColor: 'transparent',
+  },
   // Resize handles (#526): on the left and right edges only, while the pointer is over the image.
   // Each is a strip along its edge, wide enough to grab, just outside it (#676) so that it never covers
   // the picture, with a light pill that shows on any background.
