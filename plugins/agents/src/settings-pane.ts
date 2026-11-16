@@ -195,6 +195,7 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
           deps.update({ consent: Object.fromEntries(kept) });
           drawRemembered();
         },
+        handles: () => deps.agents.map(({ id }) => handleOf(id, deps.settings().agentHandles)),
         ...(deps.showGeneral ? { showGeneral: () => deps.showGeneral?.() } : {}),
       }),
     );

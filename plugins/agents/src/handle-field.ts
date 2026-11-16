@@ -2,7 +2,7 @@
 // name the agent, and what it is shown as, which is the handle with a capital. A handle another
 // agent has is refused with a note, and the old one comes back when the field is left.
 
-import { displayName, handleOf, handleProblem } from './handles.ts';
+import { DEFAULT_HANDLES, displayName, handleOf, handleProblem } from './handles.ts';
 import { el, uniqueId } from './pane-dom.ts';
 
 export interface HandleFieldDeps {
@@ -23,6 +23,7 @@ export function handleField(id: string, deps: HandleFieldDeps): HTMLElement {
   const label = el('label', 'rl-pref-note', 'Handle');
   label.htmlFor = fieldId;
   const at = el('span', 'rl-pref-note', '@');
+  at.setAttribute('aria-hidden', 'true');
   const input = el('input', 'rl-pref-text');
   input.id = fieldId;
   input.type = 'text';
@@ -31,9 +32,10 @@ export function handleField(id: string, deps: HandleFieldDeps): HTMLElement {
   input.autocapitalize = 'off';
   const shown = el('div', 'rl-pref-note');
   shown.id = uniqueId();
-  input.setAttribute('aria-describedby', shown.id);
   const problem = el('div', 'rl-pref-note rl-pref-failure');
+  problem.id = uniqueId();
   problem.setAttribute('role', 'status');
+  input.setAttribute('aria-describedby', `${shown.id} ${problem.id}`);
 
   const current = () => handleOf(id, deps.handles());
   const showShown = (handle: string) => {
@@ -44,9 +46,18 @@ export function handleField(id: string, deps: HandleFieldDeps): HTMLElement {
 
   input.addEventListener('input', () => {
     problem.textContent = '';
+    input.removeAttribute('aria-invalid');
     const typed = input.value.trim();
     if (typed !== '' && handleProblem(typed, id, {}) === null) showShown(typed);
   });
+
+  /** The old handle comes back, and the note says why. */
+  const refuse = (why: string) => {
+    problem.textContent = why;
+    input.setAttribute('aria-invalid', 'true');
+    input.value = current();
+    showShown(current());
+  };
 
   let committing = 0;
   const commit = async () => {
@@ -58,18 +69,22 @@ export function handleField(id: string, deps: HandleFieldDeps): HTMLElement {
       return;
     }
     const mine = ++committing;
-    const taken = await deps.taken().catch(() => ({}));
+    const taken = await deps.taken().catch(() => null);
     if (!deps.alive() || mine !== committing) return;
+    if (taken === null) {
+      refuse('Couldn’t check the other agents’ handles.');
+      return;
+    }
     const why = handleProblem(typed, id, taken);
     if (why !== null) {
-      // The old handle comes back, and the note says why.
-      problem.textContent = why;
-      input.value = current();
-      showShown(current());
+      refuse(why);
       return;
     }
     problem.textContent = '';
-    deps.save({ ...deps.handles(), [id]: typed });
+    input.removeAttribute('aria-invalid');
+    const next = { ...deps.handles(), [id]: typed };
+    if (typed === DEFAULT_HANDLES[id]) delete next[id];
+    deps.save(next);
     input.value = typed;
     showShown(typed);
   };

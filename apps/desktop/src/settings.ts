@@ -4,7 +4,7 @@
 // helps, whether line breaks show their marks, what agents may read), and the file sidebar. A
 // window that changes a setting tells the others through the `storage` event (`watchSettings`).
 
-import { isHandle } from '@redlines/agents';
+import { DEFAULT_HANDLES, isHandle } from '@redlines/agents';
 import { meetPeople, type Author, type MarkupView, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
@@ -248,14 +248,22 @@ function identityOf(value: unknown): Settings['identity'] {
     : null;
 }
 
-/** The handles of the agents: each a handle (lowercase letters, digits, hyphens), none shared. */
+/**
+ * The handles of the agents: each a handle (lowercase letters, digits, hyphens), none shared with
+ * another agent's, whose own handle is its default (claude, codex) until it is given one.
+ */
 function agentHandlesOf(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null) return {};
   const handles: Record<string, string> = {};
-  if (typeof value !== 'object' || value === null) return handles;
-  const taken = new Set<string>();
+  /** What each agent is called now, the defaults included. */
+  const effective: Record<string, string> = { ...DEFAULT_HANDLES };
   for (const [id, handle] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof handle !== 'string' || !isHandle(handle) || taken.has(handle)) continue;
-    taken.add(handle);
+    if (typeof handle !== 'string' || !isHandle(handle)) continue;
+    // The default is no choice, and isn't kept.
+    if (handle === (DEFAULT_HANDLES[id] ?? id)) continue;
+    const shared = Object.entries(effective).some(([other, had]) => other !== id && had === handle);
+    if (shared) continue;
+    effective[id] = handle;
     handles[id] = handle;
   }
   return handles;

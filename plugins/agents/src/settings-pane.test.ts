@@ -1619,6 +1619,17 @@ describe('the Redlines skill', () => {
       expect(field(container, 'claude').text()).toContain('Another agent is @codex.');
     });
 
+    it('keeps nothing for a handle put back to the default', async () => {
+      const { container, deps, now } = setup(
+        { claude: ready, codex: ready },
+        { agentHandles: { claude: 'ada' } },
+      );
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'claude').input, 'claude');
+      expect(now().agentHandles).toEqual({});
+    });
+
     it('refuses what is not a handle', async () => {
       const { container, deps, now } = setup({ claude: ready, codex: ready });
       renderAgentsPane(container, deps);

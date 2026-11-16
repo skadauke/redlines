@@ -679,6 +679,9 @@ describe('settings', () => {
       }),
     );
     expect(loadSettings().agentHandles).toEqual({ claude: 'ada', y: 'two-words' });
+    // The handle of an agent with none of its own is taken, and a default is no choice.
+    localStorage.setItem(SETTINGS_KEY, '{"agentHandles":{"claude":"codex","codex":"codex"}}');
+    expect(loadSettings().agentHandles).toEqual({});
     localStorage.setItem(SETTINGS_KEY, '{"agentHandles":[1]}');
     expect(loadSettings().agentHandles).toEqual({});
   });
