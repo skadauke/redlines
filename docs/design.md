@@ -422,8 +422,9 @@ of red there besides the pen).
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
   with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
-  text. The click
-  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  text. In the simple look, a click on a change, on its colored text or on its bar, opens that
+  change's card with Accept and Reject (the card says what a hidden deletion was: #664); a click on
+  a bar in the full markup, and the switch, switch from the one look to the other, with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
