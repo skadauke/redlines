@@ -86,6 +86,7 @@ import { noticeFacet } from './image-size.ts';
 import {
   imageOpening,
   imageResolver,
+  imageSizer,
   imageSelection,
   localImageAt,
   refreshImagesEffect,
@@ -333,6 +334,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
+    options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     imageSelection(),
     undoHistory(),

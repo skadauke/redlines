@@ -51,6 +51,7 @@ const COMMANDS: &[&str] = &[
     "folder_exists",
     "forget_documents",
     "identity",
+    "image_sizes",
     "image_stamps",
     "install_command_line",
     "install_command_line_at_home",

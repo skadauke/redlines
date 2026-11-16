@@ -44,6 +44,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
+import { createImageSizes } from './image-sizes.ts';
 import { localImagePath, localImageUrl, relativeImagePath } from './images.ts';
 import { exposeForJourneys } from './journey-hook.ts';
 import {
@@ -203,6 +204,8 @@ let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
+/** The size of each local image file, read from its header once and kept until it is saved again. */
+const imageSizes = createImageSizes((paths) => host.imageSizes(paths));
 /** The images the preview has drawn, which are looked at again when the window regains the focus. */
 const imageWatch = createImageWatch((paths) => host.imageStamps(paths));
 
@@ -232,7 +235,10 @@ async function refreshSavedImages(): Promise<void> {
   imageWatch.begin();
   editor.refreshImages();
   const changed = await imageWatch.check();
-  if (changed.length) editor.refreshImages();
+  if (changed.length) {
+    imageSizes.forget(changed);
+    editor.refreshImages();
+  }
 }
 
 /** The system's beep, as the Mac makes it for a key or an item that does nothing. */
@@ -308,6 +314,11 @@ const editor = createEditor(element('#editor'), {
       const url = host.imageUrl(file);
       return url === null ? null : imageWatch.url(file, url);
     });
+  },
+  imageSize: (src) => {
+    const path = imageDocument;
+    const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
+    return file === null ? null : imageSizes.of(file);
   },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).
@@ -666,6 +677,7 @@ const projectOf = (path: string) => host.projectRoot(path);
 async function showImages(path: string | null): Promise<void> {
   imageFolder = null;
   imageWatch.forget();
+  imageSizes.forget();
   editor.refreshImages();
   if (path === null) return;
   try {
