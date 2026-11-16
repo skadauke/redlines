@@ -58,8 +58,9 @@ jobs:
       quicklook: ${{ steps.flags.outputs.quicklook }}
       ui: ${{ steps.flags.outputs.ui }}
     steps:
-      # A run for this commit by a push, the schedule or a dispatch, other than this one, that has
-      # finished with a success or a failure (a cancelled run tested nothing).
+      # A full run (scheduled or dispatched) of this commit, other than this one, that has finished
+      # with a success or a failure (a cancelled run tested nothing). Push runs never count: their
+      # flags come from their own diff, so a cancelled run's breakage could go unseen.
       - name: Has this commit been tested?
         id: tested
         env:
@@ -76,7 +77,7 @@ jobs:
               --jq '[.workflow_runs[] | select(.id != ('"$RUN_ID"')
                 and .status == "completed"
                 and (.conclusion == "success" or .conclusion == "failure")
-                and (.event == "push" or .event == "schedule" or .event == "workflow_dispatch"))]
+                and (.event == "schedule" or .event == "workflow_dispatch"))]
                 | length')
             echo "Finished runs for $SHA: $n"
             [ "$n" -gt 0 ] && skip=true
