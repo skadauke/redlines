@@ -306,4 +306,46 @@ describe('text contrast on the grounds', () => {
     }
     expect(failing, `below 4.5:1:\n${failing.join('\n')}`).toEqual([]);
   });
+
+  // The tertiary gray draws shapes: the focus rings, the checkboxes' outlines, a field's border when
+  // it is focused (WCAG 1.4.11 asks 3:1 of them), and the text of disabled controls, which is
+  // exempt and stays dimmer than --rl-ink-2 (#653).
+  it('--rl-ink-3 keeps 3:1 on every ground a ring sits on, and stays dimmer than --rl-ink-2', () => {
+    const failing: string[] = [];
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        const ink3 = resolve(declared.get('--rl-ink-3')!);
+        // A ring is on the page, on a tint or a card, and on a row the pointer is over or that is
+        // pressed or current, which is --rl-pressed, or --rl-rule.
+        for (const ground of ['--rl-page', '--rl-tint', '--rl-card', '--rl-pressed', '--rl-rule']) {
+          const value = ratio(ink3, resolve(declared.get(ground)!));
+          if (value < 3)
+            failing.push(`${name} ${appearance} ink-3 on ${ground}: ${value.toFixed(2)}:1`);
+        }
+        const page = resolve(declared.get('--rl-page')!);
+        expect(
+          ratio(resolve(declared.get('--rl-ink-2')!), page),
+          `${name} ${appearance}: ink-3 is the dimmer`,
+        ).toBeGreaterThan(ratio(ink3, page));
+      }
+    }
+    expect(failing, `below 3:1:\n${failing.join('\n')}`).toEqual([]);
+  });
+
+  // Text is drawn on a row the pointer is over: the pressed background (#653).
+  it('--rl-ink and --rl-ink-2 keep 4.5:1 on the pressed background, in every theme', () => {
+    const failing: string[] = [];
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        const pressed = resolve(declared.get('--rl-pressed')!);
+        for (const token of ['--rl-ink', '--rl-ink-2']) {
+          const value = ratio(resolve(declared.get(token)!), pressed);
+          if (value < 4.5) failing.push(`${name} ${appearance} ${token}: ${value.toFixed(2)}:1`);
+        }
+      }
+    }
+    expect(failing, `below 4.5:1:\n${failing.join('\n')}`).toEqual([]);
+  });
 });
