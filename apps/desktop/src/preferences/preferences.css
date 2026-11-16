@@ -252,6 +252,15 @@ select:focus-visible {
   width: 120px;
 }
 
+/* An agent's handle, in its card (#558). */
+.rl-pref-agent-handle {
+  margin-top: 8px;
+}
+
+.rl-pref-agent-handle .rl-pref-text {
+  width: 160px;
+}
+
 .rl-pref-inline {
   display: flex;
   align-items: center;

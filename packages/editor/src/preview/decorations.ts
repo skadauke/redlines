@@ -22,9 +22,8 @@ import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
-import { freshlyAdded } from './fresh.ts';
 import { imageOfNode } from '../image-size.ts';
-import { imageDecoration, refreshImagesEffect } from './image.ts';
+import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import {
   inWindow,
@@ -506,8 +505,9 @@ function autolink(b: Builder, node: SyntaxNode): void {
 function image(b: Builder, node: SyntaxNode): void {
   // A tag that is no image, or a block that holds more than one, stays source.
   if (!imageOfNode(b.state, node)) return;
-  // A link a paste or a drop has just added is drawn with the caret at its end (`freshlyAdded`).
-  if (touches(b.state, node.from, node.to) && !freshlyAdded(b.state, node.to)) {
+  // The image stays drawn while it is selected or the caret is beside it (a click selects it, #675);
+  // only a selection with an end inside its syntax shows the source.
+  if (selectionInside(b.state, node.from, node.to)) {
     // Its source shows, and the spell check leaves the path alone.
     const url = node.getChild('URL');
     if (url) b.unchecked(url.from, url.to);
@@ -642,14 +642,17 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
   return b.finish();
 }
 
-/** What the preview field holds: the decorations, and the hard breaks among them. */
+/** What the preview field holds: the decorations, and the hard breaks and images among them. */
 interface Preview {
   decorations: DecorationSet;
-  /** The hard breaks' syntax, as what the caret steps over. */
+  /** The hard breaks' syntax and the images, as what the caret steps over. */
   breaks: DecorationSet;
 }
 
-const isBreak = (value: Decoration) => (value.spec as { hardBreak?: true }).hardBreak === true;
+const isBreak = (value: Decoration) => {
+  const spec = value.spec as { hardBreak?: true; imageAtom?: true };
+  return spec.hardBreak === true || spec.imageAtom === true;
+};
 
 function previewOf(decorations: DecorationSet, breaks?: DecorationSet): Preview {
   return {

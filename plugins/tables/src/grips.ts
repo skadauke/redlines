@@ -78,15 +78,22 @@ export const GRIPS_STYLE = `
 .rl-grips > * { pointer-events: auto; }
 .rl-plus, .rl-col-plus {
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  width: 18px; height: 22px; border-radius: 4px; user-select: none;
-  color: var(--rl-ink-3); font-size: var(--rl-size-ui); line-height: 1;
+  width: 18px; height: 22px; user-select: none; font-size: var(--rl-size-ui); line-height: 1;
 }
 .rl-edge-add, .rl-table-select {
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  border-radius: 4px; cursor: pointer; user-select: none; background: var(--rl-rule); color: var(--rl-ink);
-  border: 1px solid transparent; font-size: var(--rl-size-ui); line-height: 1;
+  user-select: none; font-size: var(--rl-size-ui); line-height: 1;
 }
-.rl-edge-add:hover, .rl-table-select:hover { border-color: var(--rl-ink-3); }
+/* The + between rows and columns, the strips at the table's edge and the select-table square are one
+   widget: the card's ground, a rule, the ink's gray, and under the pointer the pressed ground (docs/widgets.md). */
+.rl-plus, .rl-col-plus, .rl-edge-add, .rl-table-select {
+  cursor: pointer; border: 1px solid var(--rl-rule); border-radius: 6px;
+  background: var(--rl-card); color: var(--rl-ink-2);
+}
+.rl-plus:hover, .rl-col-plus:hover, .rl-edge-add:hover, .rl-table-select:hover {
+  background: var(--rl-pressed); color: var(--rl-ink); border-color: var(--rl-ink-3);
+}
+.rl-edge-add:hover { background: color-mix(in srgb, var(--rl-pressed) 60%, var(--rl-card)); }
 .rl-edge-col { width: ${EDGE_SIZE}px; }
 .rl-edge-row { height: ${EDGE_SIZE}px; }
 .rl-table-select { width: ${CORNER_SIZE}px; height: ${CORNER_SIZE}px; }
@@ -95,8 +102,6 @@ export const GRIPS_STYLE = `
   background: linear-gradient(currentColor, currentColor) center / 1.5px 100% no-repeat,
     linear-gradient(currentColor, currentColor) center / 100% 1.5px no-repeat;
 }
-.rl-plus:hover, .rl-col-plus:hover { background: var(--rl-rule); color: var(--rl-ink); }
-.rl-plus, .rl-col-plus { cursor: pointer; border: 1px solid var(--rl-rule); background: var(--rl-page); }
 /* A handle is a small pill at the table's edge: the element is its reach (wider than the pill, so it
    is easy to hit), the pill is its ::before, which grows when the pointer is over it to say it can be
    dragged. A row's and a column's are the same pill, turned. */
@@ -112,7 +117,7 @@ export const GRIPS_STYLE = `
 }
 .rl-grip::before { width: 5px; height: 16px; }
 .rl-col-grip::before { width: 16px; height: 5px; }
-.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-ink-2); }
+.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-pressed); border-color: var(--rl-ink); }
 .rl-grip:hover::before { width: 8px; height: 22px; }
 .rl-col-grip:hover::before { width: 22px; height: 8px; }
 .rl-grip:active, .rl-col-grip:active { cursor: grabbing; }
@@ -123,27 +128,30 @@ export const GRIPS_STYLE = `
 .rl-drop-line[hidden] { display: none; }
 .rl-drag-copy {
   position: absolute; max-width: 320px; padding: 4px 10px; border-radius: 4px; opacity: 0.85;
-  background: var(--rl-page); color: var(--rl-ink); border: 1px solid var(--rl-rule); box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+  background: var(--rl-card); color: var(--rl-ink); border: 1px solid var(--rl-rule); box-shadow: var(--rl-shadow);
   font-size: var(--rl-size-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   pointer-events: none;
 }
 .rl-row-dim { opacity: 0.4; }
 .rl-grip-menu {
-  position: absolute; min-width: 180px; padding: 4px; border-radius: 6px; background: var(--rl-page);
-  color: var(--rl-ink); box-shadow: 0 4px 16px rgb(0 0 0 / 0.22); border: 1px solid var(--rl-rule);
+  position: absolute; min-width: 180px; padding: 6px; border-radius: 12px; background: var(--rl-card);
+  color: var(--rl-ink); box-shadow: var(--rl-shadow); border: 1px solid var(--rl-rule);
   font-size: var(--rl-size-ui);
 }
 .rl-grip-hint {
   position: absolute; z-index: 6; padding: 6px 10px; border-radius: 8px; pointer-events: none;
-  background: var(--rl-tip, #1d1d1f); color: #fff; font-size: var(--rl-size-ui-small);
-  line-height: 1.3; white-space: nowrap; box-shadow: 0 4px 16px rgb(0 0 0 / 0.22);
+  border: 1px solid var(--rl-rule); background: var(--rl-card); color: var(--rl-ink);
+  font-size: var(--rl-size-ui-small); line-height: 1.3; white-space: nowrap; box-shadow: var(--rl-shadow);
 }
 .rl-grip-hint[hidden] { display: none; }
-.rl-grip-item { position: relative; padding: 5px 10px 5px 24px; border-radius: 4px; cursor: default; white-space: nowrap; }
-.rl-grip-item:hover { background: var(--rl-rule); }
-.rl-grip-item[aria-disabled="true"] { opacity: 0.45; }
+.rl-grip-item {
+  position: relative; display: flex; align-items: center; height: 32px; padding: 0 10px 0 28px; border-radius: 7px;
+  cursor: default; white-space: nowrap;
+}
+.rl-grip-item:hover { background: color-mix(in srgb, var(--rl-pressed) 55%, transparent); }
+.rl-grip-item[aria-disabled="true"] { color: var(--rl-ink-3); }
 .rl-grip-item[aria-disabled="true"]:hover { background: none; }
-.rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 8px; font-size: var(--rl-size-ui); }
+.rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 10px; font-size: var(--rl-size-ui); }
 `;
 
 /** The title bar's hint delay, which the app passes in (`TOOLTIP_MS`). */

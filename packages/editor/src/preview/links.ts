@@ -401,17 +401,18 @@ const linkTheme = EditorView.baseTheme({
   // The hint is itself the tooltip's element, so CodeMirror's own tooltip look (a light gray
   // ground and a border, under `&light` and `&dark`) is on it too: this rule names both, as the
   // review card's does, so that it is not left to the order of the stylesheets. The look is the
-  // title bar's hint (--rl-tip, and the same whites).
+  // notifications' grays (docs/widgets.md).
   '&light .cm-tooltip.rl-link-hint, &dark .cm-tooltip.rl-link-hint': {
-    border: 'none',
+    border: '1px solid var(--rl-rule)',
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
     padding: '7px 10px',
     maxWidth: 'min(32rem, 90vw)',
     borderRadius: '8px',
-    backgroundColor: 'var(--rl-tip)',
-    color: '#ffffff',
+    backgroundColor: 'var(--rl-card)',
+    boxShadow: 'var(--rl-shadow)',
+    color: 'var(--rl-ink)',
     fontSize: 'var(--rl-size-ui-small)',
     lineHeight: '1',
     whiteSpace: 'nowrap',
@@ -422,7 +423,7 @@ const linkTheme = EditorView.baseTheme({
     minWidth: '0',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    color: 'rgb(255 255 255 / 0.62)',
+    color: 'var(--rl-ink-2)',
   },
   // With the key that opens down, a link that opens is a pointer.
   '.cm-content.rl-link-ready .rl-link': { cursor: 'pointer' },
