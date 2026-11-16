@@ -277,7 +277,7 @@ The window, on the desktop:
   Editor › Show the toolbar at the bottom keeps it docked from the start, for those who want it
   always shown; the wrench still puts it away for that window. Nothing else is drawn at the bottom
   of the window to summon it (the handle that was there is gone, decided on 2026-11-15). It is a
-  small card in one row: **Ask | Insert · Review · [List] · [Table] · Format · Edit**, a vertical line after
+  small card in one row: **Ask | Insert · Review · [List] · [Table] · [Image] · Format · Edit**, a vertical line after
   Ask. Each name opens a menu on a click (hovering from one open menu to another switches menus),
   with a header, then one line for each item: icon, name and shortcut, with no descriptions.
   Related actions share a line (Accept | Reject). Insert holds Link, Image, Table, Code Block,
@@ -294,6 +294,12 @@ The window, on the desktop:
   with a caret both sides work on the caret's row and column (the header is row 1). Align column
   dims with the Column side, since it changes the columns the selection touches. The header row and the last column
   keep the Table menu's own refusals as dimmed items with their reasons; Merge is not offered.
+  Image (#553) is in the bar only where an image is under the caret or in the selection. Its menu is
+  Align (Left | Center | Right, the image's own checked, centered by default), Size (Small | Medium
+  | Large, a fraction of the text column) and Original Size, and Edit in Preview, which opens the
+  file in Preview and follows its saves (§5.10). Alt Text…, with its "Describe with" an agent, keeps
+  its place and appears when its command is registered. The items are the editor's own commands
+  (`image.align.*`, `image.size.*`, `image.edit`), so the palette and the shortcuts see the same.
   An item that can't be used here is dimmed, and
   its hover hint (after the title bar's delay) says why, from the command's own reason. A menu
   opens on the side of the bar with room and scrolls when taller, never over the bar. A docked
@@ -303,8 +309,7 @@ The window, on the desktop:
   about names, keys or whether an item is available; an item whose command isn't registered is
   left out, and so is a menu with no items. The arrow keys move along the bar; ↓ or Return opens a
   menu, ↑ and ↓ move by line, ← and → move inside a shared line and, past its end, switch menus;
-  Esc closes the open menu, then a toolbar at the caret or the pointer. The command palette and the
-  Image menu come in later batches. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+  Esc closes the open menu, then a toolbar at the caret or the pointer. The command palette comes in a later batch. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
   and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
   nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says

@@ -82,6 +82,16 @@ const ICONS = {
   'align-left': '<path d="M3 4h10M3 7.3h6M3 10.6h10M3 13.9h6" transform="translate(0 -1)"/>',
   'align-center': '<path d="M3 4h10M5 7.3h6M3 10.6h10M5 13.9h6" transform="translate(0 -1)"/>',
   'align-right': '<path d="M3 4h10M7 7.3h6M3 10.6h10M7 13.9h6" transform="translate(0 -1)"/>',
+  /** Image sizes: the frame grows from small to large; original size is the frame's own corners. */
+  'size-small': '<rect x="5" y="5.5" width="6" height="5" rx="1"/>',
+  'size-medium': '<rect x="3.5" y="4.5" width="9" height="7" rx="1.2"/>',
+  'size-large': '<rect x="2" y="3" width="12" height="10" rx="1.4"/>',
+  'original-size': '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>',
+  /** Edit in Preview: a frame with an arrow leaving it. */
+  preview:
+    '<path d="M7 3H3.5A1.5 1.5 0 0 0 2 4.5v8A1.5 1.5 0 0 0 3.5 14h8a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M9.5 2.5h4v4M13.5 2.5L8 8"/>',
+  /** Alt Text: a frame with a line of words under it. */
+  'alt-text': '<rect x="2" y="2.5" width="12" height="7" rx="1.4"/><path d="M3 12.5h10M3 14.5h6"/>',
   /** The mark of a menu in the bar. */
   chevron: '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
   /** Cut: scissors. */

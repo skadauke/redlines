@@ -245,6 +245,47 @@ export const MENUS: readonly MenuSpec[] = [
     ],
   },
   {
+    id: 'image',
+    label: 'Image',
+    // Only where an image is under the caret or in the selection; its commands say so themselves.
+    shownWhen: (context) => context.canRun('image.align.left'),
+    rows: [
+      [
+        {
+          command: 'image.align.left',
+          icon: 'align-left',
+          label: 'Left',
+          caption: 'Align',
+          side: 'align image',
+        },
+        {
+          command: 'image.align.center',
+          icon: 'align-center',
+          label: 'Center',
+          side: 'align image',
+        },
+        { command: 'image.align.right', icon: 'align-right', label: 'Right', side: 'align image' },
+      ],
+      [
+        {
+          command: 'image.size.small',
+          icon: 'size-small',
+          label: 'Small',
+          caption: 'Size',
+          side: 'image size',
+        },
+        { command: 'image.size.medium', icon: 'size-medium', label: 'Medium', side: 'image size' },
+        { command: 'image.size.large', icon: 'size-large', label: 'Large', side: 'image size' },
+      ],
+      one({ command: 'image.size.original', icon: 'original-size', label: 'Original Size' }),
+      // Edit in Preview is the editor's own (#525), where the host can open files. Alt Text… needs
+      // an agent to write the description (the agents' lane) and keeps its place: the item appears
+      // when its command, `image.altText`, is registered.
+      one({ command: 'image.edit', icon: 'preview', label: 'Edit in Preview' }),
+      one({ command: 'image.altText', icon: 'alt-text', label: 'Alt Text…' }),
+    ],
+  },
+  {
     id: 'format',
     label: 'Format',
     rows: [

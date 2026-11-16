@@ -207,4 +207,59 @@ test.describe('the toolbar @views', () => {
     await menu.locator('[data-command="table.deleteTable"]').click();
     expect(await j.text()).not.toContain('| A |');
   });
+
+  // #553: the Image menu is in the bar only where an image is picked: Align, Size, Edit in Preview.
+  test('the Image menu aligns and sizes the picked image, and opens it in Preview', async ({
+    start,
+  }) => {
+    const j = await start({ tracking: false, view: 'redlines' });
+    await j.page.evaluate(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 400;
+      canvas.height = 200;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = '#c0392b';
+      context.fillRect(0, 0, 400, 200);
+      const blob = await new Promise<Blob>((done) => canvas.toBlob((b) => done(b!), 'image/png'));
+      (
+        window as unknown as { __redlinesImages: { replace(path: string, blob: Blob): void } }
+      ).__redlinesImages.replace('red.png', blob);
+      window.__redlines!.editor.setDoc(
+        'Before the picture.\n\n![A red square](red.png)\n\nAfter.\n',
+      );
+    });
+    await j.caretAfter('Before');
+    await wrench(j).click();
+    const top = toolbar(j).locator('.rl-toolbar-top[data-menu="image"]');
+    await expect(top).toHaveCount(0);
+    await j.page.locator('.rl-image img').click();
+    await expect(top).toBeVisible();
+    await top.click();
+    const menu = toolbar(j).locator('.rl-toolbar-menu:not([hidden])');
+    await expect(menu.locator('.rl-toolbar-menu-head')).toHaveText('Image');
+    expect(await isOpaque(menu)).toBe(true);
+    await expect(menu.locator('[data-command="image.align.center"]')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await j.shot('image-menu');
+    await menu.locator('[data-command="image.align.right"]').click();
+    expect(await j.text()).toMatch(/align="right"|align:\s*right/);
+    // The image the caret is in is drawn as its source; the menu follows the caret.
+    await top.click();
+    await expect(menu.locator('[data-command="image.align.right"]')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await menu.locator('[data-command="image.size.medium"]').click();
+    expect(await j.text()).toContain('width=');
+    await top.click();
+    await j.shot('image-menu-after');
+    await menu.locator('[data-command="image.edit"]').click();
+    const opened = await j.page.evaluate(
+      () =>
+        (window as unknown as { __redlinesImages: { opened: string[] } }).__redlinesImages.opened,
+    );
+    expect(opened.at(-1)).toContain('red.png');
+  });
 });
