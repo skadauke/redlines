@@ -284,8 +284,10 @@ export function createTitleBar(
 
   // The toolbar's wrench: a click shows it or puts it away, and the button is pressed while it shows.
   const toolbarControl = element('div', 'rl-control');
-  const toolbarButton = iconButton('Show Toolbar', icon('wrench', 18));
+  const toolbarButton = iconButton('Toolbar', icon('wrench', 18));
   toolbarButton.classList.add('rl-wrench-button');
+  // The toolbar's own press handling leaves it to the click (plugins/toolbar).
+  toolbarButton.dataset['toolbarControl'] = '';
   toolbarButton.setAttribute('aria-keyshortcuts', TOOLBAR_ARIA_KEY);
   toolbarControl.append(toolbarButton);
   const toolbarTip = createTip(toolbarControl, toolbarButton, 'rl-wrench-tip', {
@@ -485,7 +487,6 @@ export function createTitleBar(
     viewTip.set(`Show ${VIEW_NAMES[toView]}`, VIEW_KEYS[toView]);
     viewButton.setAttribute('aria-keyshortcuts', VIEW_ARIA_KEYS[toView]);
     toolbarButton.setAttribute('aria-pressed', String(next.toolbarShown));
-    toolbarButton.setAttribute('aria-label', next.toolbarShown ? 'Hide Toolbar' : 'Show Toolbar');
     toolbarTip.set(next.toolbarShown ? 'Hide Toolbar' : 'Show Toolbar', TOOLBAR_KEY);
     reviewTip.set(next.tracking ? 'Turn off Track Changes' : 'Turn on Track Changes', TRACKING_KEY);
     reviewButton.setAttribute('aria-pressed', String(next.tracking));

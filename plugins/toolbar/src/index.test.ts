@@ -940,4 +940,30 @@ describe('docked, by the wrench or the preference', () => {
     expect(toolbar.isOpen()).toBe(false);
     expect(changes).toEqual([true, false]);
   });
+
+  it('stays through Tab, which only gives the keyboard back to the text', () => {
+    const { editor, toolbar } = mount();
+    toolbar.toggle();
+    editor.commands.run('toolbar.show');
+    key(buttons()[0]!, 'Tab');
+    expect(toolbar.isOpen()).toBe(true);
+    expect(document.activeElement).toBe(editor.view.contentDOM);
+  });
+
+  it('comes back after a right-click’s toolbar goes, and not after the wrench put it away', async () => {
+    const { editor, toolbar } = mount();
+    toolbar.toggle();
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    rightClick(editor);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(panelOf()?.classList.contains('rl-toolbar-docked')).toBe(false);
+    key(document.body, 'Escape');
+    expect(panelOf()?.classList.contains('rl-toolbar-docked')).toBe(true);
+    expect(panelOf()?.hidden).toBe(false);
+    // The wrench while it is at the pointer puts it away for good.
+    rightClick(editor);
+    await vi.advanceTimersByTimeAsync(0);
+    toolbar.toggle();
+    expect(toolbar.isOpen()).toBe(false);
+  });
 });

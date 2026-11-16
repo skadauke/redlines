@@ -1356,30 +1356,30 @@ describe('the wrench', () => {
     const labels = [
       ...root.querySelectorAll('.rl-titlebar-end > .rl-control > .rl-icon-button'),
     ].map((b) => b.getAttribute('aria-label'));
-    expect(labels).toEqual(['Show Toolbar', 'View', 'Track Changes']);
+    expect(labels).toEqual(['Toolbar', 'View', 'Track Changes']);
   });
 
   it('asks for the toolbar on a click, and keeps the text’s focus on the press', () => {
     const { actions, button } = setup();
     const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-    button('Show Toolbar').dispatchEvent(press);
+    button('Toolbar').dispatchEvent(press);
     expect(press.defaultPrevented).toBe(true);
-    button('Show Toolbar').click();
+    button('Toolbar').click();
     expect(actions.toggleToolbar).toHaveBeenCalledTimes(1);
   });
 
   it('is pressed, and offers to hide, while the toolbar shows', () => {
     const { bar, button } = setup();
-    expect(button('Show Toolbar').getAttribute('aria-pressed')).toBe('false');
+    expect(button('Toolbar').getAttribute('aria-pressed')).toBe('false');
     bar.update({ ...BASE, toolbarShown: true });
-    const pressed = button('Hide Toolbar');
+    const pressed = button('Toolbar');
     expect(pressed.getAttribute('aria-pressed')).toBe('true');
     expect(pressed.getAttribute('aria-keyshortcuts')).toBe('Shift+Meta+P');
   });
 
   it('says what a click does, with the key, after the pointer rests', () => {
     const { button, root } = setup();
-    enter(button('Show Toolbar'));
+    enter(button('Toolbar'));
     vi.advanceTimersByTime(400);
     const tip = root.querySelector<HTMLElement>('#rl-wrench-tip');
     expect(tip?.hidden).toBe(false);

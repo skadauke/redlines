@@ -11,7 +11,14 @@ import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { Editor, EditorCommand } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
-import { type Dismissal, dismiss, keyAction, type Summoned } from './model.ts';
+import {
+  type Dismissal,
+  dismiss,
+  keyAction,
+  setAtBottom as modelSetAtBottom,
+  type Summoned,
+  wrench,
+} from './model.ts';
 import { editCommands, type ToolbarClipboard, pageClipboard } from './edit.ts';
 import { shownGroups } from './items.ts';
 import { type DrawnPanel, drawPanel, type PanelHandlers, type SpellingRows } from './panel.ts';
@@ -98,8 +105,8 @@ function moveSelectionTo(editor: Editor, pos: number): void {
 }
 
 /**
- * Adds the toolbar to an editor: its right-click, and the commands Show Formatting
- * Toolbar (⌥⌘P, in the View menu) and, with a clipboard, Cut, Copy and Paste (which have no menu
+ * Adds the toolbar to an editor: its right-click, and the commands Show
+ * Toolbar (⇧⌘P, in the View menu) and, with a clipboard, Cut, Copy and Paste (which have no menu
  * or key here). Register the plugins whose commands it shows first, or later: an item appears when
  * its command is registered. Returns the toolbar, whose `destroy` takes it out again.
  */
@@ -130,6 +137,8 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   let how: Summoned | null = null;
   let atBottom = false;
   let told = false;
+  /** Whether a docked toolbar a right-click replaced comes back when that one goes. */
+  let redock = false;
   let drawn: DrawnPanel | null = null;
   /** The spelling rows the toolbar holds, and where the word they are for is. */
   let spelling: { rows: SpellingRows; from: number; to: number } | null = null;
@@ -254,6 +263,8 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   const onPress = (event: PointerEvent) => {
     const target = event.target;
     if (target instanceof Node && panel.contains(target)) return;
+    // The control that shows and hides the toolbar (the title bar's wrench) acts on the click.
+    if (target instanceof Element && target.closest('[data-toolbar-control]')) return;
     away('press');
   };
   const onScroll = (event: Event) => {
@@ -331,6 +342,9 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     unlisten();
     tell();
     if (takeBack) view.focus();
+    const again = redock;
+    redock = false;
+    if (again) open('docked', () => {});
   }
 
   // A press on the padding or the hairlines leaves the keyboard where it is, as one on an item does.
@@ -366,7 +380,9 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
         break;
       case 'Tab':
         event.preventDefault();
-        close(true);
+        // A docked toolbar stays: Tab only gives the keyboard back to the text.
+        if (how === 'docked') view.focus();
+        else close(true);
         return;
       default:
         return;
@@ -392,7 +408,10 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   });
 
   async function openContext(x: number, y: number, fromKeyboard: boolean): Promise<void> {
+    // A docked toolbar comes back when this one goes: it is the person's to put away.
+    const wasDocked = how === 'docked';
     close();
+    redock = wasDocked;
     const mine = ++opening;
     let at = view.state.selection.main.head;
     if (!fromKeyboard) {
@@ -478,6 +497,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   const failed = (what: 'cut' | 'copy' | 'paste') =>
     options.notice(what === 'paste' ? NO_TEXT : `Couldn’t ${what}.`);
   const show = (): boolean => {
+    opening++;
     switch (keyAction({ how, atBottom }, panel.contains(doc.activeElement))) {
       case 'hide':
         close(true);
@@ -499,20 +519,22 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     }
   };
   const toggle = (): boolean => {
-    if (how === null) open('docked', () => {});
+    opening++;
+    redock = false;
+    if (wrench({ how, atBottom }).how === 'docked') open('docked', () => {});
     else close();
     return how !== null;
   };
   const setAtBottom = (next: boolean): void => {
     if (next === atBottom) return;
-    // At the bottom the toolbar is docked, and away from it a docked one goes.
+    redock = false;
+    const after = modelSetAtBottom({ how, atBottom }, next);
     atBottom = next;
-    if (next) {
-      if (how !== 'docked') {
-        close();
-        open('docked', () => {});
-      }
-    } else if (how === 'docked') {
+    // At the bottom the toolbar is docked, and away from it a docked one goes.
+    if (after.how === 'docked' && how !== 'docked') {
+      close();
+      open('docked', () => {});
+    } else if (after.how === null && how === 'docked') {
       close();
     }
   };
@@ -540,6 +562,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     hide: () => away('zoom'),
     isOpen: () => how !== null,
     destroy() {
+      redock = false;
       close();
       removeCommands();
       removeExtension();
