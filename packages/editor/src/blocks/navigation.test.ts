@@ -348,63 +348,83 @@ describe('a click past the end of a block’s text (#434)', () => {
   });
 });
 
-describe('⌥↑ and ⌥↓ by paragraph', () => {
+describe('⌥↑ and ⌥↓ move blocks', () => {
   scriptRows(
     both([
       {
-        name: '⌥↑ in a paragraph: its start',
-        doc: 'One.⏎⏎Tw‸o.',
-        keys: ['Alt-ArrowUp'],
-        expect: { caret: 'One.⏎⏎‸Two.', file: 'One.⏎⏎Two.' },
-      },
-      {
-        name: '⌥↑ at the start of a paragraph: the start of the one before',
-        doc: 'One.⏎⏎‸Two.',
-        keys: ['Alt-ArrowUp'],
-        expect: { caret: '‸One.⏎⏎Two.', file: 'One.⏎⏎Two.' },
-      },
-      {
-        name: '⌥↓ in a paragraph: its end',
-        doc: 'On‸e.⏎⏎Two.',
+        name: '⌥↓ moves a paragraph below the next',
+        doc: 'One.⏎⏎Tw‸o.⏎⏎Three.',
         keys: ['Alt-ArrowDown'],
-        expect: { caret: 'One.‸⏎⏎Two.', file: 'One.⏎⏎Two.' },
+        expect: { newest: 'One.⏎⏎Three.⏎⏎Two.' },
       },
       {
-        name: '⌥↓ at the end of a paragraph: the end of the next one',
-        doc: 'One.‸⏎⏎Two.',
-        keys: ['Alt-ArrowDown'],
-        expect: { caret: 'One.⏎⏎Two.‸', file: 'One.⏎⏎Two.' },
+        name: '⌥↑ moves a paragraph above the one before',
+        doc: 'One.⏎⏎Two.⏎⏎Thr‸ee.',
+        keys: ['Alt-ArrowUp'],
+        expect: { newest: 'One.⏎⏎Three.⏎⏎Two.' },
       },
       {
-        name: '⌥↑ at the start of the first block, and ⌥↓ at the end of the last: nothing',
-        doc: '‸One.⏎⏎Two.',
-        keys: ['Alt-ArrowUp', 'Alt-ArrowDown', 'Alt-ArrowDown'],
-        expect: { caret: 'One.⏎⏎Two.‸', file: 'One.⏎⏎Two.' },
+        name: '⌥↑ then ⌥↓ puts it back, the caret in it',
+        doc: 'One.⏎⏎Tw‸o.⏎⏎Three.',
+        keys: ['Alt-ArrowUp', 'Alt-ArrowDown'],
+        expect: { newest: 'One.⏎⏎Two.⏎⏎Three.' },
       },
       {
-        name: '⌥↑ over a heading and its hidden marker',
+        name: '⌥↑ over a heading',
         doc: 'One.⏎⏎## Tw‸o⏎⏎Three.',
-        keys: ['Alt-ArrowUp', 'Alt-ArrowUp'],
-        expect: { caret: '‸One.⏎⏎## Two⏎⏎Three.', file: 'One.⏎⏎## Two⏎⏎Three.' },
-      },
-      {
-        name: '⌥↓ through list items, a quote and a paragraph',
-        doc: '‸- one⏎- two⏎⏎> Quote.⏎⏎Last.',
-        keys: ['Alt-ArrowDown', 'Alt-ArrowDown', 'Alt-ArrowDown', 'Alt-ArrowDown'],
-        expect: { caret: '- one⏎- two⏎⏎> Quote.⏎⏎Last.‸' },
-      },
-      {
-        name: '⌥↑ through list items',
-        doc: '- one⏎- tw‸o',
-        keys: ['Alt-ArrowUp', 'Alt-ArrowUp'],
-        expect: { caret: '- ‸one⏎- two', file: '- one⏎- two' },
-      },
-      {
-        name: 'a paragraph of two lines is one paragraph',
-        doc: 'One⏎two‸⏎⏎Next.',
         keys: ['Alt-ArrowUp'],
-        expect: { caret: '‸One⏎two⏎⏎Next.', file: 'One⏎two⏎⏎Next.' },
+        expect: { newest: '## Two⏎⏎One.⏎⏎Three.' },
       },
+      {
+        name: '⌥↑ moves a list item above its sibling',
+        doc: '- one⏎- tw‸o⏎- three',
+        keys: ['Alt-ArrowUp'],
+        expect: { newest: '- two⏎- one⏎- three' },
+      },
+      {
+        name: '⌥↓ moves the blocks a selection covers',
+        doc: '[One.⏎⏎Two.]⏎⏎Three.',
+        keys: ['Alt-ArrowDown'],
+        expect: { newest: 'Three.⏎⏎One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↑ at the first block, and ⌥↓ at the last, say so',
+        doc: '‸One.⏎⏎Two.',
+        keys: ['Alt-ArrowUp'],
+        expect: { newest: 'One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↓ at the last block does nothing',
+        doc: 'One.⏎⏎Tw‸o.',
+        keys: ['Alt-ArrowDown'],
+        expect: { newest: 'One.⏎⏎Two.' },
+      },
+    ]),
+  );
+});
+
+describe('⌥↓ moves a code block below a paragraph', () => {
+  scriptRows([
+    {
+      name: 'Track Changes off',
+      doc: 'One.⏎⏎```⏎co‸de⏎```⏎⏎Next.',
+      keys: ['Alt-ArrowDown'],
+      tc: false,
+      expect: { newest: 'One.⏎⏎Next.⏎⏎```⏎code⏎```' },
+    },
+    {
+      name: 'Track Changes on: the closer after the fence leaves a line break',
+      doc: 'One.⏎⏎```⏎co‸de⏎```⏎⏎Next.',
+      keys: ['Alt-ArrowDown'],
+      tc: true,
+      expect: { newest: 'One.⏎⏎Next.⏎⏎```⏎code⏎```⏎', original: 'One.⏎⏎```⏎code⏎```⏎⏎Next.' },
+    },
+  ]);
+});
+
+describe('⇧⌥↑ and ⇧⌥↓ by paragraph', () => {
+  scriptRows(
+    both([
       {
         name: '⇧⌥↑ selects to the start of the paragraph',
         doc: 'One.⏎⏎Tw‸o.',

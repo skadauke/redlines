@@ -1080,6 +1080,7 @@ menus, shortcuts, the palette, plugins and agents.
 | In a table: line break in a cell | Return or ⇧Return                                                                           | Enter or Shift+Enter      |
 | In a table: insert row above, below | ⌥⌘↑ and ⌥⌘↓ (⌘↩ also below)                                                              | Ctrl+Alt+Up and Down (Ctrl+Enter below) |
 | In a table: delete row, move row up, down | ⌥⌘⌫ (also ⇧⌘K), ⌥↑ and ⌥↓                                                            | Ctrl+Alt+Backspace, Alt+Up and Down |
+| Move a paragraph, list item or block up, down | ⌥↑ and ⌥↓ (the blocks a selection covers move together; tracked, it is one change that is accepted or rejected whole, format §3.14) | Alt+Up and Down |
 | In a table: insert column left, right; delete column | ⌥⌘← and ⌥⌘→; ⌃⌘⌫                                                                 | Ctrl+Alt+Left and Right; Ctrl+Win+Backspace |
 | In a table: select cells       | ⇧ with an arrow, ⌘A (cell, table, document), ⌃L (the row), Esc (a caret)                      | Shift with an arrow, Ctrl+A, Ctrl+L, Esc |
 | In a table: clear cells; delete emptied rows, columns, the table | ⌫ or ⌦; again once whole rows, columns or the table are selected and empty                  | Backspace or Delete; again       |

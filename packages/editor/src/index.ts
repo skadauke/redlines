@@ -812,3 +812,5 @@ function pasteIntoField(view: EditorView, text: string): boolean {
   }
   return false;
 }
+
+export { moveBlocks, moveBlocksReason, moveRunTo, runOfSelection } from './blocks/move.ts';
