@@ -159,16 +159,28 @@ export function codeFileHighlight(filename: string, size = 0): Extension {
         fragments: readonly TreeFragment[] = [];
         gone = false;
         constructor(view: EditorView) {
-          void description.load().then((support) => {
-            if (this.gone) return;
-            this.parser = support.language.parser;
-            this.decorations = this.build(view);
-            // Draws the colors that the grammar's arrival made possible.
-            view.dispatch({});
-          });
+          description.load().then(
+            (support) => {
+              if (this.gone || view.state.doc.length > CODE_FILE_COLOR_LIMIT) return;
+              this.parser = support.language.parser;
+              this.decorations = this.build(view);
+              // Draws the colors that the grammar's arrival made possible.
+              view.dispatch({});
+            },
+            // A grammar that can't be loaded leaves the file uncolored, and still Plain.
+            () => {},
+          );
         }
         update(update: ViewUpdate) {
           if (!this.parser) return;
+          // A file that grew past the limit by paste or reload is no longer colored.
+          if (update.state.doc.length > CODE_FILE_COLOR_LIMIT) {
+            this.parser = null;
+            this.tree = null;
+            this.fragments = [];
+            this.decorations = Decoration.none;
+            return;
+          }
           if (update.docChanged || update.viewportChanged) {
             this.decorations = this.build(update.view, update);
           }
