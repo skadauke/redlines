@@ -198,8 +198,10 @@ export const TOOLBAR_STYLE = `
   gap: 12px;
   padding: 7px 10px;
   border-radius: 8px;
-  background: var(--rl-tip, #1d1d1f);
-  color: #ffffff;
+  border: 1px solid var(--rl-rule);
+  background: var(--rl-card);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
   font-family: var(--rl-font-ui);
   font-size: var(--rl-size-ui-small);
   line-height: 1;
@@ -210,7 +212,7 @@ export const TOOLBAR_STYLE = `
 }
 .rl-toolbar-tip[hidden] { display: none; }
 .rl-toolbar-tip-keys {
-  color: rgb(255 255 255 / 0.62);
+  color: var(--rl-ink-2);
   letter-spacing: 0.04em;
 }
 
