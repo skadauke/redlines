@@ -7,6 +7,7 @@ import {
   authorFrom,
   imageFolderNameOf,
   imageFolderNameProblem,
+  keepWindowOwn,
   loadSettings,
   meetPeopleInSettings,
   reopenLastDocument,
@@ -720,5 +721,28 @@ describe('settings', () => {
     expect(loadSettings().agentModels).toEqual({ claude: 'opus' });
     localStorage.setItem(SETTINGS_KEY, '{"agentModels":[1]}');
     expect(loadSettings().agentModels).toEqual({});
+  });
+});
+
+describe('the Default text size (#557)', () => {
+  it('is what a new window opens at, and no window’s own text size changes it', () => {
+    updateSettings({ textSize: 1.25 });
+    let own = { ...loadSettings(), textSize: 2 };
+    own = keepWindowOwn(own, updateSettings({ spellCheck: false }));
+    expect(own.textSize).toBe(2);
+    expect(loadSettings().textSize).toBe(1.25);
+  });
+
+  it('changes no window that is open', () => {
+    const open = { ...loadSettings(), textSize: 1.5 };
+    const stored = updateSettings({ textSize: 3 });
+    expect(keepWindowOwn(open, stored).textSize).toBe(1.5);
+    expect(loadSettings().textSize).toBe(3);
+  });
+
+  it('is changed by Preferences, which keeps what it set', () => {
+    const open = { ...loadSettings(), textSize: 1 };
+    const stored = updateSettings({ textSize: 1.75 });
+    expect(keepWindowOwn(open, stored, { textSize: 1.75 }).textSize).toBe(1.75);
   });
 });

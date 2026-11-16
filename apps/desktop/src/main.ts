@@ -69,6 +69,7 @@ import {
   loadSettings,
   reopenLastDocument,
   updateSettings,
+  keepWindowOwn,
   watchSettings,
   type Settings,
 } from './settings.ts';
@@ -891,12 +892,7 @@ const acceptAllAndStopTracking = () => {
  * stored text size is the Default text size of Preferences, which only Preferences changes (#557).
  */
 const changeSettings = (change: Partial<Settings>) => {
-  settings = {
-    ...updateSettings(change),
-    sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
-    sidebarWidth: change.sidebarWidth ?? settings.sidebarWidth,
-    textSize: change.textSize ?? settings.textSize,
-  };
+  settings = keepWindowOwn(settings, updateSettings(change), change);
 };
 
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
@@ -1371,12 +1367,7 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
-  settings = {
-    ...changed,
-    sidebarOpen: settings.sidebarOpen,
-    sidebarWidth: settings.sidebarWidth,
-    textSize: settings.textSize,
-  };
+  settings = keepWindowOwn(settings, changed);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();
