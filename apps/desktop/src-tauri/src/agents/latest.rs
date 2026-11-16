@@ -6,6 +6,7 @@
 //! rather than guess.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
@@ -18,7 +19,9 @@ const CURL: &str = "/usr/bin/curl";
 const KEEP: Duration = Duration::from_secs(6 * 60 * 60);
 /// How long the look may take, which is all of it: connecting and the answer.
 const LOOK_SECONDS: &str = "10";
-/// The most of an answer that is read. The registry's answer for a package is a few kilobytes.
+/// The most of an answer that is read, in bytes.
+const MOST_READ: u64 = 2_000_000;
+/// The most of an answer that curl itself takes, by what the server says it sends. The registry's answer for a package is a few kilobytes.
 const MOST_BYTES: &str = "2000000";
 
 type Answers = Mutex<HashMap<Agent, (Instant, String)>>;
@@ -50,19 +53,23 @@ pub fn parse_latest(body: &str) -> Option<String> {
 pub fn latest_version(agent: Agent, fresh: bool) -> Result<String, String> {
     if !fresh
         && let Some((at, version)) = kept()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&agent)
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&agent)
         && at.elapsed() < KEEP
     {
         return Ok(version.clone());
     }
-    let output = Command::new(CURL)
+    // `-q` first: no `.curlrc` of the person's changes the request.
+    let mut child = Command::new(CURL)
         .args([
+            "-q",
             "--fail",
             "--silent",
             "--location",
             "--proto",
+            "=https",
+            "--proto-redir",
             "=https",
             "--max-time",
             LOOK_SECONDS,
@@ -73,13 +80,27 @@ pub fn latest_version(agent: Agent, fresh: bool) -> Result<String, String> {
         ])
         .arg(registry_url(agent))
         .stdin(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output()
+        .spawn()
         .map_err(|_| "Redlines couldn't look for a newer version.".to_owned())?;
-    if !output.status.success() {
+    // Only so much is read, whatever the server sends (`--max-filesize` trusts its length).
+    let mut body = Vec::new();
+    if let Some(out) = child.stdout.take() {
+        let _ = out.take(MOST_READ).read_to_end(&mut body);
+    }
+    let reached = if body.len() as u64 >= MOST_READ {
+        // Still sending past the limit: stopped, and no answer.
+        let _ = child.kill();
+        let _ = child.wait();
+        false
+    } else {
+        child.wait().is_ok_and(|status| status.success())
+    };
+    if !reached {
         return Err("Redlines couldn't reach the list of versions.".to_owned());
     }
-    let version = parse_latest(&String::from_utf8_lossy(&output.stdout))
+    let version = parse_latest(&String::from_utf8_lossy(&body))
         .ok_or_else(|| "The list of versions said something Redlines doesn't know.".to_owned())?;
     kept()
         .lock()

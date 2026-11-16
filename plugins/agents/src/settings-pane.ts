@@ -517,12 +517,14 @@ function agentRow(
       : '';
     const tooOld = state?.found === true && !state.signedIn && state.reason === 'too-old';
     const signedOut = state?.found === true && !state.signedIn && state.reason === 'signed-out';
-    const canUpdate = (tooOld || newer !== undefined) && agent.update !== undefined;
+    // A newer version is kept through a look, so that the button doesn't come and go.
+    const behind = newer !== undefined && (state === null || state.found);
+    const canUpdate = (tooOld || behind) && agent.update !== undefined;
     const canSignIn = signedOut && agent.signIn !== undefined;
     // The button says what to do, so help that told the person what to type is left out.
     help.textContent = canSignIn ? '' : (state?.help ?? '');
     // Update is offered for a program that is behind, and says which version is out.
-    if (newer !== undefined && !tooOld && shown === undefined) {
+    if (behind && !tooOld && !canSignIn && shown === undefined) {
       help.textContent = `Version ${newer} is available.`;
     }
     if (activity === 'sign-in') help.textContent = 'Finish in your browser.';
@@ -557,7 +559,6 @@ function agentRow(
     // An update or a sign-in is what the row is about; it looks again by itself when it ends.
     if (activity !== null) return;
     const mine = ++asked;
-    newer = undefined;
     draw(null, 'Checking…');
     void Promise.resolve()
       .then(() => (fresh ? agent.detect(true) : agent.detect()))
@@ -594,22 +595,24 @@ function agentRow(
    * when it is newer. A look that fails (offline) leaves things as they are, with no word of it.
    */
   const lookForNewer = (state: AgentState | null, mine: number, fresh: boolean) => {
-    if (!agent.latest || state?.found !== true || state.version === undefined) return;
+    if (!agent.latest || state?.found !== true || state.version === undefined) {
+      newer = undefined;
+      return;
+    }
     const installed = state.version;
     let asking: Promise<string>;
     try {
       asking = agent.latest(fresh);
     } catch {
+      newer = undefined;
       return;
     }
-    asking.then(
-      (version) => {
-        if (!alive() || mine !== asked || activity !== null || !isNewer(version, installed)) return;
-        newer = version;
-        draw(last);
-      },
-      () => {},
-    );
+    const settle = (version: string | undefined) => {
+      if (!alive() || mine !== asked || activity !== null) return;
+      newer = version !== undefined && isNewer(version, installed) ? version : undefined;
+      draw(last);
+    };
+    asking.then(settle, () => settle(undefined));
   };
 
   const copy = (text: string) => {
