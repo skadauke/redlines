@@ -83,9 +83,17 @@ test.describe('the eye @views', () => {
     await j.shot('view-button-clean');
     await eye.click();
     await expect(bar, 'Redlines has the bar').toHaveCount(1);
-    expect(await bar.evaluate((path) => getComputedStyle(path).stroke), 'and it is red').not.toBe(
-      await eye.evaluate((button) => getComputedStyle(button).color),
-    );
+    // It is the app's red: the color a probe takes from the same token.
+    const red = await j.page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--rl-red, #d42a1e)';
+      document.body.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    expect(await bar.evaluate((path) => getComputedStyle(path).stroke), 'and it is red').toBe(red);
+    await j.page.mouse.move(400, 400);
     await j.shot('view-button-redlines');
     await j.page.mouse.move(400, 400);
     await (await openEye(j)).item('Plain').click();
