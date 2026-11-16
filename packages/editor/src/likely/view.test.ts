@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { markdown } from '@codemirror/lang-markdown';
-import { Language, syntaxTree } from '@codemirror/language';
+import { syntaxTree } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
@@ -71,18 +71,22 @@ describe('a far jump in a view', () => {
     expect(styled(syntaxTree(view.state), 0, 2000)).toBe(false);
     // The pause of CodeMirror's worker, and the parse in its slices.
     await wait(4000);
-    const cxx = (view.state.field((Language as any).state) as any).context;
-    console.log(
-      'DBG',
-      JSON.stringify(cxx.skipped),
-      cxx.treeLen,
-      !!cxx.parse,
-      cxx.parse?.parsedPos,
-      syntaxTree(view.state).length,
-    );
     expect(styled(syntaxTree(view.state), 0, 2000)).toBe(true);
     expect(styled(syntaxTree(view.state), from, to)).toBe(true);
   }, 10_000);
+
+  it('goes on parsing from the likely place while the text is edited', async () => {
+    const view = viewOf(60_000);
+    await jumpTo(view, Math.floor(text.length / 2));
+    await wait(30);
+    const at = view.viewport.from + 20;
+    view.dispatch({ changes: { from: at, insert: 'new *words* ' } });
+    await wait(30);
+    const { from, to } = view.viewport;
+    expect(styled(syntaxTree(view.state), from, to)).toBe(true);
+    expect(styled(syntaxTree(view.state), at, at + 12)).toBe(true);
+    expect(styled(syntaxTree(view.state), 0, 2000)).toBe(false);
+  });
 
   it('is exact at the end, and a scroll up from it draws too', async () => {
     const view = viewOf(60_000);

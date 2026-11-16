@@ -83,6 +83,7 @@ class Scanned {
 /** What the parse context keeps that its types don't show: what this file sets. */
 interface Inside {
   skipped: Span[];
+  tempSkipped: Span[];
   treeLen: number;
   parse: PartialParse | null;
   work(until: () => boolean, upto: number): boolean;
@@ -206,6 +207,9 @@ export function likelyParsing(parser: Parser, restMs = REST_MS): Extension {
     }
     if (restart === null || restart <= 0) return original(input, fragments, ranges);
     if (!head) cx.skipUntilInView(0, restart);
+    // The tree is not one of the head, which a later parse must not take for parsed: its fragments
+    // are cut there once the parse is taken, as CodeMirror does for what a parser skipped.
+    inside(cx).tempSkipped.push({ from: 0, to: restart });
     shared.headEnd = restart;
     const parts = rangesFor(doc, scanned.current(), restart);
     return new Placed(original(input, fragments, parts), parts[0]!.from);

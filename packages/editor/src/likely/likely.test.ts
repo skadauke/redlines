@@ -72,16 +72,24 @@ function setup(text: string) {
   return { state, full, parser: support.language.parser };
 }
 
+interface Context {
+  tree: Tree;
+  skipped: { from: number; to: number }[];
+  work(until: () => boolean, upto: number): boolean;
+  takeTree(): void;
+}
+
 /** ParseContext's own constructor, which its types leave out. */
 const create = (
-  ParseContext as unknown as {
-    create(
-      parser: unknown,
-      state: EditorState,
-      viewport: { from: number; to: number },
-    ): Context;
-  }
-).create;
+  viewport: { from: number; to: number },
+  parser: unknown,
+  state: EditorState,
+): Context =>
+  (
+    ParseContext as unknown as {
+      create(parser: unknown, state: EditorState, viewport: { from: number; to: number }): Context;
+    }
+  ).create(parser, state, viewport);
 
 describe('where Markdown starts afresh', () => {
   it('finds unindented lines after a blank, outside code and HTML', () => {
@@ -135,7 +143,7 @@ describe('a likely parse', () => {
 
   function likelyTree(at: number, to = at + 3000) {
     const { state, full, parser } = setup(text);
-    const cx = create(parser, state, { from: at, to });
+    const cx = create({ from: at, to }, parser, state);
     cx.work(() => false, to);
     cx.takeTree();
     return { state, full, tree: cx.tree, cx };
@@ -144,14 +152,6 @@ describe('a likely parse', () => {
   it('draws a far place as the full parse does, without parsing what is before it', () => {
     const at = Math.floor(text.length / 2);
     const { full, tree, cx } = likelyTree(at);
-    console.log(
-      'DBG',
-      tree.length,
-      tree.type.name,
-      JSON.stringify((cx as any).skipped),
-      (cx as any).treeLen,
-      nodes(tree, 0, text.length).length,
-    );
     const skipped = cx.skipped;
     expect(skipped).toHaveLength(1);
     expect(skipped[0]!.from).toBe(0);
@@ -178,7 +178,7 @@ describe('a likely parse', () => {
     const doc = `[far]: https://example.com\n\n${'filler words go here.\n\n'.repeat(20_000)}see [far] and [near]\n\nend\n`;
     const { state, parser } = setup(doc);
     const at = doc.length - 100;
-    const cx = create(parser, state, { from: at, to: doc.length });
+    const cx = create({ from: at, to: doc.length }, parser, state);
     cx.work(() => false, doc.length);
     cx.takeTree();
     // The definition is in the tree, where it is written, though nothing near it is parsed.
@@ -202,7 +202,7 @@ describe('a likely parse', () => {
     const { state, parser } = setup(big);
     const at = Math.floor(big.length / 2);
     const start = performance.now();
-    const cx = create(parser, state, { from: at, to: at + 3000 });
+    const cx = create({ from: at, to: at + 3000 }, parser, state);
     cx.work(() => false, at + 3000);
     const likely = performance.now() - start;
     const whole = performance.now();
