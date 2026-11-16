@@ -29,6 +29,7 @@ import {
   indentReason,
   inFrontMatter,
   selectionInTable,
+  setFold,
   setViewModeEffect,
   trackedEditAnnotation,
   trackingField,
@@ -610,7 +611,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   };
 
   /** Where a block inserted for the caret goes: after the block it is in, as its own paragraph. */
-  const insertBlock = (text: string, find: string, caret: number, selected = 0): boolean => {
+  const insertBlock = (
+    text: string,
+    find: string,
+    caret: number,
+    selected = 0,
+    place = selected > 0,
+  ): boolean => {
     if (onEmptyLine()) return putOnEmptyLine(text, find, caret, selected);
     const { doc } = view.state;
     const { head } = view.state.selection.main;
@@ -618,13 +625,59 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const top = atSelection(view.state).find((node) => node.parent?.type.isTop);
     const at = top ? Math.max(top.to, line.to) : line.to;
     const done = insert([{ from: at, to: at, insert: `\n\n${text}` }]);
-    if (done && selected > 0) {
+    if (done && place) {
       const start = view.state.doc.toString().indexOf(find, at);
       if (start >= 0) {
         const anchor = afterVisible(start, caret);
         view.dispatch({ selection: { anchor, head: afterVisible(anchor, selected) } });
       }
     }
+    return done;
+  };
+
+  /**
+   * Collapsible Section (#688): `<details>` with a `<summary>` and the blocks inside. Over a
+   * selection of blocks it goes around them (two insertions: the blocks are not rewritten); at the
+   * caret it is a new section after the block, as Table is. It opens, with the summary's text
+   * selected, because a section just made is one to write in (nothing is remembered).
+   */
+  const SUMMARY = 'Summary';
+  const collapsibleSection = (): boolean => {
+    const { doc } = view.state;
+    const { from, to, empty } = view.state.selection.main;
+    const head = `<details>\n<summary>${SUMMARY}</summary>\n\n`;
+    const open = (at: number) => {
+      const anchor = view.state.doc.toString().indexOf(`<summary>${SUMMARY}`, at);
+      if (anchor < 0) return;
+      const opener = view.state.doc.line(view.state.doc.lineAt(anchor).number - 1).from;
+      const start = anchor + '<summary>'.length;
+      view.dispatch({
+        selection: { anchor: start, head: start + SUMMARY.length },
+        effects: setFold.of({ from: opener, open: true }),
+      });
+    };
+    if (empty) {
+      const done = insertBlock(`${head}Text\n\n</details>`, '<details>', 0);
+      if (done) open(Math.max(0, from - 1));
+      return done;
+    }
+    // The blocks the selection touches, whole: from the start of the first to the end of the last.
+    const first = doc.lineAt(from);
+    let last = doc.lineAt(to);
+    if (to === last.from && last.number > first.number) last = doc.line(last.number - 1);
+    let start = first.from;
+    let end = last.to;
+    const tree = syntaxTree(view.state);
+    for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
+      if (node.to < start || node.from > end) continue;
+      start = Math.min(start, node.from);
+      end = Math.max(end, node.to);
+    }
+    const done = insert([
+      { from: start, to: start, insert: head },
+      { from: end, to: end, insert: '\n\n</details>' },
+    ]);
+    if (done) open(Math.max(0, start - 1));
     return done;
   };
 
@@ -713,10 +766,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     return true;
   };
 
-  const TABLE = '| Column | Column |\n| --- | --- |\n|  |  |';
+  // A new table's header cells are empty (GitHub's tables allow it): the table draws a faint
+  // placeholder in them that the file doesn't hold (the theme's `.rl-th .rl-tc-fill`), and the caret
+  // starts in the first.
+  const TABLE = '|  |  |\n| --- | --- |\n|  |  |';
 
   const command = (
-    menu: 'format' | 'paragraph',
+    menu: 'format' | 'paragraph' | 'insert',
     group: string,
     fields: Omit<EditorCommand, 'menu' | 'group'>,
   ): EditorCommand => ({
@@ -727,7 +783,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       // Plain shows the file's own text: nothing in it can be marked (typing there is asked about).
       if (rawTracked(state)) return RAW_FORMAT;
       // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
-      if (menu === 'paragraph' && selectionInTable(state)) return NOT_IN_CELL_HINT;
+      if (menu !== 'format' && selectionInTable(state)) return NOT_IN_CELL_HINT;
       return fields.disabledReason?.(state);
     },
   });
@@ -1006,7 +1062,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       },
       run: checkItems,
     }),
-    command('paragraph', 'insert', {
+    command('insert', 'insert', {
       id: 'block.code',
       title: 'Code Block',
       shortcut: 'Mod-Alt-c',
@@ -1015,14 +1071,19 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         atSelection(state).some(({ name }) => CODE_BLOCK.has(name)) ? ALREADY_CODE_HINT : undefined,
       isActive: (state) => activeBlocks(state).has('block.code'),
     }),
-    command('paragraph', 'insert', {
+    command('insert', 'insert', {
       id: 'block.table',
       title: 'Table',
       shortcut: 'Mod-Alt-t',
-      // The first header cell's text is selected, so that typing names the column.
-      run: () => insertBlock(TABLE, '| Column', 2, 'Column'.length),
+      // The caret is in the first header cell, which is empty: typing names the column.
+      run: () => insertBlock(TABLE, '|  |  |', 2, 0, true),
     }),
-    command('paragraph', 'insert', {
+    command('insert', 'insert', {
+      id: 'block.details',
+      title: 'Collapsible Section',
+      run: collapsibleSection,
+    }),
+    command('insert', 'insert', {
       id: 'block.alert',
       title: 'Alert',
       // A new alert after the block the caret is in, or on the empty paragraph it is in, with its
@@ -1030,7 +1091,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       run: () =>
         insertBlock(ALERT, '> [!NOTE]', ALERT.length - ALERT_BODY.length, ALERT_BODY.length),
     }),
-    command('paragraph', 'insert', {
+    command('insert', 'insert', {
       id: 'block.rule',
       title: 'Horizontal Rule',
       run: () => insertBlock('---', '---', 3),
@@ -1104,6 +1165,7 @@ export const plugin: Plugin = {
         { id: 'block.check', title: 'Check Item', shortcut: 'Mod-Shift-u' },
         { id: 'block.code', title: 'Code Block', shortcut: 'Mod-Alt-c' },
         { id: 'block.table', title: 'Table', shortcut: 'Mod-Alt-t' },
+        { id: 'block.details', title: 'Collapsible Section' },
         { id: 'block.alert', title: 'Alert' },
         { id: 'block.rule', title: 'Horizontal Rule' },
         { id: 'block.indent', title: 'Indent', shortcut: 'Mod-]' },

@@ -207,7 +207,7 @@ describe('the pair model with an alignment change pending', () => {
   const ROW_OPS = ['insertRows', 'deleteRows', 'moveRows'];
   const COLUMN_OPS = ['insertCols', 'deleteCols', 'moveCols'];
 
-  it('refuses a row operation on the header beside an alignment change, in either order', () => {
+  it('widens a tracked row operation on the header beside an alignment change, in either order', () => {
     let after = 0;
     let before = 0;
     let allowed = 0;
@@ -223,8 +223,15 @@ describe('the pair model with an alignment change pending', () => {
             const name = `${JSON.stringify([col, align])} then ${JSON.stringify(second)} by ${secondBy}`;
             const two = run(one, second, secondBy, SECOND_IDS);
             if (touchesHeader(second)) {
-              expect(two, name).toBeInstanceOf(EditError);
-              expect((two as EditError).message, name).toBe(ALIGN_FIRST);
+              if (secondBy === 'plain') {
+                // Nothing is tracked, so there is nothing to widen: the refusal stays.
+                expect(two, name).toBeInstanceOf(EditError);
+                expect((two as EditError).message, name).toBe(ALIGN_FIRST);
+              } else {
+                // Tracked, it is written as a replacement of the table, and reads alike.
+                expect(two, name).not.toBeInstanceOf(EditError);
+                if (typeof two === 'string') expectEveryOrderRead(name, two);
+              }
               after++;
             } else {
               expect(two, name).not.toBeInstanceOf(EditError);
@@ -242,10 +249,20 @@ describe('the pair model with an alignment change pending', () => {
             const name = `${JSON.stringify(first)} then ${JSON.stringify([col, align])} by ${secondBy}`;
             const two = run(one, { kind: 'align', cols: [col], align }, secondBy, SECOND_IDS);
             if (secondBy !== 'plain' && touchesHeader(first)) {
-              expect(two, name).toBeInstanceOf(EditError);
-              expect((two as EditError).message, name).toBe(
-                'Accept or reject the row changes in this table first.',
-              );
+              // Written as a replacement of the table, which reads alike; or the columns are as asked.
+              if (two instanceof EditError) {
+                // No replacement holds an alignment of the header while the header's row change
+                // is pending: that refusal stays (filed in the PR), as does the no-op.
+                expect(
+                  [
+                    'The columns are already aligned that way.',
+                    'Accept or reject the row changes in this table first.',
+                  ],
+                  name,
+                ).toContain(two.message);
+              } else {
+                expectEveryOrderRead(name, two);
+              }
               before++;
             } else if (two instanceof EditError) {
               // Nothing else may refuse it but the columns being as asked.

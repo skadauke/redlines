@@ -14,6 +14,7 @@ import {
   createLiveLines,
   createMacAgents,
   createRuns,
+  defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
 import { codeFileHighlight, codeLanguages } from '@redlines/code';
@@ -70,6 +71,7 @@ import {
   loadSettings,
   reopenLastDocument,
   updateSettings,
+  keepWindowOwn,
   watchSettings,
   type Settings,
 } from './settings.ts';
@@ -351,17 +353,46 @@ ui = editor.getUiState();
 // Codex have providers of their own, and the agents the person added, which the app keeps (Preferences
 // doesn't offer adding one for now), are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
+let webAsks = 0;
+const webAccess = {
+  web: () => loadSettings().webAccess,
+  allowWeb: () => void updateSettings({ webAccess: true }),
+  askWeb: (_agent: string, name: string, signal: AbortSignal) =>
+    new Promise<'once' | 'always' | 'no'>((resolve) => {
+      const done = (answer: 'once' | 'always' | 'no') => (card: { close(): void }) => {
+        signal.removeEventListener('abort', stopped);
+        card.close();
+        resolve(answer);
+      };
+      // Its own key: another run's card doesn't take this one's place.
+      const card = notifications.show({
+        key: `web-access ${++webAsks}`,
+        text: `${name} wants to use the web, to look something up or check a source.`,
+        dismissLabel: 'Don’t Allow',
+        onDismiss: () => done('no')(card),
+        secondaryAction: { label: 'Allow Once', run: done('once') },
+        action: { label: 'Allow Always', run: done('always') },
+      });
+      const stopped = () => done('no')(card);
+      signal.addEventListener('abort', stopped, { once: true });
+    }),
+};
 const agents =
   !isTauri && import.meta.env.DEV
     ? // A plain page has no agent programs: in development a scripted one stands in, which answers
       // an Ask with a canned answer, so that the bubble can be seen and checked in a browser.
-      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents())
+      await import('./dev-agents.ts').then(({ createDevAgents }) => createDevAgents(webAccess))
     : createMacAgents(
         isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
         createRelay(),
         {
           // What the person named each agent in Preferences, read at every look.
           handles: () => loadSettings().agentHandles,
+          // The model the person chose for each agent, read at every run.
+          models: () => loadSettings().agentModels,
+          // The web (#529): one switch for every agent. An agent that reaches for it with the
+          // switch off asks here: Allow Once, or Allow Always, which turns the switch on.
+          ...webAccess,
           ...(isTauri
             ? {
                 more: async () =>
@@ -409,12 +440,12 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
     getParsed: () => editor.getParsed(),
     getMet: () => settings.people,
     me: author.handle,
-    agents: () => knownAgents,
+    // The default agent comes first in the list (#528).
+    agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
   });
 };
 
-// The formatting commands are the Format and Paragraph menus. They register before the review
-// interface, so that its Add Comment comes last in Format.
+// The formatting commands are the Insert, Format and Paragraph menus.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 createTables(editor, { tooltipMs: TOOLTIP_MS });
 // Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
@@ -451,12 +482,11 @@ async function insertChosenImages(spot: ImageSpot): Promise<void> {
   }
 }
 
-// Registered before the review plugin's Add Comment, which comes last in Format.
 editor.commands.register([
   {
     id: 'image.insert',
     title: 'Image…',
-    menu: 'format',
+    menu: 'insert',
     group: 'insert',
     run: () => {
       const spot = editor.imageSpot();
@@ -467,8 +497,8 @@ editor.commands.register([
   },
 ]);
 
-// A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
-// a plugin with commands in that menu registers before this one.
+// A menu lists its commands in the order they are registered: Add Comment and Ask… come last in the Review menu, after its own rows: its
+// commands, and Ask… follows it (createAsk, below).
 const review = createReview(editor, {
   author,
   showResolved: settings.showResolved,
@@ -826,6 +856,8 @@ const ask = createAsk(editor, {
   },
   projectRoot: projectOf,
   settings: agentSettings,
+  // An Ask that names no agent goes to the one the person chose in Preferences (#528).
+  defaultAgent: () => loadSettings().defaultAgent ?? undefined,
   notice: (message) => notice.flash(message),
   attachToField: attachAgentPicker,
   showThread: (thread) => review.showThread(thread),
@@ -911,12 +943,7 @@ const acceptAllAndStopTracking = () => {
  * stored text size is the Default text size of Preferences, which only Preferences changes (#557).
  */
 const changeSettings = (change: Partial<Settings>) => {
-  settings = {
-    ...updateSettings(change),
-    sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
-    sidebarWidth: change.sidebarWidth ?? settings.sidebarWidth,
-    textSize: change.textSize ?? settings.textSize,
-  };
+  settings = keepWindowOwn(settings, updateSettings(change), change);
 };
 
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
@@ -953,6 +980,12 @@ const textZoom = followTextZoom(window, {
   holdRail: (held) => review.holdRail(held),
   say: (text) => notice.flash(text),
 });
+
+const toggleWordCount = () => {
+  changeSettings({ showWordCount: !settings.showWordCount });
+  wordCount.setVisible(settings.showWordCount);
+  render();
+};
 
 const toggleSidebar = () => {
   changeSettings({ sidebarOpen: !settings.sidebarOpen });
@@ -1097,6 +1130,7 @@ const commands: MenuCommands = {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleSidebar,
+  toggleWordCount,
   toggleTracking,
   acceptAllAndStopTracking,
   openReview,
@@ -1230,6 +1264,7 @@ function render(): void {
     canAcceptAll: ui.canAcceptAll,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
+    showWordCount: settings.showWordCount,
     zoom: zoom?.level() ?? null,
     textSize: settings.textSize,
     hasFile: doc.path !== null,
@@ -1398,12 +1433,7 @@ if (isTauri) {
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
   const plainOnlyListed = settings.showPlainOnlyFiles;
-  settings = {
-    ...changed,
-    sidebarOpen: settings.sidebarOpen,
-    sidebarWidth: settings.sidebarWidth,
-    textSize: settings.textSize,
-  };
+  settings = keepWindowOwn(settings, changed);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   if (settings.showPlainOnlyFiles !== plainOnlyListed) void sidebar.refresh();

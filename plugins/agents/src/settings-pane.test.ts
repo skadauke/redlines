@@ -736,6 +736,22 @@ describe('the Agents pane', () => {
     expect(now().agentScope).toBe('everything');
   });
 
+  it('has one switch for the web, off by default, for every agent (#529)', () => {
+    const { deps, container, update, now } = setup({});
+    renderAgentsPane(container, deps);
+    const web = row(container, 'Web access').querySelector('input')!;
+    expect(web.type).toBe('checkbox');
+    expect(web.checked).toBe(false);
+    expect(row(container, 'Web access').textContent).toContain('Allow Once, or Allow Always');
+    web.checked = true;
+    web.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenCalledWith({ webAccess: true });
+    expect(now().webAccess).toBe(true);
+    web.checked = false;
+    web.dispatchEvent(new Event('change'));
+    expect(now().webAccess).toBe(false);
+  });
+
   describe('the note under What agents may read', () => {
     const noteOf = (container: HTMLElement) =>
       row(container, 'What agents may read').querySelector('.rl-pref-note')?.textContent ?? '';
@@ -1006,7 +1022,15 @@ describe('the Agents pane', () => {
     renderAgentsPane(container, deps);
     expect(
       [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
-    ).toEqual(['Claude', 'Codex', 'What agents may read', 'Remembered answers', 'Agent logs']);
+    ).toEqual([
+      'Default agent',
+      'Claude',
+      'Codex',
+      'What agents may read',
+      'Web access',
+      'Remembered answers',
+      'Agent logs',
+    ]);
   });
 
   describe('other agents', () => {
@@ -1064,7 +1088,15 @@ describe('the Agents pane', () => {
       await settle();
       expect(
         [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
-      ).toEqual(['Claude', 'Codex', 'Other agents', 'What agents may read', 'Agent logs']);
+      ).toEqual([
+        'Default agent',
+        'Claude',
+        'Codex',
+        'Other agents',
+        'What agents may read',
+        'Web access',
+        'Agent logs',
+      ]);
       const text = row(container, 'Other agents').textContent;
       expect(text).toContain('Gemini');
       expect(text).toContain('/opt/homebrew/bin/gemini --experimental-acp');
@@ -1639,5 +1671,106 @@ describe('the Redlines skill', () => {
       expect(field(container, 'codex').input.value).toBe('codex');
       expect(field(container, 'codex').text()).toMatch(/lowercase letters, digits and hyphens/);
     });
+  });
+});
+
+describe('the Model field (#530)', () => {
+  const ok: AgentState = { found: true, signedIn: true, version: '1', path: '/bin/x' };
+  const models = [
+    { id: 'opus', name: 'Opus' },
+    { id: 'sonnet', name: 'Sonnet' },
+  ];
+  const field = (container: HTMLElement) =>
+    container.querySelector<HTMLSelectElement>('.rl-pref-agent-model select');
+
+  it('has none for an agent that lists no models', async () => {
+    const { container, deps } = setup({ claude: ok, codex: ok });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(field(container)).toBeNull();
+  });
+
+  it('lists Default and the models, shows the one kept, and keeps a new choice', async () => {
+    const { container, deps, now } = setup(
+      { claude: ok, codex: ok },
+      { agentModels: { claude: 'sonnet' } },
+    );
+    deps.agents = deps.agents.map((agent) =>
+      agent.id === 'claude' ? { ...agent, models } : agent,
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    const select = field(container)!;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      'Default',
+      'Opus',
+      'Sonnet',
+    ]);
+    expect(select.value).toBe('sonnet');
+    select.value = 'opus';
+    select.dispatchEvent(new Event('change'));
+    expect(now().agentModels).toEqual({ claude: 'opus' });
+    select.value = '';
+    select.dispatchEvent(new Event('change'));
+    expect(now().agentModels).toEqual({});
+  });
+});
+
+describe('Update, only when there is a newer version (#527)', () => {
+  const claude = '/Users/me/.local/bin/claude';
+  const installed: AgentState = { found: true, signedIn: true, version: '2.1.400', path: claude };
+  const buttonsOf = (container: HTMLElement) =>
+    [...container.querySelectorAll('[data-row="Claude"] button')].map((b) => b.textContent);
+
+  const withLatest = (latest: (fresh?: boolean) => Promise<string>) => {
+    const made = setup({ claude: installed, codex: installed });
+    made.deps.agents = made.deps.agents.map((agent) => ({ ...agent, latest }));
+    return made;
+  };
+
+  it('offers Update, and says which version is out, when a newer one is', async () => {
+    const { container, deps } = withLatest(() => Promise.resolve('2.2.0'));
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).toContain('Update');
+    expect(row(container, 'Claude').textContent).toContain('Version 2.2.0 is available.');
+  });
+
+  it('offers none when the program is the newest, or ahead', async () => {
+    for (const latest of ['2.1.400', '2.1.3']) {
+      const { container, deps } = withLatest(() => Promise.resolve(latest));
+      renderAgentsPane(container, deps);
+      await settle();
+      expect(buttonsOf(container)).not.toContain('Update');
+    }
+  });
+
+  it('offers none, and says nothing, when the newest can not be found', async () => {
+    const { container, deps } = withLatest(() => Promise.reject(new Error('offline')));
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).not.toContain('Update');
+    expect(row(container, 'Claude').textContent).not.toContain('offline');
+  });
+
+  it('asks afresh on Check Again, and Update goes once the program is current', async () => {
+    const asked: (boolean | undefined)[] = [];
+    const { container, deps, detect } = withLatest((fresh) => {
+      asked.push(fresh);
+      return Promise.resolve('2.2.0');
+    });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).toContain('Update');
+    detect.mockImplementation((id) =>
+      Promise.resolve(id === 'claude' ? { ...installed, version: '2.2.0' } : installed),
+    );
+    const again = [...container.querySelectorAll('[data-row="Claude"] button')].find(
+      (b) => b.textContent === 'Check Again',
+    ) as HTMLButtonElement;
+    again.click();
+    await settle();
+    expect(asked.at(-1)).toBe(true);
+    expect(buttonsOf(container)).not.toContain('Update');
   });
 });

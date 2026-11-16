@@ -117,7 +117,7 @@ export interface EditorCommand {
   /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
   shortcut?: string;
   /** Where a host with menus shows it. */
-  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'table' | 'view';
+  menu?: 'file' | 'edit' | 'insert' | 'format' | 'paragraph' | 'table' | 'view' | 'review';
   /** Items with different groups get a separator between them. */
   group?: string;
   /**

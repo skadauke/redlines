@@ -675,6 +675,9 @@ export function createRuns(deps: RunDeps): RunController {
       } else if (event.type === 'status') {
         running(run, event.text);
         if (event.blocked) tellBlocked(run, event.blocked);
+      } else if (event.type === 'web') {
+        // The host answers the web itself (mac-agents); a line is all that can reach here.
+        running(run, event.text);
       } else if (event.type === 'error') {
         return finish(run, failed(run, event.message, event.setup === true));
       } else {

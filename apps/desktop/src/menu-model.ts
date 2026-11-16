@@ -37,6 +37,8 @@ export interface MenuCommands {
    */
   switchLook(): void;
   toggleSidebar(): void;
+  /** Shows the word count in the window's corner, or hides it (Preferences' switch). */
+  toggleWordCount(): void;
   toggleTracking(): void;
   /**
    * Accepts the changes in the selection, or with only a caret all of them, and turns Track Changes
@@ -93,6 +95,8 @@ export interface MenuState {
   sidebarOpen: boolean;
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
+  /** Whether the word count is shown in the window's corner. */
+  showWordCount: boolean;
   /** The window zoom (zoom.ts), a rung of its ladder (`ZOOM_LADDER`); none until the page follows the app's. */
   zoom: number | null;
   /** The text size, any whole percent from 80 to 400 as a multiple of the theme's own. */
@@ -407,9 +411,26 @@ export function appMenuModel(
         { item: 'SelectAll' },
       ]),
     },
+    { title: 'Insert', rows: withCommands('insert', []) },
     { title: 'Format', rows: withCommands('format', []) },
     { title: 'Paragraph', rows: withCommands('paragraph', []) },
-    { title: 'Table', rows: withCommands('table', []) },
+    {
+      title: 'Table',
+      rows: withCommands(
+        'table',
+        // The same command as Insert › Table, where Word and Docs have it too; its key is shown
+        // there, once. Without that command (an app with no formatting) the row isn't drawn.
+        registry.list().some(({ id }) => id === 'block.table')
+          ? [
+              {
+                text: 'Insert Table',
+                action: () => void registry.run('block.table'),
+                enabled: (state: MenuState) => state.enabledCommands.includes('block.table'),
+              },
+            ]
+          : [],
+      ),
+    },
     {
       title: 'View',
       rows: withCommands(
@@ -484,6 +505,11 @@ export function appMenuModel(
             action: () => commands.toggleSidebar(),
             textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
           },
+          {
+            text: 'Show Word Count',
+            action: () => commands.toggleWordCount(),
+            textFor: (state) => (state.showWordCount ? 'Hide Word Count' : 'Show Word Count'),
+          },
         ],
         [
           // The Mac's own, which says Exit Full Screen while the window is. Always the last row.
@@ -493,7 +519,7 @@ export function appMenuModel(
     },
     {
       title: 'Review',
-      rows: [
+      rows: withCommands('review', [
         {
           text: 'Track Changes',
           accelerator: 'Shift+CmdOrCtrl+E',
@@ -528,7 +554,7 @@ export function appMenuModel(
           action: () => commands.toggleResolved(),
           checked: (state) => state.showResolved,
         },
-      ],
+      ]),
     },
     {
       title: 'Window',

@@ -146,6 +146,19 @@ describe('Redlines', () => {
     expect(lineClasses(single, 3)).toEqual([]);
   });
 
+  it('puts the bar of lines drawn as one on the first of them, though the change is on a later (#654)', () => {
+    // The comment's opener and its text run over two lines, which the view draws as one; the
+    // insertion is only on the second.
+    const doc = withLedger(
+      'a <!--cmt b2b2 hello\nworld--> b <!--ins c3c3-->x<!--/c3c3-->\nnext',
+      { c3c3: 'bo' },
+      'comments:\n  b2b2:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Why?\n',
+    );
+    const editor = load(doc, { view: 'simple' });
+    expect(lineClasses(editor, 2)).toEqual([]);
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
+  });
+
   it('marks a point comment with a pin and leaves resolved comments untinted', () => {
     const thread = (id: string, resolved: boolean) =>
       `  ${id}:\n    by: bo\n    at: 2026-10-31T09:40Z\n` +
@@ -1137,6 +1150,7 @@ describe('ui state', () => {
   it('uiState.hasRedlines is true for the fixture and false for a plain file', () => {
     expect(load(fixture).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
     expect(load('# Plain\n\nNo marks.\n').getUiState()).toEqual({
+      kind: 'markdown',
       view: 'clean',
       markupView: 'redlines',
       tracking: false,

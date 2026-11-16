@@ -199,14 +199,14 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     }),
   ];
   const remove = editor.addExtension(extension);
-  // Come last in the Format menu, which lists commands in the order they are registered: Add
-  // Comment, then Highlight, in a group of their own. Highlight has ⇧⌘H: ⌥⌘H is the Mac's Hide Others.
+  // Add Comment is the Review menu's first command, and Ask… follows it; Highlight is Format's, in a
+  // group of its own. Highlight has ⇧⌘H: ⌥⌘H is the Mac's Hide Others.
   const removeCommands = editor.commands.register([
     {
       id: 'comment.add',
       title: 'Add Comment',
       shortcut: 'Mod-Alt-m',
-      menu: 'format',
+      menu: 'review',
       group: 'comment',
       disabledReason: commentDisabledReason,
       run: () => notes.startComment(),
