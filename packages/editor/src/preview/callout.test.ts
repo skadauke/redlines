@@ -215,7 +215,7 @@ describe('an alert in the preview (#311)', () => {
       expect(lineClasses(editor).get(pending.indexOf('> [!TIP]'))).toContain('rl-callout-tip');
     });
 
-    it('is pending but in no author’s color in Simple, and not in Raw', () => {
+    it('is pending but in no author’s color in Simple, and not in Plain', () => {
       const simple = title(editorAt(pending, 0, 'simple'));
       expect(simple?.classList.contains('rl-callout-pending')).toBe(true);
       expect(simple?.className).not.toMatch(/rl-author/);
@@ -251,7 +251,7 @@ describe('an alert in the preview (#311)', () => {
     expect(editor.getDoc()).toBe(ALERT);
   });
 
-  it('is not drawn in Raw, which shows the source as written', () => {
+  it('is not drawn in Plain, which shows the source as written', () => {
     const editor = editorAt(ALERT, 0);
     editor.setViewMode('raw');
     expect(title(editor)).toBeNull();

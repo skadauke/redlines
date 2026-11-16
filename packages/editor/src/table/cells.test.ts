@@ -96,7 +96,7 @@ describe('a rectangle of cells', () => {
     expect(rectOf(editor.view.state)).toBeNull();
   });
 
-  it('is none in Raw, which draws no cells', () => {
+  it('is none in Plain, which draws no cells', () => {
     const editor = load();
     editor.setViewMode('raw');
     select(editor, start(editor, '12'), end(editor, '32'));

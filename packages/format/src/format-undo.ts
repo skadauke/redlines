@@ -36,7 +36,7 @@ export { decidesFormat } from './format-ops.ts';
 export const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
 
 export const LOST_SYNTAX =
-  "This format change can't be rejected, because its text no longer has that formatting. Accept it, or change the text in Raw with Track Changes off.";
+  "This format change can't be rejected, because its text no longer has that formatting. Accept it, or change the text in Plain with Track Changes off.";
 
 const DECIDE_INSIDE =
   "This format change can't be rejected until the changes inside it are decided. Accept or reject them first.";

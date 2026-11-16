@@ -253,8 +253,8 @@ describe('no marker goes between a letter or a digit and a shortcode (#312)', ()
   it('refuses the opener that would stand between a letter and a shortcode, with words to follow', () => {
     const why = refusal(() => edit(text, { from: at - 1, to: at, insert: '' }));
     expect(why).toMatch(STUCK);
-    // Raw is read-only while Track Changes is on, which is when this is said: it is no advice.
-    expect(why).not.toMatch(/Raw/);
+    // Plain is read-only while Track Changes is on, which is when this is said: it is no advice.
+    expect(why).not.toMatch(/Plain/);
   });
 
   it('takes a space or punctuation typed there, and a word replaced by one that ends in a space', () => {

@@ -432,10 +432,10 @@ export function appMenuModel(
           // the clash proves real (design §14, open question 6).
           viewRow('clean', 'Clean', '1'),
           viewRow('redlines', 'Redlines', '2'),
-          viewRow('raw', 'Raw', '3'),
+          viewRow('raw', 'Plain', '3'),
           SEPARATOR,
           // The simple look is no view of its own but a switch of Redlines' (#330, design §5.3): on
-          // while it shows, off in the full markup, and not there to choose in Clean and Raw, which
+          // while it shows, off in the full markup, and not there to choose in Clean and Plain, which
           // have no look. It does what a click on a change bar does, for a keyboard and VoiceOver.
           {
             text: 'Simple Look',

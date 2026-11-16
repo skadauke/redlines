@@ -201,6 +201,8 @@ function write(view: EditorView, plan: Plan): boolean {
       view,
       { kind: 'insertCols', table: table.from, after: table.columns, count: extraCols },
       group,
+      undefined,
+      true,
     );
     if ('refusal' in insertion) return refuse(view, insertion.refusal);
     rows = ChangeSet.of(
@@ -222,6 +224,7 @@ function write(view: EditorView, plan: Plan): boolean {
       { kind: 'insertRows', table: table.from, after: table.rows.length - 1, count: extra },
       group,
       text1,
+      true,
     );
     if ('refusal' in insertion) return refuse(view, insertion.refusal);
     // The new rows hold the values they are pasted: text in your own new row is its insertion.
