@@ -440,6 +440,7 @@ pub fn run() {
             project::open_default,
             links::open_link,
             project::show_images,
+            images::image_for_agent,
             images::image_stamps,
             images::image_sizes,
             project::allow_document,

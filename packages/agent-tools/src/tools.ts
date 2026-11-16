@@ -36,11 +36,33 @@ export interface ToolContext {
   requestedBy: Handle;
   onStatus(text: string): void;
   onReply(): void;
+  /**
+   * The one picture this run may be shown, for `view_image`: only a request to describe an image
+   * (Alt Text) gives it, and the tool has no argument that names another file. Without it, there
+   * is no such tool.
+   */
+  image?: ToolImage;
+}
+
+/** A picture, as an MCP image content block carries it. */
+export interface ImageBytes {
+  /** `image/png`, `image/jpeg`, `image/gif` or `image/webp`. */
+  mimeType: string;
+  /** The file's bytes in base64. */
+  data: string;
+}
+
+/** The picture a run is about. */
+export interface ToolImage {
+  /** Reads it; rejects with a line for the agent when it can't be read. */
+  read(): Promise<ImageBytes>;
 }
 
 export interface ToolResult {
   text: string;
   isError: boolean;
+  /** A picture the result shows the agent, after its text (`view_image`). */
+  image?: ImageBytes;
 }
 
 interface ToolDefinition {
@@ -125,6 +147,21 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     },
   },
 ];
+
+/**
+ * The tool that shows the agent the one picture a request to describe an image is about. It is not
+ * one of the six: only a run that has a picture (`ToolContext.image`) is offered it, and it takes
+ * no argument, so the agent can't name a file; which file is the host's to decide.
+ */
+export const VIEW_IMAGE: ToolDefinition = {
+  name: 'view_image',
+  description:
+    'Shows you the image you are writing alt text for. It takes no arguments: the image is the one the person picked.',
+  inputSchema: { type: 'object', properties: {} },
+};
+
+/** The tools a request to describe an image is answered with: the picture, and `status`. */
+export const DESCRIBE_TOOLS: readonly string[] = ['view_image', 'status'];
 
 /**
  * The tools a question is answered with: `view` to read the document, and `status` to say what is
@@ -342,6 +379,12 @@ function messageOf(error: unknown): string {
   }
 }
 
+async function viewImage(ctx: ToolContext): Promise<ToolResult> {
+  if (!ctx.image) return fail('There is no image to look at in this request.');
+  const image = await ctx.image.read();
+  return { text: 'The image.', isError: false, image };
+}
+
 /**
  * Runs the tool `name`. Whatever goes wrong, a wrong argument, text that doesn't match, a document
  * that can't be written, comes back as a result with `isError`, for the agent to read and recover
@@ -363,6 +406,8 @@ export async function callTool(ctx: ToolContext, name: string, args: unknown): P
         return await replyTool(ctx, given);
       case 'status':
         return status(ctx, given);
+      case 'view_image':
+        return await viewImage(ctx);
       default:
         return fail(`Unknown tool: ${name}.`);
     }

@@ -97,6 +97,7 @@ export function createMacAgents(
           readLimit: provider.readLimit,
           ...(provider.toolbox === false ? { toolbox: false as const } : {}),
           ...(provider.models ? { models: provider.models } : {}),
+          ...(provider.seesImages === true ? { seesImages: true as const } : {}),
           state,
         };
       }),

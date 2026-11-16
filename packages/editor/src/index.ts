@@ -139,6 +139,7 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
+export { imageAt, imageInSelection, setImageAlt, type ImageElement } from './image-size.ts';
 /** Whether the parse has a node at `pos` other than the document: what the journeys ask of a far jump. */
 export const parsedAt = (state: EditorState, pos: number): boolean =>
   syntaxTree(state).resolveInner(pos, 1).name !== 'Document';
