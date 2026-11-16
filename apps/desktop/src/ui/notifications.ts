@@ -19,6 +19,8 @@ export interface NotificationAction {
 export interface NotificationOptions {
   text: string;
   action?: NotificationAction;
+  /** A second button, beside the action, for what is less likely to be wanted. */
+  secondaryAction?: NotificationAction;
   /** The dismiss button's word, such as "Later"; without one, the button is a cross. */
   dismissLabel?: string;
   /** Closes it after this many milliseconds; without it, it stays until it is handled. */
@@ -123,6 +125,12 @@ export function createNotifications(container: HTMLElement): Notifications {
       makeButton('rl-notification-close', null, dismiss);
     } else {
       makeButton('rl-notification-dismiss', dismissLabel, dismiss);
+    }
+    if (options.secondaryAction) {
+      const { secondaryAction } = options;
+      makeButton('rl-notification-dismiss', secondaryAction.label, () =>
+        secondaryAction.run(notification),
+      );
     }
     if (action) makeButton('rl-notification-action', action.label, () => action.run(notification));
     if (!action && dismissLabel === undefined) card.classList.add('rl-notification-compact');

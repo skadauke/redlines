@@ -6,15 +6,20 @@
 // and the ones whose stamp changed are loaded again, from a URL that carries a version, which the
 // webview has no copy of. Nothing here ever writes the document: it is the page's pictures that
 // change, not its text.
-
+//
+// The webview keeps every image it has loaded for as long as the page lives, whatever the answer's
+// cache headers say (WebKit reuses a URL that the document has already loaded), so an image that
+// changed on disk is shown again only from a URL it hasn't loaded. Two things make one: the version
+// of an image found saved again, and the number of the document's opening: a document opened again
+// loads its images from URLs of its own, however the files changed while it was closed (#677).
 /** The stamp of each file, in order, or null for a file the page may not see or that isn't there. */
 export type Stamps = (paths: string[]) => Promise<(string | null)[]>;
 
 export interface ImageWatch {
   /**
-   * The URL to load the image at `path` from: `url`, as the host made it, with the version of the
-   * image added once it has been saved again. It only notes that the path is drawn, which is all a
-   * drawing may do.
+   * The URL to load the image at `path` from: `url`, as the host made it, with the number of this
+   * opening of the document and the version of the image (how many times it was found saved again).
+   * It only notes that the path is drawn, which is all a drawing may do.
    */
   url(path: string, url: string): string;
   /** The images are about to be drawn again: those that are drawn then are the ones to watch. */
@@ -26,7 +31,7 @@ export interface ImageWatch {
   check(): Promise<string[]>;
   /** Takes the stamp of the images drawn, soon, for those that came since: not at the drawing. */
   settle(): void;
-  /** Another document is drawn. The versions stay, for the document that comes back. */
+  /** Another document is drawn, or this one again: its images load from URLs the webview hasn't seen. */
   forget(): void;
 }
 
@@ -46,6 +51,8 @@ export function createImageWatch(stamps: Stamps): ImageWatch {
    * back loads from the URL the webview last saw, not from one it may have a copy of.
    */
   const versions = new Map<string, number>();
+  /** How many documents have been opened: the images of each load from URLs of their own. */
+  let opening = 0;
   let learning: Promise<void> = Promise.resolve();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let epoch = 0;
@@ -68,9 +75,8 @@ export function createImageWatch(stamps: Stamps): ImageWatch {
   return {
     url(path, url) {
       drawn.add(path);
-      const version = versions.get(path);
-      if (!version || !SERVED_BY_THE_APP.test(url)) return url;
-      return `${url}${url.includes('?') ? '&' : '?'}v=${version}`;
+      if (!SERVED_BY_THE_APP.test(url)) return url;
+      return `${url}${url.includes('?') ? '&' : '?'}v=${opening}.${versions.get(path) ?? 0}`;
     },
     begin() {
       drawn = new Set();
@@ -102,6 +108,7 @@ export function createImageWatch(stamps: Stamps): ImageWatch {
     },
     forget() {
       epoch += 1;
+      opening += 1;
       clearTimeout(timer);
       known = new Map();
       drawn = new Set();

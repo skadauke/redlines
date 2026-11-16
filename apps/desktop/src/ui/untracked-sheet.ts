@@ -5,7 +5,12 @@
 // habit; Make Edit is a click, or ⌘↩.
 
 import { UNTRACKED_DETAILS, UNTRACKED_TITLE } from '@redlines/editor';
-import type { UntrackedAnswer, UntrackedAsker, UntrackedReason } from '@redlines/editor';
+import type {
+  UntrackedAnswer,
+  UntrackedAsker,
+  UntrackedReason,
+  UntrackedWords,
+} from '@redlines/editor';
 import type { UntrackedAnswers } from '../untracked-answers.ts';
 
 export interface UntrackedSheetOptions {
@@ -22,7 +27,7 @@ export function createUntrackedSheet(options: UntrackedSheetOptions): UntrackedA
   const { container, answers } = options;
   let open = false;
 
-  const ask = (reason: UntrackedReason): Promise<UntrackedAnswer> =>
+  const ask = (reason: UntrackedReason, words?: UntrackedWords): Promise<UntrackedAnswer> =>
     new Promise((resolve) => {
       open = true;
       const backdrop = document.createElement('div');
@@ -32,15 +37,20 @@ export function createUntrackedSheet(options: UntrackedSheetOptions): UntrackedA
       sheet.setAttribute('role', 'alertdialog');
       sheet.setAttribute('aria-modal', 'true');
       sheet.setAttribute('aria-labelledby', 'rl-sheet-title');
-      sheet.setAttribute('aria-describedby', 'rl-sheet-detail');
       const title = document.createElement('div');
       title.id = 'rl-sheet-title';
       title.className = 'rl-sheet-title';
-      title.textContent = UNTRACKED_TITLE;
+      title.textContent = words?.title ?? UNTRACKED_TITLE;
+      // A question with its own words has no detail line, and no "Don't ask again": it decides
+      // other people's changes, and is asked every time (design §3.4).
+      const own = reason === 'accept-pending';
       const detail = document.createElement('div');
       detail.id = 'rl-sheet-detail';
       detail.className = 'rl-sheet-detail';
-      detail.textContent = UNTRACKED_DETAILS[reason];
+      if (!own) {
+        detail.textContent = UNTRACKED_DETAILS[reason];
+        sheet.setAttribute('aria-describedby', 'rl-sheet-detail');
+      }
       const label = document.createElement('label');
       label.className = 'rl-sheet-check';
       const check = document.createElement('input');
@@ -57,7 +67,8 @@ export function createUntrackedSheet(options: UntrackedSheetOptions): UntrackedA
       make.className = 'rl-sheet-button';
       make.textContent = 'Make Edit';
       buttons.append(cancel, make);
-      sheet.append(title, detail, label, buttons);
+      if (own) sheet.append(title, buttons);
+      else sheet.append(title, detail, label, buttons);
       backdrop.append(sheet);
       container.append(backdrop);
       cancel.focus();
@@ -75,7 +86,7 @@ export function createUntrackedSheet(options: UntrackedSheetOptions): UntrackedA
       cancel.addEventListener('click', () => settled() && done('cancel'));
       make.addEventListener('click', () => settled() && done('make'));
       backdrop.addEventListener('keydown', (event) => {
-        const focusable = [check, cancel, make];
+        const focusable = own ? [cancel, make] : [check, cancel, make];
         if (event.key === 'Escape') {
           event.preventDefault();
           done('cancel');

@@ -21,12 +21,15 @@ import {
 } from '@codemirror/state';
 import { type EditorView, ViewPlugin } from '@codemirror/view';
 
-/** Why an edit can't be tracked and is asked about. */
-export type UntrackedReason = 'front-matter' | 'raw';
+/**
+ * Why an edit is asked about: it can't be tracked (`front-matter`, `raw`), or, with Track Changes
+ * off, it can't be made without accepting other changes first (`accept-pending`, design §3.4).
+ */
+export type UntrackedReason = 'front-matter' | 'raw' | 'accept-pending';
 
 /** The title and buttons of the sheet are fixed; the detail line says why (design §3.1). */
 export const UNTRACKED_TITLE = "This edit can't be tracked. Make it without tracking?";
-export const UNTRACKED_DETAILS: Record<UntrackedReason, string> = {
+export const UNTRACKED_DETAILS: Record<Exclude<UntrackedReason, 'accept-pending'>, string> = {
   'front-matter':
     "Front matter is data that other tools read, so Redlines can't mark a change in it.",
   raw: "Raw shows the file's own text, where Redlines can't mark changes.",
@@ -35,11 +38,19 @@ export const UNTRACKED_DETAILS: Record<UntrackedReason, string> = {
 export type UntrackedAnswer = 'make' | 'cancel';
 
 /**
+ * The words of a question that is not one of the fixed two: its own title, no detail line, and no
+ * "Don't ask again", since it decides other people's changes and is asked every time.
+ */
+export interface UntrackedWords {
+  title: string;
+}
+
+/**
  * What the host gives for the alert. `ask` shows the sheet and answers; the host keeps "Don't ask
  * again in this document" itself, and `skip` says it is set, so that the edit is made at once.
  */
 export interface UntrackedAsker {
-  ask(reason: UntrackedReason): Promise<UntrackedAnswer>;
+  ask(reason: UntrackedReason, words?: UntrackedWords): Promise<UntrackedAnswer>;
   skip(reason: UntrackedReason): boolean;
 }
 
@@ -50,6 +61,8 @@ export const untrackedAskFacet = Facet.define<UntrackedAsker, UntrackedAsker | n
 /** An edit that waits for the answer: what it did, to the document it was made against. */
 export interface HeldEdit {
   reason: UntrackedReason;
+  /** Its own words, for `accept-pending`. */
+  words?: UntrackedWords;
   doc: Text;
   changes: ChangeSet;
   selection: EditorSelection | undefined;
@@ -80,7 +93,8 @@ export const untrackedRunField = StateField.define<{ reason: UntrackedReason; at
  * Make Edit for this run not long ago. */
 export function answeredAlready(state: EditorState, reason: UntrackedReason, now: number): boolean {
   const asker = state.facet(untrackedAskFacet);
-  if (!asker) return false;
+  // Accepting what others proposed is asked every time: no answer stands for the next edit.
+  if (!asker || reason === 'accept-pending') return false;
   if (asker.skip(reason)) return true;
   const run = state.field(untrackedRunField, false);
   return (
@@ -96,10 +110,12 @@ export function holdEdit(
   tr: Transaction,
   reason: UntrackedReason,
   annotations: readonly Annotation<unknown>[],
+  words?: UntrackedWords,
 ): { effects: StateEffect<HeldEdit> } {
   return {
     effects: heldEditEffect.of({
       reason,
+      ...(words ? { words } : {}),
       doc: tr.startState.doc,
       changes: tr.changes,
       selection: tr.selection,
@@ -136,7 +152,7 @@ class Resolver {
     this.waiting = true;
     try {
       const asker = this.view.state.facet(untrackedAskFacet);
-      const answer = asker ? await asker.ask(held.reason) : 'cancel';
+      const answer = asker ? await asker.ask(held.reason, held.words) : 'cancel';
       const { view } = this;
       if (answer === 'make' && view.dom.isConnected) {
         // The sheet is modal, so the document is the one the edit was made against; if it isn't, the
@@ -146,7 +162,7 @@ class Resolver {
             changes: held.changes,
             selection: held.selection,
             annotations: [...held.annotations, untrackedAnswerAnnotation.of(true)],
-            effects: runOf(held.reason, Date.now()),
+            effects: held.reason === 'accept-pending' ? [] : runOf(held.reason, Date.now()),
             scrollIntoView: held.scrollIntoView,
           });
         }

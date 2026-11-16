@@ -112,6 +112,8 @@ export function renderOpenClaw(
     showGeneral?: () => void;
     /** Called with an agent's id once it is removed: what the person allowed it goes with it. */
     forgetAnswers?: (id: string) => void;
+    /** The handles of the agents Redlines runs itself: an OpenClaw agent's name can't be one. */
+    handles?: () => readonly string[];
   },
 ): HTMLElement {
   const { alive } = options;
@@ -246,6 +248,11 @@ export function renderOpenClaw(
         tokenFile: file.value.trim(),
         ...(agent.value.trim() ? { agent: agent.value.trim() } : {}),
       };
+      if (options.handles?.().includes(input.name.toLowerCase())) {
+        problem.textContent = `Another agent is @${input.name.toLowerCase()}.`;
+        ready();
+        return;
+      }
       void change(() => deps.add(input)).then((done) => {
         if (!alive()) return;
         if (done) {

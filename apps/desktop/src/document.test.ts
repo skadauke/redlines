@@ -1253,6 +1253,48 @@ describe('asking about unsaved edits', () => {
   });
 });
 
+describe('edits recovered after a crash (#693)', () => {
+  it('puts the edits back as unsaved ones, over the file as it was saved', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'Saved\n' });
+    await controller.open('/docs/plan.md');
+    expect(controller.restore('/docs/plan.md', 'Saved\nAnd more typed\n')).toBe(true);
+    expect(editor.getDoc()).toBe('Saved\nAnd more typed\n');
+    expect(state()?.dirty).toBe(true);
+    // It is a reload, not an edit, and the file is not written.
+    expect(editor.reloadDoc).toHaveBeenCalledOnce();
+    expect(host.writes).toEqual([]);
+    await controller.save();
+    expect(host.files.get('/docs/plan.md')).toBe('Saved\nAnd more typed\n');
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('restores an untitled document, which was never saved', async () => {
+    const { controller, state } = setup();
+    await controller.create();
+    expect(controller.restore(null, 'Typed, never saved')).toBe(true);
+    expect(state()).toMatchObject({ path: null, dirty: true });
+  });
+
+  it('puts back nothing over what was typed since, for another document, or for the same text', async () => {
+    const { editor, controller } = setup({ '/docs/plan.md': 'Saved\n', '/docs/other.md': 'x' });
+    await controller.open('/docs/plan.md');
+    expect(controller.restore('/docs/other.md', 'Other edits')).toBe(false);
+    expect(controller.restore('/docs/plan.md', 'Saved\n')).toBe(false);
+    editor.type('Typed already\n');
+    expect(controller.restore('/docs/plan.md', 'Old copy')).toBe(false);
+    expect(editor.getDoc()).toBe('Typed already\n');
+  });
+
+  it('shows the saved version in place of the recovered edits', async () => {
+    const { editor, controller, state } = setup({ '/docs/plan.md': 'Saved\n' });
+    await controller.open('/docs/plan.md');
+    controller.restore('/docs/plan.md', 'Recovered\n');
+    await controller.showSavedVersion();
+    expect(editor.getDoc()).toBe('Saved\n');
+    expect(state()?.dirty).toBe(false);
+  });
+});
+
 describe('an untitled document made with text', () => {
   // What a window opened for text starts with (Open in New Window): not a file, and not saved.
   const ANSWER = '# The answer\n\nIt is **42**.\n';

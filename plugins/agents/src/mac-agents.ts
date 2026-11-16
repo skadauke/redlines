@@ -14,6 +14,7 @@ import type {
   HostRelay,
   McpEndpoint,
 } from '@redlines/plugin-api';
+import { DEFAULT_HANDLES, displayName, handleOf } from './handles.ts';
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -34,6 +35,17 @@ export interface MacAgentsOptions {
   now?: () => number;
   /** More agents, from a list the host keeps, such as the Agent Client Protocol agents. */
   more?: () => Promise<readonly AgentProvider[]>;
+  /**
+   * The handle the person gave each agent, by id (Preferences, #558), asked at every look: an
+   * agent with a handle is named by it, capitalized. An agent that isn't in it and has no default
+   * keeps the name it has, as an agent the person named themselves does.
+   */
+  handles?: () => Readonly<Record<string, string>>;
+  /**
+   * The model the person chose for each agent, by id (Preferences, #530), asked at every run. A
+   * request that names no model of its own (Ask's picker does) runs the one chosen here.
+   */
+  models?: () => Readonly<Record<string, string>>;
 }
 
 export function createMacAgents(
@@ -66,14 +78,27 @@ export function createMacAgents(
           name: provider.name,
           readLimit: provider.readLimit,
           ...(provider.toolbox === false ? { toolbox: false as const } : {}),
+          ...(provider.models ? { models: provider.models } : {}),
           state,
         };
       }),
     );
 
+  /** The agents with the handles as they are now: a change of handle needs no new detection. */
+  const named = async (list: Promise<AgentInfo[]>): Promise<AgentInfo[]> => {
+    const found = await list;
+    if (!options.handles) return found;
+    const handles = options.handles();
+    return found.map((info) => {
+      if (handles?.[info.id] === undefined && DEFAULT_HANDLES[info.id] === undefined) return info;
+      const handle = handleOf(info.id, handles);
+      return { ...info, name: displayName(handle), handle };
+    });
+  };
+
   const agents: MacAgents = {
     list() {
-      if (kept && now() - kept.at < KEEP_MS) return kept.list;
+      if (kept && now() - kept.at < KEEP_MS) return named(kept.list);
       const list = detect();
       const entry = { at: now(), list };
       kept = entry;
@@ -81,14 +106,14 @@ export function createMacAgents(
       list.catch(() => {
         if (kept === entry) kept = null;
       });
-      return list;
+      return named(list);
     },
 
     forget() {
       kept = null;
     },
 
-    async *run(agent, request, tools, signal): AsyncGenerator<AgentEvent> {
+    async *run(agent, asked, tools, signal): AsyncGenerator<AgentEvent> {
       // An agent added since the last look is looked for once more.
       const find = (list: readonly AgentProvider[]) => list.find(({ id }) => id === agent);
       const provider = find(current) ?? (options.more ? find(await look()) : undefined);
@@ -96,6 +121,11 @@ export function createMacAgents(
         yield { type: 'error', message: `There is no agent named ${agent} here.` };
         return;
       }
+      // The model chosen in Preferences, unless the request names one the agent lists.
+      const listed = (model: string | undefined) =>
+        model !== undefined && provider.models?.some(({ id }) => id === model) === true;
+      const chosen = options.models?.()[agent];
+      const request = !listed(asked.model) && listed(chosen) ? { ...asked, model: chosen } : asked;
       // An agent that answers in text has no toolbox: no relay is opened for it, and it is not
       // an error that its tools never started.
       if (provider.toolbox === false) {
