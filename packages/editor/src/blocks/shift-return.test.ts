@@ -88,6 +88,18 @@ describe('Shift-Return', () => {
         on: { caret: '- a⏎⏎  <split>⏎⏎  ‸b' },
       },
       {
+        name: 'the same under a code fence, and with Return (#621)',
+        doc: '- a⏎⏎  ```⏎  x⏎  ```⏎  ‸b',
+        keys: ['Enter'],
+        off: { caret: '- a⏎⏎  ```⏎  x⏎  ```⏎  ⏎⏎  ‸b' },
+        // Track Changes on: the tracked layer takes the edit out, so nothing happens (no new item);
+        // the widening of lane R is the way to write it.
+        on: {
+          caret: '- a⏎⏎  ```⏎  x⏎  ```⏎  ‸b',
+          refusal: 'A line that is only Markdown syntax takes no change.',
+        },
+      },
+      {
         name: 'in a list item, at its end: an empty line at the text column',
         doc: '- One two.‸⏎⏎Next.',
         keys: ['Shift-Enter'],
