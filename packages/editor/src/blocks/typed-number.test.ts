@@ -23,6 +23,7 @@ describe('typing a number and a period at the start of an item (#666)', () => {
       ['1. in a quoted item', '> - a⏎> - ‸', '1.', '> - a⏎> - 1\\.'],
       ['1. typed after the digit of a one-item list', '- 1‸', '.', '- 1\\.'],
     ] as const) {
+      const views = name === '1.' && tc;
       // Tracked, text typed in a bare nested marker is refused already, whatever it is (lane R).
       if (tc && name.includes('nested')) continue;
       rows.push({
@@ -30,7 +31,7 @@ describe('typing a number and a period at the start of an item (#666)', () => {
         doc,
         keys: typeEach(typed),
         tc,
-        expect: tc ? {} : { file },
+        expect: tc ? (views ? { newest: '- a⏎- 1\\.', original: '- a⏎- ' } : {}) : { file },
       });
     }
     // Text that is no marker stays as it is: a period with text after it, a box, a letter.
@@ -47,6 +48,18 @@ describe('typing a number and a period at the start of an item (#666)', () => {
         expect: tc ? {} : { file },
       });
     }
+    // A later paragraph of an item, and a line that goes on: written as typed (the first line of
+    // the item's text is the one a marker's meaning is judged on).
+    // (Tracked, `1.` typed there is an insertion that Markdown reads as a list, as before this
+    // change: not part of it.)
+    if (!tc)
+      rows.push({
+        name: `a later paragraph of the item: written as typed, Track Changes ${on}`,
+        doc: '- a⏎⏎  ‸',
+        keys: typeEach('1.'),
+        tc,
+        expect: tc ? {} : { file: '- a⏎⏎  1.' },
+      });
     // Return after it makes the next item, and the text stays text.
     rows.push({
       name: `Return after 1.: the next item, Track Changes ${on}`,

@@ -1226,7 +1226,10 @@ period typed before more text (`- 1.5`, written `- 1\.5` if it was typed in that
 the same way. The digits and the delimiter followed by a space, typed in that order, are the
 numbered sublist of an item (planned: #512); until that is built the space is text after
 `1\.`. A file that holds `- 1.` as it is, the empty numbered list, is read as that, and the keys
-treat it as an empty item (Return in it goes up a level, as in any empty item). Tested:
+treat it as an empty item (Return in it goes up a level, as in any empty item). Only the delimiter
+typed at the end of the item's first line is escaped: the digits typed in front of an existing
+period, Backspace that leaves `1.`, a paste, and a line that goes on under the digits are written
+as they are, and read as the empty numbered list. Tested:
 `typed-number.test.ts` of `packages/editor/src/blocks`.
 
 A numbered line other than `1.` right under the text of a list item (`1. a⏎   2. b`, or `2)`) is a
