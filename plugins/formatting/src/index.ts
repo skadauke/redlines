@@ -618,7 +618,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const top = atSelection(view.state).find((node) => node.parent?.type.isTop);
     const at = top ? Math.max(top.to, line.to) : line.to;
     const done = insert([{ from: at, to: at, insert: `\n\n${text}` }]);
-    if (done && selected > 0) {
+    if (done) {
       const start = view.state.doc.toString().indexOf(find, at);
       if (start >= 0) {
         const anchor = afterVisible(start, caret);
@@ -713,7 +713,10 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     return true;
   };
 
-  const TABLE = '| Column | Column |\n| --- | --- |\n|  |  |';
+  // A new table's header cells are empty (GitHub's tables allow it): the table draws a faint
+  // placeholder in them that the file doesn't hold (the theme's `.rl-th .rl-tc-fill`), and the caret
+  // starts in the first.
+  const TABLE = '|  |  |\n| --- | --- |\n|  |  |';
 
   const command = (
     menu: 'format' | 'paragraph',
@@ -1019,8 +1022,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.table',
       title: 'Table',
       shortcut: 'Mod-Alt-t',
-      // The first header cell's text is selected, so that typing names the column.
-      run: () => insertBlock(TABLE, '| Column', 2, 'Column'.length),
+      // The caret is in the first header cell, which is empty: typing names the column.
+      run: () => insertBlock(TABLE, '|  |  |', 2),
     }),
     command('paragraph', 'insert', {
       id: 'block.alert',

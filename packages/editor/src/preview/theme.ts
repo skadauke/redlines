@@ -419,6 +419,28 @@ export const baseThemeSpec: ThemeSpec = {
     overflow: 'hidden',
     verticalAlign: 'top',
   },
+  // An empty header cell shows a faint placeholder, which is drawn and not in the file (a new table's
+  // header cells are empty). It hangs from the cell's filler, which takes no room, so that it changes
+  // no width and no height; a centered or right-aligned column's reaches back from the filler, which
+  // stands where its text would.
+  '.rl-tbl > .rl-th:not(.rl-ghost) .rl-tc-fill': { position: 'relative', overflow: 'visible' },
+  '.rl-tbl > .rl-th:not(.rl-ghost) .rl-tc-fill::before': {
+    content: '"Header"',
+    position: 'absolute',
+    left: '0',
+    top: '0',
+    whiteSpace: 'nowrap',
+    fontWeight: '400',
+    color: 'var(--rl-ink-3)',
+    pointerEvents: 'none',
+    userSelect: 'none',
+  },
+  '.rl-tbl > .rl-th .rl-tc[data-align="center"] .rl-tc-fill::before': {
+    transform: 'translateX(-50%)',
+  },
+  '.rl-tbl > .rl-th .rl-tc[data-align="right"] .rl-tc-fill::before': {
+    transform: 'translateX(-100%)',
+  },
   // The cells a row lacks (`table/missing.ts`) stand at the end of the row, where the page's own caret
   // can't say which of them it is in: the one the caret is in draws it, and the line's own is hidden.
   // (The last cell of a row has no padding on its right, and the break CodeMirror ends a line with, hidden
