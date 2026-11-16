@@ -666,6 +666,36 @@ test.describe('tables @tables', () => {
     });
   }
 
+  // #671: a new table's header cells are empty, with a faint placeholder the file doesn't hold, and
+  // the caret in the first.
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`Insert Table gives empty header cells with a placeholder, the caret in the first (${scheme}) @tables`, async ({
+      start,
+    }) => {
+      const j = await start({ doc: 'Intro\n\n', tracking: false, view: 'clean', scheme });
+      await j.caretAtEnd();
+      await j.press('ControlOrMeta+Alt+t');
+      await j.settle();
+      expect(await j.text(), 'the header cells are empty in the file').toContain(
+        '|  |  |\n| --- | --- |\n|  |  |',
+      );
+      expect(await j.text(), 'the placeholder is not in the file').not.toContain('Header');
+      const placeholders = () =>
+        j.page.evaluate(() =>
+          [...document.querySelectorAll('.rl-th .rl-tc-fill')].map(
+            (el) => getComputedStyle(el, '::before').content,
+          ),
+        );
+      expect(await placeholders(), 'both header cells draw it').toEqual(['"Header"', '"Header"']);
+      await j.shot(`new-table-${scheme}`);
+      await j.type('Name');
+      expect(await j.text(), 'typing names the first column').toContain('| Name |  |');
+      await j.settle();
+      expect(await placeholders(), 'only the empty cell still draws it').toEqual(['"Header"']);
+      await j.shot(`new-table-named-${scheme}`);
+    });
+  }
+
   // #673: the vertical edges that belong to a column (the tint of its cells, the handles over it) stand
   // on the faint column lines, not on the cell boxes, which are half a gap to the right of them.
   for (const scheme of ['light', 'dark'] as const) {
