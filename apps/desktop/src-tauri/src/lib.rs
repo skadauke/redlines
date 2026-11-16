@@ -332,7 +332,11 @@ fn open_about(app: AppHandle) -> tauri::Result<()> {
 pub fn run() {
     // Spelling is checked while typing: WebKit reads its switch once, before the first window.
     spelling::register_defaults();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The page's process ends: logged, and the window reloaded (crash.rs). WebKit's own hook.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(crash::terminated);
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         // Reads the clipboard's text for Paste as Plain Text (the menu is not a gesture in the page).
@@ -498,8 +502,6 @@ pub fn run() {
             #[cfg(unix)]
             agents::relay::relay_close
         ])
-        // The page's process ends: logged, and the window reloaded (crash.rs).
-        .on_web_content_process_terminate(crash::terminated)
         .on_page_load(|webview, payload| {
             // A window's page that loads again, as a reload does, watches what it needs itself.
             if payload.event() == tauri::webview::PageLoadEvent::Started {
