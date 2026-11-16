@@ -463,7 +463,7 @@ editor.commands.register([
   },
 ]);
 
-// A menu lists its commands in the order they are registered: Add Comment opens the Review menu's
+// A menu lists its commands in the order they are registered: Add Comment and Ask… come last in the Review menu, after its own rows: its
 // commands, and Ask… follows it (createAsk, below).
 const review = createReview(editor, {
   author,
