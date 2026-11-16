@@ -3174,7 +3174,9 @@ table), and nothing about its markers differs from theirs.
 The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
 and the views read the replacements it writes, and the writers that refuse today call it one unit at
 a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format change in a cell),
-and the lists, blocks and code follow. Until a writer calls it, it still refuses, in the words of
+and so have the lists (`edits-widen.ts`, `widen-scope.ts`: a typed, pasted or key edit and a format
+or block change in a list item, which `trackedEdits` and `trackedFormat` write as a replacement of
+the item or the list when no fine form reads alike in every order); the blocks and code follow. Until a writer calls it, it still refuses, in the words of
 its own section.
 
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
@@ -3217,6 +3219,16 @@ When the new text is the unit as it reads with the marks of the old text accepte
 is removed, and the unit is as it was, with those marks pending. Another person's edit in the new
 text is written as a mark in it where a fine mark reads alike in every order, and else as a
 replacement of a unit of the new text, written inside the first replacement's text (above).
+
+**In a list** the edit is made on the newest text as Track Changes off makes it (Return, Tab,
+Shift-Tab, a change of the list's type, Backspace at the start of an item), and the unit is the
+list item, or the list where the item's form can't be written (a tight list takes no blank line
+before a closer, and an edit that makes an item two or takes its text out of the list changes the
+list). The lines before and after the unit stand in its container, so a list unit's own looseness
+says nothing of them: they are blank only where the item that holds it is loose. A line that
+Markdown reads as the item's own indented code, or as an HTML block that runs to the next blank
+line, is code, and no unit is written around it. A person's pending split or change that stops the
+fine write is kept in the old text.
 
 **The closer** stands at the end of the new text's last line, except where a marker there would
 read otherwise: after a closing fence, a table, a bare list marker or an emphasis delimiter or

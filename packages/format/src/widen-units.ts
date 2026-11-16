@@ -46,6 +46,17 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const ATX = /^ {0,3}#{1,6}(?:[ \t]|$)/;
 const RULE = /^ {0,3}(?:(?:\* *){3,}|(?:- *){3,}|(?:_ *){3,})$/;
 const MARKER = /<!--.*?-->/g;
+/** An HTML block of CommonMark's type 6 (a block tag), which a blank line ends, and which can start
+ * in the middle of a paragraph; type 7 (a lone tag) cannot, and ends the same way. */
+const HTML_BLOCK = new RegExp(
+  '^ {0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|' +
+    'details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|' +
+    'header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|' +
+    'search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \\t/>]|$)',
+  'i',
+);
+const HTML_LONE =
+  /^ {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t][^<>]*)?\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
 const CLOSER_ONLY = /^(?:<!--\/[a-z0-9]{4}-->)+$/;
 
 const blank = (line: Line) => line.text.trim() === '';
@@ -162,6 +173,15 @@ function reader(text: string, verbatim: readonly { from: number; to: number }[])
         while (lines[end] && lines[end]!.to < rawEnd.to) end++;
         units.push(make('code', lines[Math.min(end, lines.length - 1)] ?? head, true));
         i = end + 1;
+      } else if (
+        HTML_BLOCK.test(head.text) ||
+        (HTML_LONE.test(head.text) && !paragraphAbove(units, start))
+      ) {
+        // An HTML block runs to a blank line, whatever it holds.
+        let end = at;
+        while (lines[end + 1] && !blank(lines[end + 1]!)) end++;
+        units.push(make('code', lines[end]!, true));
+        i = end + 1;
       } else if (quote) {
         let end = at;
         const inner: Line[] = [];
@@ -239,6 +259,7 @@ function startsBlock(line: string): boolean {
     ATX.test(line) ||
     QUOTE.test(line) ||
     RULE.test(line.trim()) ||
+    HTML_BLOCK.test(line) ||
     /^ {0,3}(?:[-*+]|1[.)])(?: |$)/.test(line)
   );
 }
@@ -327,7 +348,13 @@ function readList(
         continue;
       }
       // A lazy line goes on the paragraph above, unless it starts a block.
-      if (!startsBlock(next.text) && !blank(lines[j - 1]!) && !BULLET.test(next.text)) {
+      // (Not after a line of the item's own indented code, which no paragraph goes on from.)
+      if (
+        !startsBlock(next.text) &&
+        !blank(lines[j - 1]!) &&
+        !BULLET.test(next.text) &&
+        !inOwnCode(lines, j - 1, k, width)
+      ) {
         last = j;
         continue;
       }
@@ -342,19 +369,12 @@ function readList(
     else break;
   }
   list.to = lines[items.at(-1)?.last ?? at]!.to;
-  const loose = items.some((item, index) => {
-    if (index > 0 && blank(lines[item.first - 1]!)) return true;
-    for (let j = item.first; j < item.last; j++) {
-      if (blank(lines[j]!) && lines[j + 1] && !blank(lines[j + 1]!)) {
-        // A blank line inside an item between its blocks loosens the list.
-        const inner = lines.slice(j + 1, item.last + 1);
-        if (inner.length > 0) return true;
-      }
-    }
-    return false;
-  });
-  list.tight = !loose;
-  for (const item of items) {
+  // Which blocks of an item are its own decides how the list reads: a blank line between the
+  // blocks of an item loosens the list, one inside a block (a nested list's own) does not.
+  const elements: Unit[] = [];
+  let loose = false;
+  for (const [index, item] of items.entries()) {
+    if (index > 0 && blank(lines[item.first - 1]!)) loose = true;
     const itemFirst = lines[item.first]!;
     const m = BULLET.exec(itemFirst.text)!;
     const content =
@@ -362,24 +382,42 @@ function readList(
       (m[2]?.length ?? 0) +
       ((m[3] ?? '').length > 4 ? 1 : (m[3] ?? '').length);
     const lastLine = lines[item.last]!;
-    const element = unit(
-      'item',
-      itemFirst,
-      lastLine,
-      list,
-      list.tight,
-      itemFirst.contentFrom + content,
-    );
+    const element = unit('item', itemFirst, lastLine, list, false, itemFirst.contentFrom + content);
     const inner: Line[] = [];
     for (let j = item.first; j <= item.last; j++) {
       const line = lines[j]!;
       const strip = j === item.first ? content : Math.min(indentOf(line.text), item.width);
       inner.push({ ...line, contentFrom: line.contentFrom + strip, text: line.text.slice(strip) });
     }
-    element.children = read(inner, element, list.tight);
+    element.children = read(inner, element, false);
+    for (let c = 1; c < element.children.length; c++) {
+      const above = element.children[c - 1]!;
+      const below = element.children[c]!;
+      if (
+        inner.some(
+          (line) => blank(line) && line.lineFrom > above.to && line.lineFrom < below.lineFrom,
+        )
+      ) {
+        loose = true;
+      }
+    }
+    elements.push(element);
+  }
+  list.tight = !loose;
+  for (const element of elements) {
+    element.tight = list.tight;
+    for (const child of element.children) child.tight = list.tight;
     list.children.push(element);
   }
   return { list, next: k };
+}
+
+/** Whether line `at` of an item that starts at `first` is a line of its indented code: it stands
+ * four columns beyond the item's content, and a blank line comes before the run it is in. */
+function inOwnCode(lines: readonly Line[], at: number, first: number, width: number): boolean {
+  let k = at;
+  while (k > first && !blank(lines[k]!) && indentOf(lines[k]!.text) - width >= 4) k--;
+  return k < at && k > first - 1 && blank(lines[k]!) && indentOf(lines[at]!.text) - width >= 4;
 }
 
 function indentOf(text: string): number {

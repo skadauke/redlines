@@ -7,7 +7,7 @@ import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { ada, bo, bodyOf, claudeAda, context, file, thread } from './test-helpers.ts';
-import { trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import type { Person, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 

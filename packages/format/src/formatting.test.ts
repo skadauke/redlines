@@ -4,11 +4,15 @@ import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parseFormatOps } from './format-ops.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
-import { trackedFormat, untrackedFormat } from './formatting.ts';
+import {
+  fineFormat as trackedFormat,
+  trackedFormat as widenedFormat,
+  untrackedFormat,
+} from './formatting.ts';
 import { expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
-import { trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import {
   REFUSALS,
   TIME,
@@ -1077,7 +1081,7 @@ describe('next to pending changes', () => {
     expectWidened(
       'a cell',
       table,
-      trackedFormat(table, cell, italic(true), ctx('m2bd', 'n3cd', 'p5qm', 'q6rs')).changes,
+      widenedFormat(table, cell, italic(true), ctx('m2bd', 'n3cd', 'p5qm', 'q6rs')).changes,
       'ada',
     );
     // Another person's change in another row is tried with the new mark.

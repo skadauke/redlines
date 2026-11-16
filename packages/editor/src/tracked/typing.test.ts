@@ -433,7 +433,11 @@ describe('tracked typing', () => {
   it('refuses a tracked edit inside code, and says why', () => {
     const notices: string[] = [];
     const doc = 'Run `make all` now.\n';
-    const editor = load(doc, { ids: ['q4gt'], onNotice: (message) => notices.push(message) });
+    // The edit is tried as marks, then as a replacement: each draws ids.
+    const editor = load(doc, {
+      ids: ['q4gt', 'w8nn', 'p3qz'],
+      onNotice: (message) => notices.push(message),
+    });
     caret(editor, doc.indexOf('all'));
     type(editor, 'x');
     expect(editor.getDoc()).toBe(doc);
@@ -448,7 +452,20 @@ describe('tracked typing', () => {
     ] as const) {
       const notices: string[] = [];
       // Each refused edit draws ids for the marks it would have made.
-      const ids = ['q4gt', 'w8nn', 'p3qz', 'k3x9', 'm2bd', 'c9qf', 'b953', 'g3rp'];
+      const ids = [
+        'q4gt',
+        'w8nn',
+        'p3qz',
+        'k3x9',
+        'm2bd',
+        'c9qf',
+        'b953',
+        'g3rp',
+        'h4jk',
+        'n5pq',
+        'r6st',
+        't7vw',
+      ];
       const editor = load(doc, { ids, onNotice: (message) => notices.push(message) });
       caret(editor, doc.indexOf('test'));
       type(editor, 'x');
@@ -481,7 +498,8 @@ describe('tracked typing', () => {
       ['- one\n\t- two\n', '\t- two'],
     ] as const) {
       const notices: string[] = [];
-      const editor = load(doc, { ids: ['q4gt', 'w8nn', 'p3qz'], onNotice: (m) => notices.push(m) });
+      const ids = ['q4gt', 'w8nn', 'p3qz', 'k3x9', 'm2bd', 'c9qf', 'b953', 'g3rp', 'h4jk', 'n5pq'];
+      const editor = load(doc, { ids, onNotice: (m) => notices.push(m) });
       caret(editor, doc.indexOf(line) + line.length);
       press(editor, 'Enter');
       const entered = editor.getDoc();
@@ -514,20 +532,20 @@ describe('tracked typing', () => {
         said.push(`${key} at the ${where}: ${notices.join(' ') || changed}`);
       }
     }
-    // Backspace in front of the text would take a space of the line's indentation, and Enter at
-    // the end of the item's last paragraph would start a line with a marker: both are refused in
-    // their own words, as they are without the code above.
+    // Backspace in front of the text would take a space of the line's indentation: written as a
+    // replacement of the item (format §3.12). Enter at the end of the item's last paragraph would
+    // start a line with a marker: written as a replacement too.
     expect(said).toEqual([
       'x at the start: changed',
       'Enter at the start: changed',
-      "Backspace at the start: A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.",
+      'Backspace at the start: changed',
       'Delete at the start: changed',
       'x at the middle: changed',
       'Enter at the middle: changed',
       'Backspace at the middle: changed',
       'Delete at the middle: changed',
       'x at the end: changed',
-      'Enter at the end: A marker here would start a line.',
+      'Enter at the end: changed',
       'Backspace at the end: changed',
       // CodeMirror's Delete at the end of the text would step over the hidden blank line into the
       // next item: the backstop drops it (design: block editing), as the block keys' Delete there
@@ -1873,9 +1891,13 @@ describe("typing at the start of a block's text under another person's block cha
       type(editor, 'x');
       if (how === 'Home' && !homeTypes) {
         // Home puts the caret in front of the bullet, where no change goes in any list item.
-        expect(head(editor), how).toBe(lineStart);
-        expect(docText(editor), how).toBe(doc);
-        expect(notices.at(-1), how).toMatch(/^A marker can't go in a line's indentation/);
+        // Where no fine form has a place for it, the item is replaced (format §3.12).
+        if (docText(editor) === doc) {
+          expect(head(editor), how).toBe(lineStart);
+          expect(notices.at(-1), how).toMatch(/^A marker can't go in a line's indentation/);
+        } else {
+          expect(docText(editor), how).toContain('<!--sub ');
+        }
         continue;
       }
       expect(body(editor).trimEnd(), how).toBe(typedFile);
@@ -2094,7 +2116,10 @@ describe('every way to change text', () => {
     ['comments out', 'Mod-/'],
   ])('tracks or refuses what a command that %s does', (_, key) => {
     const notices: string[] = [];
-    const editor = load(doc, { ids: ['q4gt', 'r5tw'], onNotice: (m) => notices.push(m) });
+    const editor = load(doc, {
+      ids: ['q4gt', 'r5tw', 'm2bd', 'p3qz'],
+      onNotice: (m) => notices.push(m),
+    });
     caret(editor, 2);
     expect(press(editor, key)).toBe(true);
     // The format can't mark either at the start of a paragraph's line, so both are refused.
@@ -2105,7 +2130,7 @@ describe('every way to change text', () => {
   it('tracks or refuses re-indenting', () => {
     // What indentSelection dispatches; Markdown's indentation rarely gives it anything to change.
     const notices: string[] = [];
-    const editor = load(doc, { ids: ['q4gt'], onNotice: (m) => notices.push(m) });
+    const editor = load(doc, { ids: ['q4gt', 'r5tw'], onNotice: (m) => notices.push(m) });
     editor.view.dispatch({ changes: { from: 0, insert: '  ' }, userEvent: 'indent' });
     expect(editor.getDoc()).toBe(doc);
     expect(notices).toHaveLength(1);

@@ -26,7 +26,7 @@ import { scan } from './scan.ts';
 import type { Marker } from './scan.ts';
 import { isAlignPoint } from './table-align.ts';
 import { alignPointIn, readLine, readTables } from './table.ts';
-import { trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import type { EditContext, Parsed, Person, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 

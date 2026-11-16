@@ -33,8 +33,6 @@ function itemOf(state: EditorState, block: Block, pos: number) {
 }
 
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
-const THEIR_SPLIT =
-  "Another person's pending change made this item. Accept or reject it before indenting or outdenting it.";
 const NOT_UNDER_TEXT = "An empty item can't go under a line of text. Type in the item first.";
 const NOT_ITEM = 'Only a list item can be indented or outdented.';
 const NO_PARENT =
@@ -66,7 +64,15 @@ function planned(
           mark.entry.by !== me &&
           mark.segments.some((g) => g.open.to === state.doc.line(item.line.number - 1).to),
       );
-  if (theirs) return { ...nothing(state), userEvent: 'indent', refusal: THEIR_SPLIT };
+  // Another person's split is theirs to decide: the edit goes through the tracked layer, which
+  // writes it as a replacement of the item or the list (format §3.12).
+  if (theirs)
+    return {
+      changes,
+      selection: EditorSelection.single(state.changes(changes).mapPos(head, 1)),
+      userEvent: 'indent',
+      caretAt: head,
+    };
   return {
     changes,
     selection: EditorSelection.single(state.changes(changes).mapPos(head, 1)),
@@ -157,7 +163,13 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
   const range = { from: Math.min(first.at, from), to: Math.max(last.at, to) };
   let changes;
   try {
-    changes = blockFormatChanges(state, range, op);
+    try {
+      changes = blockFormatChanges(state, range, op);
+    } catch (error) {
+      // No fine form: the item or the list is replaced (format §3.12).
+      if (!(error instanceof EditError)) throw error;
+      changes = blockFormatChanges(state, range, op, true);
+    }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
     return { ...nothing(state), userEvent: 'indent', refusal: error.message };

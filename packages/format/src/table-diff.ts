@@ -16,7 +16,7 @@ import { readTables } from './table.ts';
 import type { TableRead } from './table.ts';
 import { tableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import type { TrackedEdits } from './track.ts';
 import type { DocView, EditContext, TextChange } from './types.ts';
 

@@ -310,10 +310,6 @@ function splitAbove(state: EditorState, line: Line): 'own' | 'theirs' | null {
   return found.entry.by === state.facet(authorFacet)?.handle ? 'own' : 'theirs';
 }
 
-/** Why Return is refused in the empty item of another person's pending split. */
-const THEIR_SPLIT =
-  "Another person's pending change made this item. Accept or reject it before moving it out of its list.";
-
 /**
  * A bare marker (`-`, `*`, `+`, `1.` or `1)` alone on its line) at the end of an item's text,
  * which the syntax tree reads as a line of that text, though the item's text ends before it and
@@ -385,7 +381,8 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[], bare
     // the end of the text above (`1. a⏎   - b‸`, Return twice: `b<ins>2. </ins>`, #440). Another
     // person's split is theirs to decide first, as for Tab.
     const split = state.field(trackingField, false) ? splitAbove(state, line) : null;
-    if (split === 'theirs') return { ...nothing(state), refusal: THEIR_SPLIT };
+    // Another person's split is theirs to decide: the edit goes through the tracked layer, which
+    // writes it as a replacement of the item or the list (format §3.12).
     return {
       changes: [change],
       selection: EditorSelection.single(line.from + target.length),

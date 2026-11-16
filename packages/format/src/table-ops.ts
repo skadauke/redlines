@@ -68,7 +68,7 @@ import {
   setPositions,
 } from './table-rows.ts';
 import type { RowItem } from './table-rows.ts';
-import { SELF_CHECK, trackedEdit } from './track.ts';
+import { SELF_CHECK, fineEdit as trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import type { UntrackedContext } from './untracked.ts';
 import { newestView, originalView } from './views.ts';

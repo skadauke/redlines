@@ -23,7 +23,7 @@ import {
   viewModeField,
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
-import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
+import { probeAnnotation, refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import {
   type KeyEdit,
   planReturn,
@@ -220,6 +220,9 @@ export function applyKeyEdit(
     userEvent: edit.userEvent,
     annotations,
     scrollIntoView: true,
+    ...(edit.fallback && !edit.fallback.refusal
+      ? { annotations: [...annotations, probeAnnotation.of(true)] }
+      : {}),
   });
   // Refused, where the key has another form: that one.
   if (edit.fallback && tr.effects.some((effect) => effect.is(refusedEditEffect))) {
@@ -242,7 +245,12 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   /** Whether the tracked layer would refuse an edit: it is not made, and the paste goes in as text. */
   const refused = (at: EditorState, edit: KeyEdit) =>
     at
-      .update({ changes: edit.changes, selection: edit.selection, userEvent: edit.userEvent })
+      .update({
+        changes: edit.changes,
+        selection: edit.selection,
+        userEvent: edit.userEvent,
+        annotations: probeAnnotation.of(true),
+      })
       .effects.some((effect) => effect.is(refusedEditEffect));
   if (main.empty) {
     const bare = bareMarkerAt(state);

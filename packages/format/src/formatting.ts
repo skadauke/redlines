@@ -52,6 +52,7 @@ import type { Apart } from './format-apart.ts';
 import { assertCalloutType, isBlockOp, planBlock } from './format-blocks.ts';
 import { isAlignPoint } from './align-point.ts';
 import { cellAt, cellName, cellOfEdits, scopeOf } from './table-cells.ts';
+import { recordIds } from './edits-widen.ts';
 import { widenedCellFormat } from './table-widen.ts';
 import {
   DELIMITER,
@@ -100,7 +101,7 @@ import { markerRanges } from './markers.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
-import { trackedEdits, type TrackedEdits } from './track.ts';
+import { fineEdits as trackedEdits, type TrackedEdits } from './track.ts';
 import type {
   EditContext,
   Ledger,
@@ -2229,12 +2230,24 @@ export function trackedFormat(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
+  const recorded = recordIds(ctx);
   try {
-    return formatTracked(text, [range], op, ctx, LEAVING_MARKS_APART);
+    return formatTracked(text, [range], op, recorded.ctx, LEAVING_MARKS_APART);
   } catch (error) {
-    // In a table's cell, where the fine form has no place, it is a replacement of the table.
-    return widenedCellFormat(text, [range], op, ctx, error);
+    // Where the fine form has no place, it is a replacement of the unit that holds it.
+    return widenedCellFormat(text, [range], op, recorded.replay(), error);
   }
+}
+
+/** `trackedFormat` as marks at the grain of the change only: what reads alike in every order, or
+ * the refusal. For the tests of the fine forms. */
+export function fineFormat(
+  text: string,
+  range: Range,
+  op: FormatOp,
+  ctx: EditContext,
+): TrackedEdits {
+  return formatTracked(text, [range], op, ctx, LEAVING_MARKS_APART);
 }
 
 /**
@@ -2254,10 +2267,11 @@ export function trackedFormatRanges(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
+  const recorded = recordIds(ctx);
   try {
-    return formatTracked(text, ranges, op, ctx, LEAVING_MARKS_APART);
+    return formatTracked(text, ranges, op, recorded.ctx, LEAVING_MARKS_APART);
   } catch (error) {
-    return widenedCellFormat(text, ranges, op, ctx, error);
+    return widenedCellFormat(text, ranges, op, recorded.replay(), error);
   }
 }
 

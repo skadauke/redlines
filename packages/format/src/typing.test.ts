@@ -24,7 +24,7 @@ import {
   thread,
 } from './test-helpers.ts';
 import type { Person, TextChange } from './types.ts';
-import { trackedEdit, trackedEdits } from './track.ts';
+import { fineEdit as trackedEdit, fineEdits as trackedEdits } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 

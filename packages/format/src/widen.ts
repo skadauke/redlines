@@ -354,6 +354,9 @@ function tryRung(
   // Nothing left of the unit is a deletion of it, not a replacement.
   if (now.trim() === '') return giveUp('empty');
   const range = { from: rung.lineFrom, to: rung.to };
+  // The new text is one unit of the kind the old one was: an edit that makes an item two, or takes
+  // a block of it out of its container, is a change of the unit around it.
+  if (!sameFrame(rung.kind, rung.prefix, now)) return giveUp('frame');
   // Your own pending changes in the unit fold into the replacement: they are rejected in its old
   // text, as they would be by rejecting them, and their text is in the new text.
   const own = parsed.marks.filter(
@@ -428,7 +431,10 @@ function tryRung(
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
   const closer = `<!--/${id}-->`;
   if (HTML_LINE.test(lastLineOf(now, rung.prefix))) return giveUp('html');
-  const lead = scaffold(rung.prefix, eol, rung.tight);
+  // The lines before and after the unit stand in its container, whose tightness is the item's: a
+  // list's own tightness (it holds a blank line) says nothing of the blank line before it.
+  const tight = rung.kind === 'list' && rung.parent ? rung.parent.tight : rung.tight;
+  const lead = scaffold(rung.prefix, eol, tight);
   const body = now.replaceAll('\r\n', '\n').replaceAll('\n', eol);
   let written: string;
   let end = to;
@@ -453,6 +459,21 @@ function tryRung(
     held: holder ? payloadIdsOf(read, holder) : [],
     folded: own.map((mark) => mark.id),
   };
+}
+
+/** Whether the new text of a unit makes one unit of its kind after the prefix of the old: an item
+ * stays one item, a list stays a list, a block of text stays one block. An edit that makes an item
+ * two, or takes its text out of the list, belongs to the unit around it. */
+function sameFrame(kind: UnitKind, prefix: string, now: string): boolean {
+  if (kind !== 'item' && kind !== 'list') return true;
+  const source = `${prefix}${now}`;
+  const units = unitsOf(source, parse(source));
+  // The prefix may hold quote markers: look inside them for the list.
+  let top: readonly Unit[] = units;
+  while (top.length === 1 && top[0]?.kind === 'quote') top = top[0].children;
+  const [only] = top;
+  if (top.length !== 1 || only?.kind !== 'list') return false;
+  return kind === 'list' || only.children.length === 1;
 }
 
 /** Whether the last line of a text closes a fenced block: a closer written after it would be read

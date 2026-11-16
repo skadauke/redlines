@@ -50,6 +50,8 @@ import {
   type Range,
   rangeEdge,
   type TextChange,
+  fineEdit,
+  fineFormat,
   trackedEdit,
   trackedFormat,
   untrackedEdit,
@@ -101,6 +103,11 @@ export const refusedEditEffect = StateEffect.define<string>();
  * Changes writes for them share a group, and are decided together (format §3.7). */
 export const editGroupAnnotation = Annotation.define<boolean>();
 
+/** A transaction that is made only to learn whether the tracked layer takes it as marks at the grain
+ * of the edit, for a key that has another form to try: it is not written as a replacement of a unit
+ * (format §3.12), which is the last resort of the last form. */
+export const probeAnnotation = Annotation.define<boolean>();
+
 export const RAW_READ_ONLY =
   'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
 
@@ -135,9 +142,17 @@ export function contextFor(state: EditorState): EditContext {
  *
  * @throws EditError when the format refuses it.
  */
-export function blockFormatChanges(state: EditorState, range: Range, op: FormatOp): TextChange[] {
+export function blockFormatChanges(
+  state: EditorState,
+  range: Range,
+  op: FormatOp,
+  widening = false,
+): TextChange[] {
   const text = state.doc.toString();
-  if (state.field(trackingField)) return trackedFormat(text, range, op, contextFor(state)).changes;
+  if (state.field(trackingField)) {
+    const write = widening ? trackedFormat : fineFormat;
+    return write(text, range, op, contextFor(state)).changes;
+  }
   const { random } = state.facet(editSourceFacet);
   const editing = state.facet(authorFacet);
   const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
@@ -449,6 +464,7 @@ function trackEdits(
   edits: readonly Edit[],
   backward: boolean,
   grouped: boolean | string = false,
+  widening = false,
 ): Tracked {
   let ctx = contextFor(state);
   // A group of its own for several edits, or the one a caller has made for them.
@@ -457,9 +473,10 @@ function trackEdits(
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
-    if (edit.from !== edit.to) return trackedEdit(doc, edit, ctx);
+    const write = widening ? trackedEdit : fineEdit;
+    if (edit.from !== edit.to) return write(doc, edit, ctx);
     const at = rangeEdge(read, edit.from, edit.insert);
-    return trackedEdit(doc, { from: at, to: at, insert: edit.insert }, ctx);
+    return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
   });
 }
 
@@ -601,15 +618,25 @@ export function authoredChanges(
 function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): TransactionSpec {
   const start = tr.startState;
   let tracked: Tracked;
-  try {
-    tracked = trackEdits(
+  const track = (widening: boolean) =>
+    trackEdits(
       start,
       start.doc.toString(),
       start.field(parsedField),
       edits,
       backward,
       tr.annotation(editGroupAnnotation) === true,
+      widening,
     );
+  try {
+    try {
+      tracked = track(false);
+    } catch (error) {
+      // No fine form: the unit that holds the edit is replaced, unless a key has another form to
+      // try first.
+      if (!(error instanceof EditError) || tr.annotation(probeAnnotation) === true) throw error;
+      tracked = track(true);
+    }
   } catch (error) {
     if (error instanceof EditError) return refused(tr, error);
     throw error;

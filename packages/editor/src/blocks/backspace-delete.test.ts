@@ -1206,15 +1206,11 @@ describe('Numbered items that would become text (walk seeds 332, 511, 887)', () 
       },
     ]),
     {
-      name: 'Delete at the start of a soft-broken line before a numbered item that a deletion ends (seed 511), Track Changes on',
+      name: 'Delete at the start of a soft-broken line before a numbered item that a deletion ends (seed 511), Track Changes on: written as a replacement of the list item',
       doc: '1) ship plan<del  >⏎‸   gamma<del z>⏎2) alpha beta',
       keys: DEL,
       tc: true,
-      expect: {
-        caret: '1) ship plan<del  >⏎‸   gamma<del z>⏎2) alpha beta',
-        refusal:
-          'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
-      },
+      expect: { newest: '1) ship plan⏎  gamma⏎2) alpha beta' },
     },
   ]);
 });
