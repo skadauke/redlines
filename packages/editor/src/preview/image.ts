@@ -130,6 +130,8 @@ class ImageWidget extends WidgetType {
   /** The width the document gives it, in px at the theme's own text size, or null. */
   readonly width: number | null;
   readonly align: ImageAlign;
+  /** The selection is this image (a click on it): it is drawn with an outline and its handles. */
+  readonly selected: boolean;
 
   constructor(
     alt: string,
@@ -137,8 +139,10 @@ class ImageWidget extends WidgetType {
     own: boolean,
     width: number | null = null,
     align: ImageAlign = 'center',
+    selected = false,
   ) {
     super();
+    this.selected = selected;
     this.alt = alt;
     this.url = url;
     this.own = own;
@@ -152,7 +156,8 @@ class ImageWidget extends WidgetType {
       other.url === this.url &&
       other.own === this.own &&
       other.width === this.width &&
-      other.align === this.align
+      other.align === this.align &&
+      other.selected === this.selected
     );
   }
 
@@ -160,6 +165,7 @@ class ImageWidget extends WidgetType {
     const wrap = document.createElement('span');
     wrap.className = this.own ? 'rl-image rl-image-own' : 'rl-image';
     if (this.own && this.align !== 'center') wrap.classList.add(`rl-image-${this.align}`);
+    if (this.selected) wrap.classList.add('rl-image-selected');
     const showAlt = () => {
       wrap.className += ' rl-image-missing';
       wrap.replaceChildren(this.alt || 'image');
@@ -215,7 +221,7 @@ class ImageWidget extends WidgetType {
     drags.get(dom)?.();
   }
 
-  /** Clicking the image puts the caret on it, which shows its source; a handle is pressed instead. */
+  /** A click on the image selects it (`imageSelection`); a handle is pressed instead. */
   override ignoreEvent(event: Event): boolean {
     return event.target instanceof Element && event.target.closest('.rl-image-handle') !== null;
   }
@@ -355,8 +361,13 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
     url = state.facet(imageResolver)?.(source.path) ?? null;
   }
   const own = aloneInItsLine(state, node);
+  const selected = state.selection.ranges.some(
+    (range) => !range.empty && range.from === node.from && range.to === node.to,
+  );
+  // The caret steps over the image as one unit (`imageAtom`), as over a hard break's spaces.
   return Decoration.replace({
-    widget: new ImageWidget(image.alt, url, own, image.width, image.align),
+    widget: new ImageWidget(image.alt, url, own, image.width, image.align, selected),
+    imageAtom: true,
   });
 }
 
@@ -428,6 +439,64 @@ export function localImageAt(state: EditorState): string | null {
   });
   return found;
 }
+
+/**
+ * Whether the selection has an end strictly inside the image's syntax, which only a click in
+ * hidden text or an edit can bring about: the source shows then, so that it can be read and
+ * mended. A caret at either end of the image, or a selection of the whole image, does not show it.
+ */
+export function selectionInside(state: EditorState, from: number, to: number): boolean {
+  return state.selection.ranges.some((range) =>
+    range.empty
+      ? range.head > from && range.head < to
+      : (range.from > from && range.from < to) || (range.to > from && range.to < to),
+  );
+}
+
+/**
+ * A click on an image selects it, drawn as the image with its handles and an outline; its Markdown
+ * or HTML stays hidden (it shows in Plain, and the Image menu and the handles change its alt text
+ * and size). The caret moves past it with the arrows, and Delete or typing replaces it.
+ */
+export function imageSelection(): Extension {
+  return [selectedImageLook, clickSelects];
+}
+
+/** While the selection is one image, the page's own selection color stays off the line: the image's
+ * outline is the selection. */
+const selectedImageLook = EditorView.editorAttributes.compute(
+  ['selection', 'doc'],
+  (state): Record<string, string> => {
+    const { from, to, empty } = state.selection.main;
+    if (empty || state.selection.ranges.length !== 1) return {};
+    const node = imageNodeAt(state, from);
+    return node && node.from === from && node.to === to ? { class: 'rl-image-is-selected' } : {};
+  },
+);
+
+const clickSelects = EditorView.domEventHandlers({
+  mousedown(event, view) {
+    if (event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey) return false;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest('.rl-image-handle')) return false;
+    const wrap = target.closest('.rl-image');
+    if (!wrap || !view.contentDOM.contains(wrap)) return false;
+    let node: SyntaxNode | null;
+    try {
+      node = imageNodeAt(view.state, view.posAtDOM(wrap));
+    } catch {
+      return false;
+    }
+    if (!node) return false;
+    event.preventDefault();
+    view.focus();
+    view.dispatch({
+      selection: { anchor: node.from, head: node.to },
+      userEvent: 'select.pointer',
+    });
+    return true;
+  },
+});
 
 /** How long after the first click of a double-click the second may come, and how far it may move. */
 const DOUBLE_CLICK_MS = 700;

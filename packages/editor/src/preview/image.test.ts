@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import type { WidgetType } from '@codemirror/view';
+import { EditorView, type WidgetType } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from './decorations.ts';
@@ -46,6 +46,48 @@ const ledger = (ids: string[]) =>
     .join('')}-->\n`;
 
 const local = (src: string) => `app://${src}`;
+
+describe('an image under the selection (#675)', () => {
+  const DOC = 'Before ![A cat](cat.png) after';
+  const from = DOC.indexOf('![');
+  const to = DOC.indexOf(')') + 1;
+
+  it('is drawn with the caret at either end, and its source stays hidden', () => {
+    for (const at of [from, to]) {
+      const [image] = drawn(editorWith(DOC, local, at));
+      expect(image, `drawn with the caret at ${at}`).toBeDefined();
+      expect(image?.classList.contains('rl-image-selected')).toBe(false);
+    }
+  });
+
+  it('is drawn selected when the selection is exactly the image, with the handles to grab', () => {
+    const editor = editorWith(DOC, local, 0);
+    editor.view.dispatch({ selection: { anchor: from, head: to } });
+    const [image] = drawn(editor);
+    expect(image?.classList.contains('rl-image-selected')).toBe(true);
+    expect(image?.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+  });
+
+  it('shows its source only when the selection has an end inside it', () => {
+    expect(drawn(editorWith(DOC, local, from + 4))).toHaveLength(0);
+    const editor = editorWith(DOC, local, 0);
+    editor.view.dispatch({ selection: { anchor: from + 2, head: to + 3 } });
+    expect(drawn(editor)).toHaveLength(0);
+    // A selection that runs across the whole image, and past it, still draws it.
+    editor.view.dispatch({ selection: { anchor: 0, head: to + 3 } });
+    expect(drawn(editor)).toHaveLength(1);
+  });
+
+  it('is one unit that the caret steps over', () => {
+    const editor = editorWith(DOC, local, from);
+    const atomic = editor.view.state.facet(EditorView.atomicRanges);
+    const found: [number, number][] = [];
+    for (const source of atomic) {
+      source(editor.view).between(0, DOC.length, (a, b) => void found.push([a, b]));
+    }
+    expect(found).toContainEqual([from, to]);
+  });
+});
 
 describe('images', () => {
   it('centers an image alone in its paragraph, with its pending change around it or not', () => {
@@ -287,8 +329,8 @@ describe('opening an image', () => {
     );
     const [cat] = editor.view.dom.querySelectorAll('.rl-image');
     expect(press(cat!, 1)).toBe(false);
-    // The first click puts the caret on the image, which shows its source in place of the picture,
-    // and the second lands there: it is taken whole, so that it selects no word.
+    // The first click selects the image, and the second lands there: it is taken whole, so that it
+    // selects no word.
     expect(press(editor.view.contentDOM, 2)).toBe(true);
     expect(opened).toEqual(['img/a cat.png']);
   });
