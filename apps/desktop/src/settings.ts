@@ -114,6 +114,10 @@ export interface Settings {
    */
   agentHandles: Record<string, string>;
   /**
+   * The agent an Ask that names none goes to (#528), by id; null leaves it to the first ready one.
+   */
+  defaultAgent: string | null;
+  /**
    * The people this machine has met, in the order of meeting, each with the author color they were
    * given (design §5.5). Never you, who always have the first color.
    */
@@ -157,6 +161,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   agentScope: 'folder',
   consent: {},
   agentHandles: {},
+  defaultAgent: null,
   people: [],
   newDocumentFolder: null,
   imageFolderName: 'images',
@@ -214,6 +219,10 @@ export function loadSettings(): Settings {
       : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
     agentHandles: agentHandlesOf(value['agentHandles']),
+    defaultAgent:
+      typeof value['defaultAgent'] === 'string' && value['defaultAgent']
+        ? value['defaultAgent']
+        : null,
     people: peopleOf(value['people']),
     newDocumentFolder:
       typeof value['newDocumentFolder'] === 'string' && value['newDocumentFolder']

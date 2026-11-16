@@ -1006,7 +1006,14 @@ describe('the Agents pane', () => {
     renderAgentsPane(container, deps);
     expect(
       [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
-    ).toEqual(['Claude', 'Codex', 'What agents may read', 'Remembered answers', 'Agent logs']);
+    ).toEqual([
+      'Default agent',
+      'Claude',
+      'Codex',
+      'What agents may read',
+      'Remembered answers',
+      'Agent logs',
+    ]);
   });
 
   describe('other agents', () => {
@@ -1064,7 +1071,14 @@ describe('the Agents pane', () => {
       await settle();
       expect(
         [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
-      ).toEqual(['Claude', 'Codex', 'Other agents', 'What agents may read', 'Agent logs']);
+      ).toEqual([
+        'Default agent',
+        'Claude',
+        'Codex',
+        'Other agents',
+        'What agents may read',
+        'Agent logs',
+      ]);
       const text = row(container, 'Other agents').textContent;
       expect(text).toContain('Gemini');
       expect(text).toContain('/opt/homebrew/bin/gemini --experimental-acp');

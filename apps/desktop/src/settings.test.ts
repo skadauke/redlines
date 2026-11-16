@@ -72,6 +72,7 @@ describe('settings', () => {
       agentScope: 'folder',
       consent: {},
       agentHandles: {},
+      defaultAgent: null,
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
@@ -101,6 +102,7 @@ describe('settings', () => {
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       agentHandles: { claude: 'ada' },
+      defaultAgent: 'codex',
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
@@ -684,5 +686,14 @@ describe('settings', () => {
     expect(loadSettings().agentHandles).toEqual({});
     localStorage.setItem(SETTINGS_KEY, '{"agentHandles":[1]}');
     expect(loadSettings().agentHandles).toEqual({});
+  });
+
+  it('keeps the default agent as an id, and nothing else (#528)', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"defaultAgent":"codex"}');
+    expect(loadSettings().defaultAgent).toBe('codex');
+    for (const bad of ['""', '3', 'null', '{}']) {
+      localStorage.setItem(SETTINGS_KEY, `{"defaultAgent":${bad}}`);
+      expect(loadSettings().defaultAgent).toBeNull();
+    }
   });
 });

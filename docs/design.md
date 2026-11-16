@@ -1829,6 +1829,11 @@ so a file's authors (`claude-<person>`) stay what they were; a mention of the ol
 nothing once it has changed. Handles are kept in the app's settings (`agentHandles`) and read at
 every look at the agents, so a change reaches the open documents' pickers at once.
 
+**Default agent** (#528). Once more than one agent is set up (a program found on this Mac, or an
+OpenClaw agent), the first row of the pane is a choice of them, by the names they are shown as. An Ask
+that names no agent goes to the one chosen (else to the first that is ready), and the @ picker lists it
+first. It is kept in the app's settings (`defaultAgent`, an id); it is never a file's author.
+
 **Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
 the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
 button, and Check Again always:
