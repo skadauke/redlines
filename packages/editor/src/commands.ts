@@ -120,7 +120,7 @@ export function createCommandRegistry(
       const shortcut = keyOf(command);
       return shortcut === command.shortcut
         ? command
-        : { ...command, shortcut, defaultShortcut: command.shortcut };
+        : { ...command, shortcut, defaultShortcut: command.shortcut ?? '' };
     });
   };
 

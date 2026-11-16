@@ -30,9 +30,12 @@ function actionRows(rows: readonly MenuRow[]): ActionRow[] {
 
 /** The commands that can have a key, from the menu bar's table, in its order. */
 export function shortcutEntries(model: MenuModel): ShortcutEntry[] {
+  const seen = new Set<string>();
   return model.menus.flatMap((menu) =>
     actionRows(menu.rows).flatMap((row) => {
-      if (!row.id) return [];
+      // Two rows with one id would share a key: the second is left out.
+      if (!row.id || seen.has(row.id)) return [];
+      seen.add(row.id);
       const entry: ShortcutEntry = {
         id: row.id,
         menu: menu.title,
@@ -98,7 +101,8 @@ export function createShortcutBook(
     keyOf: (id) => keyIn(entries, overrides, id),
     acceleratorOf(row) {
       const { id } = row;
-      if (id && id in overrides) return overrides[id] ? menuKey(overrides[id]) : undefined;
+      if (id && id in overrides && !LOCKED.has(id))
+        return overrides[id] ? menuKey(overrides[id]) : undefined;
       return row.accelerator;
     },
     assess: (id, key) => assessKey(entries, overrides, id, key),

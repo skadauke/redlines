@@ -91,6 +91,11 @@ const RESERVED: Readonly<Record<string, string>> = {
   'Mod-Space': 'Spotlight',
   'Ctrl-ArrowUp': 'Mission Control',
   'Ctrl-ArrowDown': 'Application windows',
+  'Mod-w': 'Close',
+  'Alt-Mod-h': 'Hide Others',
+  'Ctrl-Mod-f': 'Full Screen',
+  'Mod-Tab': 'the app switcher',
+  'Mod-`': 'window switching',
 };
 
 /** The standard items the system draws and handles, so that their keys are theirs. */

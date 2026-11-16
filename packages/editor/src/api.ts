@@ -109,7 +109,7 @@ export interface EditorCommand {
    * the command has now, which the person may have changed (`CommandKeys`).
    */
   shortcut?: string;
-  /** Only in the registry's list, and only on a command whose key was changed: the key it came with. */
+  /** Only in the registry's list, and only on a command whose key was changed: the key it came with, or "" for none. */
   defaultShortcut?: string;
   /** Where a host with menus shows it. */
   menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'table' | 'view';

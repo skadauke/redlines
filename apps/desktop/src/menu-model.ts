@@ -232,7 +232,9 @@ function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRo
       ? { textFor: (state: MenuState) => state.commandTitles[id] ?? baseTitle(command) }
       : {}),
     // The key the command came with: the person's own are applied by the shortcuts (shortcuts.ts).
-    accelerator: acceleratorOf(command.defaultShortcut ?? command.shortcut),
+    accelerator: acceleratorOf(
+      command.defaultShortcut === undefined ? command.shortcut : command.defaultShortcut,
+    ),
     action: () => void registry.run(id),
     checked: command.isActive ? (state) => state.activeCommands.includes(id) : undefined,
     enabled: command.disabledReason ? (state) => state.enabledCommands.includes(id) : undefined,
