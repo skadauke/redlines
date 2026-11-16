@@ -78,6 +78,7 @@ import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
+import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
 import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
@@ -256,6 +257,8 @@ function dragFile(): void {
 // Crashes (#692): an error CodeMirror catches goes to the watch, which is made below, once there
 // is a document to take the shape of.
 let crashes: CrashWatch | null = null;
+// Unsaved edits are kept in the app's support folder while there are any (recovery.ts, #693).
+let recovery: Recovery | null = null;
 
 const editor = createEditor(element('#editor'), {
   doc: '',
@@ -306,6 +309,7 @@ const editor = createEditor(element('#editor'), {
   onChange: (text) => {
     controller.markEdited(text);
     crashes?.documentChanged();
+    recovery?.changed();
     // Images the text shows now are watched once the typing pauses.
     imageWatch.settle();
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -586,6 +590,7 @@ function showDocument(state: DocumentState): void {
     settings = { ...settings, recent };
     void refreshRecent();
   }
+  recovery?.follow(state);
   notice.setStanding(state.notice, () => controller.dismissNotice());
   // The plugins' data is the document's: another document, or the same at another path.
   documentData.follow(controller.generation, state.path);
@@ -816,6 +821,19 @@ function showAgentLogs(): void {
   });
 }
 
+/**
+ * A window that opens a document finds the copy of its unsaved edits, if the page's process ended or
+ * the app crashed meanwhile, and puts the edits back.
+ */
+async function restoreAfterCrash(): Promise<void> {
+  const kept = await recovery?.find();
+  if (!kept || !controller.restore(kept.path, kept.text)) return;
+  await crashes?.recovered(() => {
+    void controller.showSavedVersion();
+    recovery?.discard();
+  });
+}
+
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
@@ -955,6 +973,11 @@ const wordCount = createEditorWordCount(main, editor, { visible: settings.showWo
 // Failures leave a trace in the app's log and offer a report (crash.ts, #692); the app is where they
 // are logged, so a browser tab has none.
 if (isTauri) {
+  recovery = createRecovery({
+    link: tauriRecoveryLink(),
+    label: getCurrentWindow().label,
+    getText: () => editor.getDoc(),
+  });
   const crashLink = tauriCrashLink();
   crashes = watchCrashes({
     link: crashLink,
@@ -1167,6 +1190,8 @@ if (isTauri) {
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else {
+      // Closed without saving, or with nothing unsaved: no copy is kept of it.
+      recovery?.discard();
       runs.stopAll();
       ask.close();
     }
@@ -1254,6 +1279,8 @@ if (isTauri) {
   if (controller.state.path === null && settings.trackNewDocuments) {
     editor.setTracking(true, { inFile: false });
   }
+  // After a crash: the edits the window had, put back, with a card that says so (#693).
+  void restoreAfterCrash();
   windows?.ready();
   nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.

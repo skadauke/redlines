@@ -123,6 +123,11 @@ repo root.
   build, system, trace and the document's shape, never its text) and **Reveal Log**; Help has both.
   In `pnpm tauri dev`, `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')` in
   the page's console makes each happen
+- Recovery (`apps/desktop/src-tauri/src/recovery.rs`, `src/recovery.ts`): while a document has
+  unsaved edits its window keeps a copy of the text in the app's support folder
+  (`~/Library/Application Support/md.redlines.editor/recovery/`), never next to the file; saving or
+  closing without saving deletes it, and so does a quit that asked about every document. A window
+  that opens the document after a crash puts the edits back and says so in a notification
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
