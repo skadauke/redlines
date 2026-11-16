@@ -284,7 +284,14 @@ The window, on the desktop:
   Quote and Callout (and a place for Collapsible Section, which appears when its command is
   registered); Review holds Comment, Highlight, Accept | Reject (the change at the selection),
   and Review Changes; Format holds Bold, Italic, Strikethrough, Code, Subscript, Superscript and
-  Clear Formatting; Edit holds Cut, Copy and Paste. An item that can't be used here is dimmed, and
+  Clear Formatting; Edit holds Cut, Copy and Paste. **List** (#506) is in the bar, between Review
+  and Format, only where the selection holds a paragraph or a list item (anywhere in it, not only
+  at its start; a heading, a code block or a table has none): Bullets, Numbers, Checkboxes and No
+  List, which make the selected paragraphs one list of that kind, turn the selected items into
+  another kind, or take them out of the list, with Track Changes on and off, as the Paragraph
+  menu's commands do. No List is grayed, with its reason, where the selection holds no list item,
+  and a conversion the block commands can't make (in a table cell, in Raw while tracking) is
+  grayed with their own hint. An item that can't be used here is dimmed, and
   its hover hint (after the title bar's delay) says why, from the command's own reason. A menu
   opens on the side of the bar with room and scrolls when taller, never over the bar. A docked
   toolbar fades while you type and comes back when the pointer moves, and it leaves room under the

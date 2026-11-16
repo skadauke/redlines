@@ -172,7 +172,10 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
       // Under the item; above it when there is no room under.
       const room = win.innerHeight - below - tip.offsetHeight;
       tip.style.left = `${rect.left + rect.width / 2}px`;
-      tip.style.top = `${room >= MARGIN || tip.offsetHeight === 0 ? below : rect.top - HINT_GAP - tip.offsetHeight}px`;
+      // An item of a menu that opened over the bar has its hint above it: below would cover the bar.
+      const over = button.closest('.rl-toolbar-menu-up') !== null;
+      const under = !over && (room >= MARGIN || tip.offsetHeight === 0);
+      tip.style.top = `${under ? below : rect.top - HINT_GAP - tip.offsetHeight}px`;
     }, tooltipMs);
   };
 

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { forceParsing } from '@codemirror/language';
 import {
   createEditor,
   type Editor,
@@ -191,13 +192,15 @@ describe('the items', () => {
     expect(document.querySelectorAll('.rl-toolbar-rule')).toHaveLength(0);
   });
 
-  it('puts Ask first, with a rule after it, and the List menu only for a paragraph', () => {
-    const ids = ['ask.start', 'block.body', 'block.ul', 'block.ol', 'block.task', 'format.bold'];
-    mount(
-      'Hello',
-      {},
-      ids.map((id) => command(id, { isActive: () => id === 'block.body' })),
-    );
+  it('puts Ask first, with a rule after it, and the List menu only where a list can be made', () => {
+    const { editor } = mount('Hello\n\n# Title\n', {}, [
+      command('ask.start'),
+      command('block.body'),
+      command('block.ul'),
+      command('format.bold'),
+    ]);
+    forceParsing(editor.view, editor.view.state.doc.length, 1000);
+    editor.view.dispatch({ selection: { anchor: 2 } });
     mounted.at(-1)?.toolbar.show();
     expect(tops().map((top) => top.textContent)).toEqual(['Ask', 'List', 'Format']);
     expect(document.querySelectorAll('.rl-toolbar-rule')).toHaveLength(1);
@@ -1049,22 +1052,22 @@ describe('docked, by the wrench or the preference', () => {
     expect(document.activeElement).toBe(tops()[0]);
   });
 
-  it('draws again when the items change, with the open menu open and the keyboard kept', () => {
-    let paragraph = true;
-    const ids = ['block.body', 'block.ul', 'block.ol', 'block.task', 'format.bold'];
+  it('draws again when the items change, with the keyboard kept in the bar', () => {
+    const ids = ['block.body', 'block.ul', 'format.bold'];
     const { editor, toolbar } = mount(
-      'Hello',
+      'Hello\n\n# Title\n',
       {},
-      ids.map((id) => command(id, { isActive: () => paragraph && id === 'block.body' })),
+      ids.map((id) => command(id)),
     );
+    forceParsing(editor.view, editor.view.state.doc.length, 1000);
+    editor.view.dispatch({ selection: { anchor: 2 } });
     toolbar.toggle();
     tops()[0]!.focus();
     key(tops()[0]!, 'ArrowDown');
     expect(tops().map((top) => top.textContent)).toEqual(['List', 'Format']);
     expect(document.activeElement).toBe(itemFor('block.ul'));
-    // The selection moves out of the paragraph: List goes, and the keyboard stays in the bar.
-    paragraph = false;
-    editor.view.dispatch({ selection: { anchor: 2 } });
+    // The selection moves into the heading: List goes, and the keyboard stays in the bar.
+    editor.view.dispatch({ selection: { anchor: 10 } });
     expect(tops().map((top) => top.textContent)).toEqual(['Format']);
     expect(panelOf()?.contains(document.activeElement)).toBe(true);
   });
