@@ -166,15 +166,14 @@ describe('a cell that is only a marker', () => {
     }
   }, 60_000);
 
-  it('is refused in words that name the cell and the person, and writes nothing', () => {
-    expect(
-      over(text, [
-        [1, 0],
-        [1, 1],
-      ]).refusal,
-    ).toBe(
-      "Bo Chen's insertion is in the cell in row 1, column 1. Accept or reject it first, then format the cell.",
-    );
+  it('is written as a replacement of the table, with the person’s change in its old text', () => {
+    const wide = over(text, [
+      [1, 0],
+      [1, 1],
+    ]);
+    expect(wide.refusal).toBeUndefined();
+    expect(parse(wide.after ?? '').marks.some((mark) => mark.kind === 'sub')).toBe(true);
+    expectEveryOrderRead('widened cell format', wide.after ?? '');
     // A cell with nothing to format but a marker takes no change.
     expect(over(text, [[2, 0]])).toEqual({ after: text, refusal: undefined });
   });
@@ -245,10 +244,8 @@ describe('rows and columns pending in the table', () => {
   );
   const edit = (text: string, op: TableOp, who: Person, ids: string[]) =>
     applyChanges(text, tableEdit(text, op, context(who, ids)).changes);
-  const BO_ROW =
-    "Bo Chen's insertion is in the cell in row 2, column 2. Accept or reject it first, then format the cell.";
 
-  it('formats cells beside a moved row, and refuses a cell of the moved row', () => {
+  it('formats cells beside a moved row, and widens a cell of the moved row', () => {
     const moved = edit(plain, { kind: 'moveRows', table: 0, rows: [1], to: 3 }, bo, [
       'k3x9',
       'm2bd',
@@ -264,7 +261,10 @@ describe('rows and columns pending in the table', () => {
       BOLD,
       false,
     );
-    expect(over(moved, [[2, 1]]).refusal).toBe(BO_ROW);
+    // A cell of the moved row is a replacement of the table.
+    const wide = over(moved, [[2, 1]]);
+    expect(wide.refusal).toBeUndefined();
+    expectEveryOrderRead('a moved row', wide.after ?? '');
   });
 
   it('formats cells in the other columns of a deleted or a moved one', () => {
@@ -314,9 +314,9 @@ describe('rows and columns pending in the table', () => {
       ITALIC,
       false,
     );
-    expect(over(shifted, [[0, 1]]).refusal).toBe(
-      "Bo Chen's insertion is in the cell in the header, column 2. Accept or reject it first, then format the cell.",
-    );
+    const wide = over(shifted, [[0, 1]]);
+    expect(wide.refusal).toBeUndefined();
+    expectEveryOrderRead('a moved column header', wide.after ?? '');
   });
 
   it('formats cells beside an inserted row', () => {

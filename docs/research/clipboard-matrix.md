@@ -6,7 +6,7 @@ The paste rules: [paste.md](paste.md).
 
 Every copy in Clean and Redlines puts two flavors on the clipboard: `text/plain`, the selection's
 newest text as Markdown, and `text/html`, the same text as HTML with the theme's font and its
-metric-compatible twin inline (for example `Calibri, Carlito, sans-serif`). Raw copies the source
+metric-compatible twin inline (for example `Calibri, Carlito, sans-serif`). Plain copies the source
 as written, as plain text alone. A paste that has HTML turns it into Markdown unless the plain
 text says as much; ⇧⌘V, Edit › Paste as Plain Text, never reads HTML.
 
@@ -24,7 +24,7 @@ has pressed the keys in the app yet.
 | Slack                   | Slack reads `text/plain` or its own flavor; the plain text is Markdown. By hand: not checked yet                                     | As Clean. By hand: not checked yet                                                     | Slack's HTML is simple markup. By hand: not checked yet                                                                                                                                       |
 | A web page (any)        | HTML as above                                                                                                                        | As Clean                                                                               | Headings, links, lists, code, quotes, images and tables. Covered by "pastes a web page table without a header with its first row as the header" and the converter's other tests                |
 | A plain text field      | The Markdown, as before. Covered by "copy the newest text of the selection in Redlines" and "copies the newest text: no markers, no deleted text, no ledger, in both text/plain and text/html" | Same. Covered by the same tests                                                        | n/a. Paste out of a text field is plain text, unchanged. Covered by "pastes markup as its newest text with Track Changes off"                                                                  |
-| Redlines (Raw)          | Source as written, plain text only. Covered by "puts only the source on the clipboard in Raw"                                        | n/a                                                                                    | Text as it is, HTML ignored. Covered by "keeps the plain text when the html says nothing more, and in Raw"                                                                                    |
+| Redlines (Plain)        | Source as written, plain text only. Covered by "puts only the source on the clipboard in Plain"                                        | n/a                                                                                    | Text as it is, HTML ignored. Covered by "keeps the plain text when the html says nothing more, and in Raw"                                                                                    |
 | Redlines to Redlines    | Own copy is recognized (the wrapper's `data-redlines`, or the last text this editor copied) and its plain text is pasted, so references, footnotes, raw HTML and comments survive, tracked or not. Covered by "pastes its own copy back as the source, with nothing lost", "cuts and pastes its own copy, tracked, as the source" and "knows its own copy by the text, too, when a page has changed the html" | Same | A page that forges the wrapper gets only plain text. Covered by "gives a page that forges the wrapper only what plain text gets" |
 
 Cross-cutting rows, each covered by a test:

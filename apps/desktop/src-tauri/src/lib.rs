@@ -62,6 +62,8 @@ mod file_scope;
 
 // The app's updates, which no window owns: the checks, the download and the install, whether this
 // copy can update itself, and starting the new version after an update.
+mod crash;
+mod recovery;
 mod updates;
 
 // Renaming a file, showing it in Finder, and printing the window.
@@ -331,7 +333,11 @@ fn open_about(app: AppHandle) -> tauri::Result<()> {
 pub fn run() {
     // Spelling is checked while typing: WebKit reads its switch once, before the first window.
     spelling::register_defaults();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The page's process ends: logged, and the window reloaded (crash.rs). WebKit's own hook.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(crash::terminated);
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         // Reads the clipboard's text for Paste as Plain Text (the menu is not a gesture in the page).
@@ -350,7 +356,10 @@ pub fn run() {
         .manage(project::Projects::default())
         .manage(image_files::ImageSources::default())
         .manage(watch::Watches::default())
+        .manage(crash::Crashes::default())
         .setup(|app| {
+            // Failures leave a trace first (crash.rs): the panic hook, the watchdog, the last run's reports.
+            crash::set_up(app.handle());
             // The appearance first, light, dark or the system's: every window opens in it.
             appearance::set_up(app.handle());
             // The zoom too, before a window opens: every window starts at it.
@@ -398,6 +407,16 @@ pub fn run() {
             about,
             appearance::set_appearance,
             edit_menu::beep,
+            crash::crash_environment,
+            recovery::recovery_write,
+            recovery::recovery_read,
+            recovery::recovery_delete,
+            crash::crash_log_page,
+            crash::crash_slow,
+            crash::crash_heartbeat,
+            crash::crash_pending,
+            crash::crash_log_reveal,
+            crash::crash_simulate,
             spelling::correct_word,
             spelling::spelling_suggestions,
             spelling::spelling_learn,
@@ -461,6 +480,8 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_update,
             #[cfg(unix)]
+            agents::agent_latest_version,
+            #[cfg(unix)]
             agents::agent_sign_in,
             #[cfg(unix)]
             agents::agent_setup_stop,
@@ -491,6 +512,7 @@ pub fn run() {
             // A window's page that loads again, as a reload does, watches what it needs itself.
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 watch::page_loaded(webview.app_handle(), webview.label());
+                crash::page_loaded(webview.app_handle(), webview.label());
             }
         })
         .on_window_event(|window, event| {
@@ -500,6 +522,7 @@ pub fn run() {
             }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 zoom::window_closed(window.app_handle(), window.label());
+                crash::window_closed(window.app_handle(), window.label());
                 // A closed window's document is watched for nobody.
                 watch::window_closed(window.app_handle(), window.label());
                 // Its spell document, which the checker kept for the corrections of its Returns.
@@ -544,6 +567,11 @@ pub fn run() {
             #[cfg(unix)]
             if matches!(event, tauri::RunEvent::Exit) {
                 agents::quitting(app);
+            }
+            // A quit that asked about every document ends with each saved or given up: no copy of
+            // an unsaved document is kept (recovery.rs).
+            if matches!(event, tauri::RunEvent::Exit) {
+                recovery::quit(app);
             }
             // After an update is installed, the new version starts as this one quits.
             if matches!(event, tauri::RunEvent::Exit) {
@@ -699,7 +727,7 @@ mod tests {
             "/docs/plan.md",
             "/docs/notes.TXT",
             "/docs/logo.png",
-            "/docs/main.ts",
+            "/docs/main.zig",
             "/docs/Makefile",
         ]
         .map(PathBuf::from)

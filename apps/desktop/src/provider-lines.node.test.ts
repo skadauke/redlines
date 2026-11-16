@@ -75,8 +75,13 @@ describe('the lines the Rust side lets through', () => {
   it('are the lines the providers use', () => {
     expect(fixture.lines).toEqual({
       'claude at a folder': claudeArgs(atFolder, tools),
+      'claude at a folder with the web': claudeArgs({ ...atFolder, web: true }, tools),
       'claude at this document': claudeArgs(atDocument, tools),
       'codex at a folder': codexArgs(atFolder, tools, { folder, programFolders }),
+      'codex at a folder with the web': codexArgs({ ...atFolder, web: true }, tools, {
+        folder,
+        programFolders,
+      }),
       'codex at this document': codexArgs(atDocument, tools, {
         folder: '/var/folders/06/T/redlines-run.abc',
         programFolders,

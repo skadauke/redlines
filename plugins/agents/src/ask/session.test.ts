@@ -167,6 +167,19 @@ describe('an Ask', () => {
     expect(request.author).toEqual({ handle: 'claude-ada', name: 'Claude', for: 'ada' });
   });
 
+  it('keeps that the agent used the web with its answer, for the bubble to say (#529)', async () => {
+    const { session } = setup({
+      claude: async function* ({ tools }) {
+        await tools.initialize();
+        yield { type: 'web', allowed: true, text: 'Searching the web' };
+        yield { type: 'done', finalText: 'Per the source [1].', web: true };
+      },
+    });
+    session.ask('Is this true?');
+    await done(session);
+    expect(session.state.turns[0]).toMatchObject({ answer: 'Per the source [1].', web: true });
+  });
+
   it('is a question about the selected text, in a prompt that says it changes nothing', async () => {
     const { session, claude } = setup();
     session.ask('What?');

@@ -1,14 +1,14 @@
 // The title bar (design §5.1): part of the page, with the file name centered and three icons and
 // no labels. Files, next to the window buttons, explains itself on hover; View and Review open
-// their menus on hover, and a click on either does what it does most often: the eye switches
-// between Clean and Redlines, the pen turns Track Changes on and off. Each says what a click will
+// their menus on hover, and a click on either does what it does most often: the View button, a page
+// that shows the view, switches between Clean and Redlines, the pen turns Track Changes on and off. Each says what a click will
 // do, with its key, in a hint. The file name says how many words the document has, and when it was
 // last saved, on hover, and a double-click on it renames the document. A small document icon beside
 // it drags the file, as a native title bar's proxy icon does.
 
 import { menuViewOf } from '@redlines/editor';
 import type { MenuView, ViewMode } from '@redlines/editor';
-import { icon } from './icons.ts';
+import { icon, type IconName } from './icons.ts';
 import { createMenu, type Menu } from './menu.ts';
 import { ariaKey, displayKey } from '../shortcuts.ts';
 
@@ -86,11 +86,11 @@ export function documentFactsLine(newestText: string, savedAt: Date | null): str
 
 export const TOOLTIP_MS = 400;
 
-/** The views a click on the View icon switches between: Raw is for the menu. */
+/** The views a click on the View icon switches between: Plain is for the menu. */
 type SwitchView = Exclude<MenuView, 'raw'>;
 
 /** The views' names, and the keys the menu bar gives them (menu-model.ts, which a test compares). */
-const VIEW_NAMES: Record<MenuView, string> = { clean: 'Clean', redlines: 'Redlines', raw: 'Raw' };
+const VIEW_NAMES: Record<MenuView, string> = { clean: 'Clean', redlines: 'Redlines', raw: 'Plain' };
 export const VIEW_KEYS: Record<MenuView, string> = { clean: '⌥⌘1', redlines: '⌥⌘2', raw: '⌥⌘3' };
 /** The same keys as assistive technology names them (`aria-keyshortcuts`). */
 export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
@@ -119,8 +119,12 @@ const KEY_ROWS = {
 export const BAR_PT = 52;
 export const FADE_PT = 64;
 
-/** How long the eye's pupil stays red after a click on it, in milliseconds. */
-export const EYE_FLASH_MS = 450;
+/** The page that the View button draws for each view: the view shows in its icon (#661). */
+const VIEW_ICONS: Record<MenuView, IconName> = {
+  clean: 'viewClean',
+  redlines: 'viewRedlines',
+  raw: 'viewPlain',
+};
 
 /** How far the pointer moves, with the button down, before the document icon's drag starts. */
 const DRAG_START_PX = 4;
@@ -295,7 +299,7 @@ export function createTitleBar(
   // View and Review.
   const end = element('div', 'rl-titlebar-end');
   const viewControl = element('div', 'rl-control');
-  const viewButton = iconButton('View', icon('eye', 18));
+  const viewButton = iconButton('View', icon(VIEW_ICONS[menuViewOf(state.view)], 18));
   viewControl.append(viewButton);
   // What a click on each will do, which the hint under it says, and the icon's description is.
   // (A hint is not shown over its own icon's menu, which is open when the pointer has rested.)
@@ -352,11 +356,11 @@ export function createTitleBar(
 
   /**
    * The one of Clean and Redlines shown last, by any means (the menu, the keys, a click on a change
-   * bar): what a click on the eye goes back to from Raw. Redlines for a window that has shown
+   * bar): what a click on the eye goes back to from Plain. Redlines for a window that has shown
    * neither.
    */
   let lastShown: SwitchView = 'redlines';
-  /** What a click on the eye shows: Clean and Redlines in turn, and from Raw the one shown last. */
+  /** What a click on the eye shows: Clean and Redlines in turn, and from Plain the one shown last. */
   const viewAfterClick = (view: ViewMode): SwitchView => {
     const shownNow = menuViewOf(view);
     if (shownNow === 'raw') return lastShown;
@@ -391,16 +395,6 @@ export function createTitleBar(
     disabled,
     select: () => actions.setView(view),
   });
-  /**
-   * A click on the eye shows that it did something, though Clean and Redlines look alike in a file
-   * with no changes: the pupil is red for a moment (the pen is red as long as it is on).
-   */
-  let flashTimer: ReturnType<typeof setTimeout> | undefined;
-  const flashEye = () => {
-    clearTimeout(flashTimer);
-    viewButton.classList.add('rl-eye-flash');
-    flashTimer = setTimeout(() => viewButton.classList.remove('rl-eye-flash'), EYE_FLASH_MS);
-  };
   const viewMenu: Menu = createMenu({
     label: 'View',
     container: viewControl,
@@ -419,10 +413,9 @@ export function createTitleBar(
       'divider',
       viewItem('raw', VIEW_NAMES.raw, keyShown('raw', VIEW_KEYS.raw)),
     ],
-    // A click switches Clean and Redlines; Raw is for the menu.
+    // A click switches Clean and Redlines; Plain is for the menu.
     activate: (event) => {
       actions.setView(viewAfterClick(state.view));
-      flashEye();
       // The pointer is still there: what the next click will do is said once it has rested.
       if (event.detail > 0) viewTip.arm();
     },
@@ -490,6 +483,7 @@ export function createTitleBar(
   };
 
   let penTracking: boolean | null = null;
+  let shownIcon: MenuView = menuViewOf(state.view);
   const update = (next: TitleBarState) => {
     state = next;
     titleName.textContent = next.name;
@@ -501,6 +495,12 @@ export function createTitleBar(
     docIcon.title = next.dirty ? 'Drag to copy the file as saved' : 'Drag to copy the file';
 
     drawHints(next);
+    // The button is a page that shows the view: lines of text, a red bar in the margin, or a #.
+    const shownNow = menuViewOf(next.view);
+    if (shownIcon !== shownNow) {
+      shownIcon = shownNow;
+      viewButton.replaceChildren(icon(VIEW_ICONS[shownNow], 18));
+    }
     reviewButton.setAttribute('aria-pressed', String(next.tracking));
 
     if (penTracking !== next.tracking) {
@@ -526,7 +526,6 @@ export function createTitleBar(
     height: () => bar.getBoundingClientRect().height,
     room: () => (bar.getBoundingClientRect().height * FADE_PT) / BAR_PT,
     destroy() {
-      clearTimeout(flashTimer);
       for (const tip of tips) tip.destroy();
       forgetPress?.();
       for (const menu of menus) menu.destroy();

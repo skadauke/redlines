@@ -7,9 +7,14 @@
 // `deps`.
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
-import type { AgentState } from '@redlines/plugin-api';
+import type { AgentModel, AgentState } from '@redlines/plugin-api';
 import { privacyMessage } from './blocked-message.ts';
 import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
+import { defaultAgentRow, type DefaultChoice } from './default-agent-field.ts';
+import { modelField } from './model-field.ts';
+import { isNewer } from './versions.ts';
+import { handleField } from './handle-field.ts';
+import { displayName, handleOf } from './handles.ts';
 import { renderOpenClaw, type OpenClawDeps } from './openclaw-pane.ts';
 import { skillControls, type PaneSkill } from './skill-controls.ts';
 
@@ -20,6 +25,14 @@ export interface AgentsPaneSettings {
   agentScope: 'document' | 'folder' | 'everything';
   /** What the person allowed each agent, keyed `agent|folder`. */
   consent: Record<string, 'document' | 'folder' | 'everything' | 'no'>;
+  /** The handle the person gave each agent, by id (#558). */
+  agentHandles: Record<string, string>;
+  /** The agent an Ask that names none goes to (#528); none chosen means the first ready one. */
+  defaultAgent?: string | null;
+  /** The model chosen for each agent, by id (#530); an agent with none runs its default. */
+  agentModels?: Record<string, string>;
+  /** Whether agents may use the web (#529): one switch for every agent. */
+  webAccess?: boolean;
 }
 
 /** An agent the person added, as the pane shows it. */
@@ -51,10 +64,19 @@ export interface SetupUnderWay {
 export interface PaneAgent {
   id: string;
   name: string;
+  /** The models the agent can be told to run (#530); without any, the card has no Model field. */
+  models?: readonly AgentModel[];
   /** Installs the Redlines skill for the agent. Without it, the row says nothing of a skill. */
   skill?: PaneSkill;
   /** `fresh` asks the program again, where the host keeps what it found. */
   detect(fresh?: boolean): Promise<AgentState>;
+  /**
+   * The newest version of the agent's program, as `x.y.z`, which is what its updater installs, or
+   * a rejection when it can't be found (offline). Update shows when it is newer than the one
+   * installed (#527). `fresh` skips what the host kept. Without it, Update shows only for a program
+   * that is too old.
+   */
+  latest?(fresh?: boolean): Promise<string>;
   /** Runs the agent's own updater, for the way it was installed, which the host knows. */
   update?(): Promise<SetupResult>;
   /** Runs the agent's own login, which opens the browser; Redlines never sees the credentials. */
@@ -141,6 +163,9 @@ const HOME_NOTE =
 export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): () => void {
   let alive = true;
   const names = new Map(deps.agents.map(({ id, name }) => [id, name]));
+  /** What an agent is shown as: its handle, capitalized; an agent that isn't listed, as it is. */
+  const shownName = (id: string) =>
+    names.has(id) ? displayName(handleOf(id, deps.settings().agentHandles)) : id;
 
   // A login that needed a terminal ends where the person finishes it, outside this window: coming
   // back to it, the pane looks again, once, for each agent that waits on that and has nothing
@@ -154,8 +179,45 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   const looks: { id: string; check: AgentRow['check']; busy: () => boolean }[] = [];
   window.addEventListener('focus', comeBack);
 
+  /** The handles every agent has now: Redlines' own, and the OpenClaw agents' names. */
+  const takenHandles = async (): Promise<Record<string, string>> => {
+    const taken: Record<string, string> = {};
+    for (const { id } of deps.agents) taken[id] = handleOf(id, deps.settings().agentHandles);
+    const others = deps.openclaw ? await deps.openclaw.list().catch(() => []) : [];
+    for (const { id, name } of others) taken[id] = name.toLowerCase();
+    return taken;
+  };
+
+  // The Default agent row comes first and shows once more than one agent is set up: a program that
+  // was found, or an OpenClaw agent. Each card reports what it found, and the list is drawn again.
+  const found = new Map<string, boolean>();
+  let openclawChoices: DefaultChoice[] = [];
+  const defaultRow = defaultAgentRow({
+    chosen: () => deps.settings().defaultAgent,
+    save: (id) => deps.update({ defaultAgent: id }),
+  });
+  const drawDefault = () => {
+    if (!alive) return;
+    const mine = deps.agents
+      .filter(({ id }) => found.get(id) === true)
+      .map(({ id }) => ({ id, name: shownName(id) }));
+    defaultRow.show([...mine, ...openclawChoices]);
+  };
+  container.append(defaultRow.row);
+
   for (const agent of deps.agents) {
-    const drawn = agentRow(agent, deps, () => alive, waiting);
+    const drawn = agentRow(
+      agent,
+      deps,
+      () => alive,
+      waiting,
+      takenHandles,
+      (isFound) => {
+        found.set(agent.id, isFound);
+        drawDefault();
+      },
+      drawDefault,
+    );
     looks.push({
       id: agent.id,
       check: (fresh, options) => drawn.check(fresh, options),
@@ -168,8 +230,31 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   }
 
   if (deps.openclaw) {
+    const openclaw = deps.openclaw;
+    const listed = (agents: readonly { id: string; name: string }[]) => {
+      openclawChoices = agents.map(({ id, name }) => ({
+        id,
+        name: displayName(name.toLowerCase()),
+      }));
+      drawDefault();
+    };
+    void openclaw.list().then(listed, () => {});
+    // An agent added or removed here changes the list at once.
+    const tracked: OpenClawDeps = {
+      ...openclaw,
+      add: async (input) => {
+        const agents = await openclaw.add(input);
+        listed(agents);
+        return agents;
+      },
+      remove: async (id) => {
+        const agents = await openclaw.remove(id);
+        listed(agents);
+        return agents;
+      },
+    };
     container.append(
-      renderOpenClaw(deps.openclaw, {
+      renderOpenClaw(tracked, {
         alive: () => alive,
         // What an agent was allowed isn't what another of its name is: Remove takes the answers.
         forgetAnswers: (agent) => {
@@ -179,6 +264,7 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
           deps.update({ consent: Object.fromEntries(kept) });
           drawRemembered();
         },
+        handles: () => deps.agents.map(({ id }) => handleOf(id, deps.settings().agentHandles)),
         ...(deps.showGeneral ? { showGeneral: () => deps.showGeneral?.() } : {}),
       }),
     );
@@ -256,6 +342,27 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   scopeExtras.append(scopeNote, holdingBack);
   container.append(row('What agents may read', scope, scopeExtras));
 
+  // Web access (#529): one switch for every agent, off by default. Off, an agent that wants the web
+  // asks, and Allow Always turns this on.
+  const web = el('input');
+  web.type = 'checkbox';
+  web.setAttribute('aria-label', 'Let agents use the web');
+  web.checked = deps.settings().webAccess === true;
+  web.addEventListener('change', () => deps.update({ webAccess: web.checked }));
+  const webLabel = el('label', 'rl-pref-choice');
+  webLabel.append(web, ' Let agents use the web');
+  container.append(
+    row(
+      'Web access',
+      webLabel,
+      el(
+        'div',
+        'rl-pref-note',
+        'Lets Claude Code and Codex look things up and check sources. Off, they ask first: Allow Once, or Allow Always, which turns this on. An agent you added can’t use the web.',
+      ),
+    ),
+  );
+
   // The remembered answers: a row only while there are any.
   let remembered: HTMLElement | null = null;
   const drawRemembered = () => {
@@ -279,16 +386,12 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
       // it in a folder is allowing it to be sent the document and the thread, not to read.
       const sent = !names.has(agent) && answer === 'folder';
       what.append(
-        el(
-          'span',
-          undefined,
-          `${names.get(agent) ?? agent} · ${sent ? ANSWER_SENT : ANSWERS[answer]}`,
-        ),
+        el('span', undefined, `${shownName(agent)} · ${sent ? ANSWER_SENT : ANSWERS[answer]}`),
         el('span', 'rl-pref-note', folder),
       );
       const forget = el('button', 'rl-pref-button', 'Forget');
       forget.type = 'button';
-      forget.setAttribute('aria-label', `Forget ${names.get(agent) ?? agent} for ${folder}`);
+      forget.setAttribute('aria-label', `Forget ${shownName(agent)} for ${folder}`);
       forget.addEventListener('click', () => {
         const rest = { ...deps.settings().consent };
         delete rest[key];
@@ -358,6 +461,9 @@ function agentRow(
   deps: AgentsPaneDeps,
   alive: () => boolean,
   waiting: Set<string>,
+  taken: () => Promise<Record<string, string>>,
+  looked: (found: boolean) => void,
+  renamed: () => void,
 ): AgentRow {
   const status = el('div', 'rl-pref-status', 'Checking…');
   status.setAttribute('role', 'status');
@@ -377,7 +483,37 @@ function agentRow(
     fallbackFocus: () => actions.querySelector('button'),
   });
   const rest = el('div');
-  rest.append(where, help, install, actions, said, ...skillUi.nodes);
+  rest.append(
+    where,
+    help,
+    install,
+    actions,
+    said,
+    handleField(agent.id, {
+      handles: () => deps.settings().agentHandles,
+      save: (agentHandles) => {
+        deps.update({ agentHandles });
+        renamed();
+      },
+      taken,
+      alive,
+    }),
+    ...(agent.models?.length
+      ? [
+          modelField(agent.name, {
+            models: agent.models,
+            chosen: () => deps.settings().agentModels?.[agent.id],
+            save: (model) => {
+              const rest = { ...deps.settings().agentModels };
+              if (model === undefined) delete rest[agent.id];
+              else rest[agent.id] = model;
+              deps.update({ agentModels: rest });
+            },
+          }),
+        ]
+      : []),
+    ...skillUi.nodes,
+  );
   const root = row(agent.name, status, rest);
 
   /** The latest question asked, so that an older answer never draws over a newer one. */
@@ -385,6 +521,8 @@ function agentRow(
   /** An update or a sign-in is under way: nothing else is started meanwhile. */
   let activity: 'update' | 'sign-in' | null = null;
   let last: AgentState | null = null;
+  /** A version newer than the one installed, when the host found one (#527). */
+  let newer: string | undefined;
 
   /** A button of the row, which waits while the row says something is happening (`busy`). */
   const make = (text: string, label: string, run: () => void, busy: boolean) => {
@@ -402,10 +540,16 @@ function agentRow(
       : '';
     const tooOld = state?.found === true && !state.signedIn && state.reason === 'too-old';
     const signedOut = state?.found === true && !state.signedIn && state.reason === 'signed-out';
-    const canUpdate = tooOld && agent.update !== undefined;
+    // A newer version is kept through a look, so that the button doesn't come and go.
+    const behind = newer !== undefined && (state === null || state.found);
+    const canUpdate = (tooOld || behind) && agent.update !== undefined;
     const canSignIn = signedOut && agent.signIn !== undefined;
     // The button says what to do, so help that told the person what to type is left out.
     help.textContent = canSignIn ? '' : (state?.help ?? '');
+    // Update is offered for a program that is behind, and says which version is out.
+    if (behind && !tooOld && !canSignIn && shown === undefined) {
+      help.textContent = `Version ${newer} is available.`;
+    }
     if (activity === 'sign-in') help.textContent = 'Finish in your browser.';
     const command = state !== null && !state.found ? state.install : undefined;
     // While the row says something is happening, its buttons wait.
@@ -448,6 +592,8 @@ function agentRow(
       .then((state) => {
         if (!alive() || mine !== asked || activity !== null) return;
         draw(state);
+        lookForNewer(state, mine, fresh);
+        looked(state?.found === true && state.signedIn);
         skillUi.look(state?.found === true);
         const ready = state?.found === true && state.signedIn;
         if (ready) {
@@ -465,6 +611,31 @@ function agentRow(
           said.textContent = `The update ran, but ${was} is still too old.${words ? ` It said: ${words}` : ''}`;
         }
       });
+  };
+
+  /**
+   * Asks for the newest version, once the program is found and says its version: Update shows only
+   * when it is newer. A look that fails (offline) leaves things as they are, with no word of it.
+   */
+  const lookForNewer = (state: AgentState | null, mine: number, fresh: boolean) => {
+    if (!agent.latest || state?.found !== true || state.version === undefined) {
+      newer = undefined;
+      return;
+    }
+    const installed = state.version;
+    let asking: Promise<string>;
+    try {
+      asking = agent.latest(fresh);
+    } catch {
+      newer = undefined;
+      return;
+    }
+    const settle = (version: string | undefined) => {
+      if (!alive() || mine !== asked || activity !== null) return;
+      newer = version !== undefined && isNewer(version, installed) ? version : undefined;
+      draw(last);
+    };
+    asking.then(settle, () => settle(undefined));
   };
 
   const copy = (text: string) => {

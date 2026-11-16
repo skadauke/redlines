@@ -74,7 +74,7 @@ function caretCell(state: EditorState): { table: Table; row: Row; cell: Cell } |
 /**
  * The rectangle of cells a selection makes: its two ends in two different cells of one table, every
  * cell in the rows and columns between them. Null for a caret, for text inside one cell, for a
- * selection that reaches out of the table (which is a reach, `reach.ts`) and in Raw, which draws no
+ * selection that reaches out of the table (which is a reach, `reach.ts`) and in Plain, which draws no
  * cells. A selection that covers a table whole and more is no rectangle: it deletes the table.
  */
 export function rectOf(
@@ -239,7 +239,7 @@ export type Scope = 'cell' | 'row' | 'column' | 'table';
 /**
  * Selects the caret's cell (its text), row, column or the whole table, as a rectangle (so that
  * `whole` reports it). A cell its row lacks has no text, so selecting it keeps the caret there.
- * False where the selection has no cell, or in Raw.
+ * False where the selection has no cell, or in Plain.
  */
 export function selectRect(view: EditorView, scope: Scope): boolean {
   const { state } = view;

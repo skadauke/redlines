@@ -6,7 +6,7 @@ import type { MenuView } from '@redlines/editor';
 const LABELS = {
   clean: 'Clean',
   redlines: 'Redlines',
-  raw: 'Raw',
+  raw: 'Plain',
 } satisfies Record<MenuView, string>;
 
 /** The views the editor offers, in order, with the words the app's View menu uses. */

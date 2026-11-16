@@ -203,14 +203,15 @@ describe('⌫ and ⌦ on whole columns', () => {
       {
         // The column's cells are the cells the rows have: the row that lacks one has no cell there to
         // clear. Track Changes cannot write the column's deletion while a row lacks it, and says so.
-        name: 'a column that one row lacks: deleted from the rows that have it, refused in words when tracked',
+        name: 'a column that one row lacks: deleted from the rows that have it, a replacement of the table when tracked',
         doc: '| a | b | [c |⏎| - | - | - |⏎| 11 | 12 | 13 |⏎| 21 | 22 |⏎| 31 | 32 | 33] |',
         keys: ['Backspace', 'Backspace'],
         off: { file: '| a | b |⏎| - | - |⏎| 11 | 12 |⏎| 21 | 22 |⏎| 31 | 32 |' },
         on: {
-          refusal: 'A row of this table has fewer cells than its header. Fill it in first.',
-          // The refused key wrote nothing: the column is as the first ⌫ left it.
-          file: '| a | b | <del c> |⏎| - | - | - |⏎| 11 | 12 | <del 13> |⏎| 21 | 22 |⏎| 31 | 32 | <del 33> |',
+          // Track Changes can't write the column's deletion while a row lacks it: the second key
+          // writes the plain deletion as a replacement of the table.
+          newest: '| a | b |⏎| - | - |⏎| 11 | 12 |⏎| 21 | 22 |⏎| 31 | 32 |⏎',
+          original: '| a | b | c |⏎| - | - | - |⏎| 11 | 12 | 13 |⏎| 21 | 22 |⏎| 31 | 32 | 33 |',
         },
       },
       {
@@ -368,8 +369,9 @@ describe('another person’s pending change in what goes (rules 3 and 6)', () =>
         off: { newest: WITHOUT(R1, R3) },
         // The refused key wrote nothing: the file is the one it started from.
         on: {
-          refusal: "bo's pending change is in this row. Decide it first.",
-          file: G(R1, '| <del 21> | <del 22> | <del 23> |'),
+          // Their change stays theirs, in the old text of a replacement of the table.
+          newest: `${WITHOUT(R1, R3)}⏎`,
+          original: G(R1, R2),
         },
       },
       {
@@ -379,10 +381,7 @@ describe('another person’s pending change in what goes (rules 3 and 6)', () =>
         others: 'bo',
         off: { newest: WITHOUT(R1, R3) },
         // Your deletion inside their insertion is all the first key wrote.
-        on: {
-          refusal: "bo's pending change is in this row. Decide it first.",
-          file: G(R1, '| <ins><del x></ins> |  |  |'),
-        },
+        on: { newest: `${WITHOUT(R1, R3)}⏎`, original: G(R1, '|  |  |  |') },
       },
       {
         name: 'a column, after the first ⌫',
@@ -392,8 +391,9 @@ describe('another person’s pending change in what goes (rules 3 and 6)', () =>
         off: { newest: '| a | c |⏎| - | - |⏎| 11 | 13 |⏎| 21 | 23 |⏎| 31 | 33 |' },
         // Only the first key wrote: the column is struck, and the second left it as it was.
         on: {
-          refusal: "bo's pending change is in this column. Decide it first.",
-          file: '| a | <del b> | c |⏎| - | - | - |⏎| 11 | <del 12> | 13 |⏎| 21 | <del 22> | 23 |⏎| 31 | <del 32> | 33 |',
+          newest: '| a | c |⏎| - | - |⏎| 11 | 13 |⏎| 21 | 23 |⏎| 31 | 33 |⏎',
+          original:
+            '| a | b | c |⏎| - | - | - |⏎| 11 | 12 | 13 |⏎| 21 | 22 | 23 |⏎| 31 | 32 | 33 |',
         },
       },
       {
@@ -403,8 +403,8 @@ describe('another person’s pending change in what goes (rules 3 and 6)', () =>
         others: 'bo',
         off: { newest: 'Intro.⏎⏎After.⏎' },
         on: {
-          refusal: "bo's pending change is in this table. Decide it first.",
-          file: 'Intro.⏎⏎|  |  |⏎| - | - |⏎|  | <del 12> |⏎|  |  |⏎⏎After.',
+          newest: 'Intro.⏎⏎After.⏎',
+          original: 'Intro.⏎⏎|  |  |⏎| - | - |⏎|  | 12 |⏎|  |  |⏎⏎After.⏎',
         },
       },
     ]),
@@ -426,11 +426,16 @@ describe('what refuses the second ⌫ in either mode (rule 2)', () => {
         on: { refusal: 'Accept or reject the column changes in this table first.' },
       },
       {
-        name: 'a column, while a row is pending deleted, after the first ⌫',
+        name: 'a column, while a row is pending deleted, after the first ⌫ (plain: refused; tracked: widened)',
         doc: `| a | [b | c |⏎| - | - | - |⏎| 1 | 2 | 3 |⏎| 5 | 6] | 7 |⏎⏎${ROW}`,
         keys: ['Backspace', 'Backspace'],
         off: { refusal: 'Accept or reject the row changes in this table first.' },
-        on: { refusal: 'Accept or reject the row changes in this table first.' },
+        // With Track Changes on the second key writes a replacement of the table, which keeps the
+        // pending row deletion in its old text.
+        on: {
+          newest: '| a | c |⏎| - | - |⏎| 1 | 3 |⏎| 5 | 7 |⏎⏎',
+          original: '| a | b | c |⏎| - | - | - |⏎| 1 | 2 | 3 |⏎| 3 | 4 |⏎| 5 | 6 | 7 |⏎',
+        },
       },
     ]),
   );

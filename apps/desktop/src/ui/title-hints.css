@@ -1,0 +1,32 @@
+/* The hover hint that stands in for a `title` (title-hints.ts): the notifications' grays, at the
+   interface's small size, never the system's black bubble. See docs/widgets.md. */
+
+.rl-title-hint {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px 10px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 8px;
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink, CanvasText);
+  font-family: var(--rl-font-ui);
+  font-size: var(--rl-size-ui-small);
+  line-height: 1.3;
+  pointer-events: none;
+  animation: rl-title-hint-appear 90ms ease-out;
+}
+
+@keyframes rl-title-hint-appear {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rl-title-hint {
+    animation: none;
+  }
+}

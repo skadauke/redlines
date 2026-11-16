@@ -4,14 +4,116 @@
 // ask it without loading the window's host (host.ts) too.
 
 /**
- * The extensions of the documents Redlines opens (format §9.1), lowercase: Markdown, its R Markdown
- * and Quarto dialects, and plain text, which is read as Markdown is.
+ * The kinds of document: Markdown has three views, Track Changes and a ledger; Plain-only has
+ * none of them.
  */
-export const DOCUMENT_EXTENSIONS: readonly string[] = ['md', 'markdown', 'qmd', 'rmd', 'txt'];
+export type DocumentKind = 'markdown' | 'plain-only';
+
+/** The dialects of Markdown: GitHub's, and Pandoc's, which R Markdown and Quarto write. */
+export type MarkdownDialect = 'gfm' | 'pandoc';
+
+/**
+ * The extensions of Markdown documents by dialect (format §9.1), lowercase: Markdown, and the R
+ * Markdown and Quarto dialects. The dialect is for what differs in how a document is written, such
+ * as an image's size. `src-tauri/src/project.rs` holds the same table, and a test says they agree
+ * (`src-tauri/src/document_types.rs`).
+ */
+export const MARKDOWN_EXTENSIONS: Readonly<Record<MarkdownDialect, readonly string[]>> = {
+  gfm: ['md', 'markdown'],
+  pandoc: ['qmd', 'rmd'],
+};
+
+/** The dialect of a Markdown document by its name or path; null for any other file. */
+export function markdownDialect(name: string): MarkdownDialect | null {
+  const own = extension(name);
+  for (const dialect of ['gfm', 'pandoc'] as const) {
+    if (MARKDOWN_EXTENSIONS[dialect].includes(own)) return dialect;
+  }
+  return null;
+}
+
+/**
+ * The extensions of the Plain-only documents, by group (format §9.1): text and code, which open in
+ * Plain with no Clean or Redlines view, no Track Changes and no ledger.
+ */
+export const PLAIN_ONLY_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
+  text: ['txt', 'text', 'log'],
+  data: [
+    'json',
+    'jsonc',
+    'yaml',
+    'yml',
+    'toml',
+    'ini',
+    'cfg',
+    'conf',
+    'env',
+    'csv',
+    'tsv',
+    'xml',
+    'plist',
+  ],
+  web: [
+    'html',
+    'htm',
+    'css',
+    'scss',
+    'less',
+    'js',
+    'mjs',
+    'cjs',
+    'jsx',
+    'ts',
+    'mts',
+    'cts',
+    'tsx',
+    'svg',
+  ],
+  code: [
+    'py',
+    'rb',
+    'go',
+    'rs',
+    'swift',
+    'java',
+    'kt',
+    'c',
+    'h',
+    'cc',
+    'cpp',
+    'hpp',
+    'cs',
+    'php',
+    'lua',
+    'r',
+    'sql',
+    'sh',
+    'bash',
+    'zsh',
+    'ps1',
+  ],
+};
+
+/** Every extension of the documents Redlines opens, lowercase. */
+export const DOCUMENT_EXTENSIONS: readonly string[] = [
+  ...MARKDOWN_EXTENSIONS.gfm,
+  ...MARKDOWN_EXTENSIONS.pandoc,
+  ...Object.values(PLAIN_ONLY_EXTENSIONS).flat(),
+];
+
+/**
+ * The kind of a document by its name or path, from the extension alone and never the content;
+ * null for a file that isn't a document.
+ */
+export function documentKind(name: string): DocumentKind | null {
+  const own = extension(name);
+  if (markdownDialect(name) !== null) return 'markdown';
+  return DOCUMENT_EXTENSIONS.includes(own) ? 'plain-only' : null;
+}
 
 /** Whether a file is a document, which Redlines opens and edits, by its name or its path. */
 export function isDocument(name: string): boolean {
-  return DOCUMENT_EXTENSIONS.includes(extension(name));
+  return documentKind(name) !== null;
 }
 
 /**

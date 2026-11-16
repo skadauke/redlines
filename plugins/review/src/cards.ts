@@ -282,8 +282,8 @@ class Card implements TooltipView {
 const CLICK_SLOP = 4;
 
 /**
- * Change cards on hover, pinned by a click, in the Redlines view only: in Simple the text reads as
- * accepted, and a card over plain-looking words would surprise. And `close`, which puts away the
+ * Change cards on hover in the full markup, and pinned by a click there and in the simple look,
+ * where the text reads as accepted and a card opens only when asked for. And `close`, which puts away the
  * card that shows, as a zoom change does: it was placed for the old layout.
  */
 export function cards(ctx: ReviewContext): {
@@ -297,6 +297,12 @@ export function cards(ctx: ReviewContext): {
   /** The change whose card is being pinned. */
   let pinning: Found | null = null;
   const redlines = (view: EditorView) => view.state.field(viewModeField) === 'redlines';
+  /** Where a click opens a card: the full markup, and the simple look, where the card is what tells
+   * what was changed, since a deletion is hidden (#664). Hover shows cards in the full markup only. */
+  const clickable = (view: EditorView) => {
+    const mode = view.state.field(viewModeField);
+    return mode === 'redlines' || mode === 'simple';
+  };
   /** The change under the pointer: the deleted text it is over, else the text at `pos`. */
   const pointedAt = (view: EditorView, pos: number, side: -1 | 1): Found | null => {
     const changes = changesOf(ctx);
@@ -351,8 +357,8 @@ export function cards(ctx: ReviewContext): {
   };
   const extension: Extension = [
     hover,
-    // A card over text that now reads as accepted would surprise, and its buttons could only switch
-    // back: choosing Simple puts it away.
+    // A card that hovering opened over the full markup is put away when Simple is chosen: the text
+    // now reads as accepted. A click in Simple opens one again.
     EditorState.transactionExtender.of((tr) =>
       tr.state.field(viewModeField) === 'simple' &&
       tr.startState.field(viewModeField) !== 'simple' &&
@@ -384,9 +390,9 @@ export function cards(ctx: ReviewContext): {
       mousedown(event, view) {
         const target = event.target instanceof Element ? event.target : null;
         const drawn = target?.closest(
-          '.rl-ins, .rl-del, .rl-fmt, .rl-ins-row, .rl-ins-col, .rl-struck, .rl-ghost',
+          '.rl-ins, .rl-ins-plain, .rl-ins-row-plain, .rl-ins-col-plain, .rl-del, .rl-fmt, .rl-ins-row, .rl-ins-col, .rl-struck, .rl-ghost',
         );
-        if (event.button !== 0 || !drawn || !redlines(view)) return;
+        if (event.button !== 0 || !drawn || !clickable(view)) return;
         const found = changeOf(view, changesOf(ctx), drawn);
         if (!found) return;
         const { doc } = view.state;
@@ -395,7 +401,7 @@ export function cards(ctx: ReviewContext): {
           const moved = Math.hypot(up.clientX - event.clientX, up.clientY - event.clientY);
           if (moved > CLICK_SLOP) return;
           setTimeout(() => {
-            if (view.dom.isConnected && view.state.doc === doc && redlines(view)) pin(view, found);
+            if (view.dom.isConnected && view.state.doc === doc && clickable(view)) pin(view, found);
           });
         };
         win.addEventListener('mouseup', release, { once: true });
