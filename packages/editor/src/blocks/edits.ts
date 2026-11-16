@@ -609,6 +609,13 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       caretAt: start,
     };
   }
+  // The start of a later paragraph of the item: an empty paragraph above it, in the item, as in
+  // any paragraph (Return, and Shift-Return which is Return here, never a new item; #621).
+  if (head <= start && !first) {
+    const over = lineAbove(state, state.doc.lineAt(block.lines.from));
+    if (over && BLANK.test(over.text.replace(/^[ \t>]*/, '')))
+      return returnAtStart(state, block, start);
+  }
   if (head >= end) {
     // A paragraph of the item comes after this one: an empty paragraph in the item, between them.
     if (!lastInItem(state, block, item)) return returnAtEnd(state, block);

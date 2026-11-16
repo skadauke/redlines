@@ -81,6 +81,13 @@ describe('Shift-Return', () => {
         on: { file: 'One two.⏎⏎Next.', caret: 'One two.<ins><split>\\⏎‸·</ins>⏎⏎Next.' },
       },
       {
+        name: "at the start of an item's second paragraph: an empty paragraph above, no new item (#621)",
+        doc: '- a⏎⏎  ‸b',
+        keys: ['Shift-Enter'],
+        off: { caret: '- a⏎⏎  ⏎⏎  ‸b' },
+        on: { caret: '- a⏎⏎  <split>⏎⏎  ‸b' },
+      },
+      {
         name: 'in a list item, at its end: an empty line at the text column',
         doc: '- One two.‸⏎⏎Next.',
         keys: ['Shift-Enter'],
