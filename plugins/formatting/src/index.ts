@@ -943,7 +943,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       if (rawTracked(state)) return RAW_FORMAT;
       // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
       if (
-        menu === 'paragraph' &&
+        menu !== 'format' &&
         selectionInTable(state) &&
         !(WRAPS.has(fields.id) && reachesOut(state))
       ) {

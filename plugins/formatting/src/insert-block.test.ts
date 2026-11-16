@@ -39,7 +39,7 @@ const at = (editor: Editor, text: string, plus = 0) => editor.getDoc().indexOf(t
 const DOC = 'First paragraph.\n\nSecond paragraph.\n\nThird.\n';
 
 describe.each([false, true])('where an inserted block goes (tracking %s)', (tracking) => {
-  const TABLE = /\| Column \| Column \|/;
+  const TABLE = /\|  \|  \|/;
 
   it('takes the place of an empty paragraph', () => {
     const { editor } = mount('One.\n\n\n\nTwo.\n', tracking);
@@ -53,8 +53,8 @@ describe.each([false, true])('where an inserted block goes (tracking %s)', (trac
     select(editor, at(editor, 'Second'));
     expect(editor.commands.run('block.table')).toBe(true);
     const text = seen(editor);
-    expect(text.indexOf('| Column')).toBeLessThan(text.indexOf('Second paragraph.'));
-    expect(text.indexOf('| Column')).toBeGreaterThan(text.indexOf('First paragraph.'));
+    expect(text.indexOf('|  |  |')).toBeLessThan(text.indexOf('Second paragraph.'));
+    expect(text.indexOf('|  |  |')).toBeGreaterThan(text.indexOf('First paragraph.'));
     expect(text).toMatch(TABLE);
   });
 
