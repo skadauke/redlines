@@ -1,6 +1,7 @@
 // The editor's public interface. Hosts (the desktop app, the React component, VS Code) and
 // plugins such as @redlines/review use only what is here.
 
+import type { UntrackedAsker } from './tracked/ask.ts';
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
@@ -302,6 +303,13 @@ export interface EditorOptions {
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+  /**
+   * The alert of an edit that no mark can hold: an edit in the YAML front matter, and typing in Raw,
+   * with Track Changes on. The host shows a sheet that offers to make the edit without tracking
+   * (`ask`, answered `make` or `cancel`) and keeps "Don't ask again" (`skip`). The edit waits for the
+   * answer. Without it those edits are refused through `onNotice`.
+   */
+  askUntracked?: UntrackedAsker;
   /**
    * Called when Undo or Redo, by key or through `undo()` and `redo()`, finds nothing to take and
    * nothing to say: the host beeps, as the Mac does. The key is taken all the same, so that it
