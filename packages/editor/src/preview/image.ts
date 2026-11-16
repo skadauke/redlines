@@ -248,6 +248,9 @@ class ImageWidget extends WidgetType {
     frame.addEventListener('pointerenter', placeHandles);
     frame.addEventListener('pointermove', placeHandles);
     for (const side of ['left', 'right'] as const) {
+      // The edge on the side an aligned image is anchored to stays where it is, so a handle there
+      // would widen the image without the edge following the pointer (#633): there is none.
+      if (this.own && this.align === side) continue;
       const handle = document.createElement('span');
       handle.className = `rl-image-handle rl-image-handle-${side}`;
       handle.title = 'Drag to resize';
@@ -417,7 +420,7 @@ const MARKER = new RegExp(
  * pending change around it. Track Changes on writes the markers beside an image it adds, which must
  * not draw it at the left where the same image is centered with it off.
  */
-function aloneInItsLine(state: EditorState, node: SyntaxNode): boolean {
+export function aloneInItsLine(state: EditorState, node: { from: number; to: number }): boolean {
   const line = state.doc.lineAt(node.from);
   if (node.to > line.to) return false;
   const around = state.sliceDoc(line.from, node.from) + state.sliceDoc(node.to, line.to);
