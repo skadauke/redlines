@@ -118,7 +118,13 @@ jobs:
           }
           # The redlines program bundles packages/cli and packages/format.
           flag rust '^(apps/desktop/src-tauri/|apps/desktop/redlines/|packages/cli/|packages/format/)'
-          flag quicklook '^(apps/desktop/quicklook/|packages/format/|apps/desktop/scripts/build-quicklook)'
+          # On a pull request, only a change to the Quick Look code itself runs it, to spare the
+          # Macs; main's runs also take packages/format, which the renderer bundles.
+          if [ "$EVENT" = pull_request ]; then
+            flag quicklook '^(apps/desktop/quicklook/|apps/desktop/scripts/build-quicklook)'
+          else
+            flag quicklook '^(apps/desktop/quicklook/|packages/format/|apps/desktop/scripts/build-quicklook)'
+          fi
           flag ui '^(apps/desktop/src/|apps/desktop/journeys/|plugins/|packages/editor/|packages/format/)'
 
   check:
