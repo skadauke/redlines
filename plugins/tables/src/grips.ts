@@ -78,25 +78,29 @@ export const GRIPS_STYLE = `
 .rl-grips > * { pointer-events: auto; }
 .rl-plus, .rl-col-plus {
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  width: 18px; height: 22px; border-radius: 4px; user-select: none;
-  color: var(--rl-ink-3); font-size: var(--rl-size-ui); line-height: 1;
+  width: 18px; height: 22px; user-select: none; font-size: var(--rl-size-ui); line-height: 1;
 }
 .rl-edge-add, .rl-table-select {
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  border-radius: 4px; cursor: pointer; user-select: none; background: var(--rl-rule); color: var(--rl-ink);
-  border: 1px solid transparent; font-size: var(--rl-size-ui); line-height: 1;
+  user-select: none; font-size: var(--rl-size-ui); line-height: 1;
 }
-.rl-edge-add:hover, .rl-table-select:hover { border-color: var(--rl-ink-3); }
+/* The + between rows and columns, the strips at the table's edge and the select-table square are one
+   widget: the card's ground, a rule, the ink's gray, and under the pointer the pressed ground (docs/widgets.md). */
+.rl-plus, .rl-col-plus, .rl-edge-add, .rl-table-select {
+  cursor: pointer; border: 1px solid var(--rl-rule); border-radius: 6px;
+  background: var(--rl-card); color: var(--rl-ink-2);
+}
+.rl-plus:hover, .rl-col-plus:hover, .rl-edge-add:hover, .rl-table-select:hover {
+  background: var(--rl-pressed); color: var(--rl-ink); border-color: var(--rl-ink-3);
+}
+.rl-edge-add:hover { background: color-mix(in srgb, var(--rl-pressed) 60%, var(--rl-card)); }
 .rl-edge-col { width: ${EDGE_SIZE}px; }
-.rl-edge-row { height: ${EDGE_SIZE}px; }
 .rl-table-select { width: ${CORNER_SIZE}px; height: ${CORNER_SIZE}px; }
 .rl-table-select::before {
   content: ''; box-sizing: border-box; width: 8px; height: 8px; border: 1.5px solid currentColor; border-radius: 2px;
   background: linear-gradient(currentColor, currentColor) center / 1.5px 100% no-repeat,
     linear-gradient(currentColor, currentColor) center / 100% 1.5px no-repeat;
 }
-.rl-plus:hover, .rl-col-plus:hover { background: var(--rl-rule); color: var(--rl-ink); }
-.rl-plus, .rl-col-plus { cursor: pointer; border: 1px solid var(--rl-rule); background: var(--rl-page); }
 /* A handle is a small pill at the table's edge: the element is its reach (wider than the pill, so it
    is easy to hit), the pill is its ::before, which grows when the pointer is over it to say it can be
    dragged. A row's and a column's are the same pill, turned. */
@@ -112,7 +116,7 @@ export const GRIPS_STYLE = `
 }
 .rl-grip::before { width: 5px; height: 16px; }
 .rl-col-grip::before { width: 16px; height: 5px; }
-.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-ink-2); }
+.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-pressed); border-color: var(--rl-ink); }
 .rl-grip:hover::before { width: 8px; height: 22px; }
 .rl-col-grip:hover::before { width: 22px; height: 8px; }
 .rl-grip:active, .rl-col-grip:active { cursor: grabbing; }
@@ -123,14 +127,14 @@ export const GRIPS_STYLE = `
 .rl-drop-line[hidden] { display: none; }
 .rl-drag-copy {
   position: absolute; max-width: 320px; padding: 4px 10px; border-radius: 4px; opacity: 0.85;
-  background: var(--rl-page); color: var(--rl-ink); border: 1px solid var(--rl-rule); box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+  background: var(--rl-card); color: var(--rl-ink); border: 1px solid var(--rl-rule); box-shadow: var(--rl-shadow);
   font-size: var(--rl-size-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   pointer-events: none;
 }
 .rl-row-dim { opacity: 0.4; }
 .rl-grip-menu {
-  position: absolute; min-width: 180px; padding: 4px; border-radius: 6px; background: var(--rl-page);
-  color: var(--rl-ink); box-shadow: 0 4px 16px rgb(0 0 0 / 0.22); border: 1px solid var(--rl-rule);
+  position: absolute; min-width: 180px; padding: 6px; border-radius: 12px; background: var(--rl-card);
+  color: var(--rl-ink); box-shadow: var(--rl-shadow); border: 1px solid var(--rl-rule);
   font-size: var(--rl-size-ui);
 }
 .rl-grip-hint {
@@ -139,11 +143,14 @@ export const GRIPS_STYLE = `
   font-size: var(--rl-size-ui-small); line-height: 1.3; white-space: nowrap; box-shadow: var(--rl-shadow);
 }
 .rl-grip-hint[hidden] { display: none; }
-.rl-grip-item { position: relative; padding: 5px 10px 5px 24px; border-radius: 4px; cursor: default; white-space: nowrap; }
-.rl-grip-item:hover { background: var(--rl-rule); }
-.rl-grip-item[aria-disabled="true"] { opacity: 0.45; }
+.rl-grip-item {
+  position: relative; display: flex; align-items: center; height: 32px; padding: 0 10px 0 28px; border-radius: 7px;
+  cursor: default; white-space: nowrap;
+}
+.rl-grip-item:hover { background: color-mix(in srgb, var(--rl-pressed) 55%, transparent); }
+.rl-grip-item[aria-disabled="true"] { color: var(--rl-ink-3); }
 .rl-grip-item[aria-disabled="true"]:hover { background: none; }
-.rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 8px; font-size: var(--rl-size-ui); }
+.rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 10px; font-size: var(--rl-size-ui); }
 `;
 
 /** The title bar's hint delay, which the app passes in (`TOOLTIP_MS`). */
@@ -182,6 +189,44 @@ function inCorner(drawn: { left: number; top: number }, x: number, y: number): b
 
 /** How far above the table a column handle's reach begins. */
 export const colGripTop = (tableTop: number): number => tableTop - GRIP_GAP - GRIP_REACH;
+
+/**
+ * The lowest client y a widget may take: the top of the scroll box that holds the editor, below
+ * what its `scroll-padding-top` keeps clear (the app's title bar floats over its top), and 4 px
+ * more. The window's top (0) where nothing scrolls the editor.
+ */
+function visibleTop(view: EditorView): number {
+  for (let el = view.dom.parentElement; el; el = el.parentElement) {
+    const style = getComputedStyle(el);
+    if (/(auto|scroll)/.test(style.overflowY)) {
+      return el.getBoundingClientRect().top + (parseFloat(style.scrollPaddingTop) || 0) + 4;
+    }
+  }
+  return 4;
+}
+
+/** The right end of a table's visible box: the table's, or its scroll box's when it scrolls sideways. */
+function visibleRight(drawn: { right: number; lines: HTMLElement[] }): number {
+  const clip = drawn.lines[0]?.closest('.rl-tbl-scroll')?.getBoundingClientRect();
+  return clip && clip.width > 0 ? Math.min(drawn.right, clip.right) : drawn.right;
+}
+
+/** Where Add column's strip stands (client x): just right of the table's visible end, pulled back
+ * from the editor's right edge. The pointer is looked for within `EDGE_GAP` + `EDGE_SIZE` of it. */
+function colStripLeft(drawn: { right: number; lines: HTMLElement[] }, editorRight: number): number {
+  return Math.min(visibleRight(drawn) + EDGE_GAP, editorRight - EDGE_SIZE - 4);
+}
+
+/** How tall Add row's strip is: `EDGE_SIZE`, or less where the next block is near, so that it never
+ * covers that block's first line (never under 8 px). */
+function rowStripHeight(drawn: { bottom: number; lines: HTMLElement[] }): number {
+  // The block after the table's box: the next line of the document (widgets between are skipped).
+  let next = drawn.lines[0]?.closest('.rl-tbl-scroll')?.nextElementSibling ?? null;
+  while (next && !next.classList.contains('cm-line')) next = next.nextElementSibling;
+  if (!next) return EDGE_SIZE;
+  const gap = next.getBoundingClientRect().top - drawn.bottom;
+  return gap > 0 ? Math.max(8, Math.min(EDGE_SIZE, gap - EDGE_GAP - 2)) : EDGE_SIZE;
+}
 
 /** A table drawn: its id, its box and the line of each of its real rows. */
 interface Drawn {
@@ -514,7 +559,14 @@ class Grips {
       const lastRow = drawn.rects[drawn.rects.length - 1];
       const inColumns = x >= drawn.left && x <= drawn.right;
       const inRows = y >= drawn.top && y <= drawn.bottom;
-      const col = !!lastCol && inRows && x >= lastCol.left && x <= drawn.right + EDGE_REACH;
+      // Where the strip stands, when the table's end is in view (a table scrolled sideways has none).
+      const endInView = drawn.right <= visibleRight(drawn) + 1;
+      const col =
+        endInView &&
+        !!lastCol &&
+        inRows &&
+        x >= lastCol.left &&
+        x <= colStripLeft(drawn, this.view.dom.getBoundingClientRect().right) + EDGE_SIZE + 4;
       // Not where the next table's own strip above it is: Add row would cover its handles.
       const crowded = [...this.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl')].some(
         (el) => {
@@ -523,7 +575,11 @@ class Grips {
         },
       );
       const row =
-        !crowded && !!lastRow && inColumns && y >= lastRow.top && y <= drawn.bottom + EDGE_REACH;
+        !crowded &&
+        !!lastRow &&
+        inColumns &&
+        y >= lastRow.top &&
+        y <= drawn.bottom + EDGE_GAP + rowStripHeight(drawn) + 4;
       const corner =
         x >= drawn.left - 24 && x <= drawn.right && y >= drawn.top - COL_STRIP && y <= drawn.bottom;
       if (!col && !row && !corner) continue;
@@ -589,22 +645,22 @@ class Grips {
     }
     const base = this.view.dom.getBoundingClientRect();
     if (which === 'addCol') {
-      // Just right of the table, as tall as it, and never off the window.
-      // At the table's edge, or at its box's when the table scrolls sideways and its end is out of view.
-      const clipBox = drawn.lines[0]?.closest('.rl-tbl-scroll')?.getBoundingClientRect();
-      const right =
-        clipBox && clipBox.width > 0 ? Math.min(drawn.right, clipBox.right) : drawn.right;
-      const left = Math.min(right + EDGE_GAP, base.right - EDGE_SIZE - 4);
-      el.style.left = `${left - base.left}px`;
+      // Just right of the table's visible end, as tall as it, and never off the window.
+      el.style.left = `${colStripLeft(drawn, base.right) - base.left}px`;
       el.style.top = `${drawn.top - base.top}px`;
       el.style.height = `${Math.max(0, drawn.bottom - drawn.top)}px`;
     } else if (which === 'addRow') {
       el.style.left = `${drawn.left - base.left}px`;
+      const height = rowStripHeight(drawn);
       el.style.top = `${drawn.bottom + EDGE_GAP - base.top}px`;
       el.style.width = `${Math.max(0, drawn.right - drawn.left)}px`;
+      el.style.height = `${height}px`;
+      // Too low for the glyph: the strip is a thin bar, and the hint says what it is.
+      const glyph = height >= 16 ? '+' : '';
+      if (el.textContent !== glyph) el.textContent = glyph;
     } else {
       el.style.left = `${Math.max(4, drawn.left - GRIP_GAP - CORNER_SIZE) - base.left}px`;
-      el.style.top = `${Math.max(4, drawn.top - GRIP_GAP - CORNER_SIZE) - base.top}px`;
+      el.style.top = `${Math.max(visibleTop(this.view), drawn.top - GRIP_GAP - CORNER_SIZE) - base.top}px`;
     }
   }
 
@@ -618,8 +674,17 @@ class Grips {
   /** Gives a grip or a + its hint: shown after the pointer rests on it, gone when it leaves or presses. */
   private hint(el: HTMLElement, text: string): void {
     el.setAttribute('aria-label', text);
-    el.addEventListener('mouseenter', () => {
+    el.addEventListener('mouseenter', (event) => {
       clearTimeout(this.tipTimer);
+      let pointer = { x: event.clientX, y: event.clientY };
+      // Where the pointer comes to rest, which is where a long widget's hint belongs.
+      const follow = (move: MouseEvent) => {
+        pointer = { x: move.clientX, y: move.clientY };
+      };
+      el.addEventListener('mousemove', follow);
+      el.addEventListener('mouseleave', () => el.removeEventListener('mousemove', follow), {
+        once: true,
+      });
       // A drag or an open menu has the pointer's attention.
       if (this.drag || this.menu) return;
       this.tipTimer = setTimeout(() => {
@@ -630,8 +695,12 @@ class Grips {
         this.tip.textContent = text;
         this.tip.hidden = false;
         const room = base.width - this.tip.offsetWidth - 4;
-        this.tip.style.left = `${Math.max(4, Math.min(box.left - base.left, room))}px`;
-        this.tip.style.top = `${box.bottom - base.top + 6}px`;
+        // Under a small widget; by the pointer on a long one (the strips are as long as the table).
+        const long = box.width > 48 || box.height > 48;
+        const left = long ? pointer.x - 12 : box.left;
+        this.tip.style.left = `${Math.max(4, Math.min(left - base.left, room))}px`;
+        const below = (long ? pointer.y + 20 : box.bottom + 6) - base.top;
+        this.tip.style.top = `${Math.max(0, Math.min(below, base.height - this.tip.offsetHeight - 4))}px`;
       }, this.tooltipMs);
     });
     const hide = () => this.hideHint();
@@ -663,7 +732,7 @@ class Grips {
     const centered = rect.left + (rect.right - rect.left - span) / 2 - base.left;
     grip.style.width = `${span}px`;
     grip.style.left = `${Math.max(4, Math.min(centered, base.width - span - 4))}px`;
-    grip.style.top = `${Math.max(4 - base.top, colGripTop(at.drawn.top) - base.top)}px`;
+    grip.style.top = `${Math.max(visibleTop(this.view), colGripTop(at.drawn.top)) - base.top}px`;
     grip.dataset['col'] = String(at.col);
   }
 
@@ -691,7 +760,7 @@ class Grips {
       this.colPlusLine = line;
     }
     this.colPlus.style.left = `${x - 9 - base.left}px`;
-    this.colPlus.style.top = `${Math.max(4 - base.top, drawn.top - COL_STRIP + 2 - base.top)}px`;
+    this.colPlus.style.top = `${Math.max(visibleTop(this.view), drawn.top - COL_STRIP + 2) - base.top}px`;
     if (this.colPlusLine) {
       this.colPlusLine.style.left = `${x - base.left}px`;
       this.colPlusLine.style.top = `${drawn.top - base.top}px`;

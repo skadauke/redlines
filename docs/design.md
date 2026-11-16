@@ -219,12 +219,32 @@ The window, on the desktop:
   document that has no file yet opens the Save dialog in the default folder for new documents
   (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
   As of a saved document starts in that document's own folder.
-- **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
-  markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
-  (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
-  on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
-  row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
-  match; ⌥⌘F with the bar open shows the row and focuses its box.
+- **Find.** ⌘F opens a panel at the top right of the page that searches the text a reader sees,
+  never the markers or the ledger. The Find box holds the count ("2 of 5", "No results", or
+  "Invalid" for a regular expression that does not compile) and four toggles: Match Case, Whole
+  Word, Regular Expression and Find in Selection; beside it are Previous, Next and Close. Every
+  match is marked and the current one is stronger; typing goes to the first match from the caret,
+  Return and ⇧Return step, and Esc closes the panel with the current match selected. While the
+  Find box has the focus, ⌥⌘C, ⌥⌘W, ⌥⌘R and ⌥⌘L turn the four toggles on and off, and Tab goes to
+  the Replace box (opening its row first) and ⇧Tab back. Every control has a hint with its name
+  and key. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace (⌥⌘F) and Use
+  Selection for Find (⌘E). A chevron at the start of the panel shows or hides the Replace row
+  ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current match;
+  ⌥⌘F with the panel open shows the row and focuses its box. The Replace row has Replace (Return
+  in its box) and Replace All; with Track Changes on a red pen in the box says so, and with a
+  regular expression `$1` and `$&` in the replacement stand for the groups of the match.
+  - *Seeding.* ⌘F with a selection: a short phrase (under 80 characters, inside one line, not a
+    whole block) becomes the search term; a selection of more than one block, with a line break,
+    of 80 characters or more, or a whole block limits Find to it instead (Find in Selection is on,
+    the box says "Find in selection", the scope stays shaded, and Replace All stays inside it).
+  - *Replacing.* Replacing is an edit like typing. Replace All is one step to undo (a toast at
+    the corner offers Undo), and each match is a change of its own: with Track Changes on, N
+    matches are N tracked changes, each with its own margin note, as if every one had been replaced
+    by hand. With Track Changes on, text that is already in a tracked change is not matched. A
+    replacement the editor refuses is left, and the panel says how many.
+  - *Hook.* A later feature that hides text, such as a closed fold, opens it while its match is
+    current through `currentMatchHandlers` (or `createFind`'s `onCurrentMatch`), which is called
+    whenever a match becomes the current one.
 - **Zoom and text size.** View › Zoom In (⌘=, or ⌘+), Zoom Out (⌘-) and Actual Size (⌘0) zoom
   everything Redlines draws in its windows, from 80% to 200%: the page and its notes, cards, bars,
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
@@ -422,8 +442,9 @@ of red there besides the pen).
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
   with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
-  text. The click
-  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  text. In the simple look, a click on a change, on its colored text or on its bar, opens that
+  change's card with Accept and Reject (the card says what a hidden deletion was: #664); a click on
+  a bar in the full markup, and the switch, switch from the one look to the other, with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
@@ -1078,9 +1099,10 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
   the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. A drop
   over the sidebar, the title bar or the ground below the text goes where the caret is. The image
-  shows at once. The caret ends at the end of the links, as after any paste, and the preview, which
-  draws an image only while the caret is off its link, draws one just added all the same until the
-  caret moves or anything is written. Several images go in as links a space apart, and nothing else
+  shows at once. The caret ends at the end of the links, as after any paste. The preview draws an
+  image whenever the selection has no end inside its syntax: a click on it selects it (an outline
+  and its handles, its Markdown or HTML hidden; the source shows in Plain), and the caret steps over
+  it as one unit with the arrows. Several images go in as links a space apart, and nothing else
   is written. A dropped file, or an image file copied in Finder, keeps its name, and pasted image
   data, which has none worth keeping, gets one made of the time (`image-2026-11-12-153012.png`). A
   name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
@@ -1177,7 +1199,7 @@ a new email under the same name becomes an alias in the ledger
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
-  step to undo. Not yet: deciding all of its changes at once;
+  step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
 - templates as plain `.md` files with `{{title}}` and `{{date}}`, never executable code;
 - focus and typewriter modes.
@@ -1224,6 +1246,9 @@ syntax Markdown needs, and never shows them.
   are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
   selection there it refuses before it deletes anything. At a heading's start or end it does what
   Return does (an empty paragraph beside it).
+- **Return again in the empty paragraph gives the text room.** At the top level it writes a line
+  that holds only `&nbsp;` and opens the next empty paragraph below it; every view draws that line
+  as an empty line, and GitHub and other readers show an empty paragraph (format §3.4).
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.
@@ -1825,8 +1850,32 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 Redlines never reads, stores or passes Claude or ChatGPT credentials. Whether someone is signed in
 is what the agent's own status command says, and when they aren't, the thread says so in one line
 (for example, "Claude isn't signed in. Run `claude auth login`."), which offers to open Preferences ›
-Agents. The UI says "Claude" and "Codex"; "Claude Code" appears only in plain text saying the app
-runs it.
+Agents. An agent is shown by its **handle, capitalized**: with the handle `ada`, the picker, Ask and
+the answers say "Ada", and `@` and the handle names it in a mention. The cards in Preferences keep the
+programs' names (Claude Code, Codex, OpenClaw).
+
+**Handles** (#558). Each card has a Handle field, which says "Shown as Ada". A handle is lowercase
+letters, digits and hyphens, no hyphen at either end, and at most 24 characters; a handle another agent
+has (Redlines' own, or the name of an OpenClaw agent) is refused with a note, and the old handle comes
+back when the field is left. The defaults are `claude` and `codex`; an OpenClaw agent is named by the
+person when it is added (Moby, by default in the form), and that name is its handle. There is one
+thing, not a display name beside the handle. What the host knows the agent by (its id) never changes,
+so a file's authors (`claude-<person>`) stay what they were; a mention of the old handle starts
+nothing once it has changed. Handles are kept in the app's settings (`agentHandles`) and read at
+every look at the agents, so a change reaches the open documents' pickers at once.
+
+**Default agent** (#528). Once more than one agent is set up (a program found on this Mac, or an
+OpenClaw agent), the first row of the pane is a choice of them, by the names they are shown as. An Ask
+that names no agent goes to the one chosen (else to the first that is ready), and the @ picker lists it
+first. It is kept in the app's settings (`defaultAgent`, an id); it is never a file's author.
+
+**Models** (#530). A provider lists the models its program can be told to run (`AgentProvider.models`:
+Claude Code's aliases Opus, Sonnet and Haiku, and a short list for Codex, which has no command that
+lists them); an OpenClaw agent lists none, because its Gateway chooses, so its card has no Model field.
+A card's Model field is Default, which says nothing and leaves the program's own default, or one of the
+list; the choice is kept in the app's settings (`agentModels`, by agent id) and reaches every run of the
+agent, a comment's and an Ask's. A request can carry its own model (`AgentRequest.model`), which Ask's
+picker uses; the program is told only a model its provider lists.
 
 **Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
 the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
