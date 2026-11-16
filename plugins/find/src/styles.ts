@@ -66,11 +66,11 @@ export const findTheme = EditorView.baseTheme({
     height: 'calc(var(--rl-ctl-h, 26px) - 2px)',
     boxSizing: 'border-box',
     padding: '0 8px',
-    fontSize: 'var(--rl-size-field)',
     border: '0',
     backgroundColor: 'transparent',
     color: 'var(--rl-ink)',
     font: 'inherit',
+    fontSize: 'var(--rl-size-field)',
     outline: 'none',
   },
   '.rl-find-toggle': {
