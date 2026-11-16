@@ -40,12 +40,12 @@ show the same, because they hide HTML comments.
   <img src="docs/img/view-clean-light.png" width="760" alt="The Clean view: 'We will ship the new importer in April, after the security review.'">
 </picture>
 
-**Raw** shows the file itself. Each change is a short HTML comment with an id. Who made each change
+**Plain** shows the file itself. Each change is a short HTML comment with an id. Who made each change
 and when, and the comment threads, are in a block at the end of the file.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-raw-dark.png">
-  <img src="docs/img/view-raw-light.png" width="760" alt="The Raw view: the Markdown source with each change in a short HTML comment, followed by a YAML block that lists the people, who made each change and when, and Bo's comment.">
+  <img src="docs/img/view-raw-light.png" width="760" alt="The Plain view: the Markdown source with each change in a short HTML comment, followed by a YAML block that lists the people, who made each change and when, and Bo's comment.">
 </picture>
 
 ## What is in the Mac app
@@ -66,7 +66,7 @@ and when, and the comment threads, are in a block at the end of the file.
   Clean and Redlines and turn Track Changes on and off. A small word count sits in the lower right
   corner. A formatting palette opens on right-click and from the keyboard, and
   ⌥⌘P; Highlight is ⇧⌘H. There is no toolbar.
-- **Reviewing.** The View menu lists Clean, Redlines and Raw. A click on a change bar, or View ›
+- **Reviewing.** The View menu lists Clean, Redlines and Plain. A click on a change bar, or View ›
   Simple Look, switches Redlines to its simple look; a note's Accept and Reject there decide in
   place, and say what they decide. Notes in the rail follow the view, level with the text on the
   screen. The file records the view it was saved in, and whether Track Changes is on.

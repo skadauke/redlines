@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Emoji (#312): the shortcodes in a file drawn as their emoji, and the list after a colon, which
-// writes the character itself. It keeps out of the way of `10:30`, of code and of Raw, and can be
+// writes the character itself. It keeps out of the way of `10:30`, of code and of Plain, and can be
 // turned off.
 
 import { forceParsing } from '@codemirror/language';
@@ -171,13 +171,13 @@ describe('the list of emoji after a colon', () => {
     }
   });
 
-  it('is put away when the view changes to Raw, and writes nothing there', () => {
+  it('is put away when the view changes to Plain, and writes nothing there', () => {
     const { editor } = mount('Camp ');
     typeText(editor, ':ten');
     expect(popover(editor)).not.toBeNull();
     editor.setViewMode('raw');
     expect(popover(editor)).toBeNull();
-    // Return in Raw is the editor's, not the list's: no emoji is written.
+    // Return in Plain is the editor's, not the list's: no emoji is written.
     press(editor, 'Enter');
     expect(editor.getDoc()).not.toContain('⛺');
   });
@@ -241,7 +241,7 @@ describe('the list of emoji after a colon', () => {
     }
   });
 
-  it('is not open in Raw, nor with a range selected, nor where the text is read only', () => {
+  it('is not open in Plain, nor with a range selected, nor where the text is read only', () => {
     const raw = mount('');
     raw.editor.setViewMode('raw');
     typeText(raw.editor, ':smi');

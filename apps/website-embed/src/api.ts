@@ -13,7 +13,7 @@ export interface DemoOptions {
   demo: DemoName;
   /** Called for every change of what the page's controls show, and once at mount. */
   onState(state: DemoState): void;
-  /** A message for people, from the editor's `onNotice`: "Raw is read-only while ...". */
+  /** A message for people, from the editor's `onNotice`: "Plain is read-only while ...". */
   onNotice(message: string): void;
 }
 
@@ -24,7 +24,7 @@ export interface DemoState {
   tracking: boolean;
   /** Pending changes: Review is disabled at 0. */
   changes: number;
-  /** False in Raw, where the review plugin takes no comment. */
+  /** False in Plain, where the review plugin takes no comment. */
   canComment: boolean;
   claudeRunning: boolean;
 }

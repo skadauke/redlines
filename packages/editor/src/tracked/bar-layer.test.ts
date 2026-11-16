@@ -397,7 +397,7 @@ describe('the layer', () => {
     ]);
   });
 
-  it('draws the same bars in the simple look, and none in Clean or Raw', async () => {
+  it('draws the same bars in the simple look, and none in Clean or Plain', async () => {
     const simple = load('simple');
     await frame();
     expect(segments(simple)).toHaveLength(1);
