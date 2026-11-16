@@ -1156,6 +1156,7 @@ export const plugin: Plugin = {
         { id: 'block.check', title: 'Check Item', shortcut: 'Mod-Shift-u' },
         { id: 'block.code', title: 'Code Block', shortcut: 'Mod-Alt-c' },
         { id: 'block.table', title: 'Table', shortcut: 'Mod-Alt-t' },
+        { id: 'block.details', title: 'Collapsible Section' },
         { id: 'block.alert', title: 'Alert' },
         { id: 'block.rule', title: 'Horizontal Rule' },
         { id: 'block.indent', title: 'Indent', shortcut: 'Mod-]' },

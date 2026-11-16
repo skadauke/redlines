@@ -64,6 +64,7 @@ export function containersOf(state: EditorState): readonly Container[] {
   if (hit && hit.length === doc.length) return hit.containers;
   const containers: Container[] = [];
   const stack: number[] = [];
+  const limits = new Map<Container, number>();
   let ledger = doc.length;
   for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
     if (
@@ -74,7 +75,9 @@ export function containersOf(state: EditorState): readonly Container[] {
       continue;
     }
     if (node.name !== 'HTMLBlock' || node.to - node.from > 600) continue;
-    const text = state.sliceDoc(node.from, node.to);
+    // The markers of a tracked insertion sit on the tags' lines (`<details><!--split k3x9-->`):
+    // the tags are read without them.
+    const text = state.sliceDoc(node.from, node.to).replace(/<!--[^]*?-->/g, '');
     const closing = CLOSER.exec(text);
     if (closing) {
       const kind = (closing[1] as string).toLowerCase();
@@ -84,6 +87,8 @@ export function containersOf(state: EditorState): readonly Container[] {
       const tagLine = doc.lineAt(node.from);
       open.closer = { from: tagLine.from, to: tagLine.to };
       open.end = tagLine.to;
+      // A details inside it that never closed ends where this one does.
+      for (const inner of stack.slice(at + 1)) limits.set(containers[inner]!, tagLine.from);
       stack.length = at;
       continue;
     }
@@ -121,13 +126,19 @@ export function containersOf(state: EditorState): readonly Container[] {
   const kept = containers.filter(
     (container) => container.closer !== null || (container.kind === 'details' && reached),
   );
+  const parents = containers.map((container) => container.parent);
   for (const container of kept) {
-    container.parent = container.parent === -1 ? -1 : kept.indexOf(containers[container.parent]!);
+    let up = container.parent;
+    while (up !== -1 && !kept.includes(containers[up]!)) up = parents[up]!;
+    container.parent = up === -1 ? -1 : kept.indexOf(containers[up]!);
   }
   // An unclosed details ends at the last block that is not the ledger.
   for (const container of kept) {
     if (container.closer) continue;
-    container.end = Math.max(container.openerTo, trimEnd(state, container.bodyFrom, ledger));
+    container.end = Math.max(
+      container.openerTo,
+      trimEnd(state, container.bodyFrom, limits.get(container) ?? ledger),
+    );
   }
   cache.set(tree, { length: doc.length, containers: kept });
   return kept;
@@ -184,11 +195,20 @@ export const foldField = StateField.define<Folds>({
     if (tr.docChanged && peek.size) {
       peek = new Set([...peek].map((from) => tr.changes.mapPos(from, 1)));
     }
+    // A toggle of a section an edit has taken away is forgotten, so that no later section that
+    // lands on its place inherits it.
+    if (tr.docChanged && over.size && syntaxTree(tr.state).length >= tr.state.doc.length) {
+      const live = new Set(containersOf(tr.state).map((c) => c.from));
+      if ([...over.keys()].some((from) => !live.has(from))) {
+        over = new Map([...over].filter(([from]) => live.has(from)));
+      }
+    }
     let hold: number | null = null;
     for (const effect of tr.effects) {
       if (effect.is(setFold)) {
-        over = new Map(over).set(tr.changes.mapPos(effect.value.from, 1), effect.value.open);
-        peek = new Set([...peek].filter((from) => from !== effect.value.from));
+        const key = tr.changes.mapPos(effect.value.from, 1);
+        over = new Map(over).set(key, effect.value.open);
+        peek = new Set([...peek].filter((from) => from !== key));
       } else if (effect.is(holdOpenAt)) hold = effect.value;
     }
     if (hold !== null) peek = peeked(tr.state, [hold]);

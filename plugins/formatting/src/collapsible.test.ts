@@ -61,5 +61,6 @@ describe('Collapsible Section', () => {
     expect(editor.commands.run('block.details')).toBe(true);
     expect(editor.getDoc()).toContain('<!--ins');
     expect(newestView(editor.getDoc()).text).toContain('<details>');
+    expect(containersOf(editor.view.state)).toHaveLength(1);
   });
 });

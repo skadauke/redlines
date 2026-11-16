@@ -10,13 +10,19 @@ import { containersOf, headLine, isOpen, setFold, tagLines } from './containers.
 /** A line that starts with a block's marker: a key there changes the block, it joins nothing. */
 const MARKED = /^\s{0,3}(?:[#>*+\-|`~]|\d+[.)])/;
 
-/** The nearest line above (or below) the line `n` that holds text, or null. */
-function textLine(view: EditorView, n: number, step: -1 | 1) {
+/**
+ * Whether a tag line is the next line in the direction `step` from line `n`, or the one after a
+ * single blank line: the key would then take away the line break that keeps the text and the tag
+ * apart (with more blank lines between, it takes away only a blank one).
+ */
+function tagNext(view: EditorView, n: number, step: -1 | 1): boolean {
   const { doc } = view.state;
-  for (let k = n + step; k >= 1 && k <= doc.lines; k += step) {
-    if (!BLANK.test(doc.line(k).text)) return doc.line(k);
-  }
-  return null;
+  const tags = tagLines(view.state);
+  const next = doc.line(Math.min(doc.lines, Math.max(1, n + step)));
+  if (n + step < 1 || n + step > doc.lines) return false;
+  if (tags.has(next.from)) return true;
+  if (!BLANK.test(next.text) || n + 2 * step < 1 || n + 2 * step > doc.lines) return false;
+  return tags.has(doc.line(n + 2 * step).from);
 }
 
 const backspace: Command = (view) => {
@@ -30,8 +36,7 @@ const backspace: Command = (view) => {
   // At the start of a summary, the line break above it is the tag's.
   if (container) return true;
   if (range.head !== line.from || MARKED.test(line.text)) return false;
-  const above = textLine(view, line.number, -1);
-  return above !== null && tagLines(state).has(above.from) && !tagOnly(view, line.number);
+  return tagNext(view, line.number, -1) && !tagOnly(view, line.number);
 };
 
 const del: Command = (view) => {
@@ -45,8 +50,7 @@ const del: Command = (view) => {
   // At the end of a summary, the line break below it is the tag's.
   if (summary) return true;
   if (range.head !== line.to) return false;
-  const below = textLine(view, line.number, 1);
-  return below !== null && tagLines(state).has(below.from) && !tagOnly(view, line.number);
+  return tagNext(view, line.number, 1) && !tagOnly(view, line.number);
 };
 
 /** Whether the line is itself a tag line (Backspace there is the tag's own business). */

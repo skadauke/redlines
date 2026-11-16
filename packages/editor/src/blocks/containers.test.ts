@@ -228,6 +228,26 @@ describe('keys', () => {
   });
 });
 
+describe('review fixes', () => {
+  it('an unclosed details inside a closed div ends where the div does', () => {
+    const doc = '<div>\n\n<details>\n<summary>A</summary>\n\nOne.\n\n</div>\n\nAfter.';
+    const editor = load(doc);
+    const [, inner] = containersOf(editor.view.state);
+    expect(inner!.end).toBeLessThan(doc.indexOf('</div>'));
+    expect(drawn(editor).join('|')).toContain('After.');
+  });
+
+  it('forgets the toggle of a section that an edit took away', () => {
+    const editor = load(`${SECTION}`);
+    editor.view.dispatch({ effects: setFold.of({ from: 0, open: true }) });
+    editor.view.dispatch({ changes: { from: 0, to: SECTION.indexOf('After.') } });
+    editor.view.dispatch({
+      changes: { from: 0, insert: `${SECTION.slice(0, SECTION.indexOf('After.'))}` },
+    });
+    expect(open(editor)).toBe(false);
+  });
+});
+
 describe('div align', () => {
   it('hides the tag lines and aligns the Markdown inside', () => {
     const editor = load('<div align="center">\n\nMiddle.\n\n</div>\n\nAfter.');
