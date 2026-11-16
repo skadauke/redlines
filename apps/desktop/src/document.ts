@@ -63,6 +63,7 @@ type DocumentEditor = Pick<
   | 'getDoc'
   | 'getParsed'
   | 'setDoc'
+  | 'setKind'
   | 'reloadDoc'
   | 'applyAgentEdit'
   | 'recordView'
@@ -312,6 +313,8 @@ export class DocumentController {
     }
     if (path === null) return false;
     const moved = path !== this.#state.path;
+    // The new name may make it another kind of file: Markdown, or text or code.
+    this.#editor.setKind(documentKind(path) ?? 'markdown');
     this.#saved(path, text);
     if (moved) this.#watch(path);
     return true;
@@ -348,6 +351,7 @@ export class DocumentController {
     // Another file may have been opened while the file was renamed.
     if (this.#state.path !== path) return true;
     this.#update({ path: target, name: wanted });
+    this.#editor.setKind(documentKind(target) ?? 'markdown');
     this.#watch(target);
     return true;
   }

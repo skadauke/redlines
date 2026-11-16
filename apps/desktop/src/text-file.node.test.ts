@@ -161,6 +161,15 @@ describe('a plain text file', () => {
     expect(await readFile(path, 'utf8')).toBe(text.replace('let a', 'let aa'));
   });
 
+  it('becomes Markdown, or text, as its name does when it is renamed', async () => {
+    await open('draft.md', 'Pack the bags.\n');
+    expect(editor.getUiState().kind).toBe('markdown');
+    expect(await controller.rename('draft.txt')).toBe(true);
+    expect(editor.getUiState()).toMatchObject({ kind: 'plain-only', view: 'raw' });
+    expect(await controller.rename('draft.md')).toBe(true);
+    expect(editor.getUiState().kind).toBe('markdown');
+  });
+
   it('keeps its .txt when it is renamed to a name without one, with its bytes', async () => {
     const path = await open('notes.txt', NOTES);
     expect(await controller.rename('groceries')).toBe(true);

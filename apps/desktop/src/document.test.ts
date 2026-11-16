@@ -187,6 +187,7 @@ function fakeEditor() {
       doc = text;
       onChange(text);
     },
+    setKind: vi.fn(),
     reloadDoc: vi.fn((text: string) => {
       doc = text;
       onChange(text);

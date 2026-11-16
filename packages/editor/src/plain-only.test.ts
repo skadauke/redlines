@@ -86,6 +86,20 @@ describe('a Plain-only document', () => {
     editor.destroy();
   });
 
+  it('changes kind with the name of its file, reading the same text again', () => {
+    const editor = open(WITH_LEDGER, 'markdown');
+    expect(editor.getUiState()).toMatchObject({ kind: 'markdown', tracking: true });
+    editor.setKind('plain-only');
+    expect(editor.getUiState()).toMatchObject({ kind: 'plain-only', view: 'raw', tracking: false });
+    expect(editor.getParsed().ledgerRange).toBeNull();
+    expect(editor.getDoc()).toBe(WITH_LEDGER);
+    editor.setKind('markdown');
+    forceParsing(editor.view, editor.view.state.doc.length, 5000);
+    expect(editor.getParsed().ledgerRange).not.toBeNull();
+    expect(editor.getUiState().kind).toBe('markdown');
+    editor.destroy();
+  });
+
   it('leaves a Markdown document as it was', () => {
     const editor = open(WITH_LEDGER, 'markdown');
     expect(editor.getUiState()).toMatchObject({ kind: 'markdown', tracking: true });

@@ -93,10 +93,12 @@ export const parsedField = StateField.define<Parsed>({
   create: (state) =>
     state.facet(plainOnlyFacet) ? plainParsed(state.doc.toString()) : parse(state.doc.toString()),
   update: (parsed, tr) => {
-    if (!tr.docChanged) return parsed;
+    // A file that becomes Markdown, or Plain-only, by its name (a rename, Save As) is read again.
+    const kindChanged = tr.startState.facet(plainOnlyFacet) !== tr.state.facet(plainOnlyFacet);
+    if (!tr.docChanged && !kindChanged) return parsed;
     return tr.state.facet(plainOnlyFacet)
       ? plainParsed(tr.newDoc.toString())
-      : parse(tr.newDoc.toString(), parsed);
+      : parse(tr.newDoc.toString(), kindChanged ? undefined : parsed);
   },
 });
 

@@ -384,6 +384,11 @@ export interface Editor {
    */
   setDoc(doc: string, kind?: DocumentKind): void;
   /**
+   * Changes what the open document is, when its file's name changes (a rename, Save As): the
+   * document is read again as that kind, and its text stays as it is.
+   */
+  setKind(kind: DocumentKind): void;
+  /**
    * Brings in a new version of the same file, such as one an agent changed on disk. Only the
    * lines that differ are replaced, each trimmed to the characters that differ, so the selection
    * and the scroll position stay where they are, and the reload is not an edit to undo. A reload

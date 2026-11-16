@@ -236,6 +236,7 @@ const sameTitles = (a: Readonly<Record<string, string>>, b: Readonly<Record<stri
 
 /** Whether the host has been told everything in `b` already. */
 const sameUi = (a: EditorUiState, b: EditorUiState) =>
+  a.kind === b.kind &&
   a.view === b.view &&
   a.markupView === b.markupView &&
   a.tracking === b.tracking &&
@@ -266,6 +267,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const peopleCompartment = new Compartment();
   const typingCompartment = new Compartment();
   const lineBreakMarksCompartment = new Compartment();
+  const plainOnlyCompartment = new Compartment();
   let kind: DocumentKind = options.kind ?? 'markdown';
   let author = options.author;
   let people = options.people;
@@ -413,7 +415,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       doc: loaded.doc,
       extensions: [
         loaded.extension,
-        plainOnlyFacet.of(kind === 'plain-only'),
+        plainOnlyCompartment.of(plainOnlyFacet.of(kind === 'plain-only')),
         markupViewCompartment.of(markupViewFacet.of(markupView)),
         view ? viewModeField.init(() => view) : [],
         tracking === undefined ? [] : trackingField.init(() => tracking),
@@ -536,6 +538,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     view,
     commands,
     getDoc: () => fileText(view.state),
+    setKind: (next) => {
+      if (next === kind) return;
+      kind = next;
+      view.dispatch({
+        effects: plainOnlyCompartment.reconfigure(plainOnlyFacet.of(kind === 'plain-only')),
+      });
+      trackingChosen = null;
+    },
     setDoc: (doc, next) => {
       kind = next ?? 'markdown';
       view.setState(stateFor(loadFile(doc, plain())));
