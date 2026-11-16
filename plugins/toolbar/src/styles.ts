@@ -15,7 +15,7 @@ export const TOOLBAR_STYLE = `
   max-width: calc(100vw - 16px);
   padding: 6px;
   border: 1px solid var(--rl-rule);
-  border-radius: 12px;
+  border-radius: var(--rl-radius-card, 12px);
   background-color: var(--rl-card, Canvas);
   box-shadow: var(--rl-shadow);
   color: var(--rl-ink, CanvasText);
@@ -62,10 +62,10 @@ export const TOOLBAR_STYLE = `
   flex: none;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: var(--rl-row-h, 30px);
   padding: 0 9px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--rl-ctl-radius, 7px);
   background: transparent;
   color: var(--rl-ink-2);
   font: inherit;
@@ -99,7 +99,7 @@ export const TOOLBAR_STYLE = `
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--rl-rule);
-  border-radius: 10px;
+  border-radius: var(--rl-radius-menu, 10px);
   background-color: var(--rl-card, Canvas);
   box-shadow: var(--rl-shadow);
 }
@@ -128,10 +128,10 @@ export const TOOLBAR_STYLE = `
   align-items: center;
   gap: 10px;
   min-width: 0;
-  height: 30px;
+  height: var(--rl-row-h, 30px);
   padding: 0 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--rl-ctl-radius, 7px);
   background: transparent;
   color: var(--rl-ink);
   font: inherit;
@@ -168,7 +168,7 @@ export const TOOLBAR_STYLE = `
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 30px;
+  height: var(--rl-row-h, 30px);
   padding: 0 8px;
   color: var(--rl-ink-2);
 }
@@ -200,9 +200,9 @@ export const TOOLBAR_STYLE = `
   flex: none;
   align-items: center;
   gap: 10px;
-  height: 30px;
+  height: var(--rl-row-h, 30px);
   padding: 0 10px;
-  border-radius: 7px;
+  border-radius: var(--rl-ctl-radius, 7px);
   color: var(--rl-ink);
   cursor: default;
 }
@@ -222,9 +222,9 @@ export const TOOLBAR_STYLE = `
   width: 30px;
   height: 18px;
   border-radius: 9px;
-  background: var(--rl-rule);
+  background: var(--rl-off, var(--rl-rule));
 }
-.rl-toolbar-switch[aria-checked='true'] { background: var(--rl-ink-3); }
+.rl-toolbar-switch[aria-checked='true'] { background: var(--rl-on, var(--rl-ink-3)); }
 .rl-toolbar-knob {
   position: absolute;
   top: 2px;
@@ -240,27 +240,27 @@ export const TOOLBAR_STYLE = `
   display: flex;
   gap: 2px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--rl-ctl-radius, 7px);
   background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
 }
 .rl-toolbar-segment {
-  height: 22px;
+  height: var(--rl-seg-h, 22px);
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(var(--rl-ctl-radius, 7px) - 1px);
   background: transparent;
   color: var(--rl-ink-2);
   font: inherit;
-  font-size: var(--rl-size-ui-small);
+  font-size: var(--rl-size-ctl);
   cursor: default;
 }
 .rl-toolbar-segment[aria-checked='true'] {
-  background: var(--rl-card, Canvas);
+  background: var(--rl-seg-on, var(--rl-card, Canvas));
   color: var(--rl-ink);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
 }
 .rl-toolbar-slider { display: flex; align-items: center; gap: 8px; }
-.rl-toolbar-range { width: 96px; accent-color: var(--rl-ink-3); }
+.rl-toolbar-range { width: 96px; accent-color: var(--rl-on, var(--rl-ink-3)); }
 .rl-toolbar-value { min-width: 40px; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); text-align: right; }
 
 /* The bar goes while the person types, and comes back when the pointer moves. */
@@ -282,10 +282,10 @@ export const TOOLBAR_STYLE = `
   display: block;
   box-sizing: border-box;
   width: 100%;
-  height: 30px;
+  height: var(--rl-row-h, 30px);
   padding: 0 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--rl-ctl-radius, 7px);
   background: transparent;
   color: var(--rl-ink);
   font: inherit;
@@ -312,7 +312,7 @@ export const TOOLBAR_STYLE = `
   align-items: center;
   gap: 12px;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--rl-ctl-radius, 7px);
   border: 1px solid var(--rl-rule);
   background: var(--rl-card);
   box-shadow: var(--rl-shadow);
