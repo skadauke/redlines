@@ -929,18 +929,16 @@ function bars(
   // (a bullet and its text over hidden marker lines): the one line the view renders is the first,
   // which takes the class (#654).
   const multi = hidden.filter(({ from, to }) => doc.lineAt(from).number !== doc.lineAt(to).number);
+  const firsts = new Map<number, number>();
   const first = (n: number): number => {
-    for (let moved = true; moved;) {
-      moved = false;
-      const start = doc.line(n).from;
-      for (const range of multi) {
-        if (range.from < start && start < range.to) {
-          n = doc.lineAt(range.from).number;
-          moved = true;
-        }
-      }
-    }
-    return n;
+    const known = firsts.get(n);
+    if (known !== undefined) return known;
+    // A range that ends where the line starts has taken the break before it too.
+    const start = doc.line(n).from;
+    const range = multi.find((r) => r.from < start && start <= r.to);
+    const found = range ? first(doc.lineAt(range.from).number) : n;
+    firsts.set(n, found);
+    return found;
   };
   for (const { from, to, color } of spans) {
     for (let n = doc.lineAt(from).number, last = doc.lineAt(to).number; n <= last; n++) {
