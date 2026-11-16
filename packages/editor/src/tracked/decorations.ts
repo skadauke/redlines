@@ -1393,8 +1393,15 @@ function ledgerRegions(before: Parsed, parsed: Parsed, map: (pos: number) => num
   const seen = new Set<string>();
   for (const mark of parsed.marks) {
     seen.add(mark.id);
-    if (unlike(mark, entries.get(mark.id))) {
-      regions.push([mark.segments[0]!.open.from, markEnd(mark)]);
+    const was = entries.get(mark.id);
+    const [from, to] = [mark.segments[0]!.open.from, markEnd(mark)];
+    if (unlike(mark, was)) regions.push([from, to]);
+    else if (was) {
+      // Not where the edit leaves it: the pairing of its markers changed.
+      const [a, b] = [map(was.segments[0]!.open.from), map(markEnd(was))];
+      if (a !== from || b !== to) {
+        regions.push([from, to], [Math.min(a, b), Math.max(a, b)]);
+      }
     }
   }
   for (const mark of before.marks) {
@@ -1477,9 +1484,9 @@ function advance(value: Display, tr: Transaction): Display | null {
     changes.iterChangedRanges(() => places++);
     if (places > MAX_PLACES) return null;
     // What a ledger says of the marks far from the edit: an author, a move, a resolved thread.
-    if (parsed.ledger !== before.ledger) {
-      regions.push(...ledgerRegions(before, parsed, (pos) => changes.mapPos(pos, 1)));
-    }
+    // The marks themselves, too: the scan is textual, so an unclosed `<!--` can swallow a marker far
+    // below it, and a mark that stood far from the edit goes, or changes its place.
+    regions.push(...ledgerRegions(before, parsed, (pos) => changes.mapPos(pos, 1)));
     const colors = colorsOf(state);
     const old = colorsOf(startState);
     if (

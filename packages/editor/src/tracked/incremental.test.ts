@@ -151,4 +151,27 @@ describe('the tracked display, kept and drawn again in windows', () => {
     },
     120_000,
   );
+
+  it('draws again a mark far below an edit that swallows its marker, and one that repeats its id', () => {
+    const doc =
+      'first paragraph\n\n## A heading\n\nsecond\n\nthird\n\nfourth\n\n' +
+      `fifth <!--ins ${IDS[0]}-->marked<!--/${IDS[0]}--> text\n\nlast\n\n` +
+      `<!-- redlines\nversion: 1\nmarks:\n  ${IDS[0]}: {by: ada, at: 2026-10-31T09:30Z}\n-->\n`;
+    for (const view of ['redlines', 'clean', 'simple'] as const) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author, view });
+      open.push(editor);
+      forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+      editor.view.dispatch({ changes: { from: 5, insert: '<!-- unclosed ' } });
+      expect(keptDisplay(editor.view.state), view).toEqual(freshDisplay(editor.view.state));
+      editor.view.dispatch({
+        changes: [
+          { from: 0, insert: `<!--ins ${IDS[0]}-->x<!--/${IDS[0]}-->` },
+          { from: 30, insert: `<!--ins ${IDS[0]}-->y<!--/${IDS[0]}-->` },
+        ],
+      });
+      expect(keptDisplay(editor.view.state), view).toEqual(freshDisplay(editor.view.state));
+    }
+  });
 });
