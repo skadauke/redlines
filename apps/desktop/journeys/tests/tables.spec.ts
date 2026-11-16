@@ -495,7 +495,8 @@ test.describe('tables @tables', () => {
     await plus.hover();
     await expect(tip, 'the + between rows has a hint').toHaveText(/Add a row/);
     // The + between columns: at the boundary between the first two, in the strip above the table.
-    await j.page.mouse.move(head.right, head.top + 4);
+    // The line between the columns stands 8 px left of where the cells touch.
+    await j.page.mouse.move(head.right - 8, head.top + 4);
     const colPlus = j.page.locator('.rl-col-plus');
     await expect(colPlus).toBeVisible();
     await colPlus.hover();
@@ -695,6 +696,51 @@ test.describe('tables @tables', () => {
     });
   }
 
+  // #673: the vertical edges that belong to a column (the tint of its cells, the handles over it) stand
+  // on the faint column lines, not on the cell boxes, which are half a gap to the right of them.
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`the column handles stand on the column lines, a column's tint between them (${scheme}) @tables`, async ({
+      start,
+    }) => {
+      const doc = '| Milestone | Owner | Date |\n| - | - | - |\n| Beta | Bob | April 3 |\n';
+      const j = await start({ doc: `Intro\n\n${doc}`, tracking: false, view: 'clean', scheme });
+      await j.settle();
+      // The lines: half the padding right of the cell before, left of each cell but the first.
+      const lines = await j.page.evaluate(() =>
+        [...document.querySelectorAll('.rl-th .rl-tc[data-col]')].map((cell, i, all) => {
+          const before = all[i - 1];
+          const gap = before ? Number.parseFloat(getComputedStyle(before).paddingRight) / 2 : 0;
+          const box = cell.getBoundingClientRect();
+          return { left: box.left - gap, right: box.right };
+        }),
+      );
+      expect(lines.length).toBe(3);
+      // The + between the first two columns is on the line, not on the cells' touching edges.
+      const head = (await j.page.locator('.rl-th .rl-tc').first().boundingBox())!;
+      await j.page.mouse.move(lines[1]!.left, head.y + 4);
+      const plus = j.page.locator('.rl-col-plus');
+      await expect(plus).toBeVisible();
+      const plusBox = (await plus.boundingBox())!;
+      expect(
+        Math.abs(plusBox.x + plusBox.width / 2 - lines[1]!.left),
+        'the + stands on the column line',
+      ).toBeLessThanOrEqual(1.5);
+      // The column's handle is centred between its lines.
+      await j.hover('Owner');
+      const grip = (await j.page.locator('.rl-col-grip').boundingBox())!;
+      const middle = (lines[1]!.left + lines[2]!.left) / 2;
+      expect(
+        Math.abs(grip.x + grip.width / 2 - middle),
+        "the handle is centred between its column's lines",
+      ).toBeLessThanOrEqual(1.5);
+      await j.page.locator('.rl-col-grip').click();
+      await j.shot(`column-tint-${scheme}`);
+      await j.hover('Date');
+      await expect(j.page.locator('.rl-edge-col')).toBeVisible();
+      await j.shot(`column-tint-add-column-${scheme}`);
+    });
+  }
+
   // #522, decided 2026-11-15: a selection of cells, rows, columns or the table is a flat tint in the
   // editor's own selection blue, with no outline, over every cell it reaches, whether or not a
   // tracked change has tinted the cell.
@@ -738,7 +784,10 @@ test.describe('tables @tables', () => {
         cells: cells.map((cell) => {
           const style = getComputedStyle(cell);
           return {
-            fill: style.backgroundColor,
+            // The tint is painted from column line to column line (#673): a gradient over the box, and a
+            // block before it over the gap; the cell's own fill (a change's tint) is not drawn.
+            fill: style.backgroundImage,
+            under: style.backgroundColor,
             outline: style.outlineStyle,
             shadow: style.boxShadow,
             border: style.borderTopStyle,
@@ -748,9 +797,8 @@ test.describe('tables @tables', () => {
     });
     expect(paint.cells.length, 'four rows of three cells').toBe(12);
     for (const [i, cell] of paint.cells.entries()) {
-      expect(cell.fill, `cell ${i} has the selection blue, not a change's tint`).toBe(
-        paint.selection,
-      );
+      expect(cell.fill, `cell ${i} has the selection blue`).toContain(paint.selection);
+      expect(cell.under, `cell ${i} shows no change's tint under it`).toBe('rgba(0, 0, 0, 0)');
       expect(cell.outline, `cell ${i} has no outline`).toBe('none');
       expect(cell.shadow, `cell ${i} has no shadow`).toBe('none');
     }

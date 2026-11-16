@@ -64,6 +64,18 @@ goes red ("known bug #510 no longer fails") when the fix lands: the lane that fi
 `JOURNEYS_EVIDENCE=1 pnpm journeys tests/lists.spec.ts` runs `known` journeys as ordinary tests and
 shows what fails and where (and the shots show what it looks like).
 
+## Long documents
+
+`tests/long-documents.spec.ts` (tagged `@long`) opens generated documents (`src/long-docs.ts`: the
+shape of a 4.7 MB file with a few 1.5 MB lines of base64, and 1 MB and 5 MB of ordinary text with
+changes and comments), drags the scrollbar to the middle and the end, scrolls up and presses Page
+Down, and measures each phase (`src/stalls.ts`: the longest stall of the page's main thread by a
+heartbeat, the frame gaps, and the browser's memory, which is read only when no other Playwright
+WebKit is running on the machine). It prints the numbers and holds them to budgets. It is slow, so
+it runs on main only: `JOURNEYS_LONG=1 pnpm journeys tests/long-documents.spec.ts` (without
+`JOURNEYS_LONG=1` the `@long` journeys are left out). `JOURNEYS_BUDGETS=off` keeps the text checks and
+drops the budgets, to measure a build that is over them.
+
 ## Tags and areas
 
 `@smoke` runs on every pull request (the page opens, Track Changes marks typing, a list, a table,
@@ -136,8 +148,8 @@ baselines are drawn by it), as a job of its own in parallel with `check`:
 | When | What | Looks |
 |---|---|---|
 | a pull request | the `@smoke` journeys, and those of the areas its paths touch (`src/areas.ts`) | light |
-| a push to main | every journey, and the smoke journeys again | light; dark, 200% and dark 200% for the smoke ones |
-| manual dispatch (the sweep) | every journey | all four |
+| a push to main | every journey, and the smoke journeys again; then the `@long` ones, alone | light; dark, 200% and dark 200% for the smoke ones |
+| manual dispatch (the sweep) | every journey, then the `@long` ones | all four |
 
 A change to a path every journey draws through (the format, the editor's core, the themes, the
 page's own code, the journeys, the workflow) runs every journey. The run uploads `journeys-test-results`
