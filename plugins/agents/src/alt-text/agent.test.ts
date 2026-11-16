@@ -135,6 +135,7 @@ describe('the request', () => {
 
   it('says why when the agent fails, or ends with nothing', async () => {
     const failing: FakeScript = async function* () {
+      await Promise.resolve();
       yield { type: 'error', message: 'Claude isn’t signed in.' };
     };
     await expect(

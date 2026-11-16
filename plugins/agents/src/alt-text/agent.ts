@@ -171,7 +171,7 @@ export function createAltDescriber(deps: AltAgentDeps): AltDescriber {
           }
         }
       } catch (error) {
-        throw new Error(reasonOf(error));
+        throw new Error(reasonOf(error), { cause: error });
       } finally {
         // Let go of the agent, which closes its relay once it is let go of.
         void events.return?.(undefined).catch(() => {});

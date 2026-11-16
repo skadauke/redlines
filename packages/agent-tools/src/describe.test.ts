@@ -10,12 +10,22 @@ import { DESCRIBE_TOOLS, type ToolImage } from './tools.ts';
 
 const PICTURE = { mimeType: 'image/png', data: 'iVBORw0KGgo=' };
 
+interface Reply {
+  result: {
+    tools: { name: string; inputSchema: unknown }[];
+    isError: boolean;
+    content: unknown[];
+  };
+}
+
 function request(image?: ToolImage) {
   const doc = fakeDocument();
   const ctx = { ...fakeContext(doc), ...(image ? { image } : {}) };
   const ask = answerMcp(ctx, { only: DESCRIBE_TOOLS });
-  const call = async (message: object): Promise<Record<string, any>> =>
-    JSON.parse((await ask(JSON.stringify({ jsonrpc: '2.0', id: 1, ...message }))) ?? 'null');
+  const call = async (message: object): Promise<Reply> =>
+    JSON.parse(
+      (await ask(JSON.stringify({ jsonrpc: '2.0', id: 1, ...message }))) ?? 'null',
+    ) as Reply;
   return { doc, call };
 }
 
@@ -23,13 +33,13 @@ describe('answerMcp for a request to describe an image', () => {
   it('offers the picture and status, and nothing that reads the document or writes', async () => {
     const { call } = request({ read: () => Promise.resolve(PICTURE) });
     const answer = await call({ method: 'tools/list' });
-    expect(answer['result'].tools.map(({ name }: { name: string }) => name)).toEqual([
+    expect(answer.result.tools.map(({ name }: { name: string }) => name)).toEqual([
       'status',
       'view_image',
     ]);
-    const view = answer['result'].tools.find(({ name }: { name: string }) => name === 'view_image');
+    const view = answer.result.tools.find(({ name }: { name: string }) => name === 'view_image');
     // No argument: the agent can't name a file.
-    expect(view.inputSchema).toEqual({ type: 'object', properties: {} });
+    expect(view?.inputSchema).toEqual({ type: 'object', properties: {} });
   });
 
   it('returns the picture as an MCP image content block', async () => {
@@ -38,8 +48,8 @@ describe('answerMcp for a request to describe an image', () => {
       method: 'tools/call',
       params: { name: 'view_image', arguments: { path: '/etc/passwd' } },
     });
-    expect(answer['result'].isError).toBe(false);
-    expect(answer['result'].content).toEqual([
+    expect(answer.result.isError).toBe(false);
+    expect(answer.result.content).toEqual([
       { type: 'text', text: 'The image.' },
       { type: 'image', data: PICTURE.data, mimeType: 'image/png' },
     ]);
@@ -50,17 +60,17 @@ describe('answerMcp for a request to describe an image', () => {
       read: () => Promise.reject(new Error('The image file isn’t there.')),
     });
     const answer = await call({ method: 'tools/call', params: { name: 'view_image' } });
-    expect(answer['result'].isError).toBe(true);
+    expect(answer.result.isError).toBe(true);
     expect(JSON.stringify(answer)).toContain('The image file isn’t there.');
   });
 
   it('does not have the picture where the request has none, and never reads or writes the document', async () => {
     const { doc, call } = request();
     const listed = await call({ method: 'tools/list' });
-    expect(listed['result'].tools.map(({ name }: { name: string }) => name)).toEqual(['status']);
+    expect(listed.result.tools.map(({ name }: { name: string }) => name)).toEqual(['status']);
     for (const name of ['view_image', 'view', 'str_replace', 'reply']) {
       const answer = await call({ method: 'tools/call', params: { name, arguments: {} } });
-      expect(answer['result'].isError).toBe(true);
+      expect(answer.result.isError).toBe(true);
     }
     expect(doc.writes).toBe(0);
   });
@@ -74,7 +84,7 @@ describe('answerMcp for a request to describe an image', () => {
           ctx,
           options,
         )(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }))) ?? 'null',
-      );
+      ) as Reply;
       expect(answer.result.tools.map(({ name }: { name: string }) => name)).not.toContain(
         'view_image',
       );

@@ -825,7 +825,7 @@ async function readImageForAgent(src: string): Promise<{ mimeType: string; data:
     try {
       return await invoke<{ mimeType: string; data: string }>('image_for_agent', { path });
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : String(error));
+      throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
     }
   }
   const url = host.imageUrl(path);
