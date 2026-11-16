@@ -837,11 +837,15 @@ export function barClickHandler(
         const at = segmentSpan(segment);
         return at.to <= piece.from && at.to >= line.from;
       });
-    const found =
-      changes.find(beside) ??
-      changes.findLast(before) ??
-      changes.find(onLine) ??
-      changes.findLast(above);
+    // In the simple look, with the review bar closed, only a change drawn on that line or beside
+    // that piece: a bar beside a comment, or beside text a hidden deletion left, opens no card of a
+    // change the person did not point at.
+    const found = !open
+      ? (changes.find(beside) ?? changes.find(onLine))
+      : (changes.find(beside) ??
+        changes.findLast(before) ??
+        changes.find(onLine) ??
+        changes.findLast(above));
     if (found) pin(view, found.id);
     // The bar is open: a click never switches the view. In the simple look it does only where it
     // found no change to open.

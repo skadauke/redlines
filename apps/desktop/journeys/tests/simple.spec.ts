@@ -160,6 +160,9 @@ test.describe('the simple look @views', () => {
     const at = await j.page.locator('.rl-bar-seg').first().boundingBox();
     await j.page.mouse.click(at!.x + at!.width / 2, at!.y + at!.height / 2);
     await expect(card).toBeVisible();
+    expect(await j.page.evaluate(() => window.__redlines!.editor.getUiState()['view'])).toBe(
+      'simple',
+    );
     await j.shot('simple-card-from-bar');
   });
 
