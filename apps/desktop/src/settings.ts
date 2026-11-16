@@ -317,6 +317,26 @@ export function saveSettings(settings: Settings): void {
 }
 
 /**
+ * `incoming` (settings as stored, or as a change leaves them) with what is this window's own kept
+ * from `own`: its file sidebar and its text size. The stored text size is the Default text size of
+ * Preferences, which only Preferences changes; a window opens at it, and neither its own zoom nor
+ * a change of the default elsewhere moves the other (#557). `changed` is what this window itself
+ * just changed, which it keeps as it is.
+ */
+export function keepWindowOwn(
+  own: Settings,
+  incoming: Settings,
+  changed: Partial<Settings> = {},
+): Settings {
+  return {
+    ...incoming,
+    sidebarOpen: changed.sidebarOpen ?? own.sidebarOpen,
+    sidebarWidth: changed.sidebarWidth ?? own.sidebarWidth,
+    textSize: changed.textSize ?? own.textSize,
+  };
+}
+
+/**
  * Changes some settings and saves them, on top of what is stored now rather than what this window
  * last read, so that another window's change isn't lost. Returns the settings as saved.
  */
