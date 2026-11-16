@@ -190,7 +190,10 @@ repo root.
   `journeys-test-results` (screenshots, and the picture got, the approved one and the diff for a
   failed comparison) and `look-review` (the pictures in order, with INDEX.md).
 - The `quicklook` job of `ci.yml` runs on macOS: it builds the Quick Look extension and checks it
-  (`scripts/build-quicklook --check`), since no other job compiles Swift.
+  (`scripts/build-quicklook --check`), since no other job compiles Swift. On a pull request it runs only when the
+  change touches `apps/desktop/quicklook/`, `packages/format/`, `plugins/themes/`, the build script or
+  `ci.yml` (the `quicklook-changes` job decides; a skipped job counts as passing); pushes to `main`
+  always run it.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
   `website/**`, `apps/website-embed/**`, the packages and plugins it bundles, the icon masters,
