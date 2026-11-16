@@ -553,9 +553,12 @@ class Grips {
       const inRows = y >= drawn.top && y <= drawn.bottom;
       // Where the strip stands, when the table's end is in view (a table scrolled sideways has none).
       const endInView = drawn.right <= visibleRight(drawn) + 1;
-      const stripLeft = colStripLeft(drawn, this.view.dom.getBoundingClientRect().right);
       const col =
-        endInView && !!lastCol && inRows && x >= lastCol.left && x <= stripLeft + EDGE_SIZE + 4;
+        endInView &&
+        !!lastCol &&
+        inRows &&
+        x >= lastCol.left &&
+        x <= colStripLeft(drawn, this.view.dom.getBoundingClientRect().right) + EDGE_SIZE + 4;
       // Not where the next table's own strip above it is: Add row would cover its handles.
       const crowded = [...this.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl')].some(
         (el) => {
@@ -645,7 +648,8 @@ class Grips {
       el.style.width = `${Math.max(0, drawn.right - drawn.left)}px`;
       el.style.height = `${height}px`;
       // Too low for the glyph: the strip is a thin bar, and the hint says what it is.
-      el.textContent = height >= 16 ? '+' : '';
+      const glyph = height >= 16 ? '+' : '';
+      if (el.textContent !== glyph) el.textContent = glyph;
     } else {
       el.style.left = `${Math.max(4, drawn.left - GRIP_GAP - CORNER_SIZE) - base.left}px`;
       el.style.top = `${Math.max(visibleTop(this.view), drawn.top - GRIP_GAP - CORNER_SIZE) - base.top}px`;
@@ -664,7 +668,15 @@ class Grips {
     el.setAttribute('aria-label', text);
     el.addEventListener('mouseenter', (event) => {
       clearTimeout(this.tipTimer);
-      const pointer = { x: event.clientX, y: event.clientY };
+      let pointer = { x: event.clientX, y: event.clientY };
+      // Where the pointer comes to rest, which is where a long widget's hint belongs.
+      const follow = (move: MouseEvent) => {
+        pointer = { x: move.clientX, y: move.clientY };
+      };
+      el.addEventListener('mousemove', follow);
+      el.addEventListener('mouseleave', () => el.removeEventListener('mousemove', follow), {
+        once: true,
+      });
       // A drag or an open menu has the pointer's attention.
       if (this.drag || this.menu) return;
       this.tipTimer = setTimeout(() => {
@@ -679,7 +691,8 @@ class Grips {
         const long = box.width > 48 || box.height > 48;
         const left = long ? pointer.x - 12 : box.left;
         this.tip.style.left = `${Math.max(4, Math.min(left - base.left, room))}px`;
-        this.tip.style.top = `${(long ? pointer.y + 20 : box.bottom + 6) - base.top}px`;
+        const below = (long ? pointer.y + 20 : box.bottom + 6) - base.top;
+        this.tip.style.top = `${Math.max(0, Math.min(below, base.height - this.tip.offsetHeight - 4))}px`;
       }, this.tooltipMs);
     });
     const hide = () => this.hideHint();
