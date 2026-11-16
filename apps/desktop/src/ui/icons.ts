@@ -7,8 +7,15 @@ const ICONS = {
   /** The document's own icon beside its name in the title bar: a page with a turned corner. */
   document:
     '<path d="M4.6 1.8h4.2l3.9 3.9v7a1.5 1.5 0 0 1-1.5 1.5H4.6a1.5 1.5 0 0 1-1.5-1.5V3.3a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M8.6 1.9v2.7a1.1 1.1 0 0 0 1.1 1.1h2.9"/>',
-  /** View: an eye. */
-  eye: '<path d="M1.6 8s2.3-4.3 6.4-4.3S14.4 8 14.4 8s-2.3 4.3-6.4 4.3S1.6 8 1.6 8z"/><circle cx="8" cy="8" r="1.9"/>',
+  /** The View button in Clean: a page with lines of text. */
+  viewClean:
+    '<rect x="3.5" y="2" width="9" height="12" rx="1.6"/><path d="M6 5.5h4M6 8h4M6 10.5h2.5"/>',
+  /** The View button in Redlines: the same page, with a red bar in its left margin, as the change bars. */
+  viewRedlines:
+    '<rect x="3.5" y="2" width="9" height="12" rx="1.6"/><path d="M6 5.5h4M6 8h4M6 10.5h2.5"/><path class="rl-view-bar" d="M1.4 5.5v5" stroke-width="1.8"/>',
+  /** The View button in Plain: the same page, with a # (the source, in a monospace) in place of the lines. */
+  viewPlain:
+    '<rect x="3.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.2l-.7 5.6M9.7 5.2L9 10.8M5.4 6.9h5.4M5.2 9.1h5.4" stroke-width="1.1"/>',
   /** Resolved comments: a check mark in a circle. */
   resolved: '<circle cx="8" cy="8" r="5.8"/><path d="M5.5 8.3l1.9 1.9 3.2-3.8"/>',
   /** Review while your edits aren't tracked: a pen. */
@@ -25,7 +32,7 @@ const ICONS = {
   /** The simple look: the page of the Redlines view with its change bar and no markup on it. */
   simple:
     '<rect x="4.5" y="2" width="9" height="12" rx="1.6"/><path d="M7 5.5h4M7 8h4M7 10.5h4"/><path d="M2 6.2v3.6" stroke-width="1.8"/>',
-  /** The Raw view: angle brackets. */
+  /** The Plain view: angle brackets. */
   raw: '<path d="M5.5 4.5L2.5 8l3 3.5M10.5 4.5l3 3.5-3 3.5"/>',
   /** A list of changes. */
   list: '<path d="M6 4.5h7.5M6 8h7.5M6 11.5h7.5"/><path d="M2.6 4.5h.01M2.6 8h.01M2.6 11.5h.01" stroke-width="2"/>',

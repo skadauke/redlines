@@ -10,7 +10,6 @@ import {
   TRACKING_ARIA_KEY,
   TRACKING_KEY,
   VIEW_ARIA_KEYS,
-  EYE_FLASH_MS,
   VIEW_KEYS,
   wordCount,
   type TitleBarState,
@@ -912,27 +911,22 @@ describe('a click on the View and Review icons', () => {
     expect(shown(menu('Review'))).toBe(false);
   });
 
-  it('shows that a click on the eye did something: its pupil is red for a moment, then not (#499)', () => {
-    const { button } = setup({ view: 'clean', hasRedlines: false });
-    const eye = button('View');
-    expect(eye.classList.contains('rl-eye-flash')).toBe(false);
-    click(eye);
-    expect(eye.classList.contains('rl-eye-flash')).toBe(true);
-    vi.advanceTimersByTime(EYE_FLASH_MS - 1);
-    expect(eye.classList.contains('rl-eye-flash')).toBe(true);
-    vi.advanceTimersByTime(1);
-    expect(eye.classList.contains('rl-eye-flash')).toBe(false);
-    // Another click while it shows starts the moment again, in full.
-    click(eye);
-    vi.advanceTimersByTime(EYE_FLASH_MS - 100);
-    click(eye);
-    vi.advanceTimersByTime(EYE_FLASH_MS - 100);
-    expect(eye.classList.contains('rl-eye-flash')).toBe(true);
-    vi.advanceTimersByTime(100);
-    expect(eye.classList.contains('rl-eye-flash')).toBe(false);
-    // The pen does not flash.
-    click(button('Track Changes'));
-    expect(button('Track Changes').classList.contains('rl-eye-flash')).toBe(false);
+  it('draws the View button as a page that shows the view: lines, a red bar, a # (#661)', () => {
+    const { bar, button } = setup({ view: 'clean' });
+    const glyph = () => button('View').querySelector('svg')!;
+    // Clean: a page of lines, no bar. Redlines (in either look): the bar. Plain: the #, no lines.
+    expect(glyph().querySelector('.rl-view-bar')).toBeNull();
+    expect(glyph().querySelectorAll('path')).toHaveLength(1);
+    bar.update({ ...BASE, view: 'redlines' });
+    expect(glyph().querySelector('.rl-view-bar')).not.toBeNull();
+    bar.update({ ...BASE, view: 'simple' });
+    expect(glyph().querySelector('.rl-view-bar')).not.toBeNull();
+    bar.update({ ...BASE, view: 'raw' });
+    expect(glyph().querySelector('.rl-view-bar')).toBeNull();
+    expect(glyph().querySelector('path')?.getAttribute('d')).toContain('l-.7 5.6');
+    bar.update({ ...BASE, view: 'clean' });
+    expect(glyph().querySelector('.rl-view-bar')).toBeNull();
+    expect(glyph().querySelectorAll('path')).toHaveLength(1);
   });
 
   it('opens no menu, which hover and the arrow keys do', () => {
