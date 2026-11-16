@@ -47,4 +47,11 @@ describe('mentionedAgents', () => {
     expect(mentionedAgents('@Codex please', [missing])).toEqual([]);
     expect(mentionedAgents('@Bo please', agents)).toEqual([]);
   });
+
+  it('names an agent by its handle once it has one, and no longer by its id', () => {
+    const ada: AgentInfo = { ...found('claude', 'Ada'), handle: 'ada' };
+    expect(mentionedAgents('@ada, can you check this?', [ada])).toEqual(['claude']);
+    expect(mentionedAgents('@Ada, can you check this?', [ada])).toEqual(['claude']);
+    expect(mentionedAgents('@claude, can you check this?', [ada])).toEqual([]);
+  });
 });

@@ -116,6 +116,13 @@ repo root.
   zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
   (`src/print-check.ts`) shows that printing holds the whole document. They read nothing in a
   release build, and are no part of CI
+- Crashes (`apps/desktop/src-tauri/src/crash.rs`, `src/crash.ts`): errors in the page, the web content
+  process ending, Rust panics, the last run's macOS crash report and a page that stops answering are
+  written to `crash.log` in the app's log folder (`~/Library/Logs/md.redlines.editor/crash/`, slow
+  timers in `slow.log`), and a gray notification offers **Report…** (a filled-in GitHub issue with the
+  build, system, trace and the document's shape, never its text) and **Reveal Log**; Help has both.
+  In `pnpm tauri dev`, `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')` in
+  the page's console makes each happen
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a

@@ -11,10 +11,7 @@ import { describe, expect, it } from 'vitest';
 const repo = new URL('../../../', import.meta.url);
 
 /** Selectors whose text is decorative, not read: a glyph that is drawn, never a word. */
-const DECORATIVE = new Set([
-  // The + that a table's row or column shows between two others (plugins/tables).
-  '.rl-plus, .rl-col-plus',
-]);
+const DECORATIVE = new Set<string>([]);
 
 function sources(): string[] {
   const folders = [
