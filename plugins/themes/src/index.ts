@@ -53,7 +53,6 @@ export const TOKENS: readonly string[] = [
   '--rl-syntax',
   '--rl-card',
   '--rl-shadow',
-  '--rl-tip',
   '--rl-pressed',
   '--rl-red',
   '--rl-mixed',

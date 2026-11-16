@@ -77,8 +77,12 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createUntrackedAnswers } from './untracked-answers.ts';
+import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
+import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
+import { installTitleHints } from './ui/title-hints.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
 import { createEditorWordCount } from './ui/word-count.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
@@ -99,6 +103,7 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './zoom.css';
 import './styles.css';
+import './ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
 const host = createHost();
@@ -252,9 +257,22 @@ function dragFile(): void {
   });
 }
 
+// Crashes (#692): an error CodeMirror catches goes to the watch, which is made below, once there
+// is a document to take the shape of.
+let crashes: CrashWatch | null = null;
+const untrackedAnswers = createUntrackedAnswers();
+
 const editor = createEditor(element('#editor'), {
   doc: '',
+  onError: (error) => crashes?.caught(error),
   author,
+  // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
+  askUntracked: createUntrackedSheet({
+    container: app,
+    path: () => controller.state.path,
+    answers: untrackedAnswers,
+    restoreFocus: () => editor.focus(),
+  }),
   // Track Changes is the document's, as Word's is: the ledger records it when the file is saved for
   // another reason (format §5.6); turning it on or off never edits the file.
   saveTracking: true,
@@ -299,6 +317,7 @@ const editor = createEditor(element('#editor'), {
   markupView: settings.markupView,
   onChange: (text) => {
     controller.markEdited(text);
+    crashes?.documentChanged();
     // Images the text shows now are watched once the typing pauses.
     imageWatch.settle();
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -332,20 +351,24 @@ const agents =
     : createMacAgents(
         isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
         createRelay(),
-        isTauri
-          ? {
-              more: async () =>
-                (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
-                  createAcpProvider(processes, {
-                    id,
-                    name,
-                    command: program,
-                    args,
-                    ...(bridge === undefined ? {} : { bridge }),
-                  }),
-                ),
-            }
-          : {},
+        {
+          // What the person named each agent in Preferences, read at every look.
+          handles: () => loadSettings().agentHandles,
+          ...(isTauri
+            ? {
+                more: async () =>
+                  (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
+                    createAcpProvider(processes, {
+                      id,
+                      name,
+                      command: program,
+                      args,
+                      ...(bridge === undefined ? {} : { bridge }),
+                    }),
+                  ),
+              }
+            : {}),
+        },
       );
 // An agent added or removed by another window, or one that Preferences has updated, signed in or
 // found changed, is looked for again at the next comment box.
@@ -610,6 +633,11 @@ const sidebar = createSidebar(app, {
     }
   },
   isRunLive: () => runs.isLive(),
+  onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
+  onClose: () => {
+    changeSettings({ sidebarOpen: false });
+    render();
+  },
   notice: (message) => notice.flash(message),
 });
 
@@ -840,6 +868,7 @@ const changeSettings = (change: Partial<Settings>) => {
   settings = {
     ...updateSettings(change),
     sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
+    sidebarWidth: change.sidebarWidth ?? settings.sidebarWidth,
     textSize: change.textSize ?? settings.textSize,
   };
 };
@@ -903,6 +932,8 @@ function renameDocument(): void {
   else void controller.saveAs();
 }
 
+installTitleHints();
+
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
@@ -945,6 +976,27 @@ const wordCount = createEditorWordCount(main, editor, { visible: settings.showWo
 // off, and downloaded in the background. Restarting into the new version asks each window about its
 // unsaved edits first, as quitting does, and the new version reopens the documents. The app checks,
 // downloads and installs for all the windows (#122); this one shows what it says, and asks.
+// Failures leave a trace in the app's log and offer a report (crash.ts, #692); the app is where they
+// are logged, so a browser tab has none.
+if (isTauri) {
+  const crashLink = tauriCrashLink();
+  crashes = watchCrashes({
+    link: crashLink,
+    notifications,
+    getText: () => editor.getDoc(),
+    where: () => {
+      const room = scroller.scrollHeight - scroller.clientHeight;
+      return room > 0 ? `${Math.round((scroller.scrollTop / room) * 100)}% down` : 'at the top';
+    },
+  });
+  if (import.meta.env.DEV) {
+    // In a debug build: `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')`.
+    (window as unknown as { __simulateFailure: (kind: string) => void }).__simulateFailure = (
+      kind,
+    ) => simulateFailure(kind, crashLink);
+  }
+}
+
 const updates = isTauri ? windowUpdates(tauriUpdateLink()) : null;
 const updateNotifications =
   updates &&
@@ -1023,6 +1075,14 @@ const commands: MenuCommands = {
     else notice.flash('Preferences are in the app.');
   },
   showAgentLogs,
+  reportProblem: () => {
+    if (crashes) void crashes.reportProblem();
+    else notice.flash('Problem reports are in the app.');
+  },
+  revealCrashLog: () => {
+    if (crashes) void crashes.revealLog();
+    else notice.flash('The log is in the app.');
+  },
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. Of the
@@ -1081,6 +1141,7 @@ function render(): void {
   if (!doc || !ui) return;
   checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
+  sidebar.setWidth(settings.sidebarWidth);
   sidebar.setOpen(settings.sidebarOpen);
   titleBar.update({
     name: doc.name,
@@ -1212,12 +1273,8 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it: the
-  // person's own preference, not the document's, so nothing is written to it. A window opened for
-  // text isn't untouched (it holds the text, unsaved), but it is as new as any.
-  if (controller.state.path === null && settings.trackNewDocuments) {
-    editor.setTracking(true, { inFile: false });
-  }
+  // A new document always starts with Track Changes off (#660): the switch is the document's own,
+  // written at save, so no setting and no earlier document decides it.
   windows?.ready();
   nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
@@ -1262,7 +1319,12 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
-  settings = { ...changed, sidebarOpen: settings.sidebarOpen, textSize: settings.textSize };
+  settings = {
+    ...changed,
+    sidebarOpen: settings.sidebarOpen,
+    sidebarWidth: settings.sidebarWidth,
+    textSize: settings.textSize,
+  };
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
   editor.view.requestMeasure();

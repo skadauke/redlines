@@ -21,9 +21,8 @@ import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
-import { freshlyAdded } from './fresh.ts';
 import { imageOfNode } from '../image-size.ts';
-import { imageDecoration, refreshImagesEffect } from './image.ts';
+import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import { emojiDecoration, emojiLookup } from './emoji.ts';
 import { entityDecoration, pendingBox, TaskBoxWidget } from './task.ts';
@@ -508,8 +507,9 @@ function autolink(b: Builder, node: SyntaxNode): void {
 function image(b: Builder, node: SyntaxNode): void {
   // A tag that is no image, or a block that holds more than one, stays source.
   if (!imageOfNode(b.state, node)) return;
-  // A link a paste or a drop has just added is drawn with the caret at its end (`freshlyAdded`).
-  if (touches(b.state, node.from, node.to) && !freshlyAdded(b.state, node.to)) {
+  // The image stays drawn while it is selected or the caret is beside it (a click selects it, #675);
+  // only a selection with an end inside its syntax shows the source.
+  if (selectionInside(b.state, node.from, node.to)) {
     // Its source shows, and the spell check leaves the path alone.
     const url = node.getChild('URL');
     if (url) b.unchecked(url.from, url.to);
@@ -662,13 +662,16 @@ const previewField = StateField.define<DecorationSet>({
   ],
 });
 
-/** The hard breaks' syntax among a set of decorations, as what the caret steps over. */
+/** The hard breaks' syntax and the images among a set of decorations, as what the caret steps over. */
 const stepped = new WeakMap<DecorationSet, DecorationSet>();
 function hardBreaksOf(decorations: DecorationSet): DecorationSet {
   let found = stepped.get(decorations);
   if (!found) {
     found = decorations.update({
-      filter: (_from, _to, value) => (value.spec as { hardBreak?: true }).hardBreak === true,
+      filter: (_from, _to, value) => {
+        const spec = value.spec as { hardBreak?: true; imageAtom?: true };
+        return spec.hardBreak === true || spec.imageAtom === true;
+      },
     });
     stepped.set(decorations, found);
   }

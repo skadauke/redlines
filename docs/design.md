@@ -437,6 +437,15 @@ of red there besides the pen).
 Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
 Raw shows them.
 
+**Very long lines (every view, Raw included).** A line over 10,000 characters shows its first
+2,000 and a chip that holds the rest ("… 1.5 MB more"); the base64 of an embedded `data:` URI is a
+chip of its own ("PNG image, 1.1 MB, embedded"), wherever it stands in the line, since a base64
+picture in a code span is the usual cause. The page never lays out the text under a chip: a line of
+a million characters that wraps stalls it. The file is unchanged. The chip is one object: the caret
+steps over it, a click selects it, a deletion over it takes all of it (written whole, as any
+deletion), and a copy holds all of it, since a copy reads the document. There is no way yet to see
+it in parts. A `data:` URI of an image in `![](…)` or `<img src>` is drawn as the image.
+
 Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
 the full markup at first.
 A document that has redlines (pending changes, highlights or comment threads) opens in the view it
@@ -462,7 +471,8 @@ with redlines that record no view, and reaches every window for the documents ea
 the view any of them shows (a look saved there as Simple opens in Redlines' simple look). The View
 menu also previews the original (every change rejected) and one person's changes alone (everyone
 else's rejected). The previews are read-only. Raw can be edited while Track Changes is off; while it
-is on, or locked on, Raw is read-only, because typing there could forge or break markers.
+is on, or locked on, typing in Raw asks first, because Redlines can't mark a change there: a sheet
+offers to make the edit without tracking, as Word does.
 
 ### 5.4 Track Changes
 
@@ -1068,9 +1078,10 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   images, never moved, and a link to the copy goes in at the drop point or the caret, relative to
   the document (`![](images/screenshot.png)`), so it works on GitHub and in other editors. A drop
   over the sidebar, the title bar or the ground below the text goes where the caret is. The image
-  shows at once. The caret ends at the end of the links, as after any paste, and the preview, which
-  draws an image only while the caret is off its link, draws one just added all the same until the
-  caret moves or anything is written. Several images go in as links a space apart, and nothing else
+  shows at once. The caret ends at the end of the links, as after any paste. The preview draws an
+  image whenever the selection has no end inside its syntax: a click on it selects it (an outline
+  and its handles, its Markdown or HTML hidden; the source shows in Plain), and the caret steps over
+  it as one unit with the arrows. Several images go in as links a space apart, and nothing else
   is written. A dropped file, or an image file copied in Finder, keeps its name, and pasted image
   data, which has none worth keeping, gets one made of the time (`image-2026-11-12-153012.png`). A
   name that is taken gets `-2`, `-3` and on, and no file is ever replaced; an image that is in the
@@ -1815,8 +1826,19 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 Redlines never reads, stores or passes Claude or ChatGPT credentials. Whether someone is signed in
 is what the agent's own status command says, and when they aren't, the thread says so in one line
 (for example, "Claude isn't signed in. Run `claude auth login`."), which offers to open Preferences ›
-Agents. The UI says "Claude" and "Codex"; "Claude Code" appears only in plain text saying the app
-runs it.
+Agents. An agent is shown by its **handle, capitalized**: with the handle `ada`, the picker, Ask and
+the answers say "Ada", and `@` and the handle names it in a mention. The cards in Preferences keep the
+programs' names (Claude Code, Codex, OpenClaw).
+
+**Handles** (#558). Each card has a Handle field, which says "Shown as Ada". A handle is lowercase
+letters, digits and hyphens, no hyphen at either end, and at most 24 characters; a handle another agent
+has (Redlines' own, or the name of an OpenClaw agent) is refused with a note, and the old handle comes
+back when the field is left. The defaults are `claude` and `codex`; an OpenClaw agent is named by the
+person when it is added (Moby, by default in the form), and that name is its handle. There is one
+thing, not a display name beside the handle. What the host knows the agent by (its id) never changes,
+so a file's authors (`claude-<person>`) stay what they were; a mention of the old handle starts
+nothing once it has changed. Handles are kept in the app's settings (`agentHandles`) and read at
+every look at the agents, so a change reaches the open documents' pickers at once.
 
 **Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
 the program found (so that a stale second copy earlier on the PATH shows) and the next step as a

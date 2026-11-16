@@ -13,6 +13,7 @@ import {
   type ProjectRoot,
 } from '../host.ts';
 import { icon } from './icons.ts';
+import { createSidebarResize } from './sidebar-resize.ts';
 
 /**
  * The media query for a page too narrow to hold the sidebar beside it (the sidebar's 240 px, and a
@@ -33,6 +34,10 @@ export interface SidebarOptions {
   isRunLive?: () => boolean;
   /** Tells the person what went wrong, in one line. */
   notice(message: string): void;
+  /** The edge was dragged: keep the width (#680). */
+  onResize?(width: number): void;
+  /** The edge was dragged shut: close the sidebar, as ⌃⌘S does. */
+  onClose?(): void;
 }
 
 /** A saved document, and the project it is in. */
@@ -43,6 +48,8 @@ export interface SidebarDocument {
 
 export interface Sidebar {
   setOpen(open: boolean): void;
+  /** The width to draw, in CSS px (a stored one is made right). */
+  setWidth(width: number): void;
   /**
    * Shows the project of a document, with the folders down to it open and the document marked;
    * null for an untitled one.
@@ -96,6 +103,12 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   const list = document.createElement('ul');
   list.className = 'rl-sidebar-list';
   aside.append(head, label, list);
+  const resize = createSidebarResize({
+    aside,
+    app: container,
+    onResize: (width) => options.onResize?.(width),
+    onClose: () => options.onClose?.(),
+  });
   // Closed, it is out of the tab order and hidden from assistive technology.
   aside.inert = true;
   container.prepend(aside);
@@ -246,6 +259,9 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   };
 
   return {
+    setWidth(width) {
+      resize.setWidth(width);
+    },
     setOpen(next) {
       if (next === open) return;
       open = next;
@@ -275,6 +291,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     },
     destroy() {
       epoch++;
+      resize.destroy();
       aside.remove();
     },
   };
