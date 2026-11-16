@@ -117,6 +117,26 @@ describe('copy and cut', () => {
     );
   });
 
+  it('copy the whole file in Raw as it is shown, marks and ledger included (#683)', async () => {
+    const editor = load(doc, { view: 'raw' });
+    const data = await copyData(editor, 0, doc.length);
+    expect(data.getData('text/plain')).toBe(doc);
+    expect(data.getData('text/html')).toBe('');
+  });
+
+  it('copy the marks after the view was switched to Raw, from Clean or from Redlines (#683)', async () => {
+    for (const from of ['clean', 'redlines'] as const) {
+      const editor = load(doc, { view: from });
+      editor.setViewMode('raw');
+      const [start, end] = between(doc, 'Each', 'own name.');
+      expect(await copy(editor, start!, end!)).toBe(
+        'Each <!--cmt c8d2-->agent suggests<!--/c8d2--> in its own name.',
+      );
+      editor.setViewMode(from);
+      expect(await copy(editor, start!, end!)).toBe('Each agent suggests in its own name.');
+    }
+  });
+
   it('cut the newest text, and the cut is tracked', async () => {
     const editor = load(doc, { tracking: true });
     const [from, to] = between(doc, 'anywhere', 'merges.');
