@@ -8,7 +8,6 @@ import { mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEditor, type Editor } from '@redlines/editor';
-import { newestView, parse } from '@redlines/format';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DocumentController, type DocumentState } from './document.ts';
 import { BROWSER_IDENTITY, decodeText, FileExistsError, type Host } from './host.ts';
