@@ -79,3 +79,16 @@ export { fineTableEdit, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from
 export type { TableOp, TablePending } from './table-ops.ts';
 export { alignLabel, alignWas, isAlignMark, isAlignPoint } from './table-align.ts';
 export { blankTrailingMarkers, readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';
+export {
+  GFM_ESCAPED_TAGS,
+  GITHUB_ATTRIBUTES,
+  GITHUB_ELEMENTS,
+  GITHUB_ELEMENT_ATTRIBUTES,
+  htmlHandling,
+  isAddressAttribute,
+  isAllowedAddress,
+  isAllowedAttribute,
+  isAllowedElement,
+  isEscapedTag,
+} from './github-html.ts';
+export type { HtmlHandling } from './github-html.ts';
