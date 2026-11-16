@@ -55,11 +55,14 @@ it('puts find in the Edit menu, and Find Next works with focus in the find bar',
   box.dispatchEvent(new Event('input', { bubbles: true }));
   expect(document.activeElement).toBe(box);
 
-  item('Find Next').action();
+  // Typing makes the first match current (the panel settles on it), so each Find Next moves one.
+  expect(editor.view.state.selection.main.from).toBe(0);
   item('Find Next').action();
   expect(editor.view.state.selection.main.from).toBe(5);
+  item('Find Next').action();
+  expect(editor.view.state.selection.main.from).toBe(10);
   item('Find Previous').action();
-  expect(editor.view.state.selection.main.from).toBe(0);
+  expect(editor.view.state.selection.main.from).toBe(5);
   expect(document.activeElement).toBe(box);
   stop();
   editor.destroy();
