@@ -127,6 +127,6 @@ function selectionAfter(
     );
     return next.map.toSource(view, view === moved.to ? -1 : 1);
   };
-  if (anchor === head) return EditorSelection.cursor(place(head));
+  if (anchor === head) return EditorSelection.single(place(head));
   return EditorSelection.single(place(anchor), place(head));
 }
