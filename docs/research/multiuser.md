@@ -10,7 +10,7 @@ It builds on two earlier pieces of work:
 - [collaboration.md](collaboration.md), which simulated live sessions;
 - [design §7](../design.md#7-collaboration).
 
-It changes neither spec. The decisions it needs are in §8.
+It changes neither spec. The decisions taken on it are in §8.
 
 It draws on four inputs:
 - Google Docs, used live in two sessions (§2);
@@ -49,8 +49,8 @@ It draws on four inputs:
   - a WebSocket to a website's server;
   - iroh between Macs, on one network or across the internet.
 
-  iroh needs a relay for the connections it can't make directly. Who runs that relay is the main
-  open decision.
+  iroh needs a relay for the connections it can't make directly. At first that is iroh's free
+  public relays, with a setting to choose another (§8).
 - **Most of the work is in the editor, not the network.**
   - Every command must produce an intent that can be run again.
   - None of the collaboration rules is built yet (§7).
@@ -407,7 +407,8 @@ Shared folders and iCloud Drive stay the slow, file-based path of §4.8.
 - iroh's public relays are [for development, not production](https://docs.iroh.computer/concepts/relays).
 - For S4 to work for everyone, someone must run a relay: the project, the user, or a paid service.
 - A relay sees only encrypted traffic and which keys talk to each other, never a document.
-- This is the open question in design §14, now concrete.
+- This was the open question in design §14. For now it is decided: iroh's public relays, with a
+  setting to choose another (§8).
 
 **macOS.**
 - Joining or browsing a local network asks for the Local Network permission, on macOS 15 and later.
@@ -539,30 +540,29 @@ Sizes: S is a day or two, M about a week, L several weeks with risk.
 - **Phase 5 pays for itself outside sessions too.** It is how a file that comes back by email, a
   shared folder's conflicted copy and a git merge are reconciled.
 
-## 8. Decisions needed
+## 8. Decisions
 
-1. **Order.** Start with phases 0 and 1, several windows on one Mac, as the first Epic?
-   Recommended.
-2. **The relay for internet sessions.** The choices:
-   - the project runs a relay that carries only encrypted traffic (recommended for 1.0, with iroh's
-     public relays during the beta);
-   - users bring their own relay;
-   - internet sessions need a VPN such as Tailscale.
+Decided on 16 November 2026:
 
-   A relay is the one piece of shared infrastructure, and it never sees a document.
-3. **When the host leaves.** End the session, which is simplest and is the current design, or hand
-   it on automatically to the guest who has been there longest, which is closer to Docs (phase 5).
-   Recommended: end it at first, and hand it on later.
-4. **Copies that diverged.** The choices:
-   - overlapping edits from the other side arrive as suggestions, and the rest applies silently
-     (recommended);
-   - everything from the other side is a suggestion;
-   - everything applies silently, as Docs does.
-5. **Roles.** Viewer, Commenter and Editor as in Docs, with Suggesting as a mode? Recommended.
-6. **Identity.** A key per install and a name the person picks, with no accounts? Recommended.
-   Websites bring their own accounts.
-7. **A session with no host.** Simulate the replay merge of §3 during phase 0, once the harness
-   exists, and build it only if it holds up? Recommended.
+1. **Order:** phases 0 and 1 come first, as one Epic: the foundations, then one document in several
+   windows of one Mac.
+2. **The relay:** iroh's free public relays, with a setting where people can choose their own.
+   - Those relays are meant for testing, are rate-limited, and come with no promises.
+   - Whether the project runs a relay of its own stays open until sessions across networks are in
+     use.
+   - A relay forwards encrypted traffic only, and never sees a document.
+3. **When the host leaves:** at first the session ends. Handing it on to a guest comes later
+   (phase 5).
+4. **Copies that diverged:** overlapping edits from the other side arrive as suggestions, and the
+   rest applies silently.
+5. **Roles:** Viewer, Commenter and Editor, as in Docs, with Suggesting as a mode.
+6. **Identity:** no accounts.
+   - Each install keeps a key and the name its person picks, and the project will see how far that
+     goes.
+   - Two Macs are two identities until there is a way to link them.
+   - Websites bring their own accounts.
+7. **A session with no host:** the replay merge of §3 is simulated in phase 0, once the harness
+   exists, and built only if it holds up.
 
 ## Sources
 
