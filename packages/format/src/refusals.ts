@@ -1073,4 +1073,28 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'disable',
     'a comment is a mark, so it is never made untracked: Add Comment is grayed in Plain with its reason (R6a)',
   ],
+  [
+    'packages/editor/src/blocks/twin.ts',
+    'IN_CONTAINER',
+    'disable',
+    'the reason a structure command is disabled in HTML inside a quote or item (it goes through disabledReason, before the click)',
+  ],
+  [
+    'packages/editor/src/commands.ts',
+    'ACCEPT_FIRST',
+    'disable',
+    'the reason a structure command is disabled on HTML with a twin while Track Changes is on (disabledReason, #690)',
+  ],
+  [
+    'packages/editor/src/commands.ts',
+    'converted',
+    'keep',
+    "the format library's own error when it can't write the conversion of an HTML block that was enabled; its words are the library's",
+  ],
+  [
+    'packages/format/src/html-twin.ts',
+    'NO_TWIN',
+    'disable',
+    'the general reason a structure command is disabled on HTML that has no exact Markdown twin (disabledReason)',
+  ],
 ];

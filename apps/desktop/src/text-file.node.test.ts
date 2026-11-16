@@ -41,6 +41,7 @@ function nodeHost(): Host {
     allowImages: () => Promise.resolve(false),
     imageUrl: () => null,
     imageStamps: () => Promise.resolve([]),
+    imageSizes: () => Promise.resolve([]),
     forgetDocuments: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),

@@ -3,7 +3,7 @@
 // there. An item whose command isn't registered is left out, and appears when its command lands.
 
 import type { EditorState } from '@codemirror/state';
-import type { EditorCommand } from '@redlines/editor';
+import { disabledReasonOf, type EditorCommand } from '@redlines/editor';
 import type { PaletteIcon } from './icons.ts';
 import { ariaShortcut, formatShortcut } from './shortcuts.ts';
 
@@ -89,7 +89,7 @@ function shown(spec: ItemSpec, command: EditorCommand, state: EditorState): Show
     name: title.replace(/…$/, ''),
     keys: command.shortcut ? formatShortcut(command.shortcut) : (spec.keys ?? null),
     aria: command.shortcut ? ariaShortcut(command.shortcut) : null,
-    enabled: command.disabledReason?.(state) === undefined,
+    enabled: disabledReasonOf(command, state) === undefined,
     toggle: command.isActive !== undefined,
     active: command.isActive?.(state) ?? false,
   };

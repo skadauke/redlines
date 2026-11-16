@@ -5,7 +5,7 @@
 // drops that has no text shows as a small muted chip, drawn as an image is: the source shows while
 // the selection is inside it.
 
-import type { EditorState, Range } from '@codemirror/state';
+import type { EditorState, Line, Range } from '@codemirror/state';
 import { Decoration, WidgetType } from '@codemirror/view';
 import type { syntaxTree } from '@codemirror/language';
 import { keptAttributes, readTag } from './html-inline.ts';
@@ -18,6 +18,7 @@ export interface Sink {
   readonly state: EditorState;
   push(range: Range<Decoration>): void;
   syntax(from: number, to: number, shown: boolean): void;
+  lineClass(line: Line, className: string): void;
 }
 
 /** Elements whose text the spell check leaves alone. */
@@ -120,4 +121,33 @@ export function htmlChip(b: Sink, node: SyntaxNode): void {
       node.to,
     ),
   );
+}
+
+/** A heading of HTML with no attributes, on one line: `<h2>Title</h2>`. */
+const HEADING = /^<h([1-6])>[^\n]*<\/h\1>[ \t]*$/i;
+
+/**
+ * An HTML heading drawn as the heading it is (#690, a block with a Markdown twin): the line takes
+ * the heading's size, and its two tags are hidden unless the selection is inside one, as an ATX
+ * heading's `#`s are. The text between them is edited in place. False for any other HTML block.
+ */
+export function htmlHeading(b: Sink, node: SyntaxNode): boolean {
+  const source = b.state.sliceDoc(node.from, node.to);
+  const found = HEADING.exec(source);
+  if (!found) return false;
+  const level = found[1] as string;
+  const line = b.state.doc.lineAt(node.from);
+  b.lineClass(line, `rl-h${level} rl-html-heading`);
+  const open = node.from + 4;
+  const close = node.from + source.trimEnd().length - 5;
+  for (const [from, to] of [
+    [node.from, open],
+    [close, close + 5],
+  ] as const) {
+    const inside = b.state.selection.ranges.some((range) =>
+      range.empty ? range.from > from && range.from < to : range.from < to && range.to > from,
+    );
+    b.syntax(from, to, inside);
+  }
+  return true;
 }

@@ -96,6 +96,16 @@ function textBetween(state: EditorState, from: number, to: number): string {
   return text.replace(/\s+/g, ' ').trim().replace(ATTRIBUTES, '');
 }
 
+/** The text of HTML inline content: the tags and the marks of changes read as nothing. */
+function htmlText(inner: string): string {
+  return inner
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(?:#x[\da-f]{1,6}|#\d{1,7}|[a-z]+);/gi, entity)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Whether a link or an image has a destination or a label, and so is more than bracketed text. */
 function isLinked(node: SyntaxNode | null): boolean {
   if (!node) return false;
@@ -111,6 +121,15 @@ export function headingsOf(state: EditorState, start = 0): Heading[] {
   syntaxTree(state).iterate({
     from: start,
     enter(ref) {
+      // An HTML heading with no attributes, on one line, is a heading as its Markdown twin is (#690).
+      if (ref.name === 'HTMLBlock') {
+        const html = /^<h([1-6])>([^\n]*)<\/h\1>[ \t]*$/i.exec(state.sliceDoc(ref.from, ref.to));
+        const text = html && htmlText(html[2] as string);
+        if (html && text && ref.from >= start) {
+          found.push({ from: state.doc.lineAt(ref.from).from, level: Number(html[1]), text });
+        }
+        return false;
+      }
       const atx = /^ATXHeading([1-6])$/.exec(ref.name);
       const setext = /^SetextHeading([12])$/.exec(ref.name);
       if (!atx && !setext) return CONTAINERS.has(ref.name);

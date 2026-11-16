@@ -229,6 +229,20 @@ function onEmptyLineAt(state: EditorState): boolean {
   return line.text.trim() === '' && !atSelection(state).some((n) => n.parent?.type.isTop);
 }
 
+/**
+ * What a heading's Markdown becomes under the block type `to`: the heading of another level, or
+ * Body (or the same level again, which turns it off) as plain text; null for a quote or a list.
+ */
+function headingAs(markdown: string, to: BlockType): string | null {
+  const found = /^(#{1,6}) (.*)$/.exec(markdown);
+  if (!found) return null;
+  const [, marks, text] = found as unknown as [string, string, string];
+  if (to === 'p') return text;
+  if (!/^h[1-6]$/.test(to)) return null;
+  const level = Number(to[1]);
+  return level === marks.length ? text : `${'#'.repeat(level)} ${text}`;
+}
+
 /** Why the Paragraph menu's block types can't apply where the caret is, or undefined. */
 function blockReason(state: EditorState, to: BlockType, id: string): string | undefined {
   const { from, empty } = state.selection.main;
@@ -814,6 +828,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id,
       title,
       ...(shortcut ? { shortcut } : {}),
+      structure: ['heading', 'quote', 'list'],
+      twinAs: (twin) => (twin.kind === 'heading' ? headingAs(twin.markdown, to) : null),
       run: block(to, id),
       disabledReason: (state) => blockReason(state, to, id),
       isActive: (state) => activeBlocks(state).has(id),
@@ -1100,6 +1116,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.indent',
       title: 'Indent',
       shortcut: 'Mod-]',
+      structure: ['list'],
       disabledReason: (state) => indentReason(state, false),
       run: () => {
         if (!editable()) return false;
@@ -1112,6 +1129,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.outdent',
       title: 'Outdent',
       shortcut: 'Mod-[',
+      structure: ['list'],
       disabledReason: (state) => indentReason(state, true),
       run: () => {
         if (!editable()) return false;

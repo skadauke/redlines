@@ -3,7 +3,7 @@
 // this, the way the check pages (`block-check.ts` and the others) hold the editor. It is set only
 // in development and only in a plain browser tab, never in the app.
 
-import type { Editor } from '@redlines/editor';
+import { type Editor, parsedAt } from '@redlines/editor';
 import type { DocumentController } from './document.ts';
 
 export interface JourneyHook {
@@ -13,6 +13,8 @@ export interface JourneyHook {
   menuRow(text: string): { enabled: boolean; run(): boolean } | null;
   /** Saves `text` as the file `path` in the page's own folder, and opens it, as the sidebar would. */
   openFile(path: string, text: string): Promise<void>;
+  /** Whether the parse covers the middle of the viewport: the text there is styled, not plain. */
+  parsedAtViewport(): boolean;
 }
 
 declare global {
@@ -26,5 +28,10 @@ export function exposeForJourneys(
   controller: DocumentController,
   menu: Pick<JourneyHook, 'menuRow' | 'openFile'>,
 ): void {
-  window.__redlines = { editor, controller, ...menu };
+  const parsedAtViewport = () => {
+    const { state, viewport } = editor.view;
+    const middle = Math.floor((viewport.from + viewport.to) / 2);
+    return parsedAt(state, middle);
+  };
+  window.__redlines = { editor, controller, parsedAtViewport, ...menu };
 }

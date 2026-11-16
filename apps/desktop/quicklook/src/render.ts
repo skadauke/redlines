@@ -70,7 +70,7 @@ function prepare(source: string, cut: boolean): Prepared {
  */
 export function previewImages(source: string, cut = false): string[] {
   const { shown } = prepare(source, cut);
-  return shown.includes('![') ? markdownImages(shown) : [];
+  return shown.includes('![') || /<img[\s/>]/i.test(shown) ? markdownImages(shown) : [];
 }
 
 /**

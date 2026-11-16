@@ -3,7 +3,13 @@
 // offsets are CodeMirror positions.
 
 import { Annotation, Compartment, Facet, StateEffect, StateField } from '@codemirror/state';
-import { isDecidable, type MarkRange, type Parsed, parse } from '@redlines/format';
+import {
+  isDecidable,
+  type MarkRange,
+  type Parsed,
+  type ParseChange,
+  parse,
+} from '@redlines/format';
 import type { Author, MarkupView, MenuView, MetPerson, ViewMode } from '../api.ts';
 
 /**
@@ -96,9 +102,16 @@ export const parsedField = StateField.define<Parsed>({
     // A file that becomes Markdown, or Plain-only, by its name (a rename, Save As) is read again.
     const kindChanged = tr.startState.facet(plainOnlyFacet) !== tr.state.facet(plainOnlyFacet);
     if (!tr.docChanged && !kindChanged) return parsed;
-    return tr.state.facet(plainOnlyFacet)
-      ? plainParsed(tr.newDoc.toString())
-      : parse(tr.newDoc.toString(), kindChanged ? undefined : parsed);
+    if (tr.state.facet(plainOnlyFacet)) return plainParsed(tr.newDoc.toString());
+    if (kindChanged) return parse(tr.newDoc.toString());
+    // Where the text changed, as one stretch: the parse reads the marks again only there (#700).
+    let change: ParseChange | undefined;
+    tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+      change = change
+        ? { from: change.from, oldTo: toA, newTo: toB }
+        : { from: fromA, oldTo: toA, newTo: toB };
+    });
+    return parse(tr.newDoc.toString(), parsed, change);
   },
 });
 

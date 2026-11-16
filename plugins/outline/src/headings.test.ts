@@ -179,3 +179,23 @@ describe('the headings of a document', () => {
     expect(headings('#\n\n## \n')).toEqual([]);
   });
 });
+
+describe('HTML headings (#690)', () => {
+  it('lists an h1 to h6 with no attributes beside the Markdown ones, in order', () => {
+    const doc = '# One\n\n<h2>Two <b>bold</b> &amp; more</h2>\n\n### Three\n\n<h4>Four</h4>\n';
+    expect(brief(headings(doc))).toEqual([
+      [1, 'One'],
+      [2, 'Two bold & more'],
+      [3, 'Three'],
+      [4, 'Four'],
+    ]);
+  });
+
+  it('puts the HTML heading at the start of its line', () => {
+    expect(headings('Intro.\n\n<h3>Title</h3>\n').map(({ from }) => from)).toEqual([8]);
+  });
+
+  it('leaves out a heading with attributes, an empty one, and one over several lines', () => {
+    expect(headings('<h2 align="center">A</h2>\n\n<h2></h2>\n\n<h3>a\nb</h3>\n')).toEqual([]);
+  });
+});

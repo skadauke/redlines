@@ -26,6 +26,11 @@ function plainOnlyReason(id: string): string {
   }
   return 'Only Markdown files have formatting.';
 }
+import { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
+import { trackingField } from './tracked/typing.ts';
+
+const ACCEPT_FIRST =
+  "This HTML must be changed to Markdown first, and with Track Changes on that is a pending change that this can't build on. Turn Track Changes off to make this change.";
 
 /** Why `command` can't run in `state`, or undefined when it can. */
 export const disabledReasonOf = (
@@ -34,6 +39,18 @@ export const disabledReasonOf = (
 ): string | undefined => {
   if (state.facet(plainOnlyFacet) && !PLAIN_ONLY_COMMANDS.some((id) => command.id.startsWith(id))) {
     return plainOnlyReason(command.id);
+  }
+  // In HTML that has a Markdown twin the command converts it first; in HTML that has none it can't.
+  if (command.structure) {
+    const reason = twinReason(state, command.structure);
+    if (reason !== undefined) return reason;
+    if (inTwin(state, command.structure)) {
+      // A pending conversion can't be acted on: a command that can't write its result into the
+      // conversion waits for it to be accepted, and is disabled until then.
+      const twin = twinAt(state, state.selection.main.head)?.twin;
+      const folds = twin && command.twinAs?.(twin) != null;
+      return state.field(trackingField) && !folds ? ACCEPT_FIRST : undefined;
+    }
   }
   return command.disabledReason?.(state);
 };
@@ -138,9 +155,24 @@ export function createCommandRegistry(
    * is a bug. */
   const run = (command: EditorCommand) => {
     const reason = disabledReasonOf(command, editor().view.state);
-    if (reason === undefined) return command.run(editor());
-    notice(reason);
-    return false;
+    if (reason !== undefined) {
+      notice(reason);
+      return false;
+    }
+    if (command.structure && inTwin(editor().view.state, command.structure)) {
+      const { view } = editor();
+      const twin = twinAt(view.state, view.state.selection.main.head)?.twin;
+      // A pending conversion can't be acted on: a command that knows its result writes it in one.
+      const as = twin && view.state.field(trackingField) ? command.twinAs?.(twin) : null;
+      const converted = convertTwin(view, as ?? undefined);
+      if (converted !== true) {
+        notice(converted);
+        return false;
+      }
+      if (as != null) return true;
+      return command.run(editor());
+    }
+    return command.run(editor());
   };
 
   /** Keeps the key whatever the command does, unless the command lets it go on. */

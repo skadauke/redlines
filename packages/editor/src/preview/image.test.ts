@@ -18,10 +18,13 @@ function editorWith(
   doc: string,
   resolveImage?: (src: string) => string | null,
   cursor = doc.length,
+  imageSize?: (
+    src: string,
+  ) => { width: number; height: number } | null | Promise<{ width: number; height: number } | null>,
 ): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc, author, view: 'redlines', resolveImage });
+  const editor = createEditor(parent, { doc, author, view: 'redlines', resolveImage, imageSize });
   forceParsing(editor.view, editor.view.state.doc.length, 10_000);
   editor.view.dispatch({ selection: { anchor: cursor } });
   open.push(editor);
@@ -90,6 +93,38 @@ describe('an image under the selection (#675)', () => {
 });
 
 describe('images', () => {
+  it('holds an image’s room before it loads, from the size the host knows', async () => {
+    const asked: string[] = [];
+    const editor = editorWith(
+      '![cat](img/cat.png)\n\nend',
+      (src) => `asset://${src}`,
+      undefined,
+      (src) => {
+        asked.push(src);
+        return Promise.resolve({ width: 640, height: 480 });
+      },
+    );
+    const img = drawn(editor)[0]!.querySelector('img')!;
+    expect(img.loading).toBe('lazy');
+    expect(img.decoding).toBe('async');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(new Set(asked)).toEqual(new Set(['img/cat.png']));
+    expect(img.getAttribute('width')).toBe('640');
+    expect(img.getAttribute('height')).toBe('480');
+    expect(img.style.getPropertyValue('width')).not.toBe('');
+  });
+
+  it('draws an image whose size isn’t known as it did', () => {
+    const editor = editorWith(
+      '![cat](img/cat.png)\n\nend',
+      (src) => `asset://${src}`,
+      undefined,
+      () => null,
+    );
+    const img = drawn(editor)[0]!.querySelector('img')!;
+    expect(img.hasAttribute('width')).toBe(false);
+  });
+
   it('centers an image alone in its paragraph, with its pending change around it or not', () => {
     const alone = (doc: string) => drawn(editorWith(doc, local, 0))[0];
     const plain = 'Before\n\n![A cat](cat.png)\n\nAfter';

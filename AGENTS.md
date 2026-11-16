@@ -190,7 +190,8 @@ repo root.
   - `check` always runs typecheck, lint, format:check and the two size budgets. **On a pull
     request** its tests are `vitest run --changed <base sha>`: the tests that import, through any
     chain, a file the PR changed (a package's dependents' among them), and all of them when a
-    config or `package.json` changes. **On main** it runs every test, the timing tests included.
+    config or `package.json` changes, plus the tests that read the source files to hold every change
+    to a rule (refusals, text contrast and sizes, styles, hints, command permissions, the skill). **On main** it runs every test, the timing tests included.
   - `desktop` (Rust: build the `redlines` program and the frontend, clippy with warnings denied,
     `cargo test` for the program and `src-tauri`) and `quicklook` (macOS) run only when their flag is
     set; otherwise the job is skipped, which counts as passing.
