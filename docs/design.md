@@ -297,7 +297,7 @@ The window, on the desktop:
   Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
   Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
   Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
-  available; an item whose command isn't registered is left out. Show Formatting Palette (⌥⌘P,
+  available; an item whose command isn't registered is left out. In the menu bar, Add Comment and Ask… are in Review, Image…, Table, Code Block, Alert and Horizontal Rule in Insert (Table is also the first row of the Table menu, as Insert Table), and View has Show/Hide Word Count (#536). Show Formatting Palette (⌥⌘P,
   in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
   closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
@@ -1864,6 +1864,19 @@ so a file's authors (`claude-<person>`) stay what they were; a mention of the ol
 nothing once it has changed. Handles are kept in the app's settings (`agentHandles`) and read at
 every look at the agents, so a change reaches the open documents' pickers at once.
 
+**Default agent** (#528). Once more than one agent is set up (a program found on this Mac, or an
+OpenClaw agent), the first row of the pane is a choice of them, by the names they are shown as. An Ask
+that names no agent goes to the one chosen (else to the first that is ready), and the @ picker lists it
+first. It is kept in the app's settings (`defaultAgent`, an id); it is never a file's author.
+
+**Models** (#530). A provider lists the models its program can be told to run (`AgentProvider.models`:
+Claude Code's aliases Opus, Sonnet and Haiku, and a short list for Codex, which has no command that
+lists them); an OpenClaw agent lists none, because its Gateway chooses, so its card has no Model field.
+A card's Model field is Default, which says nothing and leaves the program's own default, or one of the
+list; the choice is kept in the app's settings (`agentModels`, by agent id) and reaches every run of the
+agent, a comment's and an Ask's. A request can carry its own model (`AgentRequest.model`), which Ask's
+picker uses; the program is told only a model its provider lists.
+
 **Setting an agent up.** Preferences › Agents shows each agent's state, the version and the path of
 the program found (so that a stale second copy earlier on the PATH shows) and the next step as a
 button, and Check Again always:
@@ -1874,6 +1887,12 @@ button, and Check Again always:
   installed, which its path says: `brew upgrade --cask` for a Homebrew install, `npm install -g
   <package>@latest` for a global npm install, and the agent's own `update` for any other
   (`claude update`, `codex update`). Redlines looks again when it ends.
+- **A newer version** (#527): a program that is fine but older than the newest shows Update too, and
+  says "Version 2.2.0 is available." Update shows only then, or when the program is too old. The newest
+  is the version npm's registry lists for the agent's package (the one its own updater installs), which
+  the app asks for with the system's `curl` at a fixed address, sending nothing of the person's, and
+  keeps for six hours; Check Again asks afresh. A look that fails (offline) shows no Update and says
+  nothing.
 - **Signed out:** Sign In runs the agent's own login (`claude auth login`, `codex login`), which
   opens the browser. A login that fails at once wants a terminal, and Redlines opens Terminal with
   the same command and looks again when the person comes back.

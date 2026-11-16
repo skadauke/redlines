@@ -11,6 +11,7 @@
 // arrows move between headings, Return goes to one and Escape gives the focus back to the text.
 
 import { syntaxTree } from '@codemirror/language';
+import type { Text } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { Editor } from '@redlines/editor';
 import { type Heading, headingsOf } from './headings.ts';
@@ -178,7 +179,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       this.resizes =
         typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.locateSoon());
 
-      this.headings = headingsOf(view.state);
+      this.headings = this.read();
       this.render();
       this.locate();
     }
@@ -219,10 +220,30 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       return true;
     }
 
+    /**
+     * The headings of the document. Where the text is the one they were read from and the parse has
+     * gone on, only the stretch it added is read: a long document's parse is many steps (#696).
+     */
+    private read(): Heading[] {
+      const { state } = this.view;
+      const tree = syntaxTree(state);
+      const before = this.readFrom;
+      this.readFrom = { doc: state.doc, reach: tree.length };
+      if (!before || before.doc !== state.doc) return headingsOf(state);
+      const block = tree.topNode.childBefore(before.reach);
+      const from = block?.prevSibling?.from ?? block?.from ?? 0;
+      return [
+        ...this.headings.filter((heading) => heading.from < from),
+        ...headingsOf(state, from),
+      ];
+    }
+
+    private readFrom: { doc: Text; reach: number } | null = null;
+
     private readonly refreshSoon = () => {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = setTimeout(() => {
-        this.headings = headingsOf(this.view.state);
+        this.headings = this.read();
         this.render();
         this.locate();
       }, REFRESH_MS);
