@@ -62,6 +62,7 @@ mod file_scope;
 
 // The app's updates, which no window owns: the checks, the download and the install, whether this
 // copy can update itself, and starting the new version after an update.
+mod crash;
 mod updates;
 
 // Renaming a file, showing it in Finder, and printing the window.
@@ -350,7 +351,10 @@ pub fn run() {
         .manage(project::Projects::default())
         .manage(image_files::ImageSources::default())
         .manage(watch::Watches::default())
+        .manage(crash::Crashes::default())
         .setup(|app| {
+            // Failures leave a trace first (crash.rs): the panic hook, the watchdog, the last run's reports.
+            crash::set_up(app.handle());
             // The appearance first, light, dark or the system's: every window opens in it.
             appearance::set_up(app.handle());
             // The zoom too, before a window opens: every window starts at it.
@@ -398,6 +402,13 @@ pub fn run() {
             about,
             appearance::set_appearance,
             edit_menu::beep,
+            crash::crash_environment,
+            crash::crash_log_page,
+            crash::crash_slow,
+            crash::crash_heartbeat,
+            crash::crash_pending,
+            crash::crash_log_reveal,
+            crash::crash_simulate,
             spelling::correct_word,
             spelling::spelling_suggestions,
             spelling::spelling_learn,
@@ -487,6 +498,8 @@ pub fn run() {
             #[cfg(unix)]
             agents::relay::relay_close
         ])
+        // The page's process ends: logged, and the window reloaded (crash.rs).
+        .on_web_content_process_terminate(crash::terminated)
         .on_page_load(|webview, payload| {
             // A window's page that loads again, as a reload does, watches what it needs itself.
             if payload.event() == tauri::webview::PageLoadEvent::Started {
@@ -500,6 +513,7 @@ pub fn run() {
             }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 zoom::window_closed(window.app_handle(), window.label());
+                crash::window_closed(window.app_handle(), window.label());
                 // A closed window's document is watched for nobody.
                 watch::window_closed(window.app_handle(), window.label());
                 // Its spell document, which the checker kept for the corrections of its Returns.

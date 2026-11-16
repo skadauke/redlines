@@ -302,6 +302,8 @@ export interface EditorOptions {
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+  /** Called with an error that CodeMirror caught in an extension, which it logs otherwise. */
+  onError?: (error: unknown) => void;
   /**
    * Called when Undo or Redo, by key or through `undo()` and `redo()`, finds nothing to take and
    * nothing to say: the host beeps, as the Mac does. The key is taken all the same, so that it
