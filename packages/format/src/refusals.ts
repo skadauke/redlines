@@ -200,6 +200,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'shows an error or a refusal that has its own tier',
   ],
   [
+    'packages/editor/src/blocks/move.ts',
+    'message',
+    'info',
+    "a move that reaches more blocks than a widened edit can hold asks first, through the sheet, and is made untracked on Make Edit (§3.13); the notice is only the format's own message for a ledger that can't be read",
+  ],
+  [
     'packages/editor/src/table/paste.ts',
     'message',
     'info',

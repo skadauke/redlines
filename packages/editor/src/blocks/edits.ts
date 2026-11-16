@@ -893,6 +893,7 @@ const EDGED = new Set([
   'Link',
   'Subscript',
   'Superscript',
+  'HtmlElement',
 ]);
 
 /**
@@ -918,7 +919,9 @@ function outsideEdges(state: EditorState, head: number): number {
                   ? 'SubscriptMark'
                   : node.name === 'Superscript'
                     ? 'SuperscriptMark'
-                    : 'EmphasisMark',
+                    : node.name === 'HtmlElement'
+                      ? 'HtmlTagMark'
+                      : 'EmphasisMark',
         );
         const open = marks[0];
         const close = node.name === 'Link' ? marks[1] : marks.at(-1);

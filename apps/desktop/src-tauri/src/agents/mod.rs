@@ -16,6 +16,7 @@ mod acp;
 mod acp_gate;
 mod acp_runs;
 mod allowed;
+mod latest;
 mod log;
 mod process;
 mod question;
@@ -265,6 +266,17 @@ pub fn agent_update(app: AppHandle, agent: String) -> Result<Outcome, String> {
     let environment = programs.environment_for(Path::new(&line.program));
     app.state::<Setups>()
         .run(agent, &line, &environment, UPDATE_TIME)
+}
+
+/// The newest version of an agent's program, for Preferences' Update button: the version npm's
+/// registry lists for its package (`latest.rs`), which is what its own updater installs; `fresh`
+/// skips what was kept from an earlier look. Only
+/// Preferences is granted the command (`capabilities/`).
+#[tauri::command(async)]
+pub fn agent_latest_version(agent: String, fresh: Option<bool>) -> Result<String, String> {
+    let agent =
+        Agent::named(&agent).ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    latest::latest_version(agent, fresh.unwrap_or(false))
 }
 
 /// Signs an agent in with its own login (`claude auth login`, `codex login`), which opens the

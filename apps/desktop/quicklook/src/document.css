@@ -335,3 +335,99 @@ section[data-footnotes] {
   border-top: 1px solid var(--rl-rule);
   border-bottom: 0;
 }
+
+/* The HTML that GitHub draws (html.ts). The page has no style attribute, so the presentational
+   `align` is read here, as a browser's own sheet reads it. */
+[align='center'] {
+  text-align: center;
+}
+[align='right'] {
+  text-align: right;
+}
+[align='left'] {
+  text-align: left;
+}
+[align='justify'] {
+  text-align: justify;
+}
+table[align='center'] {
+  margin-inline: auto;
+  width: auto;
+}
+table[align='right'] {
+  margin-inline-start: auto;
+  width: auto;
+}
+img[align='center'] {
+  display: block;
+  margin-inline: auto;
+}
+td[valign='middle'],
+th[valign='middle'] {
+  vertical-align: middle;
+}
+td[valign='bottom'],
+th[valign='bottom'] {
+  vertical-align: bottom;
+}
+mark {
+  background: #fff3a8;
+  color: inherit;
+  border-radius: 2px;
+}
+@media (prefers-color-scheme: dark) {
+  mark {
+    background: #5c4f00;
+  }
+}
+kbd {
+  padding: 0.1em 0.4em;
+  border: 1px solid var(--rl-rule);
+  border-radius: 5px;
+  font-family: var(--rl-font-mono);
+  font-size: 0.84em;
+}
+sub {
+  font-size: 0.75em;
+  line-height: 0;
+}
+small {
+  font-size: 0.85em;
+}
+abbr[title] {
+  text-decoration: underline dotted;
+}
+ins {
+  text-decoration: underline;
+}
+figure {
+  margin: 1em 0;
+}
+figcaption {
+  color: var(--rl-ink-2);
+  font-size: 0.9em;
+}
+dt {
+  font-weight: 700;
+}
+dd {
+  margin-inline-start: 1.5em;
+}
+
+/* A section that folds. Closed unless the file says `open`, as on GitHub; WebKit toggles it without
+   script. */
+details > summary {
+  cursor: default;
+}
+details[open] > summary {
+  margin-bottom: 0.5em;
+}
+
+/* An element GitHub drops that has nothing to show: its name, quietly, so that nothing is invisible. */
+.rl-chip {
+  padding: 0.05em 0.5em;
+  border-radius: 999px;
+  background: var(--rl-tint);
+  color: var(--rl-ink-2);
+  font-size: 0.8em;
+}

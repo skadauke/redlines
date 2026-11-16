@@ -52,6 +52,7 @@ import type { Apart } from './format-apart.ts';
 import { assertCalloutType, isBlockOp, planBlock } from './format-blocks.ts';
 import { isAlignPoint } from './align-point.ts';
 import { cellAt, cellName, cellOfEdits, scopeOf } from './table-cells.ts';
+import { widenedCellFormat } from './table-widen.ts';
 import {
   DELIMITER,
   INLINE_FORMATS,
@@ -2228,7 +2229,12 @@ export function trackedFormat(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
-  return formatTracked(text, [range], op, ctx, LEAVING_MARKS_APART);
+  try {
+    return formatTracked(text, [range], op, ctx, LEAVING_MARKS_APART);
+  } catch (error) {
+    // In a table's cell, where the fine form has no place, it is a replacement of the table.
+    return widenedCellFormat(text, [range], op, ctx, error);
+  }
 }
 
 /**
@@ -2248,7 +2254,11 @@ export function trackedFormatRanges(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
-  return formatTracked(text, ranges, op, ctx, LEAVING_MARKS_APART);
+  try {
+    return formatTracked(text, ranges, op, ctx, LEAVING_MARKS_APART);
+  } catch (error) {
+    return widenedCellFormat(text, ranges, op, ctx, error);
+  }
 }
 
 /** How a change is checked: with the marks apart from it left pending (format §2.6), or, with
