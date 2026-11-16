@@ -98,8 +98,6 @@ export interface Settings {
   /** A list of matching emoji after a colon and two letters (`:te`), which a choice writes as the
    * character itself. The shortcodes already in a file are drawn as their emoji either way. */
   emojiSuggestions: boolean;
-  /** Whether a new document starts with Track Changes on. */
-  trackNewDocuments: boolean;
   /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
   showLineBreakMarks: boolean;
   /** Whether the word count shows in the window's lower right corner (design §5.1). */
@@ -147,7 +145,6 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   smartPunctuation: true,
   closePairs: true,
   emojiSuggestions: true,
-  trackNewDocuments: false,
   showLineBreakMarks: false,
   showWordCount: true,
   agentScope: 'folder',
@@ -177,10 +174,8 @@ export function loadSettings(): Settings {
       | 'showLineBreakMarks'
       | 'showWordCount',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
-  const typing = (
-    key:
-      'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions' | 'trackNewDocuments',
-  ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
+  const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions') =>
+    typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
   return {
     theme: themeOf(value),
     appearance: isAppearanceChoice(value['appearance'])
@@ -204,7 +199,6 @@ export function loadSettings(): Settings {
     smartPunctuation: typing('smartPunctuation'),
     closePairs: typing('closePairs'),
     emojiSuggestions: typing('emojiSuggestions'),
-    trackNewDocuments: typing('trackNewDocuments'),
     showLineBreakMarks: flag('showLineBreakMarks'),
     showWordCount: flag('showWordCount'),
     agentScope: isAgentScope(value['agentScope'])

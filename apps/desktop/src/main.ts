@@ -1212,12 +1212,8 @@ if (isTauri) {
       await controller.open(path);
     });
   }
-  // A new document, empty or opened for text, with Track Changes on if Preferences ask for it: the
-  // person's own preference, not the document's, so nothing is written to it. A window opened for
-  // text isn't untouched (it holds the text, unsaved), but it is as new as any.
-  if (controller.state.path === null && settings.trackNewDocuments) {
-    editor.setTracking(true, { inFile: false });
-  }
+  // A new document always starts with Track Changes off (#660): the switch is the document's own,
+  // written at save, so no setting and no earlier document decides it.
   windows?.ready();
   nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
