@@ -149,6 +149,58 @@ test.describe('the Review Changes panel @views', () => {
     await j.shot('review-panel-first');
   });
 
+  test('its buttons sit on two aligned rows, never wrapping (#665)', async ({ start }) => {
+    const j = await withChanges(start);
+    await reviewChanges(j);
+    const rows = await j.page.evaluate(() => {
+      const box = (selector: string) => {
+        const r = document.querySelector(selector)!.getBoundingClientRect();
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+      };
+      return {
+        overflow: ['.rl-rp-actions', '.rl-rp-nav'].map((selector) => {
+          const el = document.querySelector(selector)!;
+          return el.scrollWidth > el.clientWidth;
+        }),
+        panel: box('.rl-review-panel'),
+        accept: box('.rl-rp-actions button:nth-child(1)'),
+        reject: box('.rl-rp-actions button:nth-child(2)'),
+        comment: box('.rl-rp-actions button:nth-child(3)'),
+        previous: box('.rl-rp-nav button:nth-child(1)'),
+        next: box('.rl-rp-nav button:nth-child(2)'),
+      };
+    });
+    await j.shot('review-panel-rows');
+    expect(rows.reject.top, 'Accept, Reject and Comment share a line').toBe(rows.accept.top);
+    expect(rows.comment.top).toBe(rows.accept.top);
+    expect(rows.next.top, 'Previous and Next share the next').toBe(rows.previous.top);
+    expect(rows.previous.top).toBeGreaterThan(rows.accept.bottom);
+    expect(rows.previous.left, 'Previous is under Accept').toBeCloseTo(rows.accept.left, 0);
+    expect(rows.next.right, 'Next is under Comment').toBeCloseTo(rows.comment.right, 0);
+    expect(rows.comment.right).toBeLessThanOrEqual(rows.panel.right);
+    expect(rows.overflow, 'neither row overflows its panel').toEqual([false, false]);
+  });
+
+  test('in a narrow window the rows still fit, without the keys (#665)', async ({ start }) => {
+    const j = await withChanges(start);
+    await j.page.setViewportSize({ width: 520, height: 700 });
+    await reviewChanges(j);
+    const fit = await j.page.evaluate(() => ({
+      overflow: ['.rl-rp-actions', '.rl-rp-nav'].map((selector) => {
+        const el = document.querySelector(selector)!;
+        return el.scrollWidth > el.clientWidth;
+      }),
+      tops: [1, 2, 3].map(
+        (n) =>
+          document.querySelector(`.rl-rp-actions button:nth-child(${n})`)!.getBoundingClientRect()
+            .top,
+      ),
+    }));
+    await j.shot('review-panel-narrow');
+    expect(fit.overflow).toEqual([false, false]);
+    expect(new Set(fit.tops).size, 'Accept, Reject and Comment share a line').toBe(1);
+  });
+
   test('takes the keyboard, and A, R, C and the arrows do the review', async ({ start }) => {
     const j = await withChanges(start);
     await reviewChanges(j);

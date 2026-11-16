@@ -609,6 +609,17 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       caretAt: start,
     };
   }
+  // The start of a later paragraph of the item: an empty paragraph above it, in the item, as in
+  // any paragraph (Return, and Shift-Return which is Return here, never a new item; #621).
+  if (head <= start && !first && block.kind === 'paragraph') {
+    // Not on a soft line break (the lines above are another block's, a blank line or a block that
+    // takes no text), which Return at the start of the line takes to the end of the line above.
+    const over = lineAbove(state, state.doc.lineAt(block.lines.from));
+    const prev = neighbours(state, block).prev;
+    if ((over && BLANK.test(over.text)) || (prev && prev.kind !== 'html')) {
+      return returnAtStart(state, block, start);
+    }
+  }
   if (head >= end) {
     // A paragraph of the item comes after this one: an empty paragraph in the item, between them.
     if (!lastInItem(state, block, item)) return returnAtEnd(state, block);
