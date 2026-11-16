@@ -71,6 +71,13 @@ function spaceRules(): ThemeSpec {
       '--rl-clip-rb': '6px',
       clipPath: clipped,
     };
+    // Code that ends an alert is the alert's last line: its padding and corners.
+    rules[`.cm-line.rl-callout-last.rl-codeblock-last.rl-space-${kind}-clip`] = {
+      paddingBottom: `calc(${space(kind)} + ${textPx(10)})`,
+      '--rl-clip-bottom': space(kind),
+      '--rl-clip-rb': '8px',
+      clipPath: clipped,
+    };
   }
   return rules;
 }

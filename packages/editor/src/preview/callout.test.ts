@@ -322,6 +322,11 @@ describe('tinted blocks under an alert, and an alert under code (#639)', () => {
     expect(classesAt(doc, '> Text.')).toContain('rl-callout-last');
   });
 
+  it('leave a table under front matter as it was', () => {
+    const doc = '---\ntitle: A\n---\n\n| a | b |\n| - | - |\n| 1 | 2 |\n';
+    expect(classesAt(doc, '---\ntitle')).not.toContain('rl-space-block-clip');
+  });
+
   it('leave code under a plain paragraph with its space below the paragraph, as it was', () => {
     const doc = 'Intro.\n\n```\ncode\n```\n';
     expect(classesAt(doc, 'Intro.')).toContain('rl-space-block-below');
