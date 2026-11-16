@@ -25,10 +25,15 @@ on:
       - 'integrations/skill/**'
       - 'integrations/*/skills/**'
   # A full run on main every two hours, which nothing cancels (see `changes`, `concurrency` below).
-  # `gh workflow run ci.yml --ref main` starts one by hand.
+  # `gh workflow run ci.yml --ref main` starts one by hand; `-f macos=true` adds the Mac jobs.
   schedule:
     - cron: '23 */2 * * *'
   workflow_dispatch:
+    inputs:
+      macos:
+        description: Also run the Mac jobs (Quick Look and the journeys)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -96,6 +101,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           BEFORE: ${{ github.event.before }}
+          MACOS: ${{ github.event_name == 'workflow_dispatch' && inputs.macos }}
         shell: bash
         run: |
           base="$BASE"
@@ -124,9 +130,13 @@ jobs:
           else
             flag rust '^(apps/desktop/src-tauri/|apps/desktop/redlines/|packages/cli/|packages/format/)'
           fi
-          # On a pull request, only a change to the Quick Look code itself runs it, to spare the
-          # Macs; main's runs also take packages/format, which the renderer bundles.
-          if [ "$EVENT" = pull_request ]; then
+          # Until Epic #537's final sweep, the Mac jobs run only by hand (a dispatch with
+          # macos=true): the lanes run them on the Mac they work on, and the sweep runs them all.
+          # After it: on a pull request, only a change to the Quick Look code itself runs it, to
+          # spare the Macs; main's runs also take packages/format, which the renderer bundles.
+          if [ "$MACOS" != true ]; then
+            echo "quicklook=false" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = pull_request ]; then
             flag quicklook '^(apps/desktop/quicklook/|apps/desktop/scripts/build-quicklook)'
           else
             flag quicklook '^(apps/desktop/quicklook/|packages/format/|apps/desktop/scripts/build-quicklook)'
@@ -289,7 +299,8 @@ jobs:
   # its own run of that workflow, so only the schedule and a dispatch call it from here.
   journeys:
     needs: changes
-    if: ${{ needs.changes.outputs.skip != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    # Until the Epic's final sweep, only a dispatch with macos=true calls them (see `changes`).
+    if: ${{ needs.changes.outputs.skip != 'true' && github.event_name == 'workflow_dispatch' && inputs.macos }}
     uses: ./.github/workflows/journeys.yml
     with:
       main-tier: true
