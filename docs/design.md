@@ -379,7 +379,7 @@ Redlines covers everything in the Markdown Guide's
   right edge resize it, with its aspect kept; the image follows the pointer as it is dragged, and
   one Undo takes the size back. A large image fits the text column and a small one keeps its own
   size (it is never scaled up unless it is dragged larger). The size is stored as `<img width>`
-  (`{width=}` in a pandoc file is not written yet): the first size turns `![alt](src)` into the tag,
+  (`{width=300px}` after the image in a pandoc file, `.qmd` and `.Rmd`): the first size turns `![alt](src)` into the tag,
   and the image's own size, which a drag to it also gives, turns it back. Alignment (left, centered,
   right) is the tag's `align`. A new size is tracked as a substitution of the whole image
   ([format §3.5.1](format.md#351-image-size-and-alignment)). The menu's Small, Medium, Large,
