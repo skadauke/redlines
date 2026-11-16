@@ -437,6 +437,15 @@ of red there besides the pen).
 Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
 Raw shows them.
 
+**Very long lines (every view, Raw included).** A line over 10,000 characters shows its first
+2,000 and a chip that holds the rest ("… 1.5 MB more"); the base64 of an embedded `data:` URI is a
+chip of its own ("PNG image, 1.1 MB, embedded"), wherever it stands in the line, since a base64
+picture in a code span is the usual cause. The page never lays out the text under a chip: a line of
+a million characters that wraps stalls it. The file is unchanged. The chip is one object: the caret
+steps over it, a click selects it, a deletion over it takes all of it (written whole, as any
+deletion), and a copy holds all of it, since a copy reads the document. There is no way yet to see
+it in parts. A `data:` URI of an image in `![](…)` or `<img src>` is drawn as the image.
+
 Redlines remembers its look, the one a click on a change bar or the Simple Look switch chose last,
 the full markup at first.
 A document that has redlines (pending changes, highlights or comment threads) opens in the view it
