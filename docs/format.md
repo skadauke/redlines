@@ -3954,8 +3954,28 @@ Agents edit the newest view, and the library turns their edits into tracked chan
 
 ### 9.1 File types and dialects
 
-- A Redlines file keeps its extension: `.md`, `.qmd`, `.Rmd` or `.txt`. A new extension would lose
-  GitHub's rendering and every Markdown, R Markdown and Quarto tool.
+- A Redlines file keeps its extension: `.md`, `.markdown`, `.qmd` or `.Rmd`. A new extension would
+  lose GitHub's rendering and every Markdown, R Markdown and Quarto tool.
+- **Two classes of file, decided by the last extension (lowercase) and never by the content.**
+  Markdown files (`md`, `markdown`, `qmd`, `rmd`) hold tracked changes, comments and a ledger. Only
+  a Markdown file has a ledger, markers or a review: for any other file the library is not called.
+  The Plain-only class is text and code, which an editor opens in Plain alone, with no Clean or
+  Redlines view, no Track Changes and no ledger:
+
+  | Group           | Extensions                                                                                                                    |
+  | --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+  | Text            | `txt`, `text`, `log`                                                                                                          |
+  | Data and config | `json`, `jsonc`, `yaml`, `yml`, `toml`, `ini`, `cfg`, `conf`, `env`, `csv`, `tsv`, `xml`, `plist`                             |
+  | Web             | `html`, `htm`, `css`, `scss`, `less`, `js`, `mjs`, `cjs`, `jsx`, `ts`, `mts`, `cts`, `tsx`, `svg`                             |
+  | Code            | `py`, `rb`, `go`, `rs`, `swift`, `java`, `kt`, `c`, `h`, `cc`, `cpp`, `hpp`, `cs`, `php`, `lua`, `r`, `sql`, `sh`, `bash`, `zsh`, `ps1` |
+
+  The table is written once in each of `apps/desktop/src/file-names.ts`, `src-tauri/src/project.rs`,
+  `packages/cli/src/plain-only.ts` and the app's `document-types.plist`, and tests hold them equal.
+  A Plain-only file is read and written as text, byte for byte (§5's line endings and final newline
+  are for Markdown): a `<!-- redlines` or a `<!--ins` in it is text, whatever it looks like, and
+  saving never adds a ledger or records a view or Track Changes. The `redlines` command line prints
+  such a file as it is and refuses every command that makes or decides a mark ("not a Markdown
+  document").
 - `.md` files are written in GitHub Flavored Markdown: `<mark>`, `<ins>` for underline,
   `<img width>`, `<dl>`, GitHub alerts.
 - `.qmd` and `.Rmd` files are written in pandoc's Markdown: `[x]{.mark}`, `{width=}`, `{#id}`,
@@ -3974,11 +3994,9 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   character. A shortcode that a file already has is kept as written, and is one character for a
   change (§3.1, rules 1 and 9).
 - Both read every common variant, and the serializer never rewrites syntax it didn't change.
-- `.txt` files are read and written as `.md` files are, in GitHub Flavored Markdown: a plain text
-  file is a document like any other, and its tracked changes and comments are the same markers and
-  ledger. Text that Markdown reads as syntax, such as a line of `=` under another line or a `*` at
-  the start of a line, shows as Markdown and stays as it was written. Other tools show a `.txt`
-  file as plain text, with every marker and the ledger (§9.3).
+- `.txt` files are Plain-only: a `*` or `_` in a log or a note is not Markdown to its author. A
+  `.txt` file that an earlier version of Redlines gave a ledger keeps it, as text that nothing
+  reads, and Redlines never changes it.
 - MDX is not supported: MDX can't compile HTML comments.
 - A file is a Redlines file if it contains Redlines markers or a `<!-- redlines` ledger. Tools that
   need a media type can use `text/markdown; variant=redlines` (RFC 7763 allows a `variant`
@@ -4004,7 +4022,6 @@ A file changes only when its content does.
 | Jekyll and GitHub Pages                                               | The newest version. Payloads escape Liquid's tags (§2.5)                              |
 | Editors that show HTML comments as text, and Google Docs' Markdown mode | Every marker and the ledger, as text. Saving keeps them; Google Docs also reformats the file (§9.5) |
 | Marp                                                                  | The newest version, with every marker and the ledger in the speaker notes             |
-| GitHub and the other tools that show a `.txt` file as plain text      | Every marker and the ledger, as text                                                  |
 | MDX                                                                   | A compile error                                                                       |
 
 ### 9.4 R Markdown, Quarto and knitr

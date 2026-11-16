@@ -16,7 +16,7 @@ import {
   createRuns,
   renderCommentText,
 } from '@redlines/agents';
-import { codeLanguages } from '@redlines/code';
+import { codeFileHighlight, codeLanguages } from '@redlines/code';
 import {
   createEditor,
   PLAIN_ONLY_TRACKING,
@@ -41,6 +41,7 @@ import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
+import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
@@ -587,7 +588,27 @@ const focusEditor = () => {
   if (!editor.view.dom.contains(document.activeElement)) editor.focus();
 };
 
+/** The file whose name the editor is colored by, with the extension that does it. */
+let coloredAs: { path: string; remove: () => void } | null = null;
+
+/**
+ * Colors a text or code file as its name says (`codeFileHighlight`), and takes the colors off when
+ * another file, or a Markdown one, takes its place or its name changes.
+ */
+function colorFile(path: string | null): void {
+  const wanted = path !== null && documentKind(path) === 'plain-only' ? path : null;
+  if (coloredAs?.path === wanted) return;
+  coloredAs?.remove();
+  coloredAs = wanted
+    ? {
+        path: wanted,
+        remove: editor.addExtension(codeFileHighlight(wanted, editor.getDoc().length)),
+      }
+    : null;
+}
+
 function showDocument(state: DocumentState): void {
+  colorFile(state.path);
   if (controller.generation !== shownGeneration) {
     shownGeneration = controller.generation;
     // Another document took this one's place: the old one's runs have nothing to act on, and its
@@ -1349,6 +1370,10 @@ if (isTauri) {
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
     exposeForJourneys(editor, controller, {
+      openFile: async (path, text) => {
+        await host.write(path, text);
+        await controller.open(path);
+      },
       // The menu bar is the app's, and a page has none: a journey chooses a row through this, which
       // runs it only while the menu would have it enabled.
       menuRow: (text) => {
