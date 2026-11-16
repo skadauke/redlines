@@ -5,7 +5,8 @@
 # - a pull request runs the short tier, as a job of its own beside `check` in ci.yml: the smoke
 #   journeys, and the journeys tagged for the areas of the paths it changes (src/areas.ts), in the
 #   light look at 100%;
-# - a push to main runs the middle tier: every journey in the light look, and the smoke journeys in
+# - a push to main runs the middle tier: every journey in the light look (the long-document ones,
+#   `@long`, too: JOURNEYS_LONG=1), and the smoke journeys in
 #   the other three looks (dark, and 200% text, light and dark); nobody waits on it;
 # - the sweep, by manual dispatch, runs the full tier: every journey in all four looks.
 #
@@ -99,7 +100,7 @@ jobs:
         run: |
           case "$EVENT" in
             pull_request) export JOURNEYS_PROJECTS=light ;;
-            push) export JOURNEYS_PROJECTS=all JOURNEYS_OTHER_GREP='@smoke' ;;
+            push) export JOURNEYS_PROJECTS=all JOURNEYS_OTHER_GREP='@smoke' JOURNEYS_LONG=1 ;;
             *) export JOURNEYS_PROJECTS=all ;;
           esac
           if [ -n "$GREP" ]; then
