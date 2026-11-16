@@ -14,6 +14,7 @@ use serde::Deserialize;
 
 // Markdown's type, the one Redlines opens Markdown files by and can be made their default app for.
 use crate::default_app::MARKDOWN;
+use crate::project::PLAIN_ONLY;
 
 /// The type that other apps declare for Markdown (Word does, as a type that conforms to nothing),
 /// which the bundle claims as well, so that Open With offers Redlines for a file typed that way
@@ -80,6 +81,17 @@ fn read<T: serde::de::DeserializeOwned>(plist: &Path) -> T {
     plist::from_file(plist).unwrap_or_else(|error| panic!("{}: {error}", plist.display()))
 }
 
+/// The name the bundle gives each group of Plain-only documents.
+fn plain_only_name(group: &str) -> &'static str {
+    match group {
+        "text" => "Plain Text Document",
+        "data" => "Data and Config Document",
+        "web" => "Web Document",
+        "code" => "Source Code Document",
+        other => panic!("no name for the group {other}"),
+    }
+}
+
 /// What the bundle should declare: Markdown by its type, the one Redlines can be made the default
 /// app for, and by `public.markdown`, which other apps declare (#347), at the rank of an app that
 /// opens it. R Markdown and Quarto by their extensions, which
@@ -96,7 +108,7 @@ fn expected() -> Vec<Document> {
         types: types.iter().map(|&each| each.to_owned()).collect(),
         extensions: extensions.iter().map(|&each| each.to_owned()).collect(),
     };
-    vec![
+    [
         editor(
             "Markdown Document",
             "Default",
@@ -105,8 +117,14 @@ fn expected() -> Vec<Document> {
         ),
         editor("R Markdown Document", "Alternate", &[], &["Rmd"]),
         editor("Quarto Document", "Alternate", &[], &["qmd"]),
-        editor("Plain Text Document", "Alternate", &[], &["txt"]),
     ]
+    .into_iter()
+    .chain(
+        PLAIN_ONLY.iter().map(|(group, extensions)| {
+            editor(plain_only_name(group), "Alternate", &[], extensions)
+        }),
+    )
+    .collect()
 }
 
 /// What the bundle imports: what Markdown is, for a macOS that doesn't say. The app owns no type,
@@ -158,11 +176,35 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
             );
         }
     }
-    let opened: BTreeSet<String> = crate::project::DOCUMENTS
-        .iter()
-        .map(|&each| each.to_owned())
+    let opened: BTreeSet<String> = crate::project::document_extensions()
+        .map(str::to_owned)
         .collect();
     assert_eq!(offered, opened);
+}
+
+/// The strings of the array that follows `name` in `src/file-names.ts`, in order.
+fn typescript_list(source: &str, name: &str) -> Vec<String> {
+    let after = source
+        .split_once(name)
+        .unwrap_or_else(|| panic!("file-names.ts has no {name}"))
+        .1;
+    let body = after.split_once('[').unwrap().1.split_once(']').unwrap().0;
+    body.split('\'')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn the_typescript_table_of_extensions_is_the_rust_one() {
+    // One table, written twice: file-names.ts decides what a window opens and which kind it is,
+    // project.rs what the app reads, and the plist, above, what Finder offers.
+    let source = include_str!("../../src/file-names.ts");
+    for (group, extensions) in crate::project::MARKDOWN.iter().chain(PLAIN_ONLY) {
+        let written = typescript_list(source, &format!("  {group}:"));
+        assert_eq!(&written, extensions, "{group}");
+    }
 }
 
 #[test]

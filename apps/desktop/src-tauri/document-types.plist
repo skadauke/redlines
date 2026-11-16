@@ -10,11 +10,11 @@
     `.md` files have and Redlines can be made the default app for (Preferences › General), and
     public.markdown, which other apps declare (Word does, as a type that conforms to nothing), so
     that Open With offers Redlines for a file typed that way too (#347).
-  - R Markdown and Quarto, by their extensions, which macOS has no type for, and plain text, by
-    .txt alone, each at the rank of an alternative: Redlines is offered for those files and takes
-    none of them, even where no other app owns them, since people who write R Markdown or Quarto
-    have an editor of their choice. Plain text's type would offer Redlines for every kind of text
-    that is plain text to macOS, such as source code, which Redlines doesn't open.
+  - R Markdown and Quarto, by their extensions, which macOS has no type for, and the Plain-only
+    documents (text, data and config, web and source code, by their extensions, the table in
+    src/file-names.ts), each at the rank of an alternative: Redlines is offered for those files and
+    takes none of them, even where no other app owns them. Plain text's own type would offer
+    Redlines for every kind of text that is plain text to macOS, so the extensions are listed.
 
   The import says what Markdown is, for a macOS that doesn't know it. public.markdown is for
   others to declare, so the bundle only claims it, and imports no more than the one type.
@@ -78,6 +78,89 @@
       <key>CFBundleTypeExtensions</key>
       <array>
         <string>txt</string>
+        <string>text</string>
+        <string>log</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Data and Config Document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>json</string>
+        <string>jsonc</string>
+        <string>yaml</string>
+        <string>yml</string>
+        <string>toml</string>
+        <string>ini</string>
+        <string>cfg</string>
+        <string>conf</string>
+        <string>env</string>
+        <string>csv</string>
+        <string>tsv</string>
+        <string>xml</string>
+        <string>plist</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Web Document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>html</string>
+        <string>htm</string>
+        <string>css</string>
+        <string>scss</string>
+        <string>less</string>
+        <string>js</string>
+        <string>mjs</string>
+        <string>cjs</string>
+        <string>jsx</string>
+        <string>ts</string>
+        <string>mts</string>
+        <string>cts</string>
+        <string>tsx</string>
+        <string>svg</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Source Code Document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>py</string>
+        <string>rb</string>
+        <string>go</string>
+        <string>rs</string>
+        <string>swift</string>
+        <string>java</string>
+        <string>kt</string>
+        <string>c</string>
+        <string>h</string>
+        <string>cc</string>
+        <string>cpp</string>
+        <string>hpp</string>
+        <string>cs</string>
+        <string>php</string>
+        <string>lua</string>
+        <string>r</string>
+        <string>sql</string>
+        <string>sh</string>
+        <string>bash</string>
+        <string>zsh</string>
+        <string>ps1</string>
       </array>
     </dict>
   </array>

@@ -725,7 +725,7 @@ mod tests {
             "/docs/plan.md",
             "/docs/notes.TXT",
             "/docs/logo.png",
-            "/docs/main.ts",
+            "/docs/main.zig",
             "/docs/Makefile",
         ]
         .map(PathBuf::from)
