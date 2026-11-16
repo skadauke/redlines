@@ -4,6 +4,7 @@
 // isn't a disabled control (WCAG exempts those), in the look the run is in.
 
 import type { Page } from '@playwright/test';
+import { flatten, parseColor, ratio } from '../src/contrast.ts';
 import { expect, test } from '../src/journey.ts';
 
 interface Low {
@@ -136,5 +137,48 @@ test.describe('interface text keeps 4.5:1 @views', () => {
     await expect(j.page.locator('.rl-sidebar')).toBeVisible();
     await j.shot('contrast-resolved-and-files');
     expect(await lowContrast(j.page), 'text under 4.5:1').toEqual([]);
+  });
+});
+
+test.describe('shapes that show state keep 3:1 (#653)', () => {
+  test('a checkbox outline and a focus ring', async ({ start }) => {
+    const j = await start({
+      doc: '- [ ] A task to do\n- [x] A task done\n\nA paragraph after.\n',
+      tracking: false,
+      view: 'clean',
+    });
+    // The page's own color, under everything: what the shapes are drawn on.
+    const page = parseColor(
+      await j.page.evaluate(
+        () => getComputedStyle(document.querySelector('.cm-editor')!).backgroundColor,
+      ),
+    );
+    const outline = await j.page.evaluate(() => {
+      const rect = document.querySelector('.rl-box rect');
+      return rect ? getComputedStyle(rect).stroke : null;
+    });
+    expect(outline, 'a checkbox is drawn').not.toBeNull();
+    expect(ratio(flatten([outline!], page), page), 'the checkbox outline').toBeGreaterThanOrEqual(
+      3,
+    );
+    // A checkbox focused after a key, as the keyboard does: its ring.
+    await j.caretAtEnd();
+    await j.page.keyboard.press('Shift');
+    await j.page
+      .locator('.rl-box')
+      .first()
+      .evaluate((box) => (box as unknown as HTMLElement).focus());
+    const ring = await j.page.evaluate(() => {
+      const focused = document.activeElement;
+      if (!focused || focused === document.body) return null;
+      const style = getComputedStyle(focused);
+      return { color: style.outlineColor, style: style.outlineStyle, width: style.outlineWidth };
+    });
+    expect(ring, 'the checkbox takes the focus').not.toBeNull();
+    expect(ring?.style, 'the focus ring is drawn').not.toBe('none');
+    if (ring && ring.style !== 'none') {
+      expect(ratio(flatten([ring.color], page), page), 'the focus ring').toBeGreaterThanOrEqual(3);
+    }
+    await j.shot('contrast-checkbox-and-focus');
   });
 });

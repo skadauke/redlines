@@ -23,9 +23,12 @@ import {
   viewModeField,
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
+import { heldEditEffect, wasHeld } from '../tracked/ask.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import {
   type KeyEdit,
+  inRoomParagraph,
+  NBSP_LINE,
   planReturn,
   planSelectionReturn,
   planShiftReturn,
@@ -222,7 +225,7 @@ export function applyKeyEdit(
     scrollIntoView: true,
   });
   // Refused, where the key has another form: that one.
-  if (edit.fallback && tr.effects.some((effect) => effect.is(refusedEditEffect))) {
+  if (edit.fallback && (wasHeld(tr) || tr.effects.some((effect) => effect.is(refusedEditEffect)))) {
     return applyKeyEdit(view, edit.fallback);
   }
   view.dispatch(tr);
@@ -243,7 +246,7 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   const refused = (at: EditorState, edit: KeyEdit) =>
     at
       .update({ changes: edit.changes, selection: edit.selection, userEvent: edit.userEvent })
-      .effects.some((effect) => effect.is(refusedEditEffect));
+      .effects.some((effect) => effect.is(refusedEditEffect) || effect.is(heldEditEffect));
   if (main.empty) {
     const bare = bareMarkerAt(state);
     if (bare !== null) {
@@ -363,6 +366,25 @@ const returnKey = blockKey((view) => {
     return again
       ? applyKeyEdit(view, { ...again, userEvent: 'delete.selection', join: true, record: true })
       : true;
+  }
+  // Return again in the empty paragraph: `&nbsp;` is typed into it, a line of room (format §3.4;
+  // with Track Changes on, the paragraph is the author's insertion), and Return opens the next
+  // empty paragraph below it: one step to undo.
+  if (inRoomParagraph(view.state)) {
+    const head = view.state.selection.main.head;
+    applyKeyEdit(view, {
+      changes: [{ from: head, insert: NBSP_LINE }],
+      selection: EditorSelection.single(head + NBSP_LINE.length),
+      userEvent: 'input.type',
+      record: true,
+      join: true,
+      isolateBefore: true,
+    });
+    const then = planReturn(view.state);
+    if (then) {
+      applyKeyEdit(view, { ...then, userEvent: 'delete.selection', join: true, record: true });
+    }
+    return true;
   }
   const over = planSelectionReturn(view.state);
   if (over) {

@@ -116,27 +116,26 @@ describe('what is found', () => {
     // Marker names, the deleted text and the ledger's own words are not in what a reader sees.
     for (const hidden of ['ins', 'ibex', 'ledgerword', 'redlines', 'b2b2', 'version']) {
       search(editor, hidden);
-      expect(bar(editor).count?.textContent, hidden).toBe('No matches');
+      expect(bar(editor).count?.textContent, hidden).toBe('No results');
     }
     search(editor, 'zebra');
-    expect(bar(editor).count?.textContent).toBe('1 match');
+    expect(bar(editor).count?.textContent).toBe('1 of 1');
     search(editor, 'kiwi');
-    expect(bar(editor).count?.textContent).toBe('1 match');
+    expect(bar(editor).count?.textContent).toBe('1 of 1');
     expect(highlighted(editor)).toEqual(['kiwi']);
   });
 
   it('finds across a hidden marker', () => {
     const { editor } = mount(file('The <!--ins b2b2-->new<!--/b2b2-->er one.', WITH_MARKS));
     search(editor, 'newer');
-    expect(bar(editor).count?.textContent).toBe('1 match');
-    bar(editor).press('Next match');
+    expect(bar(editor).count?.textContent).toBe('1 of 1');
     expect(selected(editor)).toBe('new<!--/b2b2-->er');
   });
 
   it('ignores case', () => {
     const { editor } = mount('Zebra, ZEBRA, zebra.\n');
     search(editor, 'zebra');
-    expect(bar(editor).count?.textContent).toBe('3 matches');
+    expect(bar(editor).count?.textContent).toBe('1 of 3');
   });
 });
 
@@ -144,11 +143,11 @@ describe('moving', () => {
   it('moves and wraps with next and previous', () => {
     const { editor } = mount('one cat, two cat, three cat.\n');
     const sel = () => editor.view.state.selection.main.from;
+    // Typing goes to the first match from the caret.
     search(editor, 'cat');
-    expect(editor.commands.run('find.next')).toBe(true);
     expect(sel()).toBe(4);
     expect(bar(editor).count?.textContent).toBe('1 of 3');
-    editor.commands.run('find.next');
+    expect(editor.commands.run('find.next')).toBe(true);
     editor.commands.run('find.next');
     expect(sel()).toBe(24);
     expect(bar(editor).count?.textContent).toBe('3 of 3');
@@ -185,7 +184,6 @@ describe('the replace row', () => {
   it('is shown and hidden by a disclosure control that keeps the find text', () => {
     const { editor } = mount('cat, cat, cat.\n');
     search(editor, 'cat');
-    editor.commands.run('find.next');
     editor.commands.run('find.next');
     const toggle = () => bar(editor).root!.querySelector<HTMLButtonElement>('.rl-find-disclosure')!;
     expect(bar(editor).root!.querySelector('.rl-find-row')!.firstElementChild).toBe(toggle());
@@ -235,12 +233,13 @@ describe('with focus in the bar', () => {
     const { editor } = mount('cat, cat, cat.\n');
     search(editor, 'cat');
     expect(document.activeElement).toBe(bar(editor).query);
-    expect(editor.commands.run('find.next')).toBe(true);
     expect(editor.view.state.selection.main.from).toBe(0);
     expect(editor.commands.run('find.next')).toBe(true);
     expect(editor.view.state.selection.main.from).toBe(5);
+    expect(editor.commands.run('find.next')).toBe(true);
+    expect(editor.view.state.selection.main.from).toBe(10);
     expect(editor.commands.run('find.previous')).toBe(true);
-    expect(editor.view.state.selection.main.from).toBe(0);
+    expect(editor.view.state.selection.main.from).toBe(5);
     expect(document.activeElement).toBe(bar(editor).query);
   });
 
@@ -251,13 +250,13 @@ describe('with focus in the bar', () => {
     const sel = () => editor.view.state.selection.main.from;
     const g = pressIn(box, withMod({ key: 'g', code: 'KeyG' }));
     expect(g.defaultPrevented).toBe(true);
-    expect(sel()).toBe(0);
+    expect(sel()).toBe(5);
     pressIn(box, withMod({ key: 'G', code: 'KeyG', shiftKey: true }));
-    expect(sel()).toBe(10);
-    pressIn(box, { key: 'Enter' });
     expect(sel()).toBe(0);
+    pressIn(box, { key: 'Enter' });
+    expect(sel()).toBe(5);
     pressIn(box, { key: 'Enter', shiftKey: true });
-    expect(sel()).toBe(10);
+    expect(sel()).toBe(0);
     pressIn(box, withMod({ key: 'ƒ', code: 'KeyF', altKey: true }));
     expect(bar(editor).replacement).not.toBeNull();
   });
@@ -292,13 +291,13 @@ describe('replacing', () => {
     search(editor, 'cat');
     editor.commands.run('find.replace');
     bar(editor).replacement!.value = 'dog';
-    bar(editor).press('Replace');
-    expect(selected(editor)).toBe('cat');
-    expect(editor.getDoc()).toBe('cat one, cat two.\n');
+    // The first match is the current one: Replace changes it and goes to the next.
     bar(editor).press('Replace');
     expect(editor.getDoc()).toBe('dog one, cat two.\n');
     expect(selected(editor)).toBe('cat');
     expect(bar(editor).count?.textContent).toBe('1 of 1');
+    bar(editor).press('Replace');
+    expect(editor.getDoc()).toBe('dog one, dog two.\n');
   });
 
   it('Replace All is one step to undo', () => {
@@ -336,7 +335,6 @@ describe('replacing', () => {
     search(editor, 'cat');
     editor.commands.run('find.replace');
     bar(editor).replacement!.value = 'dog';
-    bar(editor).press('Next match');
     expect(selected(editor)).toBe('cat');
     expect(editor.view.state.selection.main.from).toBe(5);
     bar(editor).press('Replace');
@@ -375,13 +373,13 @@ describe('while the bar is open', () => {
   it('survives the document changing while the bar is open', () => {
     const { editor } = mount('cat, cat.\n', { tracking: false });
     search(editor, 'cat');
-    expect(bar(editor).count?.textContent).toBe('2 matches');
+    expect(bar(editor).count?.textContent).toBe('1 of 2');
     editor.view.dispatch({ changes: { from: 0, insert: 'cat, ' } });
-    expect(bar(editor).count?.textContent).toBe('3 matches');
+    expect(bar(editor).count?.textContent).toMatch(/3( results)?$/);
     expect(highlighted(editor)).toHaveLength(3);
     editor.commands.run('find.next');
     editor.view.dispatch({ changes: { from: 0, to: editor.view.state.doc.length } });
-    expect(bar(editor).count?.textContent).toBe('No matches');
+    expect(bar(editor).count?.textContent).toBe('No results');
     expect(highlighted(editor)).toEqual([]);
     editor.setDoc('a cat\n');
     expect(bar(editor).root).toBeNull();

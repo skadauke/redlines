@@ -85,4 +85,61 @@ test.describe('alerts @blocks', () => {
       8,
     );
   });
+
+  // Code, a table and front matter under an alert, and an alert under code, keep their space
+  // outside both boxes (#639): the alert does not grow, and the tinted boxes do not touch.
+  test('code under an alert, and an alert under code, have a gap and do not grow the box', async ({
+    start,
+  }) => {
+    const doc = [
+      '> [!NOTE]',
+      '> The first alert.',
+      '',
+      '```',
+      'code under an alert',
+      '```',
+      '',
+      '> [!TIP]',
+      '> An alert under code.',
+      '',
+      '| a | b |',
+      '| - | - |',
+      '| 1 | 2 |',
+      '',
+      '```',
+      'code under a table',
+      '```',
+      '',
+      '```',
+      'code under code',
+      '```',
+      '',
+    ].join('\n');
+    const j = await start({ doc, tracking: false, view: 'clean' });
+    await j.caretAtEnd();
+    const lines = await j.page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.cm-line')].map((line) => {
+        const rect = line.getBoundingClientRect();
+        // What is painted: the line's box less what the clip takes off.
+        const clip = /^inset\(([\d.]+)px [\d.]+px ([\d.]+)px/.exec(getComputedStyle(line).clipPath);
+        const top = rect.top + (clip ? Number(clip[1]) : 0);
+        const bottom = rect.bottom - (clip ? Number(clip[2]) : 0);
+        return { text: line.textContent ?? '', top, bottom };
+      }),
+    );
+    const painted = (text: string) => lines.find((line) => line.text.includes(text))!;
+    const gap = (above: string, below: string) => painted(below).top - painted(above).bottom;
+    expect(
+      gap('The first alert.', 'code under an alert'),
+      'code under an alert',
+    ).toBeGreaterThanOrEqual(8);
+    expect(
+      gap('code under an alert', 'An alert under code'),
+      'alert under code',
+    ).toBeGreaterThanOrEqual(8);
+    expect(gap('code under a table', 'code under code'), 'code under code').toBeGreaterThanOrEqual(
+      8,
+    );
+    await j.shot('alerts-tinted-gaps');
+  });
 });
