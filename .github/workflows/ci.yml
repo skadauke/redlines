@@ -24,27 +24,66 @@ on:
       - '!**/*.md'
       - 'integrations/skill/**'
       - 'integrations/*/skills/**'
+  # A full run on main every two hours, which nothing cancels (see `changes`, `concurrency` below).
+  # `gh workflow run ci.yml --ref main` starts one by hand.
+  schedule:
+    - cron: '23 */2 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pushes and pull requests: a newer commit replaces the run of the one before. A scheduled or
+# dispatched run is a full run of main, in a group of its own, and is never cancelled.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'ci-full' || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
 
 jobs:
   # Which parts of the repository a change touches, from the files it changes: against the pull
   # request's base, or for a push against the commit before it. A change to a workflow sets every
   # flag, and so does a diff that can't be made (a new branch, a forced push). No install: it is
-  # a few seconds of shell on Ubuntu.
+  # a few seconds of shell on Ubuntu. A scheduled or dispatched run is a full run: every flag is
+  # set. A scheduled run is skipped (`skip`, which every other job reads) when main's head has
+  # already been through a finished run of this workflow; a dispatch always runs.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
+      skip: ${{ steps.tested.outputs.skip }}
       rust: ${{ steps.flags.outputs.rust }}
       quicklook: ${{ steps.flags.outputs.quicklook }}
       ui: ${{ steps.flags.outputs.ui }}
     steps:
+      # A run for this commit by a push, the schedule or a dispatch, other than this one, that has
+      # finished with a success or a failure (a cancelled run tested nothing).
+      - name: Has this commit been tested?
+        id: tested
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          skip=false
+          if [ "$EVENT" = schedule ]; then
+            n=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=100" \
+              --jq '[.workflow_runs[] | select(.id != ('"$RUN_ID"')
+                and .status == "completed"
+                and (.conclusion == "success" or .conclusion == "failure")
+                and (.event == "push" or .event == "schedule" or .event == "workflow_dispatch"))]
+                | length')
+            echo "Finished runs for $SHA: $n"
+            [ "$n" -gt 0 ] && skip=true
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "Skip the run: $skip"
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -61,7 +100,10 @@ jobs:
           base="$BASE"
           [ "$EVENT" = push ] && base="$BEFORE"
           all=false
-          if ! git diff --name-only --no-renames "$base" HEAD > changed.txt 2>/dev/null; then
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            all=true
+            : > changed.txt
+          elif ! git diff --name-only --no-renames "$base" HEAD > changed.txt 2>/dev/null; then
             all=true
           fi
           echo "Changed files:"; cat changed.txt
@@ -79,6 +121,8 @@ jobs:
           flag ui '^(apps/desktop/src/|apps/desktop/journeys/|plugins/|packages/editor/|packages/format/)'
 
   check:
+    needs: changes
+    if: ${{ needs.changes.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -118,10 +162,10 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
-          # The timing tests (blocks/cost.test.ts, hidden.test.ts) run here on pushes to main. Pull
+          # The timing tests (blocks/cost.test.ts, hidden.test.ts) run here on pushes to main and in the full runs. Pull
           # requests skip them until the ten tests of #432 are re-bound and the timing files get a job
           # of their own on pull requests.
-          REDLINES_COST: ${{ github.event_name == 'push' && 'check' || '' }}
+          REDLINES_COST: ${{ github.event_name != 'pull_request' && 'check' || '' }}
 
       - name: Check formatting
         run: pnpm format:check
@@ -140,7 +184,7 @@ jobs:
   # apps/desktop/quicklook (apps/desktop/scripts/build-quicklook).
   quicklook:
     needs: changes
-    if: ${{ needs.changes.outputs.quicklook == 'true' }}
+    if: ${{ needs.changes.outputs.skip != 'true' && needs.changes.outputs.quicklook == 'true' }}
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -163,7 +207,7 @@ jobs:
 
   desktop:
     needs: changes
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    if: ${{ needs.changes.outputs.skip != 'true' && needs.changes.outputs.rust == 'true' }}
     # Ubuntu 26.04 replaces GNU coreutils with uutils, whose multicall binary refuses to run under
     # another name (the agent tests run /bin/echo as a stand-in for claude) and stops a sleep
     # differently. Pinned until the tests stop depending on GNU coreutils (#481).
@@ -221,3 +265,12 @@ jobs:
       - name: Test
         working-directory: apps/desktop/src-tauri
         run: cargo test
+
+  # The journeys of a full run: the middle tier, as on a push to main (journeys.yml). A push has
+  # its own run of that workflow, so only the schedule and a dispatch call it from here.
+  journeys:
+    needs: changes
+    if: ${{ needs.changes.outputs.skip != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    uses: ./.github/workflows/journeys.yml
+    with:
+      main-tier: true
