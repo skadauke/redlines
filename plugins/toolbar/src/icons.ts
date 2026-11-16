@@ -64,6 +64,11 @@ const ICONS = {
   'no-list': '<path d="M3 4.5h10M3 8h10M3 11.5h6"/><path d="M11 10.5l3 3M14 10.5l-3 3"/>',
   /** Collapsible Section: a triangle beside a line. */
   collapsible: '<path d="M3.5 4.5l3 3-3 3z"/><path d="M8.5 6h4.5M8.5 10h4.5"/>',
+  /** A command with no icon of its own: a slider's line and knob. */
+  command:
+    '<path d="M2.5 5h4M10.5 5h3M2.5 11h2M8.5 11h5"/><circle cx="8.5" cy="5" r="1.7"/><circle cx="6.5" cy="11" r="1.7"/>',
+  /** The search box's mark. */
+  search: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L13.5 13.5"/>',
   /** The mark of a menu in the bar. */
   chevron: '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
   /** Cut: scissors. */

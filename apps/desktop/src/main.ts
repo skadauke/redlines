@@ -27,7 +27,7 @@ import {
 import { EditError, newestView } from '@redlines/format';
 import { createEmoji } from '@redlines/emoji';
 import { createFormatting } from '@redlines/formatting';
-import { createToolbar, pageClipboard } from '@redlines/toolbar';
+import { type AppCommand, createToolbar, pageClipboard } from '@redlines/toolbar';
 import { createTables } from '@redlines/tables';
 import type { AgentInfo, AgentScope } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
@@ -112,7 +112,9 @@ function element(selector: string): HTMLElement {
 // The theme first, so the window never shows unstyled, and the window itself in its appearance;
 // both follow every window's changes to them, and the system's (window-theme.ts).
 let settings = loadSettings();
-followTheme(document.documentElement, settings, { ...(isTauri ? { setAppearance } : {}) });
+const windowTheme = followTheme(document.documentElement, settings, {
+  ...(isTauri ? { setAppearance } : {}),
+});
 // The window zoom the app handed this page, before anything draws (zoom.ts); 1 in a browser.
 applyZoom(document.documentElement, initialZoom() ?? 1);
 
@@ -497,6 +499,11 @@ const review = createReview(editor, {
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
 const toolbar = createToolbar(editor, {
   container: main,
+  // The palette (type with the toolbar open) searches the app's own commands and settings beside
+  // the registry's; a setting is a live control in its line (toolbar-commands.ts).
+  appCommands: () => toolbarCommands(),
+  // Ask has no way yet to start with a question typed: its box opens for the selection.
+  askAbout: () => void editor.commands.run('ask.start'),
   // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
   tooltipMs: TOOLTIP_MS,
@@ -848,6 +855,102 @@ const changeSettings = (change: Partial<Settings>) => {
     textSize: change.textSize ?? settings.textSize,
   };
 };
+
+/**
+ * What the toolbar's palette offers besides the registry's commands: the app's own commands and
+ * the settings that are no part of the page's editing, each with the control that fits it. They
+ * read the live state when they are asked for, as the palette draws them again after each change.
+ */
+function toolbarCommands(): AppCommand[] {
+  const ui = () => editor.getUiState();
+  return [
+    {
+      id: 'app.tracking',
+      title: 'Track Changes',
+      keys: '⇧⌘E',
+      synonyms: ['suggest', 'suggesting', 'redline'],
+      control: {
+        kind: 'switch',
+        get: () => ui().tracking,
+        set: (on) => {
+          if (on !== ui().tracking) toggleTracking();
+        },
+      },
+    },
+    {
+      id: 'app.resolved',
+      title: 'Show Resolved Comments',
+      synonyms: ['done', 'closed'],
+      control: {
+        kind: 'switch',
+        get: () => settings.showResolved,
+        set: (on) => {
+          if (on !== settings.showResolved) toggleResolved();
+        },
+      },
+    },
+    {
+      id: 'app.appearance',
+      title: 'Appearance',
+      synonyms: ['dark mode', 'light mode', 'theme', 'night'],
+      control: {
+        kind: 'choice',
+        options: [
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+          { value: 'system', label: 'System' },
+        ],
+        get: () => settings.appearance,
+        set: (value) => {
+          if (value !== 'light' && value !== 'dark' && value !== 'system') return;
+          changeSettings({ appearance: value });
+          windowTheme.show(settings);
+        },
+      },
+    },
+    {
+      id: 'app.clean',
+      title: 'Show Clean View',
+      keys: '⌥⌘1',
+      synonyms: ['preview', 'read'],
+      run: () => editor.showView('clean'),
+    },
+    {
+      id: 'app.redlines',
+      title: 'Show Redlines View',
+      keys: '⌥⌘2',
+      synonyms: ['changes', 'markup'],
+      run: () => editor.showView('redlines'),
+    },
+    {
+      id: 'app.raw',
+      title: 'Show Raw View',
+      keys: '⌥⌘3',
+      synonyms: ['markdown', 'source'],
+      run: () => editor.showView('raw'),
+    },
+    {
+      id: 'app.simple',
+      title: 'Simple Look',
+      keys: '⌥⌘4',
+      synonyms: ['plain', 'quiet'],
+      run: () => editor.switchLook(),
+    },
+    {
+      id: 'app.preferences',
+      title: 'Open Preferences',
+      keys: '⌘,',
+      synonyms: ['settings', 'options'],
+      run: () => commands.openPreferences(),
+    },
+    {
+      id: 'app.updates',
+      title: 'Check for Updates',
+      run: () => commands.checkForUpdates(),
+      available: () => updateNotifications !== undefined,
+    },
+  ];
+}
 
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
 

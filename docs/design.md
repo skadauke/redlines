@@ -293,8 +293,22 @@ The window, on the desktop:
   about names, keys or whether an item is available; an item whose command isn't registered is
   left out, and so is a menu with no items. The arrow keys move along the bar; ↓ or Return opens a
   menu, ↑ and ↓ move by line, ← and → move inside a shared line and, past its end, switch menus;
-  Esc closes the open menu, then a toolbar at the caret or the pointer. The command palette, the
-  Table and Image menus come in later batches. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+  Esc closes the open menu, then a toolbar at the caret or the pointer. **Typing with the toolbar
+  open is a search** (#550): the card turns into a search box and a list, in place of the bar's
+  row, over every command that works at the caret and every app command and setting the host
+  offers (Track Changes, Show Resolved Comments, Appearance, the views, Preferences…); a command that
+  doesn't work here is left out. A line has an icon, what the command does (a verb phrase that may
+  differ from the menu's word: Link… is Insert Link, Bullets is Make Bulleted List; the menu's word
+  and synonyms are searched too), its control or state, and its shortcut in a column of its own, with
+  no menu name. Matching is by whole word ("ordered list" finds Numbered List, never "unordered
+  list"), every word of the query must match, and a word of the name ranks above a synonym ("todo"
+  finds Make Checklist, "dark mode" Appearance, "h2o" Subscript, "picture" Insert Image). A setting is
+  a live control in its line and the palette stays open: a switch, a choice (← and → change it) or a
+  slider; Return flips a switch. ↑ and ↓ move among the lines, Return runs one (a command puts the
+  toolbar away and gives the text the keyboard; a docked toolbar stays, with the bar back), and Esc
+  gives the bar back. The last line is always "Ask about “…”". Changing a shortcut in the palette
+  (#551) and the other settings of Preferences come later. The Table and Image menus come in later
+  batches. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
   and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
   nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says
