@@ -1,5 +1,5 @@
-// Debug only: checks the formatting palette and Ask in WebKit, where happy-dom can't: the right-click
-// through real layout (the palette at the pointer, inside the window, WebKit's own menu held back),
+// Debug only: checks the toolbar and Ask in WebKit, where happy-dom can't: the right-click
+// through real layout (the toolbar at the pointer, inside the window, WebKit's own menu held back),
 // the hover hint, no handle at the bottom center, and, with the page's scripted agent
 // (`dev-agents.ts`), Ask's bubble: where it hangs, the first-run question, the answer with its
 // citation, Make Comment and Esc. Serve the page with `VITE_PALETTE_CHECK=1 pnpm dev` and open it
@@ -104,7 +104,7 @@ async function checks(
   const at = { x: Math.round(target.left + 10), y: Math.round(target.top + target.height / 2) };
   const event = rightClick(at.x, at.y);
   await sleep(150);
-  const palette = query<HTMLElement>('.rl-palette');
+  const palette = query<HTMLElement>('.rl-toolbar');
   const rect = atRest(palette);
   report('right-click-is-the-palette', event.defaultPrevented && palette?.hidden === false, {
     prevented: event.defaultPrevented,
@@ -121,7 +121,7 @@ async function checks(
       'comments',
     view.state.selection.main,
   );
-  const items = [...(palette?.querySelectorAll<HTMLElement>('.rl-palette-item') ?? [])];
+  const items = [...(palette?.querySelectorAll<HTMLElement>('.rl-toolbar-item') ?? [])];
   const commands = items.map((item) => item.dataset['command']);
   report(
     'items-are-the-registry-commands',
@@ -135,10 +135,10 @@ async function checks(
   const bold = palette?.querySelector<HTMLElement>('[data-command="format.bold"]');
   const hovered = performance.now();
   bold?.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }));
-  const early = query<HTMLElement>('.rl-palette-tip')?.hidden;
+  const early = query<HTMLElement>('.rl-toolbar-tip')?.hidden;
   // Waited for, not slept for: a busy machine runs a timer late, and never early.
   const tip = await waitFor(() => {
-    const found = query<HTMLElement>('.rl-palette-tip');
+    const found = query<HTMLElement>('.rl-toolbar-tip');
     return found && !found.hidden ? found : null;
   }, 3000);
   const after = Math.round(performance.now() - hovered);
@@ -149,10 +149,10 @@ async function checks(
   );
   escape();
   await sleep(50);
-  report('esc-closes-the-palette', query<HTMLElement>('.rl-palette')?.hidden === true);
+  report('esc-closes-the-palette', query<HTMLElement>('.rl-toolbar')?.hidden === true);
 
   // No handle: nothing is drawn at the bottom center, and the palette stays hidden until summoned.
-  report('no-handle-at-the-bottom', query<HTMLElement>('.rl-palette-handle') === null);
+  report('no-handle-at-the-bottom', query<HTMLElement>('.rl-toolbar-handle') === null);
 
   if (!options.ask) {
     console.log('PALETTE-CHECK ask skipped: no scripted agent on this page');
@@ -166,7 +166,7 @@ async function checks(
     const box = range.getBoundingClientRect();
     rightClick(Math.round(box.left + 10), Math.round(box.top + 5));
     await sleep(150);
-    query<HTMLElement>('.rl-palette-item[data-command="ask.start"]')?.click();
+    query<HTMLElement>('.rl-toolbar-item[data-command="ask.start"]')?.click();
     await sleep(150);
     const bubble = query<HTMLElement>('.rl-qa');
     const field = bubble?.querySelector('textarea');

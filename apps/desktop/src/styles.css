@@ -74,6 +74,10 @@ body {
   /* A classic scrollbar that comes when the document grows (a table's row wraps) would move the
      centered text column, and every table in it, by half its width. */
   scrollbar-gutter: stable;
+  /* A toolbar docked at the bottom takes room that scrolls, so that the last lines can be lifted
+     clear of it (the toolbar sets --rl-toolbar-room on .rl-main while it is docked). */
+  padding-bottom: var(--rl-toolbar-room, 0);
+  scroll-padding-bottom: var(--rl-toolbar-room, 0);
 }
 
 /*
@@ -320,6 +324,12 @@ body {
 .rl-icon-button:focus-visible {
   outline: 2px solid var(--rl-ink-3);
   outline-offset: -2px;
+}
+
+/* The wrench is pressed while the toolbar shows. */
+.rl-wrench-button[aria-pressed='true'] {
+  background: var(--rl-pressed);
+  color: var(--rl-ink);
 }
 
 /* The Review pen is red while your edits are tracked (design §5.4). */

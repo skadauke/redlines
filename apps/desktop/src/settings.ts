@@ -111,6 +111,8 @@ export interface Settings {
    * off, it lists only the one that is open.
    */
   showPlainOnlyFiles: boolean;
+  /** Whether the toolbar is shown at the bottom of the window, not only when it is summoned (#504). */
+  toolbarAtBottom: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
@@ -178,6 +180,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   showLineBreakMarks: false,
   showWordCount: true,
   showPlainOnlyFiles: true,
+  toolbarAtBottom: false,
   agentScope: 'folder',
   consent: {},
   agentHandles: {},
@@ -208,7 +211,8 @@ export function loadSettings(): Settings {
       | 'checkForUpdates'
       | 'showLineBreakMarks'
       | 'showWordCount'
-      | 'showPlainOnlyFiles',
+      | 'showPlainOnlyFiles'
+      | 'toolbarAtBottom',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
@@ -239,6 +243,7 @@ export function loadSettings(): Settings {
     showLineBreakMarks: flag('showLineBreakMarks'),
     showWordCount: flag('showWordCount'),
     showPlainOnlyFiles: flag('showPlainOnlyFiles'),
+    toolbarAtBottom: flag('toolbarAtBottom'),
     agentScope: isAgentScope(value['agentScope'])
       ? value['agentScope']
       : DEFAULT_SETTINGS.agentScope,

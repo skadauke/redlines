@@ -286,24 +286,92 @@ The window, on the desktop:
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
-- **A formatting palette, shown only when summoned.** There is no toolbar, and the palette is not
-  one: it opens only when asked, on right-click, at the pointer, where it takes the place of the
-  system's context menu, and from the keyboard. Nothing is drawn at the bottom of the window to
-  summon it (the handle that was there is gone, decided on 2026-11-15); one opened by right-click goes
-  away when you type. It is a small card of icons
-  in rows, with no labels, explained on hover like the title bar's icons, after the same delay,
-  with each item's name and shortcut. The rows are Comment (Add Comment, Highlight and Ask, which
-  act on the selection, or the word under the caret), Insert (Table, Code Block, Alert, Image,
-  Quote, Link), Format (Bold, Italic, Subscript, Superscript, Clear Formatting) and Edit (Cut,
-  Copy, Paste). Its items are commands of the one registry (§5.9), so that it, the Format and
-  Paragraph menus and the shortcuts never disagree about names, keys or whether an item is
-  available; an item whose command isn't registered is left out. In the menu bar, Add Comment and Ask… are in Review, Image…, Table, Code Block, Alert and Horizontal Rule in Insert (Table is also the first row of the Table menu, as Insert Table), and View has Show/Hide Word Count (#536). Show Formatting Palette (⌥⌘P,
-  in the View menu) opens it from the keyboard, with the arrow keys moving among its items; Esc
-  closes it. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
+- **A toolbar, shown only when summoned** (#504). It is summoned three ways. The wrench in the
+  title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
+  puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
+  in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
+  at the pointer, where it takes the place of the system's context menu. A docked toolbar stays
+  while you write, scroll, resize the window or click in the text (Esc, with the keyboard in
+  it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
+  elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›
+  Editor › Show the toolbar at the bottom keeps it docked from the start, for those who want it
+  always shown; the wrench still puts it away for that window. Nothing else is drawn at the bottom
+  of the window to summon it (the handle that was there is gone, decided on 2026-11-15). It is a
+  small card in one row: **Ask | Insert · Review · [List] · [Table] · [Image] · Format · Edit**, a vertical line after
+  Ask. Each name opens a menu on a click (hovering from one open menu to another switches menus),
+  with a header, then one line for each item: icon, name and shortcut, with no descriptions.
+  Related actions share a line (Accept | Reject). Insert holds Link, Image, Table, Code Block,
+  Quote and Callout (and a place for Collapsible Section, which appears when its command is
+  registered); Review holds Comment, Highlight, Accept | Reject (the change at the selection),
+  and Review Changes; Format holds Bold, Italic, Strikethrough, Code, Subscript, Superscript and
+  Clear Formatting; Edit holds Cut, Copy and Paste. **List** (#506) is in the bar, between Review
+  and Format, only where the selection holds a paragraph or a list item (anywhere in it, not only
+  at its start; a heading, a code block or a table has none): Bullets, Numbers, Checkboxes and No
+  List, which make the selected paragraphs one list of that kind, turn the selected items into
+  another kind, or take them out of the list, with Track Changes on and off, as the Paragraph
+  menu's commands do. No List is grayed, with its reason, where the selection holds no list item,
+  and a conversion the block commands can't make (in a table cell, in Raw while tracking) is
+  grayed with their own hint.
+  Table (#552) is in the bar only with the caret in a
+  table. Its header says where the caret is or what is selected ("Table · Row 2, column 2", "Row 3
+  selected", "2 columns selected", "Whole table selected"). Its menu is two sides, Row and Column,
+  with the same six actions in each, in lines of two (Insert Above | Insert Left, Insert Below |
+  Insert Right, Move Up | Move Left, Move Down | Move Right, Select | Select, Delete | Delete), then
+  Align column (Left | Center | Right, the caret's column checked) and Delete Table. With rows
+  selected the Column side is dimmed, and with columns selected the Row side, each with its reason;
+  with a caret both sides work on the caret's row and column (the header is row 1). Align column
+  dims with the Column side, since it changes the columns the selection touches. The header row and the last column
+  keep the Table menu's own refusals as dimmed items with their reasons; Merge is not offered.
+  Image (#553) is in the bar only where an image is under the caret or in the selection. Its menu is
+  Align (Left | Center | Right, the image's own checked, centered by default), Size (Small | Medium
+  | Large, a fraction of the text column) and Original Size, and Edit in Preview, which opens the
+  file in Preview and follows its saves (§5.10). Alt Text…, with its "Describe with" an agent, keeps
+  its place and appears when its command is registered. The items are the editor's own commands
+  (`image.align.*`, `image.size.*`, `image.edit`), so the palette and the shortcuts see the same; they
+  exist where the host can open image files, and the menu is only there.
+  An item that can't be used here is dimmed, and
+  its hover hint (after the title bar's delay) says why, from the command's own reason. A menu
+  opens on the side of the bar with room and scrolls when taller, never over the bar. A docked
+  toolbar fades while you type and comes back when the pointer moves, and it leaves room under the
+  text, so that the last lines can be scrolled clear of it. Its items are commands of the one
+  registry (§5.9), so that it, the Format and Paragraph menus and the shortcuts never disagree
+  about names, keys or whether an item is available; an item whose command isn't registered is
+  left out, and so is a menu with no items. The arrow keys move along the bar; ↓ or Return opens a
+  menu, ↑ and ↓ move by line, ← and → move inside a shared line and, past its end, switch menus.
+  Where an inserted block goes (#555), the same
+  for Insert's Table, Code Block, Quote and Callout and for Horizontal Rule: in an empty paragraph
+  it takes the paragraph's place; with the caret at the very start of a block (in front of a
+  heading's text or an item's, too) it goes above that block; anywhere else it goes below the block,
+  so that no sentence is split. With text selected, Quote, Callout and Code Block wrap the selected
+  blocks (a code block takes their text) instead, as one step to undo; with Track Changes on the
+  wrapped blocks are replaced by the wrapped text, so a reader sees the blocks as they were and as
+  they are. A selection that holds a table, an image or the markers of changes is not wrapped: the
+  block goes below, and nothing is refused. With Track Changes on, above a block that is no paragraph
+  goes at the end of the block before it (the format can't write an insertion that ends in line
+  breaks in front of a heading, a list or a quote), and below the first block of the document
+  where there is none before. Quote here is `insert.quote`, named Insert Quote or Make Selection a
+  Quote; the Paragraph menu's Quote (⌥⌘Q) is another command, which changes the block it is in.
+  Esc closes the open menu, then a toolbar at the caret or the pointer. **Typing with the toolbar
+  open is a search** (#550): the card turns into a search box and a list, in place of the bar's
+  row, over every command that works at the caret and every app command and setting the host
+  offers (Track Changes, Show Resolved Comments, Appearance, the views, Preferences…); a command that
+  doesn't work here is left out. A line has an icon, what the command does (a verb phrase that may
+  differ from the menu's word: Link… is Insert Link, Bullets is Make Bulleted List; the menu's word
+  and synonyms are searched too), its control or state, and its shortcut in a column of its own, with
+  no menu name. Matching is by whole word ("ordered list" finds Numbered List, never "unordered
+  list"), every word of the query must match, and a word of the name ranks above a synonym ("todo"
+  finds Make Checklist, "dark mode" Appearance, "h2o" Subscript, "picture" Insert Image). A setting is
+  a live control in its line and the palette stays open: a switch, a choice (← and → change it) or a
+  slider; Return flips a switch. ↑ and ↓ move among the lines, Return runs one (a command puts the
+  toolbar away and gives the text the keyboard; a docked toolbar stays, with the bar back), and Esc
+  gives the bar back. The last line is always "Ask about “…”". Changing a shortcut in the palette
+  (#551) and the other settings of Preferences come later. Paste is the Mac's own, as the Edit menu's (the app sends `paste:` to the window), so
   what a web page or Word put on the clipboard is converted to Markdown as ⌘V converts it (§5.10),
   and with Track Changes on it is the paster's insertion; where the app can't (a browser tab, or
   nothing on the clipboard to paste) it pastes the clipboard's plain text, as ⇧⌘V does, and says
-  when there is none. The palette replaces the selection toolbar of §5.12.
+  when there is none. In the menu bar, Add Comment and Ask… are in Review, Image…, Table, Code Block, Alert
+  and Horizontal Rule in Insert (Table is also the first row of the Table menu, as Insert Table), and View
+  has Show/Hide Word Count (#536). The toolbar replaces the selection toolbar of §5.12.
 - **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
   review bar.
 - **Outline.** In a document with two or more headings, a column of short lines stands in the left
@@ -1113,7 +1181,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
-| Show the formatting palette    | ⌥⌘P                                                                                           | Ctrl+Alt+P                |
+| Show the toolbar               | ⇧⌘P (at the caret; the title bar's wrench docks it)                                           | Ctrl+Shift+P              |
 | Show the outline               | ⌃⌘O (View › Show Outline: opens the list and puts the focus on the heading you are reading)  | —                         |
 | Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
@@ -1263,7 +1331,7 @@ a new email under the same name becomes an alias in the ledger
 **Should (v1 if time allows):**
 
 - a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the formatting palette
-  (§5.1), which opens from a handle and on right-click rather than floating over a selection by
+  (§5.1), which opens from the title bar's wrench and on right-click rather than floating over a selection by
   itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
@@ -1508,7 +1576,7 @@ written.
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
-| `palette`    | The formatting palette: on right-click and ⌥⌘P (§5.1) | —                 |
+| `toolbar`    | The toolbar: the title bar's wrench, right-click and ⇧⌘P (§5.1) | —               |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 

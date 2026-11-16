@@ -74,7 +74,7 @@ function darkGround(ground: string): boolean {
 const HINTS = [
   '.rl-tip',
   '.rl-grip-hint',
-  '.rl-palette-tip',
+  '.rl-toolbar-tip',
   '.rl-hint',
   '.rl-link-hint',
   '.rl-image-badge',

@@ -121,6 +121,7 @@ describe('the panes', () => {
       'Suggest emoji after a colon',
       'Show line break marks (¶)',
       'Show word count',
+      'Show the toolbar at the bottom',
       'Images',
     ]);
     expect(rowLabels(draw('agents').container)).toEqual([]);
@@ -212,6 +213,14 @@ describe('the panes', () => {
     count.dispatchEvent(new Event('change'));
     expect(update).toHaveBeenLastCalledWith({ showWordCount: false });
     expect(now().showWordCount).toBe(false);
+
+    // The toolbar starts away, and stays at the bottom when the person wants it there.
+    const toolbar = control<HTMLInputElement>(container, 'Show the toolbar at the bottom', 'input');
+    expect(toolbar.checked).toBe(false);
+    toolbar.checked = true;
+    toolbar.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ toolbarAtBottom: true });
+    expect(now().toolbarAtBottom).toBe(true);
   });
 
   it('starts each control at the stored setting', () => {

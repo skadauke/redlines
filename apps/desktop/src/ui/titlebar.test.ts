@@ -25,6 +25,7 @@ const BASE: TitleBarState = {
   hasRedlines: true,
   sidebarOpen: false,
   showResolved: false,
+  toolbarShown: false,
 };
 
 /** The bars the test made, which are taken down after it: an open menu listens on the document. */
@@ -37,6 +38,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     setView: vi.fn(),
     switchLook: vi.fn(),
     toggleTracking: vi.fn(),
+    toggleToolbar: vi.fn(),
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -1357,5 +1359,42 @@ describe('documentFactsLine', () => {
     expect(documentFactsLine('a b', new Date(2026, 10, 5, 15, 41))).toMatch(
       /^2 words · Saved 3:41\s?PM$/,
     );
+  });
+});
+
+describe('the wrench', () => {
+  it('is the first of the three icons at the right, left of the view button', () => {
+    const { root } = setup();
+    const labels = [
+      ...root.querySelectorAll('.rl-titlebar-end > .rl-control > .rl-icon-button'),
+    ].map((b) => b.getAttribute('aria-label'));
+    expect(labels).toEqual(['Toolbar', 'View', 'Track Changes']);
+  });
+
+  it('asks for the toolbar on a click, and keeps the text’s focus on the press', () => {
+    const { actions, button } = setup();
+    const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    button('Toolbar').dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    button('Toolbar').click();
+    expect(actions.toggleToolbar).toHaveBeenCalledTimes(1);
+  });
+
+  it('is pressed, and offers to hide, while the toolbar shows', () => {
+    const { bar, button } = setup();
+    expect(button('Toolbar').getAttribute('aria-pressed')).toBe('false');
+    bar.update({ ...BASE, toolbarShown: true });
+    const pressed = button('Toolbar');
+    expect(pressed.getAttribute('aria-pressed')).toBe('true');
+    expect(pressed.getAttribute('aria-keyshortcuts')).toBe('Shift+Meta+P');
+  });
+
+  it('says what a click does, with the key, after the pointer rests', () => {
+    const { button, root } = setup();
+    enter(button('Toolbar'));
+    vi.advanceTimersByTime(400);
+    const tip = root.querySelector<HTMLElement>('#rl-wrench-tip');
+    expect(tip?.hidden).toBe(false);
+    expect(tip?.textContent).toBe('Show Toolbar⇧⌘P');
   });
 });
