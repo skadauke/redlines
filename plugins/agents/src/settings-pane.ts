@@ -215,18 +215,31 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   }
 
   if (deps.openclaw) {
-    void deps.openclaw.list().then(
-      (agents) => {
-        openclawChoices = agents.map(({ id, name }) => ({
-          id,
-          name: displayName(name.toLowerCase()),
-        }));
-        drawDefault();
+    const openclaw = deps.openclaw;
+    const listed = (agents: readonly { id: string; name: string }[]) => {
+      openclawChoices = agents.map(({ id, name }) => ({
+        id,
+        name: displayName(name.toLowerCase()),
+      }));
+      drawDefault();
+    };
+    void openclaw.list().then(listed, () => {});
+    // An agent added or removed here changes the list at once.
+    const tracked: OpenClawDeps = {
+      ...openclaw,
+      add: async (input) => {
+        const agents = await openclaw.add(input);
+        listed(agents);
+        return agents;
       },
-      () => {},
-    );
+      remove: async (id) => {
+        const agents = await openclaw.remove(id);
+        listed(agents);
+        return agents;
+      },
+    };
     container.append(
-      renderOpenClaw(deps.openclaw, {
+      renderOpenClaw(tracked, {
         alive: () => alive,
         // What an agent was allowed isn't what another of its name is: Remove takes the answers.
         forgetAnswers: (agent) => {
@@ -521,7 +534,7 @@ function agentRow(
       .then((state) => {
         if (!alive() || mine !== asked || activity !== null) return;
         draw(state);
-        looked(state?.found === true);
+        looked(state?.found === true && state.signedIn);
         skillUi.look(state?.found === true);
         const ready = state?.found === true && state.signedIn;
         if (ready) {
