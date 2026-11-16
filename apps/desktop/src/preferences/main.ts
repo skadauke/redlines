@@ -26,6 +26,7 @@ import { icon } from '../ui/icons.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
+import { startsFilter } from './filter-key.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
 import { createSetupRegistry } from './setup-registry.ts';
 import {
@@ -341,17 +342,9 @@ window.addEventListener('keydown', (event) => {
     leaveFilter();
     return;
   }
-  // A first character, typed where nothing takes it: not a shortcut, not a control's own key (Space
-  // presses a button), not a field's, and not while the filter is open.
-  if (!filter.hidden || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.key.length !== 1 || event.key === ' ') return;
-  const target = event.target;
-  if (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.closest('input, textarea, select, button, a, [contenteditable], [role="button"]'))
-  )
-    return;
+  // A first letter or digit, from anywhere but a field that takes text (filter-key.ts), and not
+  // while the filter is open.
+  if (!filter.hidden || !startsFilter(event)) return;
   event.preventDefault();
   filter.hidden = false;
   filter.value = event.key;
