@@ -219,12 +219,32 @@ The window, on the desktop:
   document that has no file yet opens the Save dialog in the default folder for new documents
   (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
   As of a saved document starts in that document's own folder.
-- **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
-  markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
-  (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
-  on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
-  row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
-  match; ⌥⌘F with the bar open shows the row and focuses its box.
+- **Find.** ⌘F opens a panel at the top right of the page that searches the text a reader sees,
+  never the markers or the ledger. The Find box holds the count ("2 of 5", "No results", or
+  "Invalid" for a regular expression that does not compile) and four toggles: Match Case, Whole
+  Word, Regular Expression and Find in Selection; beside it are Previous, Next and Close. Every
+  match is marked and the current one is stronger; typing goes to the first match from the caret,
+  Return and ⇧Return step, and Esc closes the panel with the current match selected. While the
+  Find box has the focus, ⌥⌘C, ⌥⌘W, ⌥⌘R and ⌥⌘L turn the four toggles on and off, and Tab goes to
+  the Replace box (opening its row first) and ⇧Tab back. Every control has a hint with its name
+  and key. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace (⌥⌘F) and Use
+  Selection for Find (⌘E). A chevron at the start of the panel shows or hides the Replace row
+  ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current match;
+  ⌥⌘F with the panel open shows the row and focuses its box. The Replace row has Replace (Return
+  in its box) and Replace All; with Track Changes on a red pen in the box says so, and with a
+  regular expression `$1` and `$&` in the replacement stand for the groups of the match.
+  - *Seeding.* ⌘F with a selection: a short phrase (under 80 characters, inside one line, not a
+    whole block) becomes the search term; a selection of more than one block, with a line break,
+    of 80 characters or more, or a whole block limits Find to it instead (Find in Selection is on,
+    the box says "Find in selection", the scope stays shaded, and Replace All stays inside it).
+  - *Replacing.* Replacing is an edit like typing. Replace All is one step to undo (a toast at
+    the corner offers Undo), and each match is a change of its own: with Track Changes on, N
+    matches are N tracked changes, each with its own margin note, as if every one had been replaced
+    by hand. With Track Changes on, text that is already in a tracked change is not matched. A
+    replacement the editor refuses is left, and the panel says how many.
+  - *Hook.* A later feature that hides text, such as a closed fold, opens it while its match is
+    current through `currentMatchHandlers` (or `createFind`'s `onCurrentMatch`), which is called
+    whenever a match becomes the current one.
 - **Zoom and text size.** View › Zoom In (⌘=, or ⌘+), Zoom Out (⌘-) and Actual Size (⌘0) zoom
   everything Redlines draws in its windows, from 80% to 200%: the page and its notes, cards, bars,
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
@@ -422,8 +442,9 @@ of red there besides the pen).
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
   with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
-  text. The click
-  and the switch do the same: they switch from the one to the other, with the line where it was (a
+  text. In the simple look, a click on a change, on its colored text or on its bar, opens that
+  change's card with Accept and Reject (the card says what a hidden deletion was: #664); a click on
+  a bar in the full markup, and the switch, switch from the one look to the other, with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
@@ -1178,7 +1199,7 @@ a new email under the same name becomes an alias in the ledger
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
-  step to undo. Not yet: deciding all of its changes at once;
+  step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
 - templates as plain `.md` files with `{{title}}` and `{{date}}`, never executable code;
 - focus and typewriter modes.
@@ -1225,6 +1246,9 @@ syntax Markdown needs, and never shows them.
   are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
   selection there it refuses before it deletes anything. At a heading's start or end it does what
   Return does (an empty paragraph beside it).
+- **Return again in the empty paragraph gives the text room.** At the top level it writes a line
+  that holds only `&nbsp;` and opens the next empty paragraph below it; every view draws that line
+  as an empty line, and GitHub and other readers show an empty paragraph (format §3.4).
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.

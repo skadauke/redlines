@@ -63,6 +63,7 @@ mod file_scope;
 // The app's updates, which no window owns: the checks, the download and the install, whether this
 // copy can update itself, and starting the new version after an update.
 mod crash;
+mod recovery;
 mod updates;
 
 // Renaming a file, showing it in Finder, and printing the window.
@@ -407,6 +408,9 @@ pub fn run() {
             appearance::set_appearance,
             edit_menu::beep,
             crash::crash_environment,
+            recovery::recovery_write,
+            recovery::recovery_read,
+            recovery::recovery_delete,
             crash::crash_log_page,
             crash::crash_slow,
             crash::crash_heartbeat,
@@ -561,6 +565,11 @@ pub fn run() {
             #[cfg(unix)]
             if matches!(event, tauri::RunEvent::Exit) {
                 agents::quitting(app);
+            }
+            // A quit that asked about every document ends with each saved or given up: no copy of
+            // an unsaved document is kept (recovery.rs).
+            if matches!(event, tauri::RunEvent::Exit) {
+                recovery::quit(app);
             }
             // After an update is installed, the new version starts as this one quits.
             if matches!(event, tauri::RunEvent::Exit) {

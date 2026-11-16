@@ -12,7 +12,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import type { Notifications } from './ui/notifications.ts';
+import type { Notification, Notifications } from './ui/notifications.ts';
 import {
   documentShape,
   problemText,
@@ -104,6 +104,11 @@ export interface CrashWatch {
   reportProblem(): Promise<void>;
   /** Help › Reveal Log. */
   revealLog(): Promise<void>;
+  /**
+   * The window put back the edits it had when it failed (recovery.ts): says so, in the card of the
+   * failure when there is one, and offers the saved version instead.
+   */
+  recovered(showSaved: () => void): Promise<void>;
   destroy(): void;
 }
 
@@ -181,34 +186,66 @@ export function watchCrashes(options: CrashWatchOptions): CrashWatch {
     }
   };
 
+  /** The card of the failure on show, while it shows. */
+  let current: { problem: Problem; card: Notification } | null = null;
+  let taking: Promise<void> = Promise.resolve();
+
+  const reportAction = (problem: Problem) => ({
+    label: 'Report…',
+    run: (card: Notification) => {
+      void openReport(problem);
+      card.close();
+    },
+  });
+
   const offer = (problem: Problem) => {
     latest = problem;
     cards = cards.filter((at) => now() - at < 60_000);
     if (cards.length >= CARDS_PER_MINUTE) return;
     cards.push(now());
-    notifications.show({
+    const card = notifications.show({
       key: KEY,
       text: problemText(problem),
       dismissLabel: 'Dismiss',
       secondaryAction: { label: 'Reveal Log', run: () => void revealLog() },
-      action: {
-        label: 'Report…',
-        run: (card) => {
-          void openReport(problem);
-          card.close();
-        },
-      },
+      action: reportAction(problem),
     });
+    current = { problem, card };
   };
 
-  const take = async () => {
-    try {
-      const problems = await link.pending();
-      const last = problems[problems.length - 1];
-      if (last) offer(last);
-    } catch (error) {
-      console.error('Could not read the crash log', error);
-    }
+  const take = () => {
+    taking = (async () => {
+      try {
+        const problems = await link.pending();
+        const last = problems[problems.length - 1];
+        if (last) offer(last);
+      } catch (error) {
+        console.error('Could not read the crash log', error);
+      }
+    })();
+    return taking;
+  };
+
+  const recovered = async (showSaved: () => void) => {
+    await taking;
+    const problem = current?.card.element.isConnected ? current.problem : null;
+    const showSavedAction = {
+      label: 'Show the Saved Version',
+      run: (card: Notification) => {
+        showSaved();
+        card.close();
+      },
+    };
+    notifications.show({
+      key: KEY,
+      text: problem
+        ? 'Redlines had a problem and recovered your document.'
+        : 'Redlines recovered your unsaved edits.',
+      dismissLabel: 'Dismiss',
+      // The saved version is what the card is about, unless there is a failure to report.
+      secondaryAction: problem ? showSavedAction : undefined,
+      action: problem ? reportAction(problem) : showSavedAction,
+    });
   };
 
   const failed = async (error: unknown) => {
@@ -272,6 +309,7 @@ export function watchCrashes(options: CrashWatchOptions): CrashWatch {
     caught: (error) => void failed(error),
     reportProblem: () => openReport(latest),
     revealLog,
+    recovered,
     destroy() {
       if (destroyed) return;
       destroyed = true;
