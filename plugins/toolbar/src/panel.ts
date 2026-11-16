@@ -58,7 +58,11 @@ function update(button: HTMLButtonElement, item: ShownItem, paired: boolean): vo
   else button.removeAttribute('aria-checked');
   // What is said is what is drawn (WCAG 2.5.3): the menu's word, not the command's title.
   const said = item.label.replace(/…$/, '');
-  button.setAttribute('aria-label', item.side ? `${said}, ${item.side}` : said);
+  const named = item.side ? `${said}, ${item.side}` : said;
+  button.setAttribute('aria-label', item.note ? `${named}, ${item.note}` : named);
+  // A word where the keys would be, for what the image has already ("Added").
+  const keysCell = button.querySelector('.rl-toolbar-keys');
+  if (keysCell && item.keys === null) keysCell.textContent = item.note ?? '';
   if (item.aria) button.setAttribute('aria-keyshortcuts', item.aria);
   else button.removeAttribute('aria-keyshortcuts');
   // The hint: the reason a grayed item can't be used, and for the icons of a shared line, the name
@@ -110,7 +114,7 @@ function itemButton(item: ShownItem, paired: boolean, handlers: PanelHandlers): 
   button.append(toolbarIcon(item.icon), label);
   if (!paired) {
     const keys = element('span', 'rl-toolbar-keys');
-    keys.textContent = item.keys ?? '';
+    keys.textContent = item.keys ?? item.note ?? '';
     button.append(keys);
   }
   update(button, item, paired);

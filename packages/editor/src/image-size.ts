@@ -408,3 +408,70 @@ export function setImageLook(
   view.dispatch(spec);
   return view.state.doc !== before;
 }
+
+/**
+ * Alt text as the document writes it between `![` and `]`: one line, with what Markdown would read
+ * as more than text escaped with a backslash (format §3.5.1), so that reading it back
+ * (`readMarkdown`) gives the text that was typed.
+ */
+export function escapeAlt(text: string, inTable: boolean): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.replace(inTable ? /[\\[\]&`*_<>|]/g : /[\\[\]&`*_<>]/g, '\\$&');
+}
+
+/** The change that gives `image` the alt text, or null where it has that text already. */
+export function altEdit(state: EditorState, image: ImageElement, alt: string): TextEdit | null {
+  const wanted = alt.replace(/\s+/g, ' ').trim();
+  let insert: string;
+  if (image.form === 'tag') {
+    const attributes = attributesWith(image, {});
+    const kept = attributes.filter((attribute) => attribute.name !== 'alt');
+    const at = attributes.findIndex((attribute) => attribute.name === 'alt');
+    const written: Attribute[] =
+      wanted === ''
+        ? []
+        : [
+            {
+              name: 'alt',
+              value: wanted,
+              source: `alt="${escapeAttribute(wanted, image.inTable)}"`,
+            },
+          ];
+    // Where the alt was stays its place; a new one goes after the src, as a tag is first written.
+    const place = at === -1 ? Math.min(1, kept.length) : at;
+    const all = [...kept.slice(0, place), ...written, ...kept.slice(place)];
+    insert = `<img ${all.map((attribute) => attribute.source).join(' ')}>`;
+  } else {
+    let node: SyntaxNode | null = syntaxTree(state).resolveInner(image.from + 1, 1);
+    while (node && node.name !== 'Image') node = node.parent;
+    const [open, close] = node?.getChildren('LinkMark') ?? [];
+    if (!node || !open || !close) return null;
+    insert =
+      state.sliceDoc(image.from, open.to) +
+      escapeAlt(wanted, image.inTable) +
+      state.sliceDoc(close.from, image.to);
+  }
+  return insert === state.sliceDoc(image.from, image.to)
+    ? null
+    : { from: image.from, to: image.to, insert };
+}
+
+/**
+ * Gives the image at `at` (default: the one under the caret or in the selection) the alt text, as
+ * one change: with Track Changes on, the editing rules write it as the substitution of the image
+ * (an image is atomic content), and one Undo takes it back. False when there is no such image or
+ * it has that alt text already.
+ */
+export function setImageAlt(view: EditorView, alt: string, at?: number): boolean {
+  const image = at === undefined ? imageInSelection(view.state) : imageAt(view.state, at);
+  if (!image) return false;
+  const change = altEdit(view.state, image, alt);
+  if (!change) return false;
+  const before = view.state.doc;
+  view.dispatch({
+    changes: change,
+    userEvent: 'input.image.alt',
+    annotations: isolateHistory.of('full'),
+  });
+  return view.state.doc !== before;
+}

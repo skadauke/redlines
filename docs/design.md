@@ -297,8 +297,14 @@ The window, on the desktop:
   Image (#553) is in the bar only where an image is under the caret or in the selection. Its menu is
   Align (Left | Center | Right, the image's own checked, centered by default), Size (Small | Medium
   | Large, a fraction of the text column) and Original Size, and Edit in Preview, which opens the
-  file in Preview and follows its saves (§5.10). Alt Text…, with its "Describe with" an agent, keeps
-  its place and appears when its command is registered. The items are the editor's own commands
+  file in Preview and follows its saves (§5.10). Alt Text… (`image.altText`, Edit Image Alt Text… in the
+  palette; the agents' plugin) opens a small bubble by the image: a field with the alt text it has, Cancel and
+  Save, and, where an agent can see pictures, "Describe with <agent>" (the default agent, or the one in Ask's
+  picker, by its display name). While the agent writes, the field and Save wait; its text then goes into the
+  field with "Written by <agent>. Read it and change it before saving." Nothing is written to the file until
+  Save, which writes it as any edit: tracked with Track Changes on (the image is atomic content, so a
+  substitution of the image, §3.5.1 of the format), untracked off, and never refused. The item says "Added"
+  once the image has alt text. The items are the editor's own commands
   (`image.align.*`, `image.size.*`, `image.edit`), so the palette and the shortcuts see the same; they
   exist where the host can open image files, and the menu is only there.
   An item that can't be used here is dimmed, and
@@ -1193,7 +1199,7 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- alt text and captions of images (resizing is built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
+- captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
   are not drawn yet); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;

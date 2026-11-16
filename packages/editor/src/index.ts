@@ -120,6 +120,7 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
+export { imageAt, imageInSelection, setImageAlt, type ImageElement } from './image-size.ts';
 export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';

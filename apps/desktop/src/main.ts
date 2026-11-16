@@ -10,6 +10,7 @@ import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
   blockedMessage,
+  createAltText,
   createAsk,
   createLiveLines,
   createMacAgents,
@@ -789,6 +790,13 @@ const ask = createAsk(editor, {
       console.error('Could not open a new window', error);
       throw error;
     }),
+});
+
+// Alt Text (#553): the Image menu's Alt Text… opens a bubble by the image, with a field for the
+// description. It writes nothing until Save, and then as any edit (tracked with Track Changes on).
+createAltText(editor, {
+  notice: (message) => notice.flash(message),
+  generation: () => controller.generation,
 });
 
 /**

@@ -11,7 +11,14 @@
 // is registered.
 
 import type { EditorState } from '@codemirror/state';
-import { rectOf, touchedCols, touchedRows, wholeRect, type EditorCommand } from '@redlines/editor';
+import {
+  imageInSelection,
+  rectOf,
+  touchedCols,
+  touchedRows,
+  wholeRect,
+  type EditorCommand,
+} from '@redlines/editor';
 import type { ToolbarIcon } from './icons.ts';
 import { ariaShortcut, formatShortcut } from './shortcuts.ts';
 
@@ -43,6 +50,8 @@ export interface ItemSpec {
   caption?: string;
   /** What the item is for, which its accessible name adds where the line's other items share its word. */
   side?: string;
+  /** A word drawn beside the item where the selection has it done already ("Added"), or undefined. */
+  note?: (state: EditorState) => string | undefined;
 }
 
 export interface MenuSpec {
@@ -280,11 +289,16 @@ export const MENUS: readonly MenuSpec[] = [
         { command: 'image.size.large', icon: 'size-large', label: 'Large', side: 'image size' },
       ],
       one({ command: 'image.size.original', icon: 'original-size', label: 'Original Size' }),
-      // Edit in Preview is the editor's own (#525), where the host can open files. Alt Text… needs
-      // an agent to write the description (the agents' lane) and keeps its place: the item appears
-      // when its command, `image.altText`, is registered.
+      // Edit in Preview is the editor's own (#525), where the host can open files. Alt Text… is the
+      // agents' plugin's (#553): the item appears when its command, `image.altText`, is registered,
+      // and says "Added" when the image has alt text.
       one({ command: 'image.edit', icon: 'preview', label: 'Edit in Preview' }),
-      one({ command: 'image.altText', icon: 'alt-text', label: 'Alt Text…' }),
+      one({
+        command: 'image.altText',
+        icon: 'alt-text',
+        label: 'Alt Text…',
+        note: (state) => (imageInSelection(state)?.alt ? 'Added' : undefined),
+      }),
     ],
   },
   {
@@ -335,6 +349,8 @@ export interface ShownItem {
   caption: string | null;
   /** What the item is for (row, column), which its accessible name adds; null for most. */
   side: string | null;
+  /** A word drawn where the keys are, for what is done already ("Added"); null for most. */
+  note: string | null;
 }
 
 export interface ShownMenu {
@@ -375,6 +391,7 @@ function shown(
     active: command.isActive?.(state) ?? false,
     caption: spec.caption ?? null,
     side: spec.side ?? null,
+    note: spec.note?.(state) ?? null,
   };
 }
 
