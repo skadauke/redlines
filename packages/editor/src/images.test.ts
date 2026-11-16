@@ -656,7 +656,7 @@ describe('where the editor takes no image', () => {
       ['![an image](cat.png) after\n', '![an ima'],
       ['![an image](cat.png) after\n', '![an image](ca'],
       ['Before\n\n$$\nx = 1\n$$\n\nAfter\n', 'x ='],
-      ['A <span class="x">tag</span> here\n', '<span cla'],
+      ['A <script>tag</script> here\n', '<scri'],
     ];
     for (const [doc, before] of cases) {
       expect(pasteAfter(doc, before), `${JSON.stringify(doc)} after ${before}`).toEqual([

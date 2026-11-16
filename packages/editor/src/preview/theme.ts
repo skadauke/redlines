@@ -150,6 +150,48 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-sub': { bottom: '-0.25em' },
   '.rl-sup': { top: '-0.5em' },
+  // Inline HTML as GitHub draws it (#687), in the text's ink unless it says otherwise.
+  '.rl-h-kbd': {
+    fontFamily: 'var(--rl-font-mono)',
+    fontSize: '0.84em',
+    border: '1px solid var(--rl-rule)',
+    borderBottomWidth: '2px',
+    borderRadius: '5px',
+    backgroundColor: 'var(--rl-tint)',
+    padding: '0.08em 0.38em',
+  },
+  '.rl-h-samp, .rl-h-tt, .rl-h-code': {
+    fontFamily: 'var(--rl-font-mono)',
+    fontSize: '0.84em',
+  },
+  '.rl-h-code': {
+    backgroundColor: 'var(--rl-tint)',
+    borderRadius: '5px',
+    padding: '0.12em 0.38em',
+  },
+  '.rl-h-var, .rl-h-dfn, .rl-h-cite, .rl-h-i, .rl-h-em': { fontStyle: 'italic' },
+  '.rl-h-b, .rl-h-strong': { fontWeight: '700' },
+  '.rl-h-mark': {
+    backgroundColor: 'light-dark(#fff8c5, rgba(187, 128, 9, 0.35))',
+    color: 'inherit',
+    padding: '0 0.1em',
+  },
+  '.rl-h-small': { fontSize: '0.85em' },
+  '.rl-h-abbr': {
+    textDecoration: 'underline dotted',
+    textUnderlineOffset: '0.2em',
+  },
+  '.rl-h-ins': { textDecoration: 'underline' },
+  '.rl-h-del, .rl-h-s, .rl-h-strike': { textDecoration: 'line-through' },
+  '.rl-html-chip': {
+    display: 'inline-block',
+    fontSize: 'var(--rl-size-ui-small)',
+    color: 'var(--rl-ink-2)',
+    backgroundColor: 'var(--rl-tint)',
+    borderRadius: '5px',
+    padding: '0 0.4em',
+    cursor: 'default',
+  },
   '.rl-code': {
     fontFamily: 'var(--rl-font-mono)',
     fontSize: '0.84em',

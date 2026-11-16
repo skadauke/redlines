@@ -6,9 +6,10 @@
 #   `journeys` label, as a job of its own beside `check` in ci.yml: the smoke
 #   journeys, and the journeys tagged for the areas of the paths it changes (src/areas.ts), in the
 #   light look at 100%;
-# - a push to main runs the middle tier: every journey in the light look and the smoke journeys in
-#   the other three looks (dark, and 200% text, light and dark), then the long-document journeys
-#   (`@long`) alone, in their own step with one worker; nobody waits on it;
+# - main runs the middle tier from ci.yml's full run, every two hours (not on every push, which
+#   kept a Mac busy on runs that the next merge cancelled): every journey in the light look and the
+#   smoke journeys in the other three looks (dark, and 200% text, light and dark), then the
+#   long-document journeys (`@long`) alone, in their own step with one worker; nobody waits on it;
 # - the sweep, by manual dispatch, runs the full tier: every journey in all four looks, and the
 #   long-document ones.
 #
@@ -26,14 +27,6 @@ on:
       - '!website/**'
       - '!**/*.md'
       # The sample document is a journeys input (the smoke baseline opens it).
-      - 'apps/desktop/src/sample.md'
-  push:
-    branches: [main]
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!website/**'
-      - '!**/*.md'
       - 'apps/desktop/src/sample.md'
   workflow_dispatch:
   # Called by ci.yml's full run (every two hours), with `main-tier`: the middle tier, as a push.
