@@ -78,16 +78,16 @@ export const changes = {
   ],
 };
 
-/** What each Redlines row says, and whether each other product has the feature: Word and Google Docs. */
+/** What each Redlines row says, and whether each other product has the feature: Word, Google Docs, Notion, VS Code. */
 type CompareRow = {
   feature: string;
   redlines: 'built' | 'planned';
-  others: readonly [boolean, boolean];
+  others: readonly [boolean, boolean, boolean, boolean];
 };
 
 export const compare = {
   title: `How ${name} compares`,
-  body: `What ${name} has built, and what it plans. Other products as of October 2026, from their documentation.`,
+  body: `What ${name} has built, and what it plans. Other products as of October 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions.`,
   /** Under the table. */
   note: `Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI’s edits count as yours. Until live sessions come, people share a ${name} file as they share any file. Word import and export are planned.`,
   /** The table's scrolling box and the features column, named for screen readers only. */
@@ -102,7 +102,7 @@ export const compare = {
     { mark: 'planned', text: 'Planned: designed, not built yet.' },
     { mark: 'no', text: 'No.' },
   ] as const,
-  products: [name, 'Word', 'Google Docs'],
+  products: [name, 'Word', 'Google Docs', 'Notion', 'VS Code'],
   /** From compare.json, which docs/design.md §4 holds (npm run compare:check). */
   rows: compareData.rows as unknown as CompareRow[],
 };

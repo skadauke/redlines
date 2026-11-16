@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { compareRows, readDesignTable } from './compare-check.mjs';
 
-const PRODUCTS = ['Redlines', 'Word', 'Google Docs'];
+const PRODUCTS = ['Redlines', 'Word', 'Google Docs', 'Notion', 'VS Code'];
 const markdown = readFileSync(new URL('../../docs/design.md', import.meta.url), 'utf8');
 const table = readDesignTable(markdown);
 const { rows } = JSON.parse(readFileSync(new URL('../lib/compare.json', import.meta.url), 'utf8'));
@@ -27,7 +27,7 @@ test('a row §4 lacks fails, by its name', () => {
   const problems = compareRows(
     [
       ...rows,
-      { feature: 'Edits PDF files', redlines: 'built', others: [true, false] },
+      { feature: 'Edits PDF files', redlines: 'built', others: [true, false, false, false] },
     ],
     PRODUCTS,
     table,
@@ -52,18 +52,18 @@ test('a changed cell of another product fails, naming the row and the product', 
 test('other product names fail, naming the product', () => {
   const problems = compareRows(
     rows,
-    ['Redlines', 'Word', 'Pages'],
+    ['Redlines', 'Word', 'Google Docs', 'Pages', 'VS Code'],
     table,
   );
   assert.equal(problems.length, 1);
-  assert.match(problems[0], /Google Docs/);
+  assert.match(problems[0], /Notion/);
 });
 
 const MINI = `## 4. How Redlines compares
 
-| Feature | Redlines | Word | Google Docs |
-| ------- | :------: | :--: | :---------: |
-| Edits Markdown files | ✅ | ❌ | ✅ |
+| Feature | Redlines | Word | Google Docs | Notion | VS Code |
+| ------- | :------: | :--: | :---------: | :----: | :-----: |
+| Edits Markdown files | ✅ | ❌ | ✅ | ❌ | ✅ |
 `;
 
 test('a one-row table reads', () => {
