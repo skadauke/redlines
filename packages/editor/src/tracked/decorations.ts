@@ -4,7 +4,7 @@
 // inserted line break shows a small pilcrow when line break marks are shown; comments and
 // highlights are tinted, and a bar left of the column marks each line with a pending change. Clean
 // shows the newest text, as if every change were accepted, without markup or ordinary HTML
-// comments. Raw shows the source as written, highlighted in grays.
+// comments. Plain shows the source as written, highlighted in grays.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -37,7 +37,16 @@ import {
   type Parsed,
   type Segment,
 } from '@redlines/format';
-import { blankLines, keptLine } from '../blocks/hidden.ts';
+import {
+  containersOf,
+  foldField,
+  headLine,
+  hiddenContainerLines,
+  isOpen,
+} from '../blocks/containers.ts';
+import { blankLines, commentSpans, keptLine } from '../blocks/hidden.ts';
+import { containerKeys } from '../blocks/container-keys.ts';
+import { containerBracket, drawContainers } from './container-draw.ts';
 import { openBlock } from '../blocks/open.ts';
 import { BULLETS, LEVEL_COLS } from '../preview/decorations.ts';
 import { alignedColumns, insertedColumnCells, tableAbove } from '../table/columns.ts';
@@ -648,6 +657,8 @@ function analyze(state: EditorState, kept: number | null): Model {
   // Blank lines between blocks are structure, never lines (design: block editing).
   // The empty paragraph Return opened is drawn, wherever the caret is, while it is open.
   model.blocks.push(...blankLines(state, kept, openBlock(state)?.empty ?? null));
+  // The tag lines of containers, and what a closed section folds away (blocks/containers.ts).
+  model.blocks.push(...hiddenContainerLines(state));
   // The empty paragraph that is open is no blank line that a marker's line takes along.
   const open = openBlock(state)?.empty ?? null;
   const drawn = (line: Line) => open !== null && line.from <= open.to && line.to >= open.from;
@@ -665,22 +676,11 @@ function ordinaryComments(state: EditorState, markers: Span[], ledger: Span | nu
   const taken = (ledger ? [...markers, ledger] : markers).toSorted((a, b) => a.from - b.from);
   const comments: Span[] = [];
   let next = 0;
-  syntaxTree(state).iterate({
-    enter: (node) => {
-      if (node.name !== 'Comment' && node.name !== 'CommentBlock') return;
-      const text = state.sliceDoc(node.from, node.to);
-      for (let open = text.indexOf('<!--'); open !== -1;) {
-        const close = text.indexOf('-->', open + 2);
-        if (close === -1) break;
-        const span = { from: node.from + open, to: node.from + close + 3 };
-        while (next < taken.length && taken[next]!.to <= span.from) next++;
-        const overlap = taken[next];
-        if (!overlap || overlap.from >= span.to) comments.push(span);
-        open = text.indexOf('<!--', close + 3);
-      }
-      return false;
-    },
-  });
+  for (const span of commentSpans(state)) {
+    while (next < taken.length && taken[next]!.to <= span.from) next++;
+    const overlap = taken[next];
+    if (!overlap || overlap.from >= span.to) comments.push(span);
+  }
   return comments;
 }
 
@@ -930,13 +930,33 @@ function changeSpans(model: Model): ChangeSpan[] {
 }
 
 /** The change bar classes of each line, by line number: which lines hold a change, and whose. */
-function bars(doc: Text, spans: readonly ChangeSpan[]): Map<number, string> {
+function bars(
+  doc: Text,
+  spans: readonly ChangeSpan[],
+  hidden: readonly { from: number; to: number }[] = [],
+): Map<number, string> {
   const colors = new Map<number, Set<number>>();
+  // A line that starts inside a hidden range that began on an earlier line is drawn as one with it
+  // (a bullet and its text over hidden marker lines): the one line the view renders is the first,
+  // which takes the class (#654).
+  const multi = hidden.filter(({ from, to }) => doc.lineAt(from).number !== doc.lineAt(to).number);
+  const firsts = new Map<number, number>();
+  const first = (n: number): number => {
+    const known = firsts.get(n);
+    if (known !== undefined) return known;
+    // A range that ends where the line starts has taken the break before it too.
+    const start = doc.line(n).from;
+    const range = multi.find((r) => r.from < start && start <= r.to);
+    const found = range ? first(doc.lineAt(range.from).number) : n;
+    firsts.set(n, found);
+    return found;
+  };
   for (const { from, to, color } of spans) {
     for (let n = doc.lineAt(from).number, last = doc.lineAt(to).number; n <= last; n++) {
-      const onLine = colors.get(n);
+      const key = multi.length ? first(n) : n;
+      const onLine = colors.get(key);
       if (onLine) onLine.add(color);
-      else colors.set(n, new Set([color]));
+      else colors.set(key, new Set([color]));
     }
   }
   return new Map([...colors].map(([n, onLine]) => [n, barClass(onLine)]));
@@ -1154,7 +1174,7 @@ interface Display {
   atomic: RangeSet<Atom>;
 }
 
-function atomicRanges(doc: Text, model: Model): RangeSet<Atom> {
+function atomicRanges(doc: Text, model: Model, extra: readonly Span[] = []): RangeSet<Atom> {
   // Whether the caret looks different at either end: across deleted text, or onto another line.
   const spans = [
     ...model.hidden.map(({ from, to, parts }) => ({
@@ -1162,6 +1182,7 @@ function atomicRanges(doc: Text, model: Model): RangeSet<Atom> {
       to,
       visible: parts.some((part) => part.text),
     })),
+    ...extra.map(({ from, to }) => ({ from, to, visible: false })),
     ...model.blocks.map(({ from, to }) => ({
       from: Math.max(0, from - 1),
       to: Math.min(doc.length, to + 1),
@@ -1254,7 +1275,9 @@ function display(state: EditorState): Display {
     ranges.push(Decoration.line({ class: className }).range(doc.lineAt(at).from));
   }
   const spans = changeSpans(model);
-  for (const [n, className] of bars(doc, spans)) {
+  const drawing = state.field(viewModeField) === 'raw' ? null : containerDrawing(state, spans);
+  if (drawing) ranges.push(...drawing.ranges);
+  for (const [n, className] of bars(doc, spans, model.hidden)) {
     const line = doc.line(n);
     const block = spanAt(model.blocks, line.from);
     if (block && line.to <= block.to) continue;
@@ -1265,7 +1288,7 @@ function display(state: EditorState): Display {
     spans,
     kept,
     decorations: Decoration.set(ranges, true),
-    atomic: atomicRanges(doc, model),
+    atomic: atomicRanges(doc, model, drawing?.atoms),
   };
 }
 
@@ -1282,6 +1305,36 @@ export function trackedDecorations(state: EditorState): DecorationSet {
   return display(state).decorations;
 }
 
+/**
+ * The containers' drawing, with the changes that a closed section holds put on its summary line:
+ * a bar there (a span for each change, added to `spans`), and a count after the summary.
+ */
+function containerDrawing(state: EditorState, spans: ChangeSpan[]) {
+  const parsed = state.field(parsedField);
+  const colors = colorsOf(state);
+  const drawing = drawContainers(state, (from, to) => {
+    let count = 0;
+    for (const mark of parsed.marks) {
+      if (!isDrawnChange(mark)) continue;
+      const at = mark.segments[0]?.open.from ?? -1;
+      if (at >= from && at <= to) count++;
+    }
+    return count;
+  });
+  for (const container of containersOf(state)) {
+    if (isOpen(state, container)) continue;
+    const row = headLine(state, container).from;
+    for (const mark of parsed.marks) {
+      if (!isDrawnChange(mark)) continue;
+      const at = mark.segments[0]?.open.from ?? -1;
+      if (at >= container.bodyFrom && at <= container.end) {
+        spans.push({ from: row, to: row, color: colors.get(mark.entry.by) ?? 0 });
+      }
+    }
+  }
+  return drawing;
+}
+
 const trackedField = StateField.define<Display>({
   create: display,
   update(value, tr) {
@@ -1292,6 +1345,7 @@ const trackedField = StateField.define<Display>({
       tr.startState.facet(authorFacet) !== tr.state.facet(authorFacet) ||
       tr.startState.facet(lineBreakMarksFacet) !== tr.state.facet(lineBreakMarksFacet) ||
       tr.startState.field(viewModeField) !== tr.state.field(viewModeField) ||
+      tr.startState.field(foldField, false) !== tr.state.field(foldField, false) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
       // The caret onto a blank line, or off it, which is hidden again.
       (tr.selection !== undefined && keptLine(tr.state) !== value.kept) ||
@@ -1317,7 +1371,7 @@ const HIDDEN_RUN = new HiddenRun();
 
 /**
  * The lines Clean and Redlines hide, each run from the start of its first line to the end of its
- * last (the caret steps over it with the line breaks around it); none in Raw.
+ * last (the caret steps over it with the line breaks around it); none in Plain.
  */
 export function hiddenLines(state: EditorState): RangeSet<HiddenRun> {
   const model = state.field(trackedField, false)?.model ?? analyze(state, keptLine(state));
@@ -1446,7 +1500,7 @@ export function visibleSelection(
   return next.eq(selection) ? selection : next;
 }
 
-/** What the caret steps over in a state: hidden text and hidden lines, none in Raw. */
+/** What the caret steps over in a state: hidden text and hidden lines, none in Plain. */
 export function atomsOf(state: EditorState): RangeSet<Atom> {
   return state.field(trackedField, false)?.atomic ?? RangeSet.of<Atom>([]);
 }
@@ -1485,7 +1539,7 @@ export function pastHidden(state: EditorState, pos: number, forward: boolean): n
 }
 
 /**
- * Leaving Raw, a new version of the file from outside, or an edit the tracked layer dealt with
+ * Leaving Plain, a new version of the file from outside, or an edit the tracked layer dealt with
  * (tracked or plain) or a decision can leave the caret in text that is hidden now: inside markers
  * that an edit brought together, on a blank line under a new own-line marker, or past the hidden
  * ledger. It moves out.
@@ -1516,7 +1570,7 @@ const viewClass = EditorView.editorAttributes.compute([viewModeField], (state) =
   class: `rl-view-${state.field(viewModeField)}`,
 }));
 
-/** Markdown's syntax in Raw, drawn in grays: color means a person. */
+/** Markdown's syntax in Plain, drawn in grays: color means a person. */
 const rawHighlighter = tagHighlighter([
   { tag: tags.heading, class: 'rl-tok-heading' },
   { tag: tags.strong, class: 'rl-tok-strong' },
@@ -1527,7 +1581,7 @@ const rawHighlighter = tagHighlighter([
   { tag: tags.comment, class: 'rl-tok-comment' },
 ]);
 
-/** The highlighting of the visible text, in Raw only: the other views draw the document. */
+/** The highlighting of the visible text, in Plain only: the other views draw the document. */
 function rawDecorations(view: EditorView): DecorationSet {
   if (view.state.field(viewModeField) !== 'raw') return Decoration.none;
   const builder = new RangeSetBuilder<Decoration>();
@@ -1710,7 +1764,7 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-2)', fontSize: '0.85em' },
 
-  // Raw: the source in the code font, a little wider and more open than the document's column,
+  // Plain: the source in the code font, a little wider and more open than the document's column,
   // markers and the ledger in the second ink.
   '&.rl-view-raw .cm-scroller': { fontFamily: 'var(--rl-font-mono)' },
   '&.rl-view-raw .cm-content': {
@@ -1741,5 +1795,8 @@ export function trackedChanges(): Extension {
     rawHighlighting,
     colorTheme,
     theme,
+    foldField,
+    containerBracket,
+    containerKeys,
   ];
 }

@@ -43,6 +43,13 @@ import { followText } from './anchor.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
+export {
+  type Container,
+  containersOf,
+  holdOpenAt,
+  isOpen as isSectionOpen,
+  setFold,
+} from './blocks/containers.ts';
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
@@ -91,6 +98,7 @@ import {
   refreshImagesEffect,
 } from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
+import { htmlInline } from './preview/html-inline.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
@@ -150,6 +158,9 @@ export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export { indentItems } from './blocks/keys.ts';
 export { indentReason } from './blocks/tab.ts';
+export { disabledReasonOf } from './commands.ts';
+export { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
+export type { TwinHere } from './blocks/twin.ts';
 export { currentChange, setCurrentChange, type CurrentChange } from './tracked/bar-layer.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
@@ -249,7 +260,7 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
- * in the Clean, Redlines and Raw views, Track Changes, copy and paste of the text as it reads, and
+ * in the Clean, Redlines and Plain views, Track Changes, copy and paste of the text as it reads, and
  * undo.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
@@ -295,7 +306,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
     markdown({
-      extensions: [GFM, tableMarkers, frontMatter, scriptTags, emojiCodes],
+      extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
       codeLanguages: options.codeLanguages,
     }),
     trackedChanges(),
@@ -595,7 +606,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       view.dispatch({ effects: setViewModeEffect.of(shownLook ?? markupView) });
     },
     switchLook: () => {
-      // Nothing to measure in Clean and Raw, which have no look to switch.
+      // Nothing to measure in Clean and Plain, which have no look to switch.
       if (menuViewOf(view.state.field(viewModeField)) !== 'redlines') return;
       const at = lookedAt(view);
       switchLookAt(view, at.pos, undefined, undefined, at.row);
@@ -617,7 +628,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     recordView: () => {
       const shown = view.state.field(viewModeField);
-      // Raw is never saved: the file keeps the view it had.
+      // Plain is never saved: the file keeps the view it had.
       if (shown === 'raw') return;
       recordInFile(viewInFile(view.state.doc.toString(), shown));
     },
@@ -811,3 +822,5 @@ function pasteIntoField(view: EditorView, text: string): boolean {
   }
   return false;
 }
+
+export { moveBlocks, moveBlocksReason, moveRunTo, runOfSelection } from './blocks/move.ts';

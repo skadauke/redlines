@@ -11,9 +11,11 @@ import { addComment } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { addHighlight } from './highlights.ts';
+import { expectEveryOrderRead, expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
 import { expectCommentsTravel } from './table-move-oracle.ts';
-import { tableEdit } from './table-ops.ts';
+import { fineTableEdit, tableEdit } from './table-ops.ts';
+import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import type { Person } from './types.ts';
 import {
@@ -105,7 +107,7 @@ function moved(text: string, row: number, to: number): { text: string; index: nu
   const done = tableEdit(
     text,
     { kind: 'moveRows', table, rows: [row], to },
-    context(claudeAda, ['k3x9', 'w8nn']),
+    context(claudeAda, ['k3x9', 'w8nn', 'r2zd', 's4ab', 't5cd']),
   );
   return { text: applyChanges(text, done.changes), index: done.rows?.[0] ?? 0 };
 }
@@ -343,9 +345,22 @@ describe('a comment in a row that moves (#371)', () => {
                 const at = to - (row < to ? 1 : 0);
                 const order = [...others.slice(0, at), row, ...others.slice(at)];
                 if (order.indexOf(first) > order.indexOf(last)) {
-                  const error = refusal(() => moved(commented, row, to));
-                  expect(error, label).toBeInstanceOf(EditError);
-                  expect((error as EditError).code, label).toBe('would-hide-marks');
+                  // The move can't be written finely (its end would stand in front of its start):
+                  // it is written as a replacement of the table, which reads alike.
+                  const table = readTables(commented, parse(commented))[0]?.from ?? 0;
+                  const op: TableOp = { kind: 'moveRows', table, rows: [row], to };
+                  expect(
+                    refusal(() =>
+                      fineTableEdit(commented, op, context(ada, ['k3x9', 'w8nn', 'r2zd'])),
+                    ),
+                    label,
+                  ).toBeInstanceOf(EditError);
+                  const wide = tableEdit(
+                    commented,
+                    op,
+                    context(claudeAda, ['k3x9', 'w8nn', 'r2zd', 's4ab', 't5cd']),
+                  );
+                  expectWidened(label, commented, wide.changes, 'claude-ada');
                   refused++;
                   continue;
                 }
@@ -439,6 +454,13 @@ describe('a comment in a row that moves (#371)', () => {
             throw error;
           }
           const label = `${layout}, row ${one} to ${first}, then row ${two} to ${second}`;
+          // A move that the fine rules refuse beside the first is a replacement of the table: its
+          // comments are in the old text, not carried one by one.
+          if (parse(both).marks.some((mark) => mark.kind === 'sub')) {
+            expectEveryOrderRead(label, both);
+            cases++;
+            continue;
+          }
           expectEveryOrderAlike(label, both);
           expectEveryOrderAlike(label, both, exactly);
           expectNoDecisionRefused(label, both);
@@ -469,14 +491,23 @@ describe('a comment in a row that moves (#371)', () => {
     expect(cases).toBe(12);
   });
 
-  it('is refused when the move is made, in words, beside a comment on the first word of a row with no pipe there', () => {
+  it('is widened when the move is made, beside a comment on the first word of a row with no pipe there', () => {
     // The opener of such a comment is at the end of the row above: the comment crosses the line break,
     // and a move beside it could be accepted but not rejected (#289).
     for (const layout of ['no outer pipes', 'trailing pipes only']) {
       const { lines } = LAYOUTS[layout] as (typeof LAYOUTS)[string];
       const text = noted(file(lines.join('\n')), 3, [{ kind: 'start', by: ada, id: 'c9qf' }]);
-      expect(() => moved(text, 2, 0), layout).toThrow(
+      const table = readTables(text, parse(text))[0]?.from ?? 0;
+      const op: TableOp = { kind: 'moveRows', table, rows: [2], to: 0 };
+      expect(() => fineTableEdit(text, op, context(claudeAda, ['k3x9'])), layout).toThrow(
         "Ada Lovelace's comment runs from one row of this table into the next. Delete or resolve it first, or turn off Track Changes.",
+      );
+      // The tracked move is written as a replacement of the table instead.
+      expectWidened(
+        layout,
+        text,
+        tableEdit(text, op, context(claudeAda, ['k3x9', 'w8nn', 'r2zd'])).changes,
+        'claude-ada',
       );
     }
   });

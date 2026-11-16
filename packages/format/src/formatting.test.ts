@@ -5,6 +5,7 @@ import { EditError } from './errors.ts';
 import { parseFormatOps } from './format-ops.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
+import { expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import { trackedEdit } from './track.ts';
@@ -1072,7 +1073,13 @@ describe('next to pending changes', () => {
       d3x9: 'ada',
     });
     const cell = { from: table.indexOf('k f'), to: table.indexOf(' x |') + 2 };
-    expect(() => trackedFormat(table, cell, italic(true), ctx())).toThrow(/stray syntax/);
+    // Where no mark can stand it is a replacement of the table, which reads alike in every order.
+    expectWidened(
+      'a cell',
+      table,
+      trackedFormat(table, cell, italic(true), ctx('m2bd', 'n3cd', 'p5qm', 'q6rs')).changes,
+      'ada',
+    );
     // Another person's change in another row is tried with the new mark.
     const rows = file('| a<!--ins k3x9--> z<!--/k3x9--> | b |\n| - | - |\n| one | two |', {
       k3x9: 'bo',

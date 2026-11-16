@@ -11,7 +11,14 @@
 // is registered.
 
 import type { EditorState } from '@codemirror/state';
-import { rectOf, touchedCols, touchedRows, wholeRect, type EditorCommand } from '@redlines/editor';
+import {
+  disabledReasonOf,
+  rectOf,
+  touchedCols,
+  touchedRows,
+  wholeRect,
+  type EditorCommand,
+} from '@redlines/editor';
 import { holds as selectionHolds, type Holds } from './convert.ts';
 import type { ToolbarIcon } from './icons.ts';
 import { ariaShortcut, formatShortcut } from './shortcuts.ts';
@@ -358,7 +365,7 @@ function shown(
 ): ShownItem {
   const title = typeof command.title === 'function' ? command.title(state) : command.title;
   const name = title.replace(/…$/, '');
-  const reason = command.disabledReason?.(state) ?? spec.reason?.(state, context) ?? null;
+  const reason = disabledReasonOf(command, state) ?? spec.reason?.(state, context) ?? null;
   return {
     id: command.id,
     icon: spec.icon,
@@ -387,7 +394,7 @@ export function shownBar(
     isOn: (id) => byId.get(id)?.isActive?.(state) ?? false,
     canRun: (id) => {
       const found = byId.get(id);
-      return found !== undefined && found.disabledReason?.(state) === undefined;
+      return found !== undefined && disabledReasonOf(found, state) === undefined;
     },
     holds,
   };

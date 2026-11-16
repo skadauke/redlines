@@ -541,7 +541,7 @@ describe('pinToRail', () => {
       expect(el.style.left).toBe('');
     });
 
-    it('takes nothing in Clean or Raw, where the rail shows no note', async () => {
+    it('takes nothing in Clean or Plain, where the rail shows no note', async () => {
       const loaded = await load();
       loaded.editor.setViewMode('clean');
       expect(pinAt(loaded, 'target', 200).pin).toBeNull();

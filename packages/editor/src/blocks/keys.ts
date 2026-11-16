@@ -1,5 +1,5 @@
 // The block keys (design: block editing, "Mechanism"): a keymap above the editor's others, in Clean
-// and Redlines only (Raw keeps CodeMirror's and lang-markdown's keys). Each key plans its edit
+// and Redlines only (Plain keeps CodeMirror's and lang-markdown's keys). Each key plans its edit
 // (`edits.ts`) and `applyKeyEdit` dispatches it as one step to undo, with the user event the
 // tracked layer records it by, the record of Returns and the empty paragraph it opens.
 
@@ -52,7 +52,9 @@ import {
 } from './motion.ts';
 import { blockAt, neighbours } from './structure.ts';
 import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
+import { moveBlocks } from './move.ts';
 import { planTab } from './tab.ts';
+import { convertTwin, htmlListMoves } from './twin.ts';
 import { bareMarkerAt, pastedItems, planListPaste } from './paste.ts';
 import {
   closeOpen,
@@ -319,7 +321,7 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   return true;
 }
 
-/** A key that acts in Clean and Redlines, and leaves Raw to CodeMirror. */
+/** A key that acts in Clean and Redlines, and leaves Plain to CodeMirror. */
 function blockKey(run: Command): Command {
   return (view) => view.state.field(viewModeField, false) !== 'raw' && run(view);
 }
@@ -475,6 +477,9 @@ const TAB_DOES_NOTHING = new Set(['paragraph', 'heading', 'rule', 'definition'])
 const tabKey = (outdent: boolean) =>
   blockKey((view) => {
     if (view.state.selection.ranges.length > 1) return false;
+    // Tab in an item of an HTML list (that has an exact twin) converts the list first (#690), and
+    // only when there is an item above to go under (or, for Shift-Tab, a level to leave).
+    if (htmlListMoves(view.state, outdent) && convertTwin(view) !== true) return true;
     const edit = planTab(view.state, outdent);
     if (edit) return applyKeyEdit(view, edit);
     const block = blockAt(view.state, view.state.selection.main.head);
@@ -500,7 +505,8 @@ const motionKey = (plan: (state: EditorState) => KeyEdit | null) =>
     return edit ? applyKeyEdit(view, edit) : false;
   });
 
-/** ⌥↑ and ⌥↓ by paragraph, and with ⇧ selecting: never CodeMirror's, which move the source line. */
+/** ⇧⌥↑ and ⇧⌥↓ select by paragraph: never CodeMirror's, which move the source line. (⌥↑ and ⌥↓ move
+ * the blocks, `move.ts`.) */
 const paragraphKey = (forward: boolean, extend: boolean) =>
   blockKey((view) => {
     const edit = planParagraphMotion(view.state, forward, extend);
@@ -713,8 +719,8 @@ export function blockKeys(): Extension {
         { key: 'Alt-Delete', run: deleteKey },
         { key: 'ArrowLeft', run: motionKey(planArrowLeft) },
         { key: 'ArrowRight', run: motionKey(planArrowRight) },
-        { key: 'Alt-ArrowUp', run: paragraphKey(false, false) },
-        { key: 'Alt-ArrowDown', run: paragraphKey(true, false) },
+        { key: 'Alt-ArrowUp', run: blockKey((view) => moveBlocks(view, true)) },
+        { key: 'Alt-ArrowDown', run: blockKey((view) => moveBlocks(view, false)) },
         { key: 'Shift-Alt-ArrowUp', run: paragraphKey(false, true) },
         { key: 'Shift-Alt-ArrowDown', run: paragraphKey(true, true) },
         { key: 'Alt-ArrowLeft', run: groupKey(false, false) },

@@ -575,7 +575,7 @@ describe('rows and columns, random', () => {
           }
           history.push(text);
           text = applyChanges(text, changes ?? []);
-          if (shouldRefuse) {
+          if (shouldRefuse && who === 'plain') {
             throw new Error(
               `a ${op?.kind} over the comment's column was written:\n${history.at(-1)}`,
             );

@@ -3,7 +3,7 @@
 // menu, and the one the person picks is made here, as typing, as the Mac's own corrections are
 // (corrections.ts). The word is read from the text the page shows, so a hidden marker inside it
 // doesn't part it, and only where the Mac spell checks: prose, outside code, a URL, front matter and
-// Raw (`autocorrects`).
+// Plain (`autocorrects`).
 
 import type { EditorView } from '@codemirror/view';
 import type { Range } from '@redlines/format';

@@ -7,6 +7,7 @@ import {
   authorFrom,
   imageFolderNameOf,
   imageFolderNameProblem,
+  keepWindowOwn,
   loadSettings,
   meetPeopleInSettings,
   reopenLastDocument,
@@ -85,6 +86,9 @@ describe('settings', () => {
       agentScope: 'folder',
       consent: {},
       agentHandles: {},
+      defaultAgent: null,
+      agentModels: {},
+      webAccess: false,
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
@@ -116,6 +120,9 @@ describe('settings', () => {
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       agentHandles: { claude: 'ada' },
+      defaultAgent: 'codex',
+      agentModels: { claude: 'opus' },
+      webAccess: true,
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
@@ -614,7 +621,7 @@ describe('settings', () => {
     };
     const reopen = (lastDocument: string) =>
       reopenLastDocument({ ...DEFAULT_SETTINGS, onLaunch: 'reopen', lastDocument }, open);
-    for (const stale of ['/notes/logo.svg', '/notes/Makefile', '/notes/main.ts']) {
+    for (const stale of ['/notes/logo.docx', '/notes/Makefile', '/notes/main.zig']) {
       expect(await reopen(stale), stale).toBe(false);
     }
     // Not even read: nothing would be said.
@@ -699,5 +706,57 @@ describe('settings', () => {
     expect(loadSettings().agentHandles).toEqual({});
     localStorage.setItem(SETTINGS_KEY, '{"agentHandles":[1]}');
     expect(loadSettings().agentHandles).toEqual({});
+  });
+
+  it('keeps the default agent as an id, and nothing else (#528)', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"defaultAgent":"codex"}');
+    expect(loadSettings().defaultAgent).toBe('codex');
+    for (const bad of ['""', '3', 'null', '{}']) {
+      localStorage.setItem(SETTINGS_KEY, `{"defaultAgent":${bad}}`);
+      expect(loadSettings().defaultAgent).toBeNull();
+    }
+  });
+
+  it('keeps the models chosen as text by agent, and drops the rest (#530)', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ agentModels: { claude: 'opus', codex: '', x: 3 } }),
+    );
+    expect(loadSettings().agentModels).toEqual({ claude: 'opus' });
+    localStorage.setItem(SETTINGS_KEY, '{"agentModels":[1]}');
+    expect(loadSettings().agentModels).toEqual({});
+  });
+
+  it('keeps web access only when it is true, and off otherwise (#529)', () => {
+    expect(loadSettings().webAccess).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, '{"webAccess":true}');
+    expect(loadSettings().webAccess).toBe(true);
+    for (const bad of ['"yes"', '1', 'null']) {
+      localStorage.setItem(SETTINGS_KEY, `{"webAccess":${bad}}`);
+      expect(loadSettings().webAccess).toBe(false);
+    }
+  });
+});
+
+describe('the Default text size (#557)', () => {
+  it('is what a new window opens at, and no window’s own text size changes it', () => {
+    updateSettings({ textSize: 1.25 });
+    let own = { ...loadSettings(), textSize: 2 };
+    own = keepWindowOwn(own, updateSettings({ spellCheck: false }));
+    expect(own.textSize).toBe(2);
+    expect(loadSettings().textSize).toBe(1.25);
+  });
+
+  it('changes no window that is open', () => {
+    const open = { ...loadSettings(), textSize: 1.5 };
+    const stored = updateSettings({ textSize: 3 });
+    expect(keepWindowOwn(open, stored).textSize).toBe(1.5);
+    expect(loadSettings().textSize).toBe(3);
+  });
+
+  it('is changed by Preferences, which keeps what it set', () => {
+    const open = { ...loadSettings(), textSize: 1 };
+    const stored = updateSettings({ textSize: 1.75 });
+    expect(keepWindowOwn(open, stored, { textSize: 1.75 }).textSize).toBe(1.75);
   });
 });

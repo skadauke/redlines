@@ -63,7 +63,7 @@ describe('task boxes', () => {
     expect(editor.view.dom.textContent).not.toContain('[ ]');
   });
 
-  it('shows the source while the caret is on the marker, and in Raw', () => {
+  it('shows the source while the caret is on the marker, and in Plain', () => {
     const on = editorAt(doc, 3);
     expect(boxes(on)).toHaveLength(1);
     expect(on.view.dom.textContent).toContain('[ ]');

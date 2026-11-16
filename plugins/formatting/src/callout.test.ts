@@ -225,13 +225,13 @@ describe('the menu in an alert’s title', () => {
 });
 
 describe('the Alert command', () => {
-  it('is a command of the Paragraph menu, with the table and the code block, and no shortcut', () => {
+  it('is a command of the Insert menu, with the table and the code block, and no shortcut', () => {
     const { editor } = mount('One.\n');
     const command = editor.commands.list().find((candidate) => candidate.id === 'block.alert');
     expect(command).toMatchObject({
       id: 'block.alert',
       title: 'Alert',
-      menu: 'paragraph',
+      menu: 'insert',
       group: 'insert',
     });
     expect(command?.shortcut).toBeUndefined();

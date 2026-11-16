@@ -1,5 +1,5 @@
 // Emoji shortcodes in the preview (#312, design §5.2). A `:name:` that the host knows is drawn as its
-// emoji, as an entity is drawn as its character: in every view but Raw, as written while the caret is
+// emoji, as an entity is drawn as its character: in every view but Plain, as written while the caret is
 // on it, and left alone in code, in a link's address and in a code block. The editor has no list of
 // names, which would weigh on every host: a host gives a `lookup`, and without one the text stays as
 // it is. What is written is the emoji itself (the autocomplete of the emoji plugin writes the

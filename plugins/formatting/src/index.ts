@@ -29,6 +29,7 @@ import {
   indentReason,
   inFrontMatter,
   selectionInTable,
+  setFold,
   setViewModeEffect,
   tablesOf,
   trackedEditAnnotation,
@@ -63,11 +64,11 @@ export interface FormattingOptions {
 }
 
 const RAW_READ_ONLY =
-  'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
-/** Why a format or block command is disabled in Raw while edits are tracked (Raw shows the file's
+  'Plain is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+/** Why a format or block command is disabled in Plain while edits are tracked (Plain shows the file's
  * own text, where nothing can be marked; typing there is asked about, a command is not). */
 const RAW_FORMAT =
-  "Raw shows the file's own text, where Redlines can't mark changes. Switch to Clean or Redlines, or turn off Track Changes.";
+  "Plain shows the file's own text, where Redlines can't mark changes. Switch to Clean or Redlines, or turn off Track Changes.";
 /** What is said where a command is disabled (design §4.1: the hint says what the thing is, then what to do). */
 const FRONT_MATTER_HINT = 'Front matter is YAML, not text to format. Select text in the body.';
 const IN_CODE_HINT = "Formatting doesn't apply inside code. Select text outside it.";
@@ -81,7 +82,7 @@ const ITEM_NEEDS_TEXT_HINT = "Write the item first. An item with no text can't c
 /** Said where the preview draws a pair of subscript or superscript tags that the format doesn't
  * read, as one that crosses emphasis: no change could be made, and none is silent (#310). */
 const TAGS_NOT_A_PAIR =
-  "These <sub> or <sup> tags can't be changed here: they are not a pair that Redlines reads, as when they cross other formatting. Edit them in Raw.";
+  "These <sub> or <sup> tags can't be changed here: they are not a pair that Redlines reads, as when they cross other formatting. Edit them in Plain.";
 const ALREADY_CODE = 'This is already a code block.';
 const MARKS_IN_CODE =
   'Accept or reject the changes in these lines first, then make them a code block.';
@@ -227,7 +228,7 @@ function computeActiveBlocks(state: EditorState): Set<string> {
   return on;
 }
 
-/** Whether edits are tracked in Raw, which shows the file's own text and marks nothing. */
+/** Whether edits are tracked in Plain, which shows the file's own text and marks nothing. */
 function rawTracked(state: EditorState): boolean {
   return state.field(trackingField, false) === true && state.field(viewModeField, false) === 'raw';
 }
@@ -245,6 +246,20 @@ function formatTarget(state: EditorState): Range | null {
 function onEmptyLineAt(state: EditorState): boolean {
   const line = state.doc.lineAt(state.selection.main.head);
   return line.text.trim() === '' && !atSelection(state).some((n) => n.parent?.type.isTop);
+}
+
+/**
+ * What a heading's Markdown becomes under the block type `to`: the heading of another level, or
+ * Body (or the same level again, which turns it off) as plain text; null for a quote or a list.
+ */
+function headingAs(markdown: string, to: BlockType): string | null {
+  const found = /^(#{1,6}) (.*)$/.exec(markdown);
+  if (!found) return null;
+  const [, marks, text] = found as unknown as [string, string, string];
+  if (to === 'p') return text;
+  if (!/^h[1-6]$/.test(to)) return null;
+  const level = Number(to[1]);
+  return level === marks.length ? text : `${'#'.repeat(level)} ${text}`;
 }
 
 /** Why the Paragraph menu's block types can't apply where the caret is, or undefined. */
@@ -371,7 +386,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   };
   const removeTheme = editor.addExtension(linkTheme);
 
-  /** Whether the selection can be edited at all: Raw is read-only while edits are tracked. */
+  /** Whether the selection can be edited at all: Plain is read-only while edits are tracked. */
   const editable = (): boolean => {
     if (view.state.field(trackingField) && view.state.field(viewModeField) === 'raw') {
       notice(RAW_READ_ONLY);
@@ -767,6 +782,52 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     return to > from && to === view.state.doc.lineAt(to).from ? to - 1 : to;
   };
 
+  /**
+   * Collapsible Section (#688): `<details>` with a `<summary>` and the blocks inside. Over a
+   * selection of blocks it goes around them (two insertions: the blocks are not rewritten); at the
+   * caret it is a new section after the block, as Table is. It opens, with the summary's text
+   * selected, because a section just made is one to write in (nothing is remembered).
+   */
+  const SUMMARY = 'Summary';
+  const collapsibleSection = (): boolean => {
+    const { doc } = view.state;
+    const { from, to, empty } = view.state.selection.main;
+    const head = `<details>\n<summary>${SUMMARY}</summary>\n\n`;
+    const open = (at: number) => {
+      const anchor = view.state.doc.toString().indexOf(`<summary>${SUMMARY}`, at);
+      if (anchor < 0) return;
+      const opener = view.state.doc.line(view.state.doc.lineAt(anchor).number - 1).from;
+      const start = anchor + '<summary>'.length;
+      view.dispatch({
+        selection: { anchor: start, head: start + SUMMARY.length },
+        effects: setFold.of({ from: opener, open: true }),
+      });
+    };
+    if (empty) {
+      const done = insertBlock(`${head}Text\n\n</details>`, '<details>', 0);
+      if (done) open(Math.max(0, from - 1));
+      return done;
+    }
+    // The blocks the selection touches, whole: from the start of the first to the end of the last.
+    const first = doc.lineAt(from);
+    let last = doc.lineAt(to);
+    if (to === last.from && last.number > first.number) last = doc.line(last.number - 1);
+    let start = first.from;
+    let end = last.to;
+    const tree = syntaxTree(view.state);
+    for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
+      if (node.to < start || node.from > end) continue;
+      start = Math.min(start, node.from);
+      end = Math.max(end, node.to);
+    }
+    const done = insert([
+      { from: start, to: start, insert: head },
+      { from: end, to: end, insert: '\n\n</details>' },
+    ]);
+    if (done) open(Math.max(0, start - 1));
+    return done;
+  };
+
   const codeBlock = (): boolean => {
     const nodes = atSelection(view.state);
     if (nodes.some(({ name }) => CODE_BLOCK.has(name))) {
@@ -864,10 +925,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     return true;
   };
 
-  const TABLE = '| Column | Column |\n| --- | --- |\n|  |  |';
+  // A new table's header cells are empty (GitHub's tables allow it): the table draws a faint
+  // placeholder in them that the file doesn't hold (the theme's `.rl-th .rl-tc-fill`), and the caret
+  // starts in the first.
+  const TABLE = '|  |  |\n| --- | --- |\n|  |  |';
 
   const command = (
-    menu: 'format' | 'paragraph',
+    menu: 'format' | 'paragraph' | 'insert',
     group: string,
     fields: Omit<EditorCommand, 'menu' | 'group'>,
   ): EditorCommand => ({
@@ -875,7 +939,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     group,
     ...fields,
     disabledReason: (state: EditorState) => {
-      // Raw shows the file's own text: nothing in it can be marked (typing there is asked about).
+      // Plain shows the file's own text: nothing in it can be marked (typing there is asked about).
       if (rawTracked(state)) return RAW_FORMAT;
       // A table's cell holds inline text: the Paragraph menu's block commands are not for it.
       if (
@@ -915,6 +979,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id,
       title,
       ...(shortcut ? { shortcut } : {}),
+      structure: ['heading', 'quote', 'list'],
+      twinAs: (twin) => (twin.kind === 'heading' ? headingAs(twin.markdown, to) : null),
       run: block(to, id),
       disabledReason: (state) => blockReason(state, to, id),
       isActive: (state) => activeBlocks(state).has(id),
@@ -1163,7 +1229,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       },
       run: checkItems,
     }),
-    command('paragraph', 'insert', {
+    command('insert', 'insert', {
       id: 'block.code',
       title: 'Code Block',
       shortcut: 'Mod-Alt-c',
@@ -1172,14 +1238,19 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         atSelection(state).some(({ name }) => CODE_BLOCK.has(name)) ? ALREADY_CODE_HINT : undefined,
       isActive: (state) => activeBlocks(state).has('block.code'),
     }),
-    command('paragraph', 'insert', {
+    command('insert', 'insert', {
       id: 'block.table',
       title: 'Table',
       shortcut: 'Mod-Alt-t',
-      // The first header cell's text is selected, so that typing names the column.
-      run: () => insertBlock(TABLE, '| Column', 2, 'Column'.length),
+      // The caret is in the first header cell, which is empty: typing names the column.
+      run: () => insertBlock(TABLE, '|  |  |', 2, 0, true),
     }),
-    command('paragraph', 'insert', {
+    command('insert', 'insert', {
+      id: 'block.details',
+      title: 'Collapsible Section',
+      run: collapsibleSection,
+    }),
+    command('insert', 'insert', {
       id: 'block.alert',
       title: 'Alert',
       // A new alert by the placement rule (#555), with its body's text selected, where the type is
@@ -1200,7 +1271,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       isActive: (state) => activeBlocks(state).has('block.quote'),
       run: quoteBlock,
     },
-    command('paragraph', 'insert', {
+    command('insert', 'insert', {
       id: 'block.rule',
       title: 'Horizontal Rule',
       run: () => insertBlock('---', '---', 3),
@@ -1209,6 +1280,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.indent',
       title: 'Indent',
       shortcut: 'Mod-]',
+      structure: ['list'],
       disabledReason: (state) => indentReason(state, false),
       run: () => {
         if (!editable()) return false;
@@ -1221,6 +1293,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.outdent',
       title: 'Outdent',
       shortcut: 'Mod-[',
+      structure: ['list'],
       disabledReason: (state) => indentReason(state, true),
       run: () => {
         if (!editable()) return false;
@@ -1274,6 +1347,7 @@ export const plugin: Plugin = {
         { id: 'block.check', title: 'Check Item', shortcut: 'Mod-Shift-u' },
         { id: 'block.code', title: 'Code Block', shortcut: 'Mod-Alt-c' },
         { id: 'block.table', title: 'Table', shortcut: 'Mod-Alt-t' },
+        { id: 'block.details', title: 'Collapsible Section' },
         { id: 'block.alert', title: 'Alert' },
         { id: 'insert.quote', title: 'Insert Quote' },
         { id: 'block.rule', title: 'Horizontal Rule' },

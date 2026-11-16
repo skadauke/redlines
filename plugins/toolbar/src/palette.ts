@@ -7,7 +7,7 @@
 // button, for a setting), and its key. A command that doesn't work at the caret is left out.
 
 import type { EditorState } from '@codemirror/state';
-import type { EditorCommand } from '@redlines/editor';
+import { disabledReasonOf, type EditorCommand } from '@redlines/editor';
 import type { ToolbarIcon } from './icons.ts';
 import { ASK, MENUS } from './items.ts';
 import { formatShortcut } from './shortcuts.ts';
@@ -137,7 +137,7 @@ export function entriesOf(
   const fromRegistry = commands.flatMap((command): Entry[] => {
     // The toolbar's own commands aren't for the palette that is in it.
     if (command.id === 'toolbar.show') return [];
-    if (command.disabledReason?.(state) !== undefined) return [];
+    if (disabledReasonOf(command, state) !== undefined) return [];
     const title = titleOf(command, state).replace(/…$/, '');
     const name = PALETTE_NAMES[command.id] ?? title;
     const menu = MENU_WORD.get(command.id);

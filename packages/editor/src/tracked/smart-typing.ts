@@ -3,7 +3,7 @@
 // (or an attribute), so what it writes is typing like any other and Track Changes records it as
 // such: a pair closed with tracking on is one insertion, and the caret stays inside it, so that
 // what is typed next extends it; a correction the Mac makes is typing too (corrections.ts). None
-// of it happens in code, where the characters mean themselves, or in Raw, where the source is
+// of it happens in code, where the characters mean themselves, or in Plain, where the source is
 // shown as it is.
 
 import { syntaxTree } from '@codemirror/language';
@@ -68,7 +68,7 @@ function inUncorrected(state: EditorState, pos: number): boolean {
 /**
  * Whether the Mac may correct `from`–`to` on its own as you type (autocorrection, text
  * replacements, smart quotes and dashes): in prose, and not where the characters mean themselves,
- * in code, a URL, the leading front matter, the ledger or an HTML comment, or in Raw. The hidden
+ * in code, a URL, the leading front matter, the ledger or an HTML comment, or in Plain. The hidden
  * markers of tracked changes inside the stretch don't count.
  */
 export function autocorrects(state: EditorState, from: number, to: number): boolean {
