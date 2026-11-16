@@ -87,11 +87,8 @@ test.describe('the eye @views', () => {
       await eye.evaluate((button) => getComputedStyle(button).color),
     );
     await j.shot('view-button-redlines');
-    await j.page.getByRole('button', { name: 'View', exact: true }).hover();
-    await j.page
-      .locator('.rl-menu-item')
-      .filter({ hasText: /^Plain/ })
-      .click();
+    await j.page.mouse.move(400, 400);
+    await (await openEye(j)).item('Plain').click();
     await expect(bar, 'Plain has no bar').toHaveCount(0);
     await j.shot('view-button-plain');
   });
