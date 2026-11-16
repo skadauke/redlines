@@ -88,7 +88,6 @@ export const GRIPS_STYLE = `
 }
 .rl-edge-add:hover, .rl-table-select:hover { border-color: var(--rl-ink-3); }
 .rl-edge-col { width: ${EDGE_SIZE}px; }
-.rl-edge-row { height: ${EDGE_SIZE}px; }
 .rl-table-select { width: ${CORNER_SIZE}px; height: ${CORNER_SIZE}px; }
 .rl-table-select::before {
   content: ''; box-sizing: border-box; width: 8px; height: 8px; border: 1.5px solid currentColor; border-radius: 2px;
@@ -182,6 +181,44 @@ function inCorner(drawn: { left: number; top: number }, x: number, y: number): b
 
 /** How far above the table a column handle's reach begins. */
 export const colGripTop = (tableTop: number): number => tableTop - GRIP_GAP - GRIP_REACH;
+
+/**
+ * The lowest client y a widget may take: the top of the scroll box that holds the editor, below
+ * what its `scroll-padding-top` keeps clear (the app's title bar floats over its top), and 4 px
+ * more. The window's top (0) where nothing scrolls the editor.
+ */
+function visibleTop(view: EditorView): number {
+  for (let el = view.dom.parentElement; el; el = el.parentElement) {
+    const style = getComputedStyle(el);
+    if (/(auto|scroll)/.test(style.overflowY)) {
+      return el.getBoundingClientRect().top + (parseFloat(style.scrollPaddingTop) || 0) + 4;
+    }
+  }
+  return 4;
+}
+
+/** The right end of a table's visible box: the table's, or its scroll box's when it scrolls sideways. */
+function visibleRight(drawn: { right: number; lines: HTMLElement[] }): number {
+  const clip = drawn.lines[0]?.closest('.rl-tbl-scroll')?.getBoundingClientRect();
+  return clip && clip.width > 0 ? Math.min(drawn.right, clip.right) : drawn.right;
+}
+
+/** Where Add column's strip stands (client x): just right of the table's visible end, pulled back
+ * from the editor's right edge. The pointer is looked for within `EDGE_GAP` + `EDGE_SIZE` of it. */
+function colStripLeft(drawn: { right: number; lines: HTMLElement[] }, editorRight: number): number {
+  return Math.min(visibleRight(drawn) + EDGE_GAP, editorRight - EDGE_SIZE - 4);
+}
+
+/** How tall Add row's strip is: `EDGE_SIZE`, or less where the next block is near, so that it never
+ * covers that block's first line (never under 8 px). */
+function rowStripHeight(drawn: { bottom: number; lines: HTMLElement[] }): number {
+  // The block after the table's box: the next line of the document (widgets between are skipped).
+  let next = drawn.lines[0]?.closest('.rl-tbl-scroll')?.nextElementSibling ?? null;
+  while (next && !next.classList.contains('cm-line')) next = next.nextElementSibling;
+  if (!next) return EDGE_SIZE;
+  const gap = next.getBoundingClientRect().top - drawn.bottom;
+  return gap > 0 ? Math.max(8, Math.min(EDGE_SIZE, gap - EDGE_GAP - 2)) : EDGE_SIZE;
+}
 
 /** A table drawn: its id, its box and the line of each of its real rows. */
 interface Drawn {
@@ -514,7 +551,11 @@ class Grips {
       const lastRow = drawn.rects[drawn.rects.length - 1];
       const inColumns = x >= drawn.left && x <= drawn.right;
       const inRows = y >= drawn.top && y <= drawn.bottom;
-      const col = !!lastCol && inRows && x >= lastCol.left && x <= drawn.right + EDGE_REACH;
+      // Where the strip stands, when the table's end is in view (a table scrolled sideways has none).
+      const endInView = drawn.right <= visibleRight(drawn) + 1;
+      const stripLeft = colStripLeft(drawn, this.view.dom.getBoundingClientRect().right);
+      const col =
+        endInView && !!lastCol && inRows && x >= lastCol.left && x <= stripLeft + EDGE_SIZE + 4;
       // Not where the next table's own strip above it is: Add row would cover its handles.
       const crowded = [...this.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl')].some(
         (el) => {
@@ -523,7 +564,11 @@ class Grips {
         },
       );
       const row =
-        !crowded && !!lastRow && inColumns && y >= lastRow.top && y <= drawn.bottom + EDGE_REACH;
+        !crowded &&
+        !!lastRow &&
+        inColumns &&
+        y >= lastRow.top &&
+        y <= drawn.bottom + EDGE_GAP + rowStripHeight(drawn) + 4;
       const corner =
         x >= drawn.left - 24 && x <= drawn.right && y >= drawn.top - COL_STRIP && y <= drawn.bottom;
       if (!col && !row && !corner) continue;
@@ -589,22 +634,21 @@ class Grips {
     }
     const base = this.view.dom.getBoundingClientRect();
     if (which === 'addCol') {
-      // Just right of the table, as tall as it, and never off the window.
-      // At the table's edge, or at its box's when the table scrolls sideways and its end is out of view.
-      const clipBox = drawn.lines[0]?.closest('.rl-tbl-scroll')?.getBoundingClientRect();
-      const right =
-        clipBox && clipBox.width > 0 ? Math.min(drawn.right, clipBox.right) : drawn.right;
-      const left = Math.min(right + EDGE_GAP, base.right - EDGE_SIZE - 4);
-      el.style.left = `${left - base.left}px`;
+      // Just right of the table's visible end, as tall as it, and never off the window.
+      el.style.left = `${colStripLeft(drawn, base.right) - base.left}px`;
       el.style.top = `${drawn.top - base.top}px`;
       el.style.height = `${Math.max(0, drawn.bottom - drawn.top)}px`;
     } else if (which === 'addRow') {
       el.style.left = `${drawn.left - base.left}px`;
+      const height = rowStripHeight(drawn);
       el.style.top = `${drawn.bottom + EDGE_GAP - base.top}px`;
       el.style.width = `${Math.max(0, drawn.right - drawn.left)}px`;
+      el.style.height = `${height}px`;
+      // Too low for the glyph: the strip is a thin bar, and the hint says what it is.
+      el.textContent = height >= 16 ? '+' : '';
     } else {
       el.style.left = `${Math.max(4, drawn.left - GRIP_GAP - CORNER_SIZE) - base.left}px`;
-      el.style.top = `${Math.max(4, drawn.top - GRIP_GAP - CORNER_SIZE) - base.top}px`;
+      el.style.top = `${Math.max(visibleTop(this.view), drawn.top - GRIP_GAP - CORNER_SIZE) - base.top}px`;
     }
   }
 
@@ -618,8 +662,9 @@ class Grips {
   /** Gives a grip or a + its hint: shown after the pointer rests on it, gone when it leaves or presses. */
   private hint(el: HTMLElement, text: string): void {
     el.setAttribute('aria-label', text);
-    el.addEventListener('mouseenter', () => {
+    el.addEventListener('mouseenter', (event) => {
       clearTimeout(this.tipTimer);
+      const pointer = { x: event.clientX, y: event.clientY };
       // A drag or an open menu has the pointer's attention.
       if (this.drag || this.menu) return;
       this.tipTimer = setTimeout(() => {
@@ -630,8 +675,11 @@ class Grips {
         this.tip.textContent = text;
         this.tip.hidden = false;
         const room = base.width - this.tip.offsetWidth - 4;
-        this.tip.style.left = `${Math.max(4, Math.min(box.left - base.left, room))}px`;
-        this.tip.style.top = `${box.bottom - base.top + 6}px`;
+        // Under a small widget; by the pointer on a long one (the strips are as long as the table).
+        const long = box.width > 48 || box.height > 48;
+        const left = long ? pointer.x - 12 : box.left;
+        this.tip.style.left = `${Math.max(4, Math.min(left - base.left, room))}px`;
+        this.tip.style.top = `${(long ? pointer.y + 20 : box.bottom + 6) - base.top}px`;
       }, this.tooltipMs);
     });
     const hide = () => this.hideHint();
@@ -663,7 +711,7 @@ class Grips {
     const centered = rect.left + (rect.right - rect.left - span) / 2 - base.left;
     grip.style.width = `${span}px`;
     grip.style.left = `${Math.max(4, Math.min(centered, base.width - span - 4))}px`;
-    grip.style.top = `${Math.max(4 - base.top, colGripTop(at.drawn.top) - base.top)}px`;
+    grip.style.top = `${Math.max(visibleTop(this.view), colGripTop(at.drawn.top)) - base.top}px`;
     grip.dataset['col'] = String(at.col);
   }
 
@@ -691,7 +739,7 @@ class Grips {
       this.colPlusLine = line;
     }
     this.colPlus.style.left = `${x - 9 - base.left}px`;
-    this.colPlus.style.top = `${Math.max(4 - base.top, drawn.top - COL_STRIP + 2 - base.top)}px`;
+    this.colPlus.style.top = `${Math.max(visibleTop(this.view), drawn.top - COL_STRIP + 2) - base.top}px`;
     if (this.colPlusLine) {
       this.colPlusLine.style.left = `${x - base.left}px`;
       this.colPlusLine.style.top = `${drawn.top - base.top}px`;
