@@ -399,7 +399,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     (message) => options.onNotice?.(message),
     options.commandKeys,
     (keymap) => {
-      commandKeymap = keymap ?? [];
+      commandKeymap = keymap;
       view.dispatch({ effects: commandKeysCompartment.reconfigure(commandKeymap) });
     },
   );

@@ -111,10 +111,9 @@ export function createCommandRegistry(
   keys?: CommandKeys,
   /**
    * Puts the commands' keymap in the editor ahead of every other (`Editor.addExtension` adds after
-   * the others, and a keymap of the same precedence that came first wins); replaces its last one,
-   * and takes it away when given none.
+   * the others, and a keymap of the same precedence that came first wins); replaces its last one.
    */
-  install?: (keymap: Extension | null) => void,
+  install?: (keymap: Extension) => void,
 ): CommandRegistry {
   let commands: readonly EditorCommand[] = [];
   /** The commands as listed: each with the key it has now, and the one it came with. */
@@ -161,7 +160,7 @@ export function createCommandRegistry(
   const bind = (extension: Extension) => {
     if (install) {
       install(extension);
-      return () => install(null);
+      return () => {};
     }
     return editor().addExtension(extension);
   };

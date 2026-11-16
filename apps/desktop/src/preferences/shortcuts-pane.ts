@@ -87,17 +87,21 @@ export function renderShortcutsPane(
   foot.append(reset, resetNote);
   container.append(field, list, foot);
 
+  const focusKey = (id: string) =>
+    list.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"] .rl-pref-key`)?.focus();
   const stop = () => {
+    const id = recording?.id;
     recording = null;
     draw();
+    // The focus stays on the key, as after a change.
+    if (id) focusKey(id);
   };
   /** Gives the command the key, and ends the recording. */
   const give = (id: string, key: string | null) => {
     change(assign(entries, overrides(), id, key));
     recording = null;
     draw();
-    // The focus stays where the person was: on the key they changed.
-    list.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"] .rl-pref-key`)?.focus();
+    focusKey(id);
   };
 
   const startRecording = (id: string) => {
@@ -204,6 +208,12 @@ export function renderShortcutsPane(
       }
       return;
     }
+    // Esc cancels with any modifier held.
+    if (event.code === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      return stop();
+    }
     const recorded = recordKey(event);
     if (recorded.kind === 'wait') {
       // A modifier alone is on its way to a key; any other key that can't be a shortcut is said.
@@ -242,9 +252,10 @@ export function renderShortcutsPane(
   window.addEventListener('keydown', onKey, true);
   // A click anywhere else leaves the recording, as Esc does.
   const onPointer = (event: PointerEvent) => {
-    if (!recording) return;
-    if (event.target instanceof Node && list.querySelector('.rl-pref-krec')?.contains(event.target))
-      return;
+    if (!recording || !(event.target instanceof Element)) return;
+    if (list.querySelector('.rl-pref-krec')?.contains(event.target)) return;
+    // Another key's button starts its own recording, which ends this one.
+    if (event.target.closest('button.rl-pref-key')) return;
     stop();
   };
   window.addEventListener('pointerdown', onPointer, true);

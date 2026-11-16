@@ -228,13 +228,22 @@ watchSettings((next) => {
   // someone types their name would take the caret away, so what is being edited is left alone, and
   // so is a row that waits for the system's panel to answer, which the redrawn row couldn't hear.
   const active = document.activeElement;
-  // The Shortcuts pane's own Filter is drawn again with the text it has (shortcuts-pane.ts).
+  // The Shortcuts pane's own Filter is drawn again with the text and caret it has (shortcuts-pane.ts),
+  // but a key being recorded is left alone: the change would end it.
+  const ownFilter =
+    active instanceof HTMLInputElement && active.classList.contains('rl-pref-kfilter')
+      ? { start: active.selectionStart, end: active.selectionEnd }
+      : null;
   const editing =
-    (active instanceof HTMLInputElement && !active.classList.contains('rl-pref-kfilter')) ||
-    active instanceof HTMLSelectElement;
-  if (!editing && !pane?.querySelector('[data-waiting]')) {
+    (active instanceof HTMLInputElement && !ownFilter) || active instanceof HTMLSelectElement;
+  if (!editing && !pane?.querySelector('[data-waiting], .rl-pref-krec')) {
     if (filter.hidden) show(current);
     else showFilter(true);
+    if (ownFilter) {
+      const again = pane?.querySelector<HTMLInputElement>('.rl-pref-kfilter');
+      again?.focus();
+      again?.setSelectionRange(ownFilter.start, ownFilter.end);
+    }
   }
 });
 
