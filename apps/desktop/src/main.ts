@@ -405,8 +405,7 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
   });
 };
 
-// The formatting commands are the Format and Paragraph menus. They register before the review
-// interface, so that its Add Comment comes last in Format.
+// The formatting commands are the Insert, Format and Paragraph menus.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 createTables(editor, { tooltipMs: TOOLTIP_MS });
 // Emoji shortcodes: the ones in a file are drawn as their emoji, and a colon with two letters lists
@@ -443,12 +442,11 @@ async function insertChosenImages(spot: ImageSpot): Promise<void> {
   }
 }
 
-// Registered before the review plugin's Add Comment, which comes last in Format.
 editor.commands.register([
   {
     id: 'image.insert',
     title: 'Image…',
-    menu: 'format',
+    menu: 'insert',
     group: 'insert',
     run: () => {
       const spot = editor.imageSpot();
@@ -459,8 +457,8 @@ editor.commands.register([
   },
 ]);
 
-// A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
-// a plugin with commands in that menu registers before this one.
+// A menu lists its commands in the order they are registered: Add Comment opens the Review menu's
+// commands, and Ask… follows it (createAsk, below).
 const review = createReview(editor, {
   author,
   showResolved: settings.showResolved,
@@ -908,6 +906,12 @@ const textZoom = followTextZoom(window, {
   say: (text) => notice.flash(text),
 });
 
+const toggleWordCount = () => {
+  changeSettings({ showWordCount: !settings.showWordCount });
+  wordCount.setVisible(settings.showWordCount);
+  render();
+};
+
 const toggleSidebar = () => {
   changeSettings({ sidebarOpen: !settings.sidebarOpen });
   render();
@@ -1046,6 +1050,7 @@ const commands: MenuCommands = {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleSidebar,
+  toggleWordCount,
   toggleTracking,
   acceptAllAndStopTracking,
   openReview,
@@ -1160,6 +1165,7 @@ function render(): void {
     canAcceptAll: ui.canAcceptAll,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
+    showWordCount: settings.showWordCount,
     zoom: zoom?.level() ?? null,
     textSize: settings.textSize,
     hasFile: doc.path !== null,
