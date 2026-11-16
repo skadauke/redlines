@@ -228,9 +228,10 @@ function textAt(view: EditorView, at: { x: number; y: number }): number | null {
 }
 
 /**
- * A spot for the links of images: where the client point `at` is in the text, if given and over
- * some, else the selection, which a paste replaces and a drop leaves. A point that is over no text,
- * in a margin, the sidebar or below the text, is no place: the caret is. Null when the document
+ * A spot for the links of images: the gap between blocks that the client point `at` is nearest, if
+ * given and over some text (a block of its own, as for a drop line), else the selection, which a
+ * paste replaces and a drop leaves. A point that is over no text, in a margin, the sidebar or below
+ * the text, is no place: the caret is. Null when the document
  * takes no image there, which `notice` then says.
  */
 export function imageSpot(
@@ -241,6 +242,16 @@ export function imageSpot(
   const { state } = view;
   const { main } = state.selection;
   const point = at ? textAt(view, at) : null;
+  // A file dropped on the text lands between blocks, as a block of its own, at the gap that the
+  // drop line shows, as an image dragged from the sidebar does (#674, #681): never in the middle of
+  // another block.
+  if (at && point != null) {
+    const near = nearestGap(view, at.y);
+    if (near) {
+      const { gap } = near;
+      return blockSpot(view, gap.pos, { before: gap.before, after: gap.after }, notice);
+    }
+  }
   // Cells selected are no one place for a link, and replacing them would take the table apart.
   const range =
     point != null
@@ -388,6 +399,7 @@ export function images(
   };
   return [
     ...base,
+    fileDragLine(),
     EditorView.domEventHandlers({
       paste: (event, view) => take(event, view, imageFiles(event.clipboardData), true),
       drop: (event, view) =>
@@ -397,6 +409,47 @@ export function images(
         }),
     }),
   ];
+}
+
+/** Whether a drag carries files from outside the page (Finder). Their types are known while they
+ * are dragged; what kind of files they are is not, until the drop. */
+function carriesFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+/**
+ * The line that shows, while files are dragged over the text, the gap between blocks that an image
+ * would land at (#674): the same line as an image dragged from the sidebar draws.
+ */
+function fileDragLine(): Extension {
+  const lines = new WeakMap<EditorView, ReturnType<typeof dropLine>>();
+  const lineOf = (view: EditorView) => {
+    let line = lines.get(view);
+    if (!line) lines.set(view, (line = dropLine(view)));
+    return line;
+  };
+  return EditorView.domEventHandlers({
+    dragover(event, view) {
+      if (!carriesFiles(event) || carriesProjectImage(event)) return false;
+      const near = textAt(view, { x: event.clientX, y: event.clientY })
+        ? nearestGap(view, event.clientY)
+        : null;
+      if (near) lineOf(view).show(near.y);
+      else lineOf(view).hide();
+      return false;
+    },
+    dragleave(event, view) {
+      if (!carriesFiles(event)) return false;
+      if (!(event.relatedTarget instanceof Node) || !view.dom.contains(event.relatedTarget)) {
+        lineOf(view).hide();
+      }
+      return false;
+    },
+    drop(event, view) {
+      if (carriesFiles(event)) lineOf(view).hide();
+      return false;
+    },
+  });
 }
 
 /** Whether a drag carries an image file of the project, as the sidebar sets it. */
