@@ -95,11 +95,10 @@ fn plain_only_name(group: &str) -> &'static str {
 /// What the bundle should declare: Markdown by its type, the one Redlines can be made the default
 /// app for, and by `public.markdown`, which other apps declare (#347), at the rank of an app that
 /// opens it. R Markdown and Quarto by their extensions, which
-/// macOS has no type for, and plain text by `.txt` alone, each at the rank of an alternative, so
+/// macOS has no type for, and the Plain-only documents (`PLAIN_ONLY`) by their extensions, each at the rank of an alternative, so
 /// that Redlines is offered for those files and takes none of them, even on a Mac where no other
-/// app owns them: people who write R Markdown or Quarto have an editor of their choice. Plain
-/// text's own type would offer Redlines for every kind of text that is plain text to macOS too,
-/// such as source code, which Redlines doesn't open. Redlines edits them all.
+/// app owns them: people who write R Markdown or Quarto have an editor of their choice.
+/// Plain text's own type would offer Redlines for every kind of text, so the extensions are listed.
 fn expected() -> Vec<Document> {
     let editor = |name: &str, rank: &str, types: &[&str], extensions: &[&str]| Document {
         name: name.to_owned(),
