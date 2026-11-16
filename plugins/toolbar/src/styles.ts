@@ -176,7 +176,7 @@ export const TOOLBAR_STYLE = `
   -webkit-user-select: text;
   user-select: text;
 }
-.rl-toolbar-input::placeholder { color: var(--rl-ink-3); }
+.rl-toolbar-input::placeholder { color: var(--rl-ink-2); }
 .rl-toolbar-results {
   display: flex;
   flex-direction: column;
