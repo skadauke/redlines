@@ -202,19 +202,26 @@ describe('change cards', () => {
     }
   });
 
-  it('shows no card on hover and pins none on a click in Simple', async () => {
+  it('shows no card on hover in Simple, and a click on a change there pins its card (#664)', async () => {
     const { editor } = mount(doc);
     editor.setViewMode('simple');
     expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del')).toBeNull();
     const at = doc.indexOf('new ');
     activateHover(editor.view, at, 1);
     expect(card(editor)).toBeNull();
-    // Nothing is drawn to click on; a click on the text pins none either.
-    const line = editor.view.contentDOM.querySelector('.cm-line')!;
-    click(line, editor.view.contentDOM);
+    // A click on the text where nothing changed pins none.
+    click(editor.view.contentDOM.querySelector('.cm-line')!, editor.view.contentDOM);
     await tick();
     expect(card(editor)).toBeNull();
-    // In Redlines, the same position does show one.
+    // A click on an insertion's colored text pins that change's card, with Accept and Reject.
+    await clickOn(editor, '.rl-ins-plain');
+    expect(what(editor)).toBe('Inserted “new”');
+    expect(
+      [...card(editor)!.querySelectorAll('.rl-card-button')].map(
+        (b) => b.getAttribute('aria-label') ?? b.textContent,
+      ),
+    ).toEqual(['Accept', 'Reject']);
+    // In Redlines, hovering the same position shows one.
     editor.setViewMode('redlines');
     activateHover(editor.view, at, 1);
     expect(what(editor)).toBe('Inserted “new”');

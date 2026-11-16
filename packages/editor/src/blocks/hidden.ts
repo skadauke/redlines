@@ -43,10 +43,20 @@ function holders(state: EditorState): Span[] {
   return spans;
 }
 
-/** The line the caret is on, when it is blank: it is drawn, for the caret to be on. */
+/** The closers of marks (`<!--/k3x9-->`). */
+const CLOSER = /<!--\/[^\n>]*-->/g;
+
+/**
+ * The line the caret is on, when it is blank, or holds only the closers of marks (the empty line
+ * at the end of an inserted paragraph that has no text yet, #670): it is drawn, for the caret to be
+ * on.
+ */
 export function keptLine(state: EditorState): number | null {
   const line = state.doc.lineAt(state.selection.main.head);
-  return BLANK.test(line.text) ? line.from : null;
+  if (BLANK.test(line.text)) return line.from;
+  return line.text.includes('<!--/') && BLANK.test(line.text.replace(CLOSER, ''))
+    ? line.from
+    : null;
 }
 
 /**

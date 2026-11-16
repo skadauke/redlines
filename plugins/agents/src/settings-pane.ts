@@ -10,6 +10,8 @@
 import type { AgentState } from '@redlines/plugin-api';
 import { privacyMessage } from './blocked-message.ts';
 import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
+import { handleField } from './handle-field.ts';
+import { displayName, handleOf } from './handles.ts';
 import { renderOpenClaw, type OpenClawDeps } from './openclaw-pane.ts';
 import { skillControls, type PaneSkill } from './skill-controls.ts';
 
@@ -20,6 +22,8 @@ export interface AgentsPaneSettings {
   agentScope: 'document' | 'folder' | 'everything';
   /** What the person allowed each agent, keyed `agent|folder`. */
   consent: Record<string, 'document' | 'folder' | 'everything' | 'no'>;
+  /** The handle the person gave each agent, by id (#558). */
+  agentHandles: Record<string, string>;
 }
 
 /** An agent the person added, as the pane shows it. */
@@ -141,6 +145,9 @@ const HOME_NOTE =
 export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): () => void {
   let alive = true;
   const names = new Map(deps.agents.map(({ id, name }) => [id, name]));
+  /** What an agent is shown as: its handle, capitalized; an agent that isn't listed, as it is. */
+  const shownName = (id: string) =>
+    names.has(id) ? displayName(handleOf(id, deps.settings().agentHandles)) : id;
 
   // A login that needed a terminal ends where the person finishes it, outside this window: coming
   // back to it, the pane looks again, once, for each agent that waits on that and has nothing
@@ -154,8 +161,17 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   const looks: { id: string; check: AgentRow['check']; busy: () => boolean }[] = [];
   window.addEventListener('focus', comeBack);
 
+  /** The handles every agent has now: Redlines' own, and the OpenClaw agents' names. */
+  const takenHandles = async (): Promise<Record<string, string>> => {
+    const taken: Record<string, string> = {};
+    for (const { id } of deps.agents) taken[id] = handleOf(id, deps.settings().agentHandles);
+    const others = deps.openclaw ? await deps.openclaw.list().catch(() => []) : [];
+    for (const { id, name } of others) taken[id] = name.toLowerCase();
+    return taken;
+  };
+
   for (const agent of deps.agents) {
-    const drawn = agentRow(agent, deps, () => alive, waiting);
+    const drawn = agentRow(agent, deps, () => alive, waiting, takenHandles);
     looks.push({
       id: agent.id,
       check: (fresh, options) => drawn.check(fresh, options),
@@ -179,6 +195,7 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
           deps.update({ consent: Object.fromEntries(kept) });
           drawRemembered();
         },
+        handles: () => deps.agents.map(({ id }) => handleOf(id, deps.settings().agentHandles)),
         ...(deps.showGeneral ? { showGeneral: () => deps.showGeneral?.() } : {}),
       }),
     );
@@ -279,16 +296,12 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
       // it in a folder is allowing it to be sent the document and the thread, not to read.
       const sent = !names.has(agent) && answer === 'folder';
       what.append(
-        el(
-          'span',
-          undefined,
-          `${names.get(agent) ?? agent} · ${sent ? ANSWER_SENT : ANSWERS[answer]}`,
-        ),
+        el('span', undefined, `${shownName(agent)} · ${sent ? ANSWER_SENT : ANSWERS[answer]}`),
         el('span', 'rl-pref-note', folder),
       );
       const forget = el('button', 'rl-pref-button', 'Forget');
       forget.type = 'button';
-      forget.setAttribute('aria-label', `Forget ${names.get(agent) ?? agent} for ${folder}`);
+      forget.setAttribute('aria-label', `Forget ${shownName(agent)} for ${folder}`);
       forget.addEventListener('click', () => {
         const rest = { ...deps.settings().consent };
         delete rest[key];
@@ -358,6 +371,7 @@ function agentRow(
   deps: AgentsPaneDeps,
   alive: () => boolean,
   waiting: Set<string>,
+  taken: () => Promise<Record<string, string>>,
 ): AgentRow {
   const status = el('div', 'rl-pref-status', 'Checking…');
   status.setAttribute('role', 'status');
@@ -377,7 +391,20 @@ function agentRow(
     fallbackFocus: () => actions.querySelector('button'),
   });
   const rest = el('div');
-  rest.append(where, help, install, actions, said, ...skillUi.nodes);
+  rest.append(
+    where,
+    help,
+    install,
+    actions,
+    said,
+    handleField(agent.id, {
+      handles: () => deps.settings().agentHandles,
+      save: (agentHandles) => deps.update({ agentHandles }),
+      taken,
+      alive,
+    }),
+    ...skillUi.nodes,
+  );
   const root = row(agent.name, status, rest);
 
   /** The latest question asked, so that an older answer never draws over a newer one. */

@@ -61,7 +61,7 @@ export function pickerEntries(
   const colorOf = (handle: Handle) => colors.get(handle) ?? 0;
 
   const entries: PickerEntry[] = mine
-    .filter((agent) => matches(wanted, agent.name, agent.id))
+    .filter((agent) => matches(wanted, agent.name, agent.handle ?? agent.id))
     .map((agent) => ({
       handle: ownHandle(agent),
       name: agent.name,
