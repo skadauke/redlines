@@ -52,7 +52,6 @@ const FILE_TOOLS = ['Read', 'Grep', 'Glob'];
  */
 const WEB_TOOLS = ['WebSearch', 'WebFetch'];
 
-const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'];
 // `view_image` is offered only to a request to describe an image, which has the one picture it is
 // about; it is allowed here for every run, and a run that is not offered it never sees it.
 const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status', 'view_image'];
