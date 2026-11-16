@@ -300,7 +300,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const markdownSupport = markdown({
-    extensions: [GFM, tableMarkers, frontMatter, scriptTags, emojiCodes],
+    extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
     codeLanguages: options.codeLanguages,
   });
   const extensions = [
