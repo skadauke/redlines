@@ -92,6 +92,16 @@ describe('the lines and characters', () => {
     });
     expect(parts(4, 14)).toMatchObject({ selectedLines: 3, selectedCharacters: 8 });
     expect(wordsIn('', { from: 0, to: 0 }).parts).toMatchObject({ lines: 0, characters: 0 });
+    // An emoji is one character, a trailing line break starts a line, and a selection starting in a
+    // marker counts the text it covers.
+    expect(wordsIn('a\u{1F600}\n', { from: 0, to: 0 }).parts).toMatchObject({
+      lines: 2,
+      characters: 2,
+    });
+    const marked = 'Keep <!--ins k3x9-->this<!--/k3x9--> one.';
+    expect(
+      wordsIn(marked, { from: marked.indexOf('<!--ins'), to: marked.indexOf('<!--/') }).parts,
+    ).toMatchObject({ selectedLines: 1, selectedCharacters: 4 });
   });
 
   it('says them for the hint', () => {

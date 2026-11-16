@@ -38,23 +38,33 @@ export interface TextParts {
 /** The lines of `text` (none for no text), and its characters, which a line break is not one of. */
 function linesAndCharacters(text: string): { lines: number; characters: number } {
   if (text === '') return { lines: 0, characters: 0 };
-  const lines = text.split('\n');
+  let lines = 1;
   let characters = 0;
-  for (const line of lines) characters += Array.from(line).length;
-  return { lines: lines.length, characters };
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 10) lines++;
+    // The low half of a pair is no character of its own.
+    else if (code < 0xdc00 || code > 0xdfff) characters++;
+  }
+  return { lines, characters };
 }
 
 /** What a reader sees of a document: its newest view. */
 type Newest = ReturnType<typeof newestView>;
 
+/** What a reading of a document holds, counted. */
+const counted = new WeakMap<object, { total: number; lines: number; characters: number }>();
+
 /** The words of a document as a reader sees it, and of the selection `from` to `to` in its source. */
 function wordsOf(view: Newest, selection: { from: number; to: number }): Words {
-  const total = wordCount(view.text);
-  const parts: TextParts = {
-    ...linesAndCharacters(view.text),
-    selectedLines: null,
-    selectedCharacters: null,
-  };
+  // The whole text is counted once for each reading of it, not for each place the selection moves to.
+  let whole = counted.get(view);
+  if (!whole) {
+    whole = { total: wordCount(view.text), ...linesAndCharacters(view.text) };
+    counted.set(view, whole);
+  }
+  const { total, lines, characters } = whole;
+  const parts: TextParts = { lines, characters, selectedLines: null, selectedCharacters: null };
   if (selection.from === selection.to) return { total, selected: null, parts };
   const from = view.map.fromSource(selection.from);
   const to = view.map.fromSource(selection.to);
@@ -158,7 +168,7 @@ export function createWordCount(
   const show = () => {
     const { total, selected, parts } = source.count();
     label.textContent = wordCountLabel(total, selected);
-    // The app's hint draws a title (title-hints.ts), so it reads as the others do (#684).
+    // The app's hint style draws a title (ui/title-hints.ts, docs/widgets.md), as it does the others'.
     label.title = textPartsLabel(parts);
   };
   const later = (ms: number) => {
