@@ -52,6 +52,7 @@ import {
 } from './motion.ts';
 import { blockAt, neighbours } from './structure.ts';
 import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
+import { blockDrag } from './drag.ts';
 import { moveBlocks } from './move.ts';
 import { planTab } from './tab.ts';
 import { convertTwin, htmlListMoves } from './twin.ts';
@@ -750,6 +751,7 @@ export function blockKeys(): Extension {
     ),
     blockMotion({ paragraph: returnKey, line: shiftReturnKey }),
     keyCaret,
+    blockDrag(),
     Prec.lowest(openLineSpaces),
   ];
 }

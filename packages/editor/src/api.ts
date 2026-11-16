@@ -549,7 +549,8 @@ export interface Editor {
   /**
    * The spot an image added now would go, for a host that has the images by other means than a
    * paste or a drop in the page (the Insert Image command, a drop the app hands over): where the
-   * client point `at` is in the text, when given and over some, and otherwise the selection. Null
+   * client point `at` is nearest between blocks, when given and over some text (an image lands as a
+   * block of its own, never inside another block), and otherwise the selection. Null
    * when the editor takes no image there, which `onNotice` then says.
    */
   imageSpot(at?: { x: number; y: number }): ImageSpot | null;
