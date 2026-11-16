@@ -52,17 +52,14 @@ export function moveBlocksReason(state: EditorState, up: boolean): string | unde
   return `${many ? 'These blocks are' : 'This block is'} at the ${up ? 'top' : 'bottom'} already.`;
 }
 
-/** ⌥↑ and ⌥↓: moves the blocks one place. False in Raw and with several selections; at the edge it
- * says so. */
+/** ⌥↑ and ⌥↓: moves the blocks one place. False in Raw and with several selections; at the edge it does nothing. */
 export function moveBlocks(view: EditorView, up: boolean): boolean {
   const run = runOfSelection(view.state);
   if (!run) return false;
   const gap = neighbourGap(run, up);
-  if (!gap) {
-    const edge = up ? 'The block is at the top.' : 'The block is at the bottom.';
-    view.dispatch({ effects: refusedEditEffect.of(edge) });
-    return true;
-  }
+  // Nothing above the first or below the last: the command is disabled (`moveBlocksReason` says why),
+  // and the key does nothing, with no notice.
+  if (!gap) return true;
   return moveRunTo(view, run, gap);
 }
 
