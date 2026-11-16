@@ -1246,6 +1246,9 @@ syntax Markdown needs, and never shows them.
   are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
   selection there it refuses before it deletes anything. At a heading's start or end it does what
   Return does (an empty paragraph beside it).
+- **Return again in the empty paragraph gives the text room.** At the top level it writes a line
+  that holds only `&nbsp;` and opens the next empty paragraph below it; every view draws that line
+  as an empty line, and GitHub and other readers show an empty paragraph (format §3.4).
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.
