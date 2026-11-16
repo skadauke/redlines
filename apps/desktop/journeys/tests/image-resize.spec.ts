@@ -136,6 +136,27 @@ test.describe('resizing an image @blocks', () => {
     await j.shot('image-resize-full-column');
   });
 
+  test('an image in a line of text has its handles beside it, as tall as it', async ({ start }) => {
+    const { j, image } = await open(
+      start,
+      false,
+      'Words before ![A red square](red.png) and words after it, in one line.\n',
+    );
+    await image.hover();
+    const [box, left, right] = await Promise.all([
+      image.boundingBox(),
+      j.page.locator('.rl-image-handle-left').boundingBox(),
+      j.page.locator('.rl-image-handle-right').boundingBox(),
+    ]);
+    for (const handle of [left!, right!]) {
+      expect(Math.abs(handle.height - box!.height), 'as tall as the image').toBeLessThan(3);
+      expect(Math.abs(handle.y - box!.y), 'level with it').toBeLessThan(3);
+    }
+    expect(Math.abs(left!.x + left!.width - box!.x)).toBeLessThan(2);
+    expect(Math.abs(right!.x - (box!.x + box!.width))).toBeLessThan(2);
+    await j.shot('image-resize-inline');
+  });
+
   test('a drag resizes the image, the size is in the file, and one Undo takes it back', async ({
     start,
   }) => {

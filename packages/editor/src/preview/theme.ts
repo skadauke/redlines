@@ -230,6 +230,9 @@ export const baseThemeSpec: ThemeSpec = {
     verticalAlign: 'top',
   },
   '.rl-image-own img': { display: 'block', margin: '0', verticalAlign: 'top' },
+  // In a line of text the frame sits where the picture did: on the text's middle.
+  '.rl-image:not(.rl-image-own) .rl-image-frame': { verticalAlign: 'middle' },
+  '.rl-image:not(.rl-image-own) .rl-image-frame img': { display: 'block', margin: '0' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
   // Resize handles (#526): on the left and right edges only, while the pointer is over the image.
   // Each is a strip along its edge, wide enough to grab, just outside it (#676) so that it never covers
