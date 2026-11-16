@@ -236,7 +236,7 @@ function inBody(edits: Edit[], end: number | null): Edit[] {
  */
 function emptiedFormats(state: EditorState, edits: Edit[]): Edit[] {
   const tree = syntaxTree(state);
-  return edits.map((edit) => {
+  const widened = edits.map((edit) => {
     if (edit.insert || edit.from >= edit.to) return edit;
     let { from, to } = edit;
     for (let moved = true; moved;) {
@@ -263,6 +263,20 @@ function emptiedFormats(state: EditorState, edits: Edit[]): Edit[] {
     }
     return from === edit.from && to === edit.to ? edit : { ...edit, from, to };
   });
+  // Edits that now overlap (several carets) are one.
+  const merged: Edit[] = [];
+  for (const edit of widened) {
+    const previous = merged.at(-1);
+    if (previous && edit.from < previous.to) {
+      merged[merged.length - 1] = {
+        ...previous,
+        to: Math.max(previous.to, edit.to),
+        insert: previous.insert + edit.insert,
+        main: previous.main || edit.main,
+      };
+    } else merged.push(edit);
+  }
+  return merged;
 }
 
 /** The visible character beside `pos`, past any hidden text, or null at the document's edge. */
@@ -942,7 +956,14 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   if (!block && (backward || tr.isUserEvent('delete.forward'))) {
     edits = pastHiddenText(start, edits, !backward);
   }
-  if (tr.isUserEvent('delete')) edits = emptiedFormats(start, edits);
+  // A cut or a drag keeps what it takes as it is: the clipboard holds the text with its markers.
+  if (
+    tr.isUserEvent('delete') &&
+    !tr.isUserEvent('delete.cut') &&
+    !tr.isUserEvent('delete.dragMove')
+  ) {
+    edits = emptiedFormats(start, edits);
+  }
   if (start.field(trackingField) && !answered) {
     return trackedSpec(tr, keepingSpaces(tr, edits), backward);
   }
