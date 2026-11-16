@@ -1020,6 +1020,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'Accept and Reject are grayed with the caret outside a tracked change, and say why',
   ],
   [
+    'plugins/formatting/src/index.ts',
+    'NOT_WRAPPED',
+    'info',
+    'tells where an inserted block went when the selection could not be wrapped; nothing is refused',
+  ],
+  [
     'plugins/outline/src/index.ts',
     'message',
     'info',
