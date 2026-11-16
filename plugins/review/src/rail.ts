@@ -900,6 +900,7 @@ class Rail {
     // Only the notes near the screen are built (#697); one with its box open, the focus, the
     // selection or its dot's popover stays, wherever it is.
     const near = this.nearScreen(BUILD_DISTANCE);
+    const far = this.nearScreen(DROP_DISTANCE);
     const wanted = (note: Note): boolean => {
       const had = this.views.get(note.id);
       return (
@@ -908,13 +909,14 @@ class Rail {
         note === selected ||
         this.popover?.id === note.id ||
         (!!had && (had.written || this.keeps(note.id, had))) ||
-        near(note)
+        (had ? far(note) : near(note))
       );
     };
     const drawn = notes.filter(wanted);
+    const drawnSet = new Set(drawn);
     for (const note of notes) {
       const had = this.views.get(note.id);
-      if (!had || drawn.includes(note)) continue;
+      if (!had || drawnSet.has(note)) continue;
       had.remove();
       this.views.delete(note.id);
     }
@@ -956,6 +958,7 @@ class Rail {
       note.writing ||
       this.popover?.id === id ||
       note.dom.contains(note.dom.ownerDocument.activeElement) ||
+      note.dot.contains(note.dom.ownerDocument.activeElement) ||
       !!this.options.extras?.keepShown?.(id)
     );
   }
@@ -1001,7 +1004,7 @@ class Rail {
     const parsed = this.view.state.field(parsedField);
     let built = false;
     this.notes.forEach((note, i) => {
-      if (note.host) return;
+      if (note.host || note.orphan) return;
       const had = this.views.get(note.id);
       if (had) {
         if (
@@ -1167,6 +1170,7 @@ class Rail {
       read: (view) =>
         this.seen(view, view.scrollDOM.getBoundingClientRect().top - view.scrollDOM.scrollTop),
       write: (seen) => {
+        this.seenLast = seen;
         const { layout } = this;
         if (this.destroyed || !layout || layout.notes !== this.notes) return;
         // A note that came near is built, and measured at the next measure.
