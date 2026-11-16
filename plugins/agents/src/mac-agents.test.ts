@@ -32,6 +32,40 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
 }
 
 describe('createMacAgents', () => {
+  it('lists the models of an agent, and runs the one chosen unless the request names its own (#530)', async () => {
+    const relay = fakeRelay();
+    const claude = fakeProvider({
+      relay,
+      script: replies('Hi.'),
+      models: [
+        { id: 'opus', name: 'Opus' },
+        { id: 'sonnet', name: 'Sonnet' },
+      ],
+    });
+    const agents = createMacAgents([claude], relay, { models: () => ({ claude: 'opus' }) });
+    expect((await agents.list())[0]?.models?.map(({ id }) => id)).toEqual(['opus', 'sonnet']);
+    const signal = new AbortController().signal;
+    await collect(agents.run('claude', request, tools, signal));
+    await collect(agents.run('claude', { ...request, model: 'sonnet' }, tools, signal));
+    expect(claude.requests.map(({ model }) => model)).toEqual(['opus', 'sonnet']);
+  });
+
+  it('names an agent by its handle, capitalized, as the handles are now', async () => {
+    const relay = fakeRelay();
+    let handles: Record<string, string> = {};
+    const agents = createMacAgents([fakeProvider({ relay, script: replies('Hi.') })], relay, {
+      handles: () => handles,
+    });
+    expect((await agents.list())[0]).toMatchObject({
+      id: 'claude',
+      name: 'Claude',
+      handle: 'claude',
+    });
+    // A change of handle needs no new detection.
+    handles = { claude: 'ada' };
+    expect((await agents.list())[0]).toMatchObject({ id: 'claude', name: 'Ada', handle: 'ada' });
+  });
+
   it('lists each provider with what it detected', async () => {
     const relay = fakeRelay();
     const agents = createMacAgents(
