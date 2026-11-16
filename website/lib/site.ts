@@ -56,8 +56,11 @@ export const aiDocs = {
   title: 'Markdown is the document format of AI.',
   body: `Plans, specs and reports from agents arrive as \`.md\` files, and most apps show them as code. ${name} shows a formatted document you can edit.`,
   points: [
-    'Open any `.md` file and read it formatted, with tables, images, task lists and syntax-colored code.',
-    'Edit it like a document: bold from the keyboard, find and replace, a file sidebar.',
+    'Open any `.md` file and read it formatted, with tables, images, task lists and syntax-colored code. HTML that GitHub draws, such as inline tags and collapsible sections, is drawn the same way.',
+    'Edit it like a document: a toolbar for formatting, tables, lists and images, with every command in a searchable palette, find and replace, a file sidebar. Move a block with ⌥↑ and ⌥↓, or drag it to a drop line.',
+    'Drop images from Finder, align them, and let an agent write their alt text. Their sizes are known before they load, so the page doesn’t jump.',
+    'Long documents stay quick to scroll and type in. If a crash is caught, your document is recovered.',
+    'Switch between Clean, Redlines and Plain from the page icon. Text and code files open in Plain, with syntax colors.',
     'It stays a `.md` file in your repo: agents and git read it, and other Markdown tools show the newest text.',
   ],
 };
@@ -70,20 +73,21 @@ export const changes = {
     'It replies in a few words, and cites the file and line when the answer comes from the code. A click opens that file.',
     'It can comment on other text. Its edits are always tracked changes in its own name, for you to accept or reject.',
     'Each run starts fresh and reads the document and its thread from the file, so a follow-up needs no session and no server.',
-    `${name} runs your own Claude Code or Codex, signed in as you. It never sees your Claude or ChatGPT sign-in.`,
+    `${name} runs your own Claude Code or Codex, signed in as you. It never sees your Claude or ChatGPT sign-in. Choose a default agent and a model for each one in Preferences.`,
+    'Table edits that a document can’t take as plain text, such as a row or column added or removed, are written as tracked changes you can accept or reject, not refused. Other kinds of edit follow.',
   ],
 };
 
-/** What each Redlines row says, and whether each other product has the feature: Word, Google Docs, Notion, VS Code. */
+/** What each Redlines row says, and whether each other product has the feature: Word and Google Docs. */
 type CompareRow = {
   feature: string;
   redlines: 'built' | 'planned';
-  others: readonly [boolean, boolean, boolean, boolean];
+  others: readonly [boolean, boolean];
 };
 
 export const compare = {
   title: `How ${name} compares`,
-  body: `What ${name} has built, and what it plans. Other products as of October 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions.`,
+  body: `What ${name} has built, and what it plans. Other products as of October 2026, from their documentation.`,
   /** Under the table. */
   note: `Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI’s edits count as yours. Until live sessions come, people share a ${name} file as they share any file. Word import and export are planned.`,
   /** The table's scrolling box and the features column, named for screen readers only. */
@@ -98,7 +102,7 @@ export const compare = {
     { mark: 'planned', text: 'Planned: designed, not built yet.' },
     { mark: 'no', text: 'No.' },
   ] as const,
-  products: [name, 'Word', 'Google Docs', 'Notion', 'VS Code'],
+  products: [name, 'Word', 'Google Docs'],
   /** From compare.json, which docs/design.md §4 holds (npm run compare:check). */
   rows: compareData.rows as unknown as CompareRow[],
 };
@@ -143,7 +147,7 @@ export const developers = {
     },
     {
       title: 'Agents, with limits',
-      body: 'Claude Code and Codex get a small set of tools. They read only after you say yes and write only this document, as tracked changes. A mention that arrives through git never starts a run.',
+      body: 'Claude Code and Codex get a small set of tools. They read only after you say yes, and reach the web only if you turn on one switch. They write only this document, as tracked changes. A mention that arrives through git never starts a run.',
     },
     {
       title: 'Built to embed',

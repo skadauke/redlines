@@ -35,7 +35,7 @@ export function readDesignTable(markdown) {
     );
   }
   const header = table[0];
-  if (!header || header.length < 6) throw new Error('docs/design.md §4: no header row');
+  if (!header || header.length < 4) throw new Error('docs/design.md §4: no header row');
   const products = header.slice(1);
   /** @type {Map<string, Cells>} */
   const rows = new Map();
@@ -112,7 +112,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // `others` in compare.json are in this order, after Redlines (the page's own name).
   const problems = compareRows(
     rows,
-    ['Redlines', 'Word', 'Google Docs', 'Notion', 'VS Code'],
+    ['Redlines', 'Word', 'Google Docs'],
     table,
   );
   if (problems.length > 0) {

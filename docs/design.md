@@ -91,27 +91,26 @@ with its changes intact.
 
 Redlines as built on `main`, and what it plans: ✅ is built, and Planned is designed but not built
 yet; a row is built when all of it works on `main`. The other products as of October 2026, from
-their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The
-website shows eleven of these rows, and `npm run compare:check` in `website/` fails when they differ
-from this table.
+their documentation. The website shows eleven of these rows, and `npm run compare:check` in
+`website/` fails when they differ from this table.
 
-| Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
-| ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
-| Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
-| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
-| Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
-| Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
-| Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
-| Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Full edit history, stored in the file       | Planned  |  ❌  |     ❌      |   ❌   |   ❌    |
-| Live collaboration with people              | Planned  |  ✅  |     ✅      |   ✅   |   ✅    |
-| Live collaboration with AI                  |    ✅    |  ❌  |     ❌      |   ✅   |   ✅    |
-| AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Word files with tracked changes, in and out | Planned  |  ✅  |     ✅      |   ❌   |   ❌    |
-| Desktop app for Mac, Windows and Linux      | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
-| Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
-| Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| Feature                                     | Redlines | Word | Google Docs |
+| ------------------------------------------- | :------: | :--: | :---------: |
+| Edits Markdown files                        |    ✅    |  ❌  |     ✅      |
+| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |
+| Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |
+| Comment threads                             |    ✅    |  ✅  |     ✅      |
+| Accept or reject by person                  | Planned  |  ✅  |     ❌      |
+| Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |
+| Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |
+| Full edit history, stored in the file       | Planned  |  ❌  |     ❌      |
+| Live collaboration with people              | Planned  |  ✅  |     ✅      |
+| Live collaboration with AI                  |    ✅    |  ❌  |     ❌      |
+| AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |
+| Word files with tracked changes, in and out | Planned  |  ✅  |     ✅      |
+| Desktop app for Mac, Windows and Linux      | Planned  |  ❌  |     ❌      |
+| Embeddable editor component                 | Planned  |  ❌  |     ❌      |
+| Free and open source                        |    ✅    |  ❌  |     ❌      |
 
 The Mac app is built; Windows and Linux are planned (§10).
 
