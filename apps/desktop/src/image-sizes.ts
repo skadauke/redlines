@@ -13,8 +13,8 @@ export type Sizes = (paths: string[]) => Promise<(Size | null)[]>;
 export interface ImageSizes {
   /** The size of the image file at `path`: at once if known, else when the app has answered. */
   of(path: string): Size | null | Promise<Size | null>;
-  /** The files were saved again: their sizes are asked for again. */
-  forget(paths: string[]): void;
+  /** The files were saved again (or, with none named, another folder is shown): sizes are asked for again. */
+  forget(paths?: string[]): void;
 }
 
 export function createImageSizes(sizes: Sizes): ImageSizes {
@@ -42,7 +42,8 @@ export function createImageSizes(sizes: Sizes): ImageSizes {
           batch.push({
             path,
             done: (size) => {
-              known.set(path, size);
+              // A file that isn't there yet may be by the next question.
+              if (size) known.set(path, size);
               asked.delete(path);
               resolve(size);
             },
@@ -53,6 +54,11 @@ export function createImageSizes(sizes: Sizes): ImageSizes {
       return pending;
     },
     forget(paths) {
+      if (!paths) {
+        known.clear();
+        asked.clear();
+        return;
+      }
       for (const path of paths) {
         known.delete(path);
         asked.delete(path);

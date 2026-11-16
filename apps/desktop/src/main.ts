@@ -200,9 +200,9 @@ let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
-/** The images the preview has drawn, which are looked at again when the window regains the focus. */
 /** The size of each local image file, read from its header once and kept until it is saved again. */
 const imageSizes = createImageSizes((paths) => host.imageSizes(paths));
+/** The images the preview has drawn, which are looked at again when the window regains the focus. */
 const imageWatch = createImageWatch((paths) => host.imageStamps(paths));
 
 /**
@@ -231,7 +231,10 @@ async function refreshSavedImages(): Promise<void> {
   imageWatch.begin();
   editor.refreshImages();
   const changed = await imageWatch.check();
-  if (changed.length) editor.refreshImages();
+  if (changed.length) {
+    imageSizes.forget(changed);
+    editor.refreshImages();
+  }
 }
 
 /** The system's beep, as the Mac makes it for a key or an item that does nothing. */
@@ -647,6 +650,7 @@ const projectOf = (path: string) => host.projectRoot(path);
 async function showImages(path: string | null): Promise<void> {
   imageFolder = null;
   imageWatch.forget();
+  imageSizes.forget();
   editor.refreshImages();
   if (path === null) return;
   try {
