@@ -230,9 +230,19 @@ export const baseThemeSpec: ThemeSpec = {
     verticalAlign: 'top',
   },
   '.rl-image-own img': { display: 'block', margin: '0', verticalAlign: 'top' },
+  // In a line of text the frame sits where the picture did: on the text's middle.
+  '.rl-image:not(.rl-image-own) .rl-image-frame': { verticalAlign: 'middle' },
+  '.rl-image:not(.rl-image-own) .rl-image-frame img': { display: 'block', margin: '0' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
+  // A click selects the image: an outline in the selection's color, and its handles.
+  '.rl-image-selected img': { outline: '2px solid Highlight' },
+  '.rl-image-selected .rl-image-handle': { opacity: '1' },
+  '&.rl-image-is-selected .cm-line::selection, &.rl-image-is-selected .cm-line *::selection': {
+    backgroundColor: 'transparent',
+  },
   // Resize handles (#526): on the left and right edges only, while the pointer is over the image.
-  // Each is a strip along its edge, wide enough to grab, with a light pill that shows on any picture.
+  // Each is a strip along its edge, wide enough to grab, just outside it (#676) so that it never covers
+  // the picture, with a light pill that shows on any background.
   '.rl-image-handle': {
     position: 'absolute',
     top: '0',
@@ -246,8 +256,11 @@ export const baseThemeSpec: ThemeSpec = {
     touchAction: 'none',
     userSelect: 'none',
   },
-  '.rl-image-handle-left': { left: '0' },
-  '.rl-image-handle-right': { right: '0' },
+  '.rl-image-handle-left': { right: '100%' },
+  '.rl-image-handle-right': { left: '100%' },
+  // Where that is outside the text column (a column-wide image): inside the edge, off the margin's notes.
+  '.rl-handle-in-left .rl-image-handle-left': { right: 'auto', left: '0' },
+  '.rl-handle-in-right .rl-image-handle-right': { left: 'auto', right: '0' },
   '.rl-image-handle::before': {
     content: '""',
     width: '6px',
@@ -266,8 +279,10 @@ export const baseThemeSpec: ThemeSpec = {
     transform: 'translateX(-50%)',
     padding: '2px 8px',
     borderRadius: '10px',
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    color: '#fff',
+    border: '1px solid var(--rl-rule)',
+    backgroundColor: 'var(--rl-card)',
+    boxShadow: 'var(--rl-shadow)',
+    color: 'var(--rl-ink)',
     fontSize: 'var(--rl-size-ui-small)',
     lineHeight: '1.4',
     whiteSpace: 'nowrap',

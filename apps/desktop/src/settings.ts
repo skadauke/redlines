@@ -11,6 +11,7 @@ import { toHandle } from './handle.ts';
 import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
 import { TEXT_LEAST, TEXT_MOST, ZOOM_LADDER } from './text-size.ts';
+import { SIDEBAR_DEFAULT, sidebarWidthOf } from './ui/sidebar-resize.ts';
 
 /**
  * How much of the surroundings an agent may read (design, Scope): the document, its folder, or its
@@ -57,6 +58,8 @@ export interface Settings {
   /** Whether every window is light, dark, or as the system is (Match System, the default). */
   appearance: AppearanceChoice;
   sidebarOpen: boolean;
+  /** The sidebar's width in CSS px, between `SIDEBAR_MIN` and `SIDEBAR_MAX` (#680). */
+  sidebarWidth: number;
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
   /**
@@ -142,6 +145,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   theme: 'default',
   appearance: 'system',
   sidebarOpen: false,
+  sidebarWidth: SIDEBAR_DEFAULT,
   showResolved: false,
   markupView: 'redlines',
   rotateIcon: true,
@@ -195,6 +199,7 @@ export function loadSettings(): Settings {
       ? value['appearance']
       : DEFAULT_SETTINGS.appearance,
     sidebarOpen: flag('sidebarOpen'),
+    sidebarWidth: sidebarWidthOf(value['sidebarWidth']),
     showResolved: flag('showResolved'),
     markupView: value['markupView'] === 'simple' ? 'simple' : DEFAULT_SETTINGS.markupView,
     rotateIcon: flag('rotateIcon'),

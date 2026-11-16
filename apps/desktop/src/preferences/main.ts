@@ -9,6 +9,7 @@ import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { announceAgentsChanged } from '../agent-changes.ts';
+import { askAgainInAllDocuments } from '../untracked-answers.ts';
 import {
   agentSetup,
   agentSkills,
@@ -23,6 +24,7 @@ import { currentIdentity } from '../identity.ts';
 import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
 import { ignorePinch } from '../text-size.ts';
 import { icon } from '../ui/icons.ts';
+import { installTitleHints } from '../ui/title-hints.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
@@ -46,8 +48,11 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import '../zoom.css';
 import './preferences.css';
+import '../ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
+
+installTitleHints();
 
 let settings = loadSettings();
 // The theme, and the window itself in its appearance, as in every window (window-theme.ts). The
@@ -130,6 +135,7 @@ const deps: PaneDeps = {
     if (settings.rotateIcon !== before.rotateIcon) reportIconRotation(settings.rotateIcon);
   },
   gitIdentity: git,
+  askAgain: askAgainInAllDocuments,
   installCommandLine: () => installCommandLine<CommandLineInstall>('install_command_line'),
   installCommandLineAtHome: () =>
     installCommandLine<CommandLineLink>('install_command_line_at_home'),

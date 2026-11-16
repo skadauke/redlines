@@ -67,7 +67,9 @@ test.describe('images in Preview @blocks', () => {
     await expect
       .poll(() => j.page.evaluate(() => window.__redlinesImages!.opened))
       .toEqual(['red.png']);
-    expect(await j.selectedText(), 'no word is selected').toBe('');
+    expect(await j.selectedText(), 'the image is selected, no word').toBe(
+      '![A red square](red.png)',
+    );
     await j.shot('image-double-clicked');
 
     // The person saves it in Preview and comes back to the window.
@@ -104,6 +106,8 @@ test.describe('images in Preview @blocks', () => {
     await expect(image).toHaveCount(1);
     await image.dblclick();
     expect(await j.page.evaluate(() => window.__redlinesImages!.opened)).toEqual([]);
-    expect(await j.selectedText(), 'no word is selected').toBe('');
+    expect(await j.selectedText(), 'the image is selected, no word').toBe(
+      '![A cat](https://example.com/cat.png)',
+    );
   });
 });
