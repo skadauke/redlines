@@ -33,15 +33,22 @@ export const imageResolver = Facet.define<ImageResolver, ImageResolver | null>({
 export const refreshImagesEffect = StateEffect.define<null>();
 
 const REMOTE = /^https?:\/\//i;
+/** Embedded image data: nothing is fetched, so a pending change doesn't hold it back. */
+const DATA_IMAGE = /^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|svg\+xml)[;,]/i;
 const SCHEME = /^[a-z][a-z0-9+.-]*:|^\/\//i;
 
 /** Where an image's file is, as a URL or a path written in the document. */
-type Source = { kind: 'remote'; url: string } | { kind: 'local'; path: string } | { kind: 'none' };
+type Source =
+  | { kind: 'remote'; url: string }
+  | { kind: 'data'; url: string }
+  | { kind: 'local'; path: string }
+  | { kind: 'none' };
 
 function sourceOf(written: string): Source {
   let url = written.trim();
   if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
   if (REMOTE.test(url)) return { kind: 'remote', url };
+  if (DATA_IMAGE.test(url)) return { kind: 'data', url };
   if (!url || SCHEME.test(url)) return { kind: 'none' };
   return { kind: 'local', path: decodePath(url) };
 }
@@ -350,6 +357,8 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   let url: string | null = null;
   if (source.kind === 'remote') {
     url = misread(state) || pending(state, node.from, node.to) ? null : source.url;
+  } else if (source.kind === 'data') {
+    url = source.url;
   } else if (source.kind === 'local') {
     url = state.facet(imageResolver)?.(source.path) ?? null;
   }

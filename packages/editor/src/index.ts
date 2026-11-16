@@ -69,6 +69,7 @@ import {
   undoSayingWhy,
 } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
+import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -305,6 +306,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     clipboard(),
     caretKeys,
     markdownPreview(),
+    longLines(),
     options.openLink ? linkOpening({ open: options.openLink }) : [],
     tableLayout(),
     tableGhosts(),
