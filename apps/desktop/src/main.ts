@@ -43,7 +43,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
-import { localImagePath, localImageUrl } from './images.ts';
+import { localImagePath, localImageUrl, relativeImagePath } from './images.ts';
 import { exposeForJourneys } from './journey-hook.ts';
 import {
   appMenuModel,
@@ -310,6 +310,8 @@ const editor = createEditor(element('#editor'), {
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
     void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
+  // An image dragged from the sidebar is the project's own file: linked by its path, not copied.
+  projectImageLink: (dragged) => relativeImagePath(controller.state.path, dragged),
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {

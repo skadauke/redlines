@@ -8,6 +8,7 @@ import { syntaxTree } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { ImageSpot } from './api.ts';
+import { dropLine, nearestGap, PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { freshImageEffect, freshImageField } from './preview/fresh.ts';
 import { rectOf } from './table/cells.ts';
 import { rawIsReadOnly, refusedEditEffect } from './tracked/typing.ts';
@@ -236,8 +237,6 @@ export function imageSpot(
   at: { x: number; y: number } | undefined,
   notice: ((message: string) => void) | undefined,
 ): ImageSpot | null {
-  const plugin = view.plugin(spots);
-  if (!plugin) return null;
   const { state } = view;
   const { main } = state.selection;
   const point = at ? textAt(view, at) : null;
@@ -248,6 +247,32 @@ export function imageSpot(
       : at || main.empty || rectOf(state)
         ? { from: main.head, to: main.head }
         : { from: main.from, to: main.to };
+  return holdSpot(view, range, notice);
+}
+
+/**
+ * A spot for an image that is a block of its own, at `pos`, which is where a block begins or ends
+ * (the gaps of `image-drop.ts`): `before` and `after` are the line breaks that set the link apart
+ * from the text on either side, written with it. Null when the document takes no image there.
+ */
+export function blockSpot(
+  view: EditorView,
+  pos: number,
+  wrap: { before: string; after: string },
+  notice: ((message: string) => void) | undefined,
+): ImageSpot | null {
+  return holdSpot(view, { from: pos, to: pos }, notice, wrap);
+}
+
+function holdSpot(
+  view: EditorView,
+  range: { from: number; to: number },
+  notice: ((message: string) => void) | undefined,
+  wrap?: { before: string; after: string },
+): ImageSpot | null {
+  const plugin = view.plugin(spots);
+  if (!plugin) return null;
+  const { state } = view;
   const reason = refusal(state, range.from, range.to);
   if (reason !== null) {
     notice?.(reason);
@@ -288,7 +313,13 @@ export function imageSpot(
       held.add(end);
       try {
         view.dispatch({
-          changes: { from, to: spot.to, insert: paths.map(imageLink).join(' ') },
+          changes: {
+            from,
+            to: spot.to,
+            insert: wrap
+              ? wrap.before + paths.map(imageLink).join('\n\n') + wrap.after
+              : paths.map(imageLink).join(' '),
+          },
           userEvent: 'input.image',
         });
       } finally {
@@ -297,7 +328,8 @@ export function imageSpot(
       }
       // The editing rules refused it, and said why through `onNotice`: nothing was written.
       if (view.state.doc === before) return false;
-      if (atSpot) {
+      // A block of its own leaves the caret where it was: the links are above or below it.
+      if (atSpot && !wrap) {
         // The caret is at the end of the links, as a paste leaves it, where the preview draws the
         // image all the same (`freshImageField`).
         view.dispatch({ selection: { anchor: end.to }, scrollIntoView: true });
@@ -325,8 +357,14 @@ export function imageFiles(data: DataTransfer | null): File[] {
 export function images(
   onImageFiles: ((files: File[], spot: ImageSpot, pasted: boolean) => void) | undefined,
   notice: ((message: string) => void) | undefined,
+  projectImageLink?: (dragged: string) => string | null,
 ): Extension {
-  if (!onImageFiles) return [spots, freshImageField];
+  const base = [
+    spots,
+    freshImageField,
+    ...(projectImageLink ? [projectDrops(projectImageLink, notice)] : []),
+  ];
+  if (!onImageFiles) return base;
   const take = (
     event: Event,
     view: EditorView,
@@ -343,8 +381,7 @@ export function images(
     return true;
   };
   return [
-    spots,
-    freshImageField,
+    ...base,
     EditorView.domEventHandlers({
       paste: (event, view) => take(event, view, imageFiles(event.clipboardData), true),
       drop: (event, view) =>
@@ -354,4 +391,58 @@ export function images(
         }),
     }),
   ];
+}
+
+/** Whether a drag carries an image file of the project, as the sidebar sets it. */
+function carriesProjectImage(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes(PROJECT_IMAGE_TYPE);
+}
+
+/**
+ * The drag of an image file from the sidebar (#681): a line shows the gap between blocks that the
+ * pointer is nearest, and the drop writes a link, a block of its own, there, as the person's own
+ * insertion (tracked while Track Changes is on, one step for Undo).
+ */
+function projectDrops(
+  linkFor: (dragged: string) => string | null,
+  notice: ((message: string) => void) | undefined,
+): Extension {
+  const lines = new WeakMap<EditorView, ReturnType<typeof dropLine>>();
+  const lineOf = (view: EditorView) => {
+    let line = lines.get(view);
+    if (!line) lines.set(view, (line = dropLine(view)));
+    return line;
+  };
+  return EditorView.domEventHandlers({
+    dragover(event, view) {
+      if (!carriesProjectImage(event)) return false;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      const near = nearestGap(view, event.clientY);
+      if (near) lineOf(view).show(near.y);
+      return true;
+    },
+    dragleave(event, view) {
+      if (!carriesProjectImage(event)) return false;
+      if (!(event.relatedTarget instanceof Node) || !view.dom.contains(event.relatedTarget)) {
+        lineOf(view).hide();
+      }
+      return false;
+    },
+    drop(event, view) {
+      if (!carriesProjectImage(event)) return false;
+      event.preventDefault();
+      lineOf(view).hide();
+      if (rawIsReadOnly(view.state)) return true;
+      const dragged = event.dataTransfer?.getData(PROJECT_IMAGE_TYPE) ?? '';
+      const link = dragged ? linkFor(dragged) : null;
+      if (link === null) return true;
+      const near = nearestGap(view, event.clientY);
+      if (!near) return true;
+      const { gap } = near;
+      const spot = blockSpot(view, gap.pos, { before: gap.before, after: gap.after }, notice);
+      spot?.insert([link]);
+      return true;
+    },
+  });
 }
