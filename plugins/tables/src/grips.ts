@@ -135,8 +135,8 @@ export const GRIPS_STYLE = `
 }
 .rl-grip-hint {
   position: absolute; z-index: 6; padding: 6px 10px; border-radius: 8px; pointer-events: none;
-  background: var(--rl-tip, #1d1d1f); color: #fff; font-size: var(--rl-size-ui-small);
-  line-height: 1.3; white-space: nowrap; box-shadow: 0 4px 16px rgb(0 0 0 / 0.22);
+  border: 1px solid var(--rl-rule); background: var(--rl-card); color: var(--rl-ink);
+  font-size: var(--rl-size-ui-small); line-height: 1.3; white-space: nowrap; box-shadow: var(--rl-shadow);
 }
 .rl-grip-hint[hidden] { display: none; }
 .rl-grip-item { position: relative; padding: 5px 10px 5px 24px; border-radius: 4px; cursor: default; white-space: nowrap; }
@@ -254,10 +254,21 @@ function drawnTables(view: EditorView, near?: { x: number; y: number }): Drawn[]
     const lines = [...wrapper.querySelectorAll<HTMLElement>(':scope > .rl-trow:not(.rl-ghost)')];
     // The columns by the header's real cells: a ghost cell between two is in the gap that is
     // their boundary.
-    const cols = [...(lines[0]?.querySelectorAll<HTMLElement>(':scope > .rl-tc[data-col]') ?? [])]
-      .filter((cell) => Number(cell.dataset['col']) < table.columns)
-      .map((cell) => cell.getBoundingClientRect())
-      .map((rect) => ({ left: rect.left, right: rect.right }));
+    const cells = [
+      ...(lines[0]?.querySelectorAll<HTMLElement>(':scope > .rl-tc[data-col]') ?? []),
+    ].filter((cell) => Number(cell.dataset['col']) < table.columns);
+    // A column is drawn between the faint lines that divide the columns, which stand half the gap
+    // (the right padding of the cell before) left of each cell but the first: not over the cell's
+    // box, which is that far to the right of them (#673).
+    const lefts = cells.map((cell, i) => {
+      const before = cells[i - 1];
+      const gap = before ? (Number.parseFloat(getComputedStyle(before).paddingRight) || 0) / 2 : 0;
+      return cell.getBoundingClientRect().left - gap;
+    });
+    const cols = cells.map((cell, i) => ({
+      left: lefts[i] ?? 0,
+      right: lefts[i + 1] ?? cell.getBoundingClientRect().right,
+    }));
     const one: Drawn = {
       table,
       left: box.left,
@@ -579,7 +590,11 @@ class Grips {
     const base = this.view.dom.getBoundingClientRect();
     if (which === 'addCol') {
       // Just right of the table, as tall as it, and never off the window.
-      const left = Math.min(drawn.right + EDGE_GAP, base.right - EDGE_SIZE - 4);
+      // At the table's edge, or at its box's when the table scrolls sideways and its end is out of view.
+      const clipBox = drawn.lines[0]?.closest('.rl-tbl-scroll')?.getBoundingClientRect();
+      const right =
+        clipBox && clipBox.width > 0 ? Math.min(drawn.right, clipBox.right) : drawn.right;
+      const left = Math.min(right + EDGE_GAP, base.right - EDGE_SIZE - 4);
       el.style.left = `${left - base.left}px`;
       el.style.top = `${drawn.top - base.top}px`;
       el.style.height = `${Math.max(0, drawn.bottom - drawn.top)}px`;
