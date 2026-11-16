@@ -15,6 +15,7 @@ export type { BlockRead } from './block-read.ts';
 export { idsIn, isId, newId } from './ids.ts';
 export { decodePayload, encodePayload } from './payload.ts';
 export { parse } from './parse.ts';
+export type { Change as ParseChange } from './scan.ts';
 export { applyChanges, eolOf } from './changes.ts';
 export {
   UNTRUSTED_NOTE,
@@ -94,3 +95,5 @@ export {
   isEscapedTag,
 } from './github-html.ts';
 export type { HtmlHandling } from './github-html.ts';
+export { htmlTwin, NO_TWIN } from './html-twin.ts';
+export type { Twin, TwinKind, TwinPlace, TwinRead } from './html-twin.ts';

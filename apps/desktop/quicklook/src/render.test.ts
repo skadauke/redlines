@@ -285,6 +285,12 @@ describe('the local images of a preview', () => {
     ]);
   });
 
+  it('include those of <img> tags', () => {
+    expect(previewImages('<p align="center"><IMG src="logo.png" width="64"></p>\n')).toEqual([
+      'logo.png',
+    ]);
+  });
+
   it('are none, with no look at the text, for a document with no image', () => {
     expect(previewImages('# Nothing\n\nA [link](a.png) and `![code](b.png)`.\n')).toEqual([]);
   });

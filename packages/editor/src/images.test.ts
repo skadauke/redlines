@@ -217,7 +217,22 @@ describe('images dropped on the editor', () => {
     expect(given[0]!.files.map((file) => file.name)).toEqual(['plan.png']);
     expect(editor.getDoc()).toBe('One two three\n');
     given[0]!.spot.insert(['images/plan.png']);
-    expect(editor.getDoc()).toBe('One two ![](images/plan.png)three\n');
+    // Between blocks, never in the middle of one (#674): there is one block, so above or below it.
+    expect(editor.getDoc()).toMatch(
+      /^(!\[\]\(images\/plan\.png\)\n\nOne two three\n|One two three\n\n!\[\]\(images\/plan\.png\)\n?)$/,
+    );
+  });
+
+  it('land between blocks, as a block of their own, wherever in the text they are dropped', () => {
+    const { editor, given } = load('One two\n\nThree four\n');
+    // The point is in the middle of the first paragraph's text.
+    pointsAt(editor, 3);
+    dropFiles(editor, [png()], { x: 400, y: 120 });
+    given[0]!.spot.insert(['shot.png']);
+    const doc = editor.getDoc();
+    expect(doc).toContain('One two');
+    expect(doc).toContain('Three four');
+    expect(doc).toMatch(/(^|\n\n)!\[\]\(shot\.png\)(\n\n|\n?$)/);
   });
 
   it('go where the caret is when no line covers the point', () => {
@@ -545,7 +560,10 @@ describe('a spot', () => {
     expect(editor.getDoc()).toBe('One![](a.png) two\n');
     pointsAt(editor, 0);
     editor.imageSpot({ x: 400, y: 120 })!.insert(['b.png']);
-    expect(editor.getDoc()).toBe('![](b.png)One![](a.png) two\n');
+    // At a point in the text the image is a block of its own, between blocks (#674).
+    expect(editor.getDoc()).toMatch(
+      /^(!\[\]\(b\.png\)\n\nOne!\[\]\(a\.png\) two\n|One!\[\]\(a\.png\) two\n\n!\[\]\(b\.png\)\n?)$/,
+    );
   });
 });
 

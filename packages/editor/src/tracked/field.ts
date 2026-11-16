@@ -3,7 +3,13 @@
 // offsets are CodeMirror positions.
 
 import { Annotation, Compartment, Facet, StateEffect, StateField } from '@codemirror/state';
-import { isDecidable, type MarkRange, type Parsed, parse } from '@redlines/format';
+import {
+  isDecidable,
+  type MarkRange,
+  type Parsed,
+  type ParseChange,
+  parse,
+} from '@redlines/format';
 import type { Author, MarkupView, MenuView, MetPerson, ViewMode } from '../api.ts';
 
 /**
@@ -74,7 +80,17 @@ export function chooseViewEffects(mode: ViewMode): StateEffect<unknown>[] {
  */
 export const parsedField = StateField.define<Parsed>({
   create: (state) => parse(state.doc.toString()),
-  update: (parsed, tr) => (tr.docChanged ? parse(tr.newDoc.toString(), parsed) : parsed),
+  update(parsed, tr) {
+    if (!tr.docChanged) return parsed;
+    // Where the text changed, as one stretch: the parse reads the marks again only there (#700).
+    let change: ParseChange | undefined;
+    tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+      change = change
+        ? { from: change.from, oldTo: toA, newTo: toB }
+        : { from: fromA, oldTo: toA, newTo: toB };
+    });
+    return parse(tr.newDoc.toString(), parsed, change);
+  },
 });
 
 /**

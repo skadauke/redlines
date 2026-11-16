@@ -24,6 +24,8 @@ export interface BlockGap {
   at: number;
   /** The gap is below the line that `at` ends: the one after the last sibling. */
   after: boolean;
+  /** Where the sibling above the gap ends (its last line's end), if there is one. */
+  above?: number;
   /** Which gap of the siblings it is: 0 above the first, the count below the last. */
   index: number;
 }
@@ -33,6 +35,8 @@ export interface BlockRun {
   /** The kind of the first, and how many there are. */
   kind: UnitKind;
   count: number;
+  /** Where the first block's text starts, past its bullet or quote marker. */
+  textFrom: number;
   /** The run in the source: its first line's start to its last line's end. */
   from: number;
   to: number;
@@ -111,9 +115,10 @@ function gapsOf(read: Read): BlockGap[] {
     if (i >= first && i <= last + 1) continue;
     const next = siblings[i];
     const previous = siblings[i - 1];
-    if (next) gaps.push({ at: map.toSource(next.lineFrom, -1), after: false, index: i });
+    const above = previous ? { above: map.toSource(lineEnd(previous), -1) } : {};
+    if (next) gaps.push({ at: map.toSource(next.lineFrom, -1), after: false, index: i, ...above });
     else if (previous)
-      gaps.push({ at: map.toSource(lineEnd(previous), -1), after: true, index: i });
+      gaps.push({ at: map.toSource(lineEnd(previous), -1), after: true, index: i, ...above });
   }
   return gaps;
 }
@@ -133,6 +138,7 @@ export function blockRunAt(text: string, range: Range): BlockRun | undefined {
     kind: firstUnit.kind,
     count: read.last - read.first + 1,
     from: read.map.toSource(firstUnit.lineFrom, 1),
+    textFrom: read.map.toSource(firstUnit.from, 1),
     to: read.map.toSource(lastUnit.to, -1),
     viewFrom: firstUnit.lineFrom,
     viewTo: lastUnit.to,

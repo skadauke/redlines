@@ -1,8 +1,9 @@
 // Markdown as the HTML of a preview: micromark with GitHub's extensions, the reader that the format's
 // tests hold every file to (packages/format/src/oracle.ts), and the same rules as a copy (design
-// §5.10): everything is escaped and raw HTML in the source is text, never live. A preview has no
-// script and no network, so it draws no image from a server. A link keeps its address, which only a
-// click would load, and a `javascript:` address is gone.
+// §5.10): everything is escaped, and raw HTML is drawn only as GitHub draws it (html.ts): the
+// elements and attributes on GitHub's list, rebuilt from tokens, never passed through, and the rest
+// as text or dropped. A preview has no script and no network, so it draws no image from a server. A
+// link keeps its address, which only a click would load, and a `javascript:` address is gone.
 //
 // Four things are changed from micromark's own HTML:
 //
@@ -11,6 +12,8 @@
 // - An image is its alt text, unless it is a file beside the document that the host (the extension)
 //   has loaded and says so, by the path the document wrote and a name to show it by: then it is
 //   `<img src="cid:name">`, which Quick Look answers from the attachments of its reply.
+//   An `<img>` tag of the document (html.ts) is the same image, at its `width` and `height` if it
+//   wrote them (#629).
 // - A chunk of R Markdown or Quarto, a fence whose info string is written in braces
 //   (```` ```{r setup, include=FALSE} ````), keeps what is in the braces as a plain line over its code,
 //   where micromark would take the first word for the language and drop the rest.
@@ -21,6 +24,7 @@
 import { micromark } from 'micromark';
 import { gfm, gfmHtml } from 'micromark-extension-gfm';
 import type { CompileContext, HtmlExtension } from 'micromark-util-types';
+import { Html } from './html.ts';
 
 /** Whether a fence's info string is written in braces, as a chunk's is, and Pandoc's attributes. */
 export const isBraced = (info: string): boolean => info.startsWith('{');
@@ -61,8 +65,9 @@ export function withoutComments(html: string, inside: boolean): { text: string; 
   return { text, inside };
 }
 
-/** The changes to micromark's HTML, with the state they keep for one document. */
-function extension(): HtmlExtension {
+/** The changes to micromark's HTML, with the state they keep for one document: `html` draws the raw
+ * HTML that GitHub keeps (html.ts), and `html.end()` closes what it left open. */
+function extension(html: Html): HtmlExtension {
   // Whether the raw HTML being written is inside a comment: a comment can run over several lines.
   let inComment = false;
   // A chunk's info string, and what follows it on the fence's line.
@@ -72,7 +77,14 @@ function extension(): HtmlExtension {
   function rawHtml(context: CompileContext, text: string) {
     const shown = withoutComments(text, inComment);
     inComment = shown.inside;
-    context.raw(context.encode(shown.text));
+    context.buffer();
+    context.tag('<');
+    const live = context.resume() === '<';
+    for (const part of html.piece(shown.text, live)) {
+      // Markup goes by `tag`, which micromark drops inside an image's alt text, where only text stays.
+      if (part.tag) context.tag(part.html);
+      else context.raw(part.html);
+    }
   }
 
   return {
@@ -88,9 +100,11 @@ function extension(): HtmlExtension {
     exit: {
       htmlFlow() {
         inComment = false;
+        this.raw(html.flush());
       },
       htmlText() {
         inComment = false;
+        this.raw(html.flush());
       },
       htmlFlowData(token) {
         rawHtml(this, this.sliceSerialize(token));
@@ -133,7 +147,8 @@ function extension(): HtmlExtension {
 
 /** An image as micromark writes it: `<img src="…" alt="…"( title="…")? />`, with every quote and
  * bracket inside escaped, and nothing else makes the tag: raw HTML is text. */
-const IMAGE = /<img src="([^"]*)" alt="([^"]*)"(?: title="[^"]*")? \/>/g;
+const IMAGE =
+  /<img src="([^"]*)" alt="([^"]*)"(?: title="[^"]*")?(?: width="(\d{1,5}%?)")?(?: height="(\d{1,5}%?)")? \/>/g;
 
 /** The most local images that a document is asked about: a preview shows no more. */
 export const MAX_IMAGES = 40;
@@ -191,10 +206,12 @@ function classOfItems(html: string): string {
 
 /** micromark's HTML of Markdown `source`, with nothing changed: where its images are. */
 function rawHtml(source: string): string {
-  return micromark(source, {
+  const html = new Html();
+  const drawn = micromark(source, {
     extensions: [gfm()],
-    htmlExtensions: [gfmHtml(), extension()],
+    htmlExtensions: [gfmHtml(), extension(html)],
   });
+  return drawn + html.end();
 }
 
 /** The local images that Markdown `source` links to (`localImageSources`). */
@@ -206,13 +223,13 @@ export function markdownImages(source: string): string[] {
  * except those in `images`, which the host loaded: those are the pictures. */
 export function markdownToHtml(source: string, images: LoadedImages = new Map()): string {
   return classOfItems(rawHtml(source))
-    .replace(IMAGE, (_, src: string, alt: string) => {
+    .replace(IMAGE, (_, src: string, alt: string, width?: string, height?: string) => {
       const path = localImagePath(src);
       const name = path === null ? undefined : images.get(path);
       return name !== undefined && NAME.test(name)
-        ? `<img class="rl-image" src="cid:${name}" alt="${alt}">`
+        ? `<img class="rl-image" src="cid:${name}" alt="${alt}"${width ? ` width="${width}"` : ''}${height ? ` height="${height}"` : ''}>`
         : `<span class="rl-image">${alt}</span>`;
     })
-    .replaceAll('<table>', '<div class="rl-tbl-scroll"><table>')
+    .replace(/<table(?=[\s>])/g, '<div class="rl-tbl-scroll"><table')
     .replaceAll('</table>', '</table></div>');
 }

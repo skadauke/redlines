@@ -43,6 +43,13 @@ import { followText } from './anchor.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
+export {
+  type Container,
+  containersOf,
+  holdOpenAt,
+  isOpen as isSectionOpen,
+  setFold,
+} from './blocks/containers.ts';
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
@@ -83,9 +90,11 @@ import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { noticeFacet } from './image-size.ts';
+import { likelyParsing } from './likely/parse.ts';
 import {
   imageOpening,
   imageResolver,
+  imageSizer,
   imageSelection,
   localImageAt,
   refreshImagesEffect,
@@ -130,6 +139,9 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
+/** Whether the parse has a node at `pos` other than the document: what the journeys ask of a far jump. */
+export const parsedAt = (state: EditorState, pos: number): boolean =>
+  syntaxTree(state).resolveInner(pos, 1).name !== 'Document';
 export {
   agentOf,
   followsText,
@@ -151,6 +163,9 @@ export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export { indentItems } from './blocks/keys.ts';
 export { indentReason } from './blocks/tab.ts';
+export { disabledReasonOf } from './commands.ts';
+export { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
+export type { TwinHere } from './blocks/twin.ts';
 export { currentChange, setCurrentChange, type CurrentChange } from './tracked/bar-layer.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
@@ -294,11 +309,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const asked = new Set<string>();
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
+  const markdownSupport = markdown({
+    extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
+    codeLanguages: options.codeLanguages,
+  });
   const extensions = [
-    markdown({
-      extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
-      codeLanguages: options.codeLanguages,
-    }),
+    markdownSupport,
+    likelyParsing(markdownSupport.language.parser),
     trackedChanges(),
     barLayer(),
     barSwitch(),
@@ -334,6 +351,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
+    options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     imageSelection(),
     undoHistory(),
@@ -821,3 +839,5 @@ function pasteIntoField(view: EditorView, text: string): boolean {
   }
   return false;
 }
+
+export { moveBlocks, moveBlocksReason, moveRunTo, runOfSelection } from './blocks/move.ts';
