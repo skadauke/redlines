@@ -83,6 +83,7 @@ export function createTables(editor: Editor, options: { tooltipMs?: number } = {
     keyFallsThrough: disabledReason === inTable ? true : (state) => !headInTable(state),
     menu: 'table',
     group,
+    structure: ['table'],
     disabledReason,
     run: (target) => run(target.view),
   });
@@ -144,6 +145,7 @@ export function createTables(editor: Editor, options: { tooltipMs?: number } = {
     {
       id: 'table.deleteTable',
       title: 'Delete Table',
+      structure: ['table'],
       menu: 'table',
       group: 'columns',
       disabledReason: inTable,
@@ -153,6 +155,7 @@ export function createTables(editor: Editor, options: { tooltipMs?: number } = {
     {
       id: 'table.moveColumnLeft',
       title: colTitles.moveLeft,
+      structure: ['table'],
       menu: 'table',
       group: 'move',
       disabledReason: (state) => moveColsReason(state, true),
@@ -161,6 +164,7 @@ export function createTables(editor: Editor, options: { tooltipMs?: number } = {
     {
       id: 'table.moveColumnRight',
       title: colTitles.moveRight,
+      structure: ['table'],
       menu: 'table',
       group: 'move',
       disabledReason: (state) => moveColsReason(state, false),
@@ -171,6 +175,7 @@ export function createTables(editor: Editor, options: { tooltipMs?: number } = {
     ...ALIGNS.map(({ id, title, align }): EditorCommand => ({
       id,
       title,
+      structure: ['table'],
       menu: 'table',
       group: 'align',
       disabledReason: (state) => alignReason(state, align),

@@ -10,10 +10,22 @@
 import { EditorState, Prec } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import type { CommandRegistry, Editor, EditorCommand } from './api.ts';
+import { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
+import { trackingField } from './tracked/typing.ts';
 
 /** Why `command` can't run in `state`, or undefined when it can. */
-export const disabledReasonOf = (command: EditorCommand, state: EditorState): string | undefined =>
-  command.disabledReason?.(state);
+export const disabledReasonOf = (
+  command: EditorCommand,
+  state: EditorState,
+): string | undefined => {
+  // In HTML that has a Markdown twin the command converts it first; in HTML that has none it can't.
+  if (command.structure) {
+    const reason = twinReason(state, command.structure);
+    if (reason !== undefined) return reason;
+    if (inTwin(state, command.structure)) return undefined;
+  }
+  return command.disabledReason?.(state);
+};
 
 const isEnabled = (command: EditorCommand, state: EditorState) =>
   disabledReasonOf(command, state) === undefined;
@@ -115,9 +127,23 @@ export function createCommandRegistry(
    * is a bug. */
   const run = (command: EditorCommand) => {
     const reason = disabledReasonOf(command, editor().view.state);
-    if (reason === undefined) return command.run(editor());
-    notice(reason);
-    return false;
+    if (reason !== undefined) {
+      notice(reason);
+      return false;
+    }
+    if (command.structure && inTwin(editor().view.state, command.structure)) {
+      const { view } = editor();
+      const twin = twinAt(view.state, view.state.selection.main.head)?.twin;
+      // A pending conversion can't be acted on: a command that knows its result writes it in one.
+      const as = twin && view.state.field(trackingField) ? command.twinAs?.(twin) : null;
+      const converted = convertTwin(view, as ?? undefined);
+      if (converted !== true) {
+        notice(converted);
+        return false;
+      }
+      if (as != null) return true;
+    }
+    return command.run(editor());
   };
 
   /** Keeps the key whatever the command does, unless the command lets it go on. */

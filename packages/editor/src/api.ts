@@ -5,7 +5,7 @@ import type { UntrackedAsker } from './tracked/ask.ts';
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
+import type { Handle, MarkRange, Parsed, Range, Twin, TwinKind } from '@redlines/format';
 
 /**
  * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
@@ -123,6 +123,21 @@ export interface EditorCommand {
    * disabled and still the table's, and outside a table it is the core's.
    */
   keyFallsThrough?: boolean | ((state: EditorState) => boolean);
+  /**
+   * The kinds of HTML block whose structure it changes (a heading's level, a list item's depth, a
+   * table's rows and columns). In HTML of one of these kinds that has an exact Markdown twin
+   * (#690), the command first converts the block to its twin, as one change, and then runs; in
+   * HTML of one that has none it is disabled, with the reason in its hint, and its own
+   * `disabledReason` is not asked.
+   */
+  structure?: readonly TwinKind[];
+  /**
+   * With Track Changes on, a pending conversion can't be acted on until it is decided (a block
+   * change can't start at a pending change). A command that can say what it would make of the
+   * twin gives it here, and the conversion is written as that, in one substitution; the command
+   * does not run. Null: the conversion is written as it is and the command runs after it.
+   */
+  twinAs?(twin: Twin): string | null;
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */

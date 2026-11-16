@@ -434,6 +434,16 @@ README-style snippets) holds the editor to it.
   hidden. **HTML blocks** with no Markdown twin are drawn as GitHub draws them, with their source
   on demand. **HTML with an exact Markdown twin** is edited as Markdown, and converted only when
   the conversion is exact. These come after the inline tags, in the order of #686.
+- **Markdown twins** (#690). An HTML heading (`<h1>` to `<h6>`, no attributes, one line) is drawn as
+  a heading with its tags hidden, edited in place, and listed in the outline. A blockquote, a simple
+  list, a simple table, an `<hr>` and a `pre` with code are edited as the HTML they are. A command
+  that changes structure (a heading level, Body, Quote, a list type, Indent and Tab, the Table
+  menu) first converts the block to its twin, as one change, only when the conversion is exact
+  (`docs/format.md` §3.13): with Track Changes on it is a substitution of the whole block whose
+  margin card says "Converted the `<h2>` heading to Markdown", with it off the block is replaced.
+  Where the HTML has no exact twin (a heading with an attribute, a table with a span or a caption,
+  Markdown in the text) the command is disabled and its hint says why; nothing is refused after
+  the fact.
 - **`<details>` and `<div align>` as containers** (#688). A container is an opening tag line (with
   the `<summary>` line under it, for a `details`) and a closing tag line, each a block of its own
   with blank lines around it, at the top of the document, as GitHub needs to read the Markdown

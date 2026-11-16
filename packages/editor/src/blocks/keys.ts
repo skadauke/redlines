@@ -53,6 +53,7 @@ import {
 import { blockAt, neighbours } from './structure.ts';
 import { openIndentedLine, shapeOf, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
+import { convertTwin, htmlListMoves } from './twin.ts';
 import { bareMarkerAt, pastedItems, planListPaste } from './paste.ts';
 import {
   closeOpen,
@@ -475,6 +476,9 @@ const TAB_DOES_NOTHING = new Set(['paragraph', 'heading', 'rule', 'definition'])
 const tabKey = (outdent: boolean) =>
   blockKey((view) => {
     if (view.state.selection.ranges.length > 1) return false;
+    // Tab in an item of an HTML list (that has an exact twin) converts the list first (#690), and
+    // only when there is an item above to go under (or, for Shift-Tab, a level to leave).
+    if (htmlListMoves(view.state, outdent)) convertTwin(view);
     const edit = planTab(view.state, outdent);
     if (edit) return applyKeyEdit(view, edit);
     const block = blockAt(view.state, view.state.selection.main.head);
