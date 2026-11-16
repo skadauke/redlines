@@ -2,8 +2,7 @@
 // micromark and GFM (its tag filter included), and cleaned by a sanitizer that follows GitHub's
 // (hast-util-sanitize, given html-pipeline's own list, transcribed below). The same tree is then cleaned by Redlines' list
 // (`@redlines/format`, `github-html.ts`), the list every drawing of HTML reads. The two must keep the
-// same elements, the same text and the same addresses. A difference between the lists themselves
-// is named in `KNOWN_DIFFERENCES`, with its reason, so that a list that drifts shows here. Both
+// same elements, the same text and the same addresses. Both
 // libraries are development dependencies only.
 
 import {
@@ -49,7 +48,7 @@ function summarize(tree: Node): Drawn {
     if (node.type === 'text') drawn.text += node.value;
     if (node.type === 'element') {
       drawn.elements.push(node.tagName);
-      for (const name of ['href', 'src']) {
+      for (const name of ['href', 'src', 'cite', 'longDesc']) {
         const value = node.properties[name];
         if (typeof value === 'string') drawn.addresses.push(`${node.tagName} ${name}=${value}`);
       }
@@ -102,7 +101,7 @@ const GITHUB_SCHEMA: Schema = {
   protocols: {
     href: ['http', 'https', 'mailto'],
     src: ['http', 'https'],
-    longdesc: ['http', 'https'],
+    longDesc: ['http', 'https'],
     cite: ['http', 'https'],
   },
   strip: ['script'],
@@ -188,20 +187,16 @@ const SNIPPETS: Record<string, string> = {
     '<picture><source media="(prefers-color-scheme: dark)" srcset="dark.png"><img src="light.png" alt="l"></picture>',
   heading: '<h1 align="center">Title</h1>',
   'blockquote cite': '<blockquote cite="https://example.com">Quoted</blockquote>',
-  'ins cite': '<ins cite="javascript:x">late</ins>',
+  'ins cite': '<ins cite="javascript:x">late</ins> <q cite="https://a.example">q</q>',
+  longdesc: '<img src="a.png" alt="a" longdesc="javascript:x">',
+  'control character link': '<a href="&#1;javascript:alert(1)">click</a>',
+  'entity link': '<a href="&#106;avascript:alert(1)">click</a>',
   'div with markdown': '<div align="center">\n\n**Bold** inside\n\n</div>',
   'html comment': 'before <!-- hidden --> after',
 };
 
-// Where the two lists differ by design, with the reason. Everything else must agree.
-const KNOWN_DIFFERENCES: Record<string, string> = {
-  // hast-util-sanitize's default schema, which follows GitHub's, drops the `src` of an image that
-  // is not a web address, as GitHub does; and keeps `ol`, `ul` and `li`'s `className`s only.
-};
-
 describe('the check against GitHub', () => {
   for (const [name, snippet] of Object.entries(SNIPPETS)) {
-    if (name in KNOWN_DIFFERENCES) continue;
     it(`keeps what GitHub keeps: ${name}`, () => {
       const html = render(snippet);
       expect(byRedlines(html)).toEqual(byGitHub(html));
