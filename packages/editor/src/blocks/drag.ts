@@ -5,7 +5,7 @@
 // were.
 
 import { EditorSelection, type Extension } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorView, ViewPlugin } from '@codemirror/view';
 import type { BlockGap, BlockRun } from '@redlines/format';
 import { moveRunTo, runOfSelection } from './move.ts';
 
@@ -69,7 +69,6 @@ export class BlockDrag {
   private line: HTMLElement | undefined;
   private target: BlockGap | undefined;
   private places: { gap: BlockGap; y: number }[] = [];
-  private readonly extent: { top: number; bottom: number };
   private readonly view: EditorView;
   private readonly run: BlockRun;
   private readonly geometry: DragGeometry;
@@ -78,7 +77,6 @@ export class BlockDrag {
     this.view = view;
     this.run = run;
     this.geometry = geometry;
-    this.extent = geometry.extent(view, run);
     view.dom.classList.add('rl-block-dragging');
   }
 
@@ -91,7 +89,8 @@ export class BlockDrag {
   move(y: number): void {
     const { view, geometry } = this;
     this.places = this.run.gaps.map((gap) => ({ gap, y: geometry.gapY(view, gap) }));
-    this.target = pickGap(this.places, this.extent, y);
+    // The run's extent is measured now, not at the press: the editor may have scrolled since.
+    this.target = pickGap(this.places, geometry.extent(view, this.run), y);
     const at = this.places.find((place) => place.gap === this.target);
     if (!at) {
       this.line?.remove();
@@ -114,12 +113,15 @@ export class BlockDrag {
     return line;
   }
 
-  /** Scrolls the editor when the pointer is at its top or bottom edge. */
-  scrollFor(y: number): void {
+  /** Scrolls the editor a step when the pointer is at its top or bottom edge, and says whether it
+   * is there (the caller keeps scrolling while it is, though the pointer holds still). */
+  scrollFor(y: number): boolean {
     const { scrollDOM } = this.view;
     const rect = scrollDOM.getBoundingClientRect();
     if (y < rect.top + SCROLL_EDGE) scrollDOM.scrollTop -= 14;
     else if (y > rect.bottom - SCROLL_EDGE) scrollDOM.scrollTop += 14;
+    else return false;
+    return true;
   }
 
   /** Lets go: the blocks move to the gap, if there is one. Whether they moved. */
@@ -141,13 +143,29 @@ export class BlockDrag {
   }
 }
 
+/** The drags in progress, by view: what ends one when its view is destroyed. */
+const ending = new WeakMap<EditorView, () => void>();
+
 /** The press, the drag and the drop of selected blocks, and the look of the line. */
 export function blockDrag(): Extension {
   return [
+    ViewPlugin.fromClass(
+      class {
+        private readonly view: EditorView;
+        constructor(view: EditorView) {
+          this.view = view;
+        }
+        destroy() {
+          ending.get(this.view)?.();
+        }
+      },
+    ),
     EditorView.domEventHandlers({
       mousedown(event, view) {
         if (event.button !== 0 || event.detail > 1) return false;
         if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
+        // Nothing moves in a document that can't be edited.
+        if (view.state.readOnly || !view.contentDOM.isContentEditable) return false;
         const run = draggableRun(view);
         if (!run) return false;
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
@@ -156,36 +174,67 @@ export function blockDrag(): Extension {
         event.preventDefault();
         view.focus();
         const doc = view.dom.ownerDocument;
+        const win = doc.defaultView;
         const start = { x: event.clientX, y: event.clientY };
+        // The document the press was made on: if it changes (an agent's edit, an undo), the run's
+        // offsets are stale and the drag lets go.
+        const pressed = view.state.doc;
         let drag: BlockDrag | undefined;
+        let y = event.clientY;
+        let frame = 0;
         const finish = () => {
           doc.removeEventListener('mousemove', onMove, true);
           doc.removeEventListener('mouseup', onUp, true);
           doc.removeEventListener('keydown', onKey, true);
+          win?.removeEventListener('blur', abandon);
+          if (frame) win?.cancelAnimationFrame(frame);
+          frame = 0;
+          ending.delete(view);
+        };
+        function abandon() {
+          finish();
+          drag?.cancel();
+        }
+        // While the pointer is at the edge the editor keeps scrolling, and the line follows.
+        const tick = () => {
+          frame = 0;
+          if (!drag) return;
+          if (!view.state.doc.eq(pressed)) return abandon();
+          if (drag.scrollFor(y)) {
+            drag.move(y);
+            frame = win?.requestAnimationFrame(tick) ?? 0;
+          }
         };
         const onMove = (e: MouseEvent) => {
-          if (!drag && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_SLOP) return;
+          y = e.clientY;
+          if (!drag && Math.hypot(e.clientX - start.x, y - start.y) < DRAG_SLOP) return;
+          if (!view.state.doc.eq(pressed)) return abandon();
           drag ??= new BlockDrag(view, run);
-          drag.scrollFor(e.clientY);
-          drag.move(e.clientY);
+          drag.move(y);
+          if (!frame && win) frame = win.requestAnimationFrame(tick);
         };
-        const onUp = (e: MouseEvent) => {
+        const onUp = () => {
           finish();
-          if (drag) drag.drop();
-          else
+          const same = view.state.doc.eq(pressed);
+          if (drag) {
+            if (same) drag.drop();
+            else drag.cancel();
+          } else if (same) {
             view.dispatch({ selection: EditorSelection.cursor(pos), userEvent: 'select.pointer' });
-          void e;
+          }
         };
         const onKey = (e: KeyboardEvent) => {
           if (e.key !== 'Escape') return;
           e.preventDefault();
           e.stopPropagation();
-          finish();
-          drag?.cancel();
+          abandon();
         };
         doc.addEventListener('mousemove', onMove, true);
         doc.addEventListener('mouseup', onUp, true);
         doc.addEventListener('keydown', onKey, true);
+        // The window lost the pointer (focus moved away, the button was let go outside): as Escape.
+        win?.addEventListener('blur', abandon);
+        ending.set(view, abandon);
         return true;
       },
     }),
@@ -194,7 +243,7 @@ export function blockDrag(): Extension {
         position: 'absolute',
         height: '3px',
         borderRadius: '2px',
-        backgroundColor: 'light-dark(rgb(10 95 214), rgb(106 168 255))',
+        backgroundColor: 'var(--rl-red, #d42a1e)',
         pointerEvents: 'none',
         zIndex: '5',
       },

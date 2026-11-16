@@ -1,5 +1,5 @@
 // Moving blocks (#516, #623): ⌥↑ and ⌥↓ move the paragraph, item or block the caret is in, and a drag
-// of selected blocks shows a line between blocks, in the selection's blue, where they will land.
+// of selected blocks shows a line between blocks, in the theme's red, where they will land.
 // With Track Changes on a move is one suggestion; Undo puts it back.
 
 import { expect, test } from '../src/journey.ts';

@@ -123,3 +123,29 @@ describe('dropping selected blocks', () => {
     });
   }
 });
+
+describe('a drag as the editor scrolls', () => {
+  it('measures the blocks being dragged at every move, not at the press', () => {
+    const editor = mount(BODY, [0, 4], false);
+    const run = runOfSelection(editor.view.state)!;
+    let top = 100;
+    const scrolling: DragGeometry = { ...lines, extent: () => ({ top, bottom: top + 10 }) };
+    const drag = new BlockDrag(editor.view, run, scrolling);
+    drag.move(105);
+    expect(drag.gap).toBeUndefined();
+    // The editor scrolled: the blocks are now where the pointer was not.
+    top = 300;
+    drag.move(105);
+    expect(drag.gap).toBeDefined();
+    drag.cancel();
+  });
+
+  it('says that the pointer is at an edge, so that the caller keeps scrolling', () => {
+    const editor = mount(BODY, [0, 4], false);
+    const run = runOfSelection(editor.view.state)!;
+    const drag = new BlockDrag(editor.view, run, lines);
+    // happy-dom's scroller has no size: its rectangle is at 0, so y = 1 is at the top edge.
+    expect(drag.scrollFor(1)).toBe(true);
+    drag.cancel();
+  });
+});
