@@ -673,6 +673,23 @@ export function authoredChanges(
   return untrackEdits(state, text, parsed, made, false).changes;
 }
 
+/** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
+ * question to the person answered Make Edit asks for (`ask.ts`). */
+export function untrackedChanges(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): ChangeSet {
+  return untrackEdits(
+    state,
+    text,
+    parsed,
+    edits.map((edit): Edit => ({ ...edit, main: false })),
+    false,
+  ).changes;
+}
+
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
 function trackedSpec(
   tr: Transaction,

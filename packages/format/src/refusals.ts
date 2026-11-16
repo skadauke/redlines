@@ -202,8 +202,8 @@ export const REFUSALS: readonly RefusalEntry[] = [
   [
     'packages/editor/src/blocks/move.ts',
     'message',
-    'alert',
-    'a move that reaches more blocks than a widened edit can hold is to be made untracked after the person is asked (§3.13); until the sheet takes it, a notice says to turn Track Changes off',
+    'info',
+    "a move that reaches more blocks than a widened edit can hold asks first, through the sheet, and is made untracked on Make Edit (§3.13); the notice is only the format's own message for a ledger that can't be read",
   ],
   [
     'packages/editor/src/table/paste.ts',
