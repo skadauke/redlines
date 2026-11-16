@@ -158,16 +158,31 @@ describe('the request', () => {
     expect(claude.requests).toHaveLength(0);
   });
 
-  it('refuses the agent’s tool calls once the document is another', async () => {
+  it('gives no text once the document is another, and reads no picture for it', async () => {
     const generation = { value: 0 };
     const script: FakeScript = async function* ({ tools }) {
       await tools.initialize();
       generation.value++;
-      const late = await tools.call('view_image');
-      yield { type: 'done', finalText: late.isError ? 'refused' : 'seen' };
+      yield { type: 'done', finalText: 'Too late.' };
     };
     const { describer } = setup(script, { generation });
-    expect(await describer.describe(IMAGE, new AbortController().signal)).toBe('refused');
+    await expect(describer.describe(IMAGE, new AbortController().signal)).rejects.toThrow(
+      'The document changed under this request',
+    );
+  });
+
+  it('refuses the agent’s tool calls once the document is another', async () => {
+    const generation = { value: 0 };
+    let late: { isError: boolean } | null = null;
+    const script: FakeScript = async function* ({ tools }) {
+      await tools.initialize();
+      generation.value++;
+      late = await tools.call('view_image');
+      yield { type: 'done', finalText: 'Too late.' };
+    };
+    const { describer } = setup(script, { generation });
+    await expect(describer.describe(IMAGE, new AbortController().signal)).rejects.toThrow();
+    expect(late).toMatchObject({ isError: true });
   });
 });
 

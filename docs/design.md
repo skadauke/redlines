@@ -308,7 +308,7 @@ The window, on the desktop:
   How the agent sees the image, with the least permission: it is given the one picture through
   `view_image` (no argument, so no path to name), which the host read first (the app's
   `image_for_agent` reads only inside a folder its sidebars show, only PNG, JPEG, GIF or WebP, at
-  most 5 MB); and the request is at "This document" with only `view_image` and `status`, so the
+  most 3.5 MB, so that it stays under a model's 5 MB in base64); and the request is at "This document" with only `view_image` and `status`, so the
   agent has no tool that reads the document and no file tool of its own, and no folder question
   is asked. Only an agent that can look at pictures is asked (Claude, which passes an MCP tool's
   image to the model): the default agent when it can, else another ready one that can, named in

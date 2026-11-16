@@ -808,12 +808,12 @@ createAltText(editor, {
 });
 
 /** The most bytes of a picture an agent is shown, as the app's own command holds it to. */
-const AGENT_IMAGE_BYTES = 5 * 1024 * 1024;
+const AGENT_IMAGE_BYTES = 3_670_016;
 
 /**
  * The picture `src` of the document, as the bytes an agent is shown (Alt Text, #553): only a local
  * image inside the document's project folder (`localImagePath`), read by the app, which holds it to
- * the folders its sidebars show, to PNG, JPEG, GIF and WebP, and to 5 MB (`image_for_agent`). A plain
+ * the folders its sidebars show, to PNG, JPEG, GIF and WebP, and to 3.5 MB (`image_for_agent`). A plain
  * page in development reads it from its own memory, with the same limits.
  */
 async function readImageForAgent(src: string): Promise<{ mimeType: string; data: string }> {
@@ -830,14 +830,19 @@ async function readImageForAgent(src: string): Promise<{ mimeType: string; data:
   }
   const url = host.imageUrl(path);
   if (url === null) throw new Error('The image file isn’t there.');
-  const blob = await (await fetch(url)).blob();
+  const response = await fetch(url).catch(() => null);
+  if (!response?.ok) throw new Error('The image file isn’t there.');
+  const blob = await response.blob();
   if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(blob.type)) {
     throw new Error('Only PNG, JPEG, GIF and WebP pictures can be described.');
   }
-  if (blob.size > AGENT_IMAGE_BYTES) throw new Error('That image is too big to describe.');
+  if (blob.size > AGENT_IMAGE_BYTES)
+    throw new Error('That image is larger than 3.5 MB, which is too big to describe.');
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (let at = 0; at < bytes.length; at += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+  }
   return { mimeType: blob.type, data: btoa(binary) };
 }
 

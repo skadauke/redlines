@@ -7,7 +7,7 @@
 // How the agent sees the image, ruled for least permission (the design of this request):
 //  - It is shown the one picture through `view_image`, an MCP tool that takes no argument, so there is
 //    no path for it to name; the host reads that file (`readImage`: the app reads only inside a folder
-//    its sidebars show, only PNG, JPEG, GIF or WebP, at most 5 MB) before the agent is started, and
+//    its sidebars show, only PNG, JPEG, GIF or WebP, at most 3.5 MB) before the agent is started, and
 //    hands the bytes over as an image content block.
 //  - The request is at scope "document" with the toolbox restricted to `view_image` and `status`
 //    (`DESCRIBE_TOOLS`): the agent gets no tool that reads the document or writes anything, and a
@@ -45,6 +45,7 @@ export interface AltAgentDeps {
   readImage(src: string): Promise<ImageBytes>;
 }
 
+const CHANGED = 'The document changed under this request, so it has stopped.';
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 const reasonOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -112,9 +113,10 @@ export function createAltDescriber(deps: AltAgentDeps): AltDescriber {
       const { agent } = found;
       // The picture is read before the agent starts: a file that can't be read says so, in words for
       // the person, and no agent is run for it.
+      const generation = deps.document.generation();
       const picture = await deps.readImage(image.src);
       if (signal.aborted) throw new Error('Stopped.');
-      const generation = deps.document.generation();
+      if (deps.document.generation() !== generation) throw new Error(CHANGED);
       const me = deps.author.handle;
       const author: Person = {
         handle: agentHandle(agent.id, me),
@@ -167,6 +169,7 @@ export function createAltDescriber(deps: AltAgentDeps): AltDescriber {
           if (event.type === 'done') {
             const text = cleanedAlt(event.finalText ?? '');
             if (text === '') throw new Error(`${agent.name} ended with nothing to say.`);
+            if (deps.document.generation() !== generation) throw new Error(CHANGED);
             return text;
           }
         }
@@ -195,6 +198,6 @@ function refuse(line: string): string | null {
   return JSON.stringify({
     jsonrpc: '2.0',
     id,
-    error: { code: -32000, message: 'The document changed under this request, so it has stopped.' },
+    error: { code: -32000, message: CHANGED },
   });
 }

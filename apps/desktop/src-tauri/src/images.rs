@@ -218,8 +218,9 @@ pub fn image_stamps(app: AppHandle, paths: Vec<String>) -> Vec<Option<String>> {
     }
 }
 
-/// The most bytes of a picture that an agent is shown: what a model takes in one image.
-const AGENT_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+/// The most bytes of a picture that an agent is shown: 3.5 MB, which is under a model's 5 MB limit
+/// on one image once it is in base64 (a third larger), and is checked before the file is read.
+const AGENT_IMAGE_BYTES: u64 = 3_670_016;
 
 /// The types of picture an agent that can look at pictures takes.
 const AGENT_IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -240,21 +241,17 @@ fn agent_image(images: &Images, path: &str) -> Result<AgentImage, String> {
     if !path.is_absolute() {
         return Err("Couldn’t read the image.".into());
     }
-    let (kind, bytes) = read_image(images, path).map_err(|status| {
+    let (kind, bytes) = read_image(images, path, AGENT_IMAGE_BYTES).map_err(|status| {
         if status == StatusCode::NOT_FOUND {
             "The image file isn’t there.".to_string()
+        } else if status == StatusCode::PAYLOAD_TOO_LARGE {
+            "That image is larger than 3.5 MB, which is too big to describe.".to_string()
         } else {
             "Redlines can’t read that image: it is outside the folders it shows, or isn’t a picture.".to_string()
         }
     })?;
     if !AGENT_IMAGE_TYPES.contains(&kind) {
         return Err("Only PNG, JPEG, GIF and WebP pictures can be described.".into());
-    }
-    if bytes.len() > AGENT_IMAGE_BYTES {
-        return Err(format!(
-            "That image is larger than {} MB, which is too big to describe.",
-            AGENT_IMAGE_BYTES / (1024 * 1024)
-        ));
     }
     Ok(AgentImage {
         mime_type: kind,
@@ -291,11 +288,26 @@ fn image(
     request: &Request<Vec<u8>>,
 ) -> Result<(&'static str, Vec<u8>), StatusCode> {
     let path = requested(request.uri()).ok_or(StatusCode::FORBIDDEN)?;
-    read_image(images, &path)
+    read_image(images, &path, MAX_IMAGE_BYTES)
 }
 
-/// The image at `path`, if the page may load it, read whole as `image` reads it.
-fn read_image(images: &Images, path: &Path) -> Result<(&'static str, Vec<u8>), StatusCode> {
+/// The status for a file over `limit`: the preview's own limit is refused as before (403), a smaller
+/// limit, an agent's, as the one that says it is too large.
+fn too_large(limit: u64) -> StatusCode {
+    if limit == MAX_IMAGE_BYTES {
+        StatusCode::FORBIDDEN
+    } else {
+        StatusCode::PAYLOAD_TOO_LARGE
+    }
+}
+
+/// The image at `path`, if the page may load it, read whole as `image` reads it, and never more than
+/// `limit` bytes of it: a larger file is refused before it is read.
+fn read_image(
+    images: &Images,
+    path: &Path,
+    limit: u64,
+) -> Result<(&'static str, Vec<u8>), StatusCode> {
     let real = images.may_load(path)?;
     let refused = |_| StatusCode::FORBIDDEN;
     let mut file = open(&real).map_err(|error| match error.kind() {
@@ -304,8 +316,11 @@ fn read_image(images: &Images, path: &Path) -> Result<(&'static str, Vec<u8>), S
     })?;
     // Of the file opened, whatever is at its path by now: no pipe, folder or device.
     let metadata = file.metadata().map_err(refused)?;
-    if !metadata.is_file() || metadata.len() > MAX_IMAGE_BYTES {
+    if !metadata.is_file() {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if metadata.len() > limit {
+        return Err(too_large(limit));
     }
     let mut bytes = Vec::new();
     (&mut file)
@@ -314,10 +329,10 @@ fn read_image(images: &Images, path: &Path) -> Result<(&'static str, Vec<u8>), S
         .map_err(refused)?;
     let kind = image_type(&real, &bytes).ok_or(StatusCode::FORBIDDEN)?;
     // The rest, and never more than an image may be, should the file have grown since.
-    let rest = MAX_IMAGE_BYTES + 1 - bytes.len() as u64;
+    let rest = (limit + 1).saturating_sub(bytes.len() as u64);
     file.take(rest).read_to_end(&mut bytes).map_err(refused)?;
-    if bytes.len() as u64 > MAX_IMAGE_BYTES {
-        return Err(StatusCode::FORBIDDEN);
+    if bytes.len() as u64 > limit {
+        return Err(too_large(limit));
     }
     Ok((kind, bytes))
 }
@@ -520,6 +535,15 @@ mod tests {
             at("repo/cat.bmp")
                 .unwrap_err()
                 .contains("PNG, JPEG, GIF and WebP")
+        );
+        // A picture over the agent's limit is refused before it is read.
+        let mut big = png.to_vec();
+        big.resize(AGENT_IMAGE_BYTES as usize + 1, 0);
+        fs::write(folder.join("repo/big.png"), big).unwrap();
+        assert!(
+            at("repo/big.png")
+                .unwrap_err()
+                .contains("larger than 3.5 MB")
         );
         assert!(at("other/owl.png").is_err());
         assert!(at("repo/gone.png").unwrap_err().contains("isn’t there"));
