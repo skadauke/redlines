@@ -5,7 +5,7 @@
 //
 // The break goes in at once; the answer is awaited by no one. When it comes, the correction is made
 // only if the word is still exactly where it was, its position mapped through the changes since,
-// and the editor isn't in Raw. A key that ends no word asks nothing: Tab changes the block, not the
+// and the editor isn't in Plain. A key that ends no word asks nothing: Tab changes the block, not the
 // words, and moving away, with the arrows or a click, never corrects, nor does any ⌘ key. Only a
 // word asks (letters, with an apostrophe inside), so a Return after a number or a closing
 // parenthesis costs nothing, and where the Mac corrects nothing on its own, in code, a URL, front

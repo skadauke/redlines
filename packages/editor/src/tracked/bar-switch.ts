@@ -183,7 +183,7 @@ function targetAt(
  * is measured. A line the new view doesn't draw has the top of the one after it, which `lineTop`
  * gives for its position. `before` is the line's top when it isn't a line's (a struck block's own),
  * and `row` keeps the row that holds `pos` (its coordinates) in place instead of its line's top:
- * the caret's row, in a paragraph that wraps. Nothing in Clean or Raw, which have no look. It
+ * the caret's row, in a paragraph that wraps. Nothing in Clean or Plain, which have no look. It
  * chooses the look, as the click on a bar does.
  */
 export function switchLookAt(
@@ -297,7 +297,7 @@ const hoverField = StateField.define<number | null>({
 /**
  * The click on a change bar: Redlines' simple look to its full markup and back, with the line
  * under the pointer where it was. The bar under the pointer draws wider, and the pointer is a hand
- * over it. Nothing in Clean or Raw.
+ * over it. Nothing in Clean or Plain.
  */
 export function barSwitch(options: BarSwitchOptions = {}): Extension {
   const geometry = options.geometry ?? pageGeometry;

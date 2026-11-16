@@ -316,7 +316,7 @@ describe('⌘A in a table', () => {
     expect(selection(outside)).toEqual([0, doc.length]);
   });
 
-  it('is not bound in Raw', () => {
+  it('is not bound in Plain', () => {
     const editor = load(doc.indexOf('12') + 1, true);
     expect(selectAllInCell(editor.view)).toBe(false);
     expect(press(editor)).toBe(true);
@@ -526,7 +526,7 @@ describe('keys that would break a row', () => {
     expect(rectOf(outside.editor.view.state)).toBeNull();
   });
 
-  it('leaves them to CodeMirror outside a table and in Raw', () => {
+  it('leaves them to CodeMirror outside a table and in Plain', () => {
     const outside = load(2);
     both(outside.editor, '/');
     expect(outside.notices).toEqual([]);

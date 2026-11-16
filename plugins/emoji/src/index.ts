@@ -1,5 +1,5 @@
 // Emoji shortcodes (#312): the ones already in a file are drawn as their emoji in every view but
-// Raw (the editor draws them, from the names this plugin gives it), and typing `:` and two letters
+// Plain (the editor draws them, from the names this plugin gives it), and typing `:` and two letters
 // lists matching emoji, which are written as the character itself. Preferences can turn the list
 // off; the shortcodes in a file are drawn either way.
 

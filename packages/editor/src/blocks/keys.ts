@@ -1,5 +1,5 @@
 // The block keys (design: block editing, "Mechanism"): a keymap above the editor's others, in Clean
-// and Redlines only (Raw keeps CodeMirror's and lang-markdown's keys). Each key plans its edit
+// and Redlines only (Plain keeps CodeMirror's and lang-markdown's keys). Each key plans its edit
 // (`edits.ts`) and `applyKeyEdit` dispatches it as one step to undo, with the user event the
 // tracked layer records it by, the record of Returns and the empty paragraph it opens.
 
@@ -319,7 +319,7 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   return true;
 }
 
-/** A key that acts in Clean and Redlines, and leaves Raw to CodeMirror. */
+/** A key that acts in Clean and Redlines, and leaves Plain to CodeMirror. */
 function blockKey(run: Command): Command {
   return (view) => view.state.field(viewModeField, false) !== 'raw' && run(view);
 }

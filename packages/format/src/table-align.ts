@@ -56,7 +56,7 @@ export { isAlignPoint };
 const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
 
 const LOST =
-  "This alignment change can't be rejected, because its table no longer has the columns it had. Accept it, or change the text in Raw with Track Changes off.";
+  "This alignment change can't be rejected, because its table no longer has the columns it had. Accept it, or change the text in Plain with Track Changes off.";
 
 /** The words of an alignment, in a card: `column Count centered (was left)`. */
 const WORDS: Record<TableAlign, string> = {

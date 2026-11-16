@@ -69,7 +69,7 @@ describe('the column', () => {
     expect(baseThemeSpec['.cm-line:has(> .rl-tc-active)']).toEqual({ caretColor: 'transparent' });
   });
 
-  it('gives Raw its column times the text size, and leaves the change bars where they are', () => {
+  it('gives Plain its column times the text size, and leaves the change bars where they are', () => {
     expect(trackedThemeSpec['&.rl-view-raw .cm-content']).toMatchObject({
       maxWidth: 'calc(760px * var(--rl-text-scale, 1) + 2 * var(--rl-margin, 24px))',
       paddingTop: s(40),

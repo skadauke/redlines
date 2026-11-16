@@ -172,7 +172,7 @@ function currentGroup(
 }
 
 /**
- * What opens the bar. The changes are shown while you review them: a document shown Clean or Raw
+ * What opens the bar. The changes are shown while you review them: a document shown Clean or Plain
  * switches to Redlines.
  */
 function opening(view: EditorView, ctx: ReviewContext): StateEffect<unknown>[] {

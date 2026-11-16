@@ -197,7 +197,7 @@ describe('markdownPreview', () => {
     expect(numbers.sizes).toEqual(['', '']); // already as wide as drawn
   });
 
-  it('hides blank lines between blocks, but not in code or Raw', () => {
+  it('hides blank lines between blocks, but not in code or Plain', () => {
     const doc = 'One.\n\nTwo.\n  \n```\na\n\nb\n```\n\nEnd';
     const editor = editorAt(doc, doc.length);
     const lines = () =>
@@ -325,6 +325,36 @@ describe('markdownPreview', () => {
     const editor = editorAt('- one\n- two', 0);
     expect(replaced(editor)).toEqual([[6, 8]]);
     expect(classed(editor, 'rl-syntax')).toEqual([[0, 1]]);
+  });
+
+  it('draws bullets, numbers and boxes the same with a selection over them (#668)', () => {
+    const doc = '- one\n- two\n\n1. first\n2. second\n\n- [ ] a\n- [x] b\n\nEnd';
+    const drawn = (editor: Editor) => ({
+      marks: [...editor.view.contentDOM.querySelectorAll('.rl-list-mark')].map(
+        (m) => m.textContent,
+      ),
+      boxes: editor.view.contentDOM.querySelectorAll('.rl-box').length,
+      source: editor.view.contentDOM.querySelectorAll('.rl-list-source').length,
+      replaced: replaced(editor),
+    });
+    const apart = editorAt(doc, doc.length);
+    const before = drawn(apart);
+    expect(before.marks).toEqual(['•', '•', '1.', '2.', '', '']);
+    expect(before.boxes).toBe(2);
+    expect(before.source).toBe(0);
+    // A selection from inside the first item to the end of the second box item, and one that
+    // starts in a marker's own text.
+    for (const [from, to] of [
+      [2, doc.length - 4],
+      [0, doc.length - 4],
+      [doc.indexOf('2.') + 1, doc.indexOf('- [x]') + 1],
+    ] as const) {
+      const selected = editorAt(doc, doc.length);
+      selected.view.dispatch({ selection: { anchor: from, head: to } });
+      expect(drawn(selected), `selection ${from}-${to}`).toEqual(before);
+    }
+    // A caret on a marker still shows its source.
+    expect(drawn(editorAt(doc, 0)).source).toBe(1);
   });
 
   it('hides blockquote marks and code fences off their lines', () => {

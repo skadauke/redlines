@@ -303,7 +303,7 @@ describe('a word ended with Return', () => {
     expect(docText(editor)).toBe('Hello tehx\n\n');
   });
 
-  it('drops the answer when the editor is in Raw by then', async () => {
+  it('drops the answer when the editor is in Plain by then', async () => {
     const { editor, questions } = load('Hello teh', { tracking: false });
     atEnd(editor);
     press(editor, 'Enter');
@@ -380,7 +380,7 @@ describe('answers that come late or out of order', () => {
     expect(docText(editor)).toBe('One tehx\n\nand word\n\n');
   });
 
-  it('drop once the editor went to Raw and back, which leaves no break', async () => {
+  it('drop once the editor went to Plain and back, which leaves no break', async () => {
     const { editor, questions } = load('Hello teh', { tracking: false });
     atEnd(editor);
     press(editor, 'Enter');
@@ -480,7 +480,7 @@ describe('a Return that asks nothing', () => {
     expect(asks('Hello <!-- teh -->', 14)).toBe(0);
   });
 
-  it('in Raw', () => {
+  it('in Plain', () => {
     expect(asks('Hello teh', undefined, 'raw')).toBe(0);
   });
 
