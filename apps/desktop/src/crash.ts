@@ -71,6 +71,9 @@ const SAME_MS = 5000;
 /** At most this many cards a minute. */
 const CARDS_PER_MINUTE = 4;
 
+/** At most this many errors a minute are logged. */
+const LOGGED_PER_MINUTE = 10;
+
 const KEY = 'problem';
 
 export interface CrashWatchOptions {
@@ -110,11 +113,8 @@ export function describeError(error: unknown): { message: string; trace: string 
     return { message: `${error.name}: ${error.message}`, trace: error.stack ?? '' };
   }
   if (typeof error === 'string') return { message: error, trace: '' };
-  try {
-    return { message: `Thrown: ${JSON.stringify(error)}`, trace: '' };
-  } catch {
-    return { message: 'Something was thrown that can’t be shown.', trace: '' };
-  }
+  // Whatever else was thrown may hold the document's words: say only that it was.
+  return { message: 'Something that is not an error was thrown.', trace: '' };
 }
 
 export function watchCrashes(options: CrashWatchOptions): CrashWatch {
@@ -135,6 +135,7 @@ export function watchCrashes(options: CrashWatchOptions): CrashWatch {
   let lastMessage = '';
   let lastMessageAt = 0;
   let cards: number[] = [];
+  let logged: number[] = [];
   let destroyed = false;
 
   const doing = (label: string) => {
@@ -212,10 +213,13 @@ export function watchCrashes(options: CrashWatchOptions): CrashWatch {
 
   const failed = async (error: unknown) => {
     const { message, trace } = describeError(error);
-    // The same failure again and again is one.
+    // A storm of failures is logged a little: the same one again is one, and only so many a minute.
+    logged = logged.filter((at) => now() - at < 60_000);
+    if (logged.length >= LOGGED_PER_MINUTE) return;
     if (message === lastMessage && now() - lastMessageAt < SAME_MS) return;
     lastMessage = message;
     lastMessageAt = now();
+    logged.push(now());
     try {
       offer(await link.logPage({ message, trace, shape: currentShape(), doing: doingText() }));
     } catch (loggingFailed) {

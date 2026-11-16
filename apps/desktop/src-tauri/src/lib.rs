@@ -504,6 +504,7 @@ pub fn run() {
             // A window's page that loads again, as a reload does, watches what it needs itself.
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 watch::page_loaded(webview.app_handle(), webview.label());
+                crash::page_loaded(webview.app_handle(), webview.label());
             }
         })
         .on_window_event(|window, event| {

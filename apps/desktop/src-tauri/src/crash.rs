@@ -91,6 +91,8 @@ pub struct Problem {
 static FOLDER: OnceLock<PathBuf> = OnceLock::new();
 static APP: OnceLock<AppHandle> = OnceLock::new();
 static COUNTER: Mutex<u32> = Mutex::new(0);
+/// Held while `pending.json` is read and written, which a panic, the watchdog and the windows all do.
+static PENDING: Mutex<()> = Mutex::new(());
 
 /// What the host knows of each window's page, from its heartbeats.
 #[derive(Default)]
@@ -125,10 +127,24 @@ fn crash_folder(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Replaces the home folder in `text` with `~`, so that a report names no one.
 pub fn scrub(text: &str, home: Option<&str>) -> String {
-    match home {
-        Some(home) if home.len() > 1 => text.replace(home, "~"),
-        _ => text.to_owned(),
+    let Some(home) = home.filter(|home| home.len() > 1) else {
+        return text.to_owned();
+    };
+    // Only where the folder's name ends: /Users/ann is not /Users/annabel.
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(home) {
+        let after = &rest[at + home.len()..];
+        out.push_str(&rest[..at]);
+        let goes_on = after
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.');
+        out.push_str(if goes_on { home } else { "~" });
+        rest = after;
     }
+    out.push_str(rest);
+    out
 }
 
 fn cut(text: &str, most: usize) -> String {
@@ -184,6 +200,20 @@ fn macos_version() -> &'static str {
 
 /// What the app uses now, in kilobytes, as `ps` says.
 fn memory_kb() -> Option<u64> {
+    // A storm of errors asks for it again and again: the figure of the last few seconds will do.
+    static LAST: Mutex<Option<(Instant, Option<u64>)>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, kb)) = *last
+        && at.elapsed() < Duration::from_secs(5)
+    {
+        return kb;
+    }
+    let kb = memory_now();
+    *last = Some((Instant::now(), kb));
+    kb
+}
+
+fn memory_now() -> Option<u64> {
     let out = std::process::Command::new("ps")
         .args(["-o", "rss=", "-p", &std::process::id().to_string()])
         .output()
@@ -200,6 +230,19 @@ pub fn problem(
     shape: Option<Shape>,
     doing: Option<String>,
 ) -> Problem {
+    problem_with(kind, window, message, trace, shape, doing, true)
+}
+
+/// A failure; the panic hook's has no memory figure, which would start a program.
+fn problem_with(
+    kind: &str,
+    window: Option<&str>,
+    message: &str,
+    trace: &str,
+    shape: Option<Shape>,
+    doing: Option<String>,
+    with_memory: bool,
+) -> Problem {
     let home = std::env::var("HOME").ok();
     let seconds = now_seconds();
     let count = {
@@ -212,11 +255,11 @@ pub fn problem(
         kind: kind.to_owned(),
         at: iso(seconds),
         window: window.map(str::to_owned),
-        message: scrub(&cut(message, 2_000), home.as_deref()),
+        message: scrub(&cut(message, 300), home.as_deref()),
         trace: scrub(&cut(trace, 20_000), home.as_deref()),
         shape,
         doing: doing.map(|d| cut(&d, 300)),
-        memory_kb: memory_kb(),
+        memory_kb: if with_memory { memory_kb() } else { None },
         macos: macos_version().to_owned(),
         build: format!("{} ({})", env!("REDLINES_VERSION"), env!("REDLINES_BUILD")),
     }
@@ -269,6 +312,13 @@ fn append(folder: &Path, name: &str, text: &str) -> std::io::Result<()> {
     file.write_all(text.as_bytes())
 }
 
+/// Writes the file whole or not at all.
+fn write_pending(folder: &Path, pending: &[Problem]) -> std::io::Result<()> {
+    let temp = folder.join("pending.json.tmp");
+    fs::write(&temp, serde_json::to_string(pending).unwrap_or_default())?;
+    fs::rename(temp, folder.join("pending.json"))
+}
+
 fn read_pending(folder: &Path) -> Vec<Problem> {
     fs::read_to_string(folder.join("pending.json"))
         .ok()
@@ -279,17 +329,16 @@ fn read_pending(folder: &Path) -> Vec<Problem> {
 /// Logs a failure and keeps it for a window to offer.
 pub fn record(folder: &Path, p: &Problem) -> std::io::Result<()> {
     append(folder, "crash.log", &entry_text(p))?;
+    let _held = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     let mut pending = read_pending(folder);
     pending.push(p.clone());
     let from = pending.len().saturating_sub(PENDING_LIMIT);
-    fs::write(
-        folder.join("pending.json"),
-        serde_json::to_string(&pending[from..]).unwrap_or_default(),
-    )
+    write_pending(folder, &pending[from..])
 }
 
 /// The failures for `window` (and those for no window), which are then no longer pending.
 pub fn take_pending(folder: &Path, window: &str) -> Vec<Problem> {
+    let _held = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     let all = read_pending(folder);
     let (mine, rest): (Vec<_>, Vec<_>) = all
         .into_iter()
@@ -297,10 +346,7 @@ pub fn take_pending(folder: &Path, window: &str) -> Vec<Problem> {
     if rest.is_empty() {
         let _ = fs::remove_file(folder.join("pending.json"));
     } else {
-        let _ = fs::write(
-            folder.join("pending.json"),
-            serde_json::to_string(&rest).unwrap_or_default(),
-        );
+        let _ = write_pending(folder, &rest);
     }
     mine
 }
@@ -311,7 +357,11 @@ fn record_and_tell(p: &Problem) {
         eprintln!("Could not write the crash log: {error}");
     }
     if let Some(app) = APP.get() {
-        let _ = app.emit(EVENT, ());
+        // Not from where this is called, which may be a panic's hook or WebKit's callback.
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let _ = app.emit(EVENT, ());
+        });
     }
 }
 
@@ -333,13 +383,14 @@ fn install_panic_hook() {
             .map(|l| format!(" at {}:{}", l.file(), l.line()))
             .unwrap_or_default();
         let trace = std::backtrace::Backtrace::force_capture().to_string();
-        record_and_tell(&problem(
+        record_and_tell(&problem_with(
             PANIC,
             None,
             &format!("{message}{place}"),
             &trace,
             None,
             None,
+            false,
         ));
     }));
 }
@@ -455,12 +506,26 @@ fn watch(app: AppHandle) {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_secs(2));
+            let state = app.state::<Crashes>();
+            // Asking a window whether it has the focus waits for the main thread, which may be
+            // waiting for the lock: never ask while holding it.
+            let labels: Vec<String> = {
+                let inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+                inner.beats.keys().cloned().collect()
+            };
+            let focused: HashMap<String, bool> = labels
+                .into_iter()
+                .map(|label| {
+                    let has = app
+                        .get_webview_window(&label)
+                        .is_some_and(|w| w.is_focused().unwrap_or(false));
+                    (label, has)
+                })
+                .collect();
             let found = {
-                let state = app.state::<Crashes>();
                 let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
                 overdue(&mut inner.beats, Instant::now(), HANG_AFTER, |label| {
-                    app.get_webview_window(label)
-                        .is_some_and(|w| w.is_focused().unwrap_or(false))
+                    focused.get(label).copied().unwrap_or(false)
                 })
             };
             for (label, shape, doing) in found {
@@ -524,7 +589,7 @@ pub fn terminated<R: tauri::Runtime>(webview: &Webview<R>) {
 
 // ---- the page's commands ----
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn crash_log_page(
     window: WebviewWindow,
     message: String,
@@ -549,7 +614,7 @@ pub fn crash_log_page(
 }
 
 /// A timer of the page that ran late, for `slow.log`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn crash_slow(window: WebviewWindow, millis: u64, doing: Option<String>) {
     if let Some(folder) = folder() {
         let line = format!(
@@ -562,7 +627,7 @@ pub fn crash_slow(window: WebviewWindow, millis: u64, doing: Option<String>) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn crash_heartbeat(
     window: WebviewWindow,
     state: tauri::State<'_, Crashes>,
@@ -591,7 +656,7 @@ pub fn crash_heartbeat(
 }
 
 /// What failed and wasn't offered yet, for this window.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn crash_pending(window: WebviewWindow) -> Vec<Problem> {
     folder().map_or_else(Vec::new, |f| take_pending(f, window.label()))
 }
@@ -651,6 +716,17 @@ pub fn crash_simulate(window: WebviewWindow, kind: String) -> Result<(), String>
     Ok(())
 }
 
+/// A page starts loading, as after a reload: its silence until it beats is not a hang.
+pub fn page_loaded(app: &AppHandle, label: &str) {
+    let state = app.state::<Crashes>();
+    state
+        .inner
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .beats
+        .remove(label);
+}
+
 /// Window closed: its page is gone, not hung.
 pub fn window_closed(app: &AppHandle, label: &str) {
     let state = app.state::<Crashes>();
@@ -666,6 +742,8 @@ pub fn set_up(app: &AppHandle) {
     };
     let _ = FOLDER.set(folder.clone());
     let _ = APP.set(app.clone());
+    // Found now, not in a panic hook, which starts no program.
+    let _ = macos_version();
     install_panic_hook();
     previous_crashes(app, &folder);
     watch(app.clone());
@@ -708,6 +786,10 @@ mod tests {
             "at ~/code/x.rs:1"
         );
         assert_eq!(scrub("at /x.rs", Some("/")), "at /x.rs");
+        assert_eq!(
+            scrub("/Users/annabel/x /Users/ann/y", Some("/Users/ann")),
+            "/Users/annabel/x ~/y"
+        );
     }
 
     #[test]

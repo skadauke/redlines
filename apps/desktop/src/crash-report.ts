@@ -40,7 +40,7 @@ const MARKS = /<!--(?:ins|del|sub|fmt|hl|split) /g;
 const COMMENTS = /<!--cmt /g;
 const IMAGES = /!\[[^\]\n]*\]\(/g;
 // A table's delimiter row: dashes and colons between pipes, and nothing else.
-const TABLE_ROWS = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/gm;
+const TABLE_ROWS = /^[ \t]*(?:\|[ \t]*)?:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*(?:\|[ \t]*)?$/gm;
 
 const count = (text: string, pattern: RegExp) => text.match(pattern)?.length ?? 0;
 
@@ -119,6 +119,7 @@ function bodyOf(
   environment: Environment,
   shape: Shape | null,
   trace: string,
+  message: string,
 ): string {
   const lines = ['**What were you doing?**', '', '(Please say, in a line or two.)', ''];
   lines.push('**Details**', '');
@@ -134,10 +135,13 @@ function bodyOf(
   }
   if (shape) lines.push(`- Document (shape only, no text): ${shapeLine(shape)}`);
   if (problem) {
-    lines.push('', '**Message**', '', '```', problem.message, '```');
+    lines.push('', '**Message**', '', '```', message, '```');
     if (trace) lines.push('', '**Trace**', '', '```', trace, '```');
   }
-  lines.push('', '_Redlines left the document’s text out. The full log is in Help › Reveal Log._');
+  lines.push(
+    '',
+    '_Redlines left the document’s text out of this. Please read it over before you send it. The full log is in Help › Reveal Log._',
+  );
   return lines.join('\n');
 }
 
@@ -153,8 +157,9 @@ export function reportFor(
   const title = problem ? `Problem: ${KINDS[problem.kind]}` : 'Problem: ';
   const shown = problem?.shape ?? shape;
   let trace = problem?.trace ?? '';
+  let message = problem?.message ?? '';
   const make = () => {
-    const body = bodyOf(problem, environment, shown, trace);
+    const body = bodyOf(problem, environment, shown, trace, message);
     const url = `${ISSUES_URL}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
     return { title, body, url };
   };
@@ -163,6 +168,11 @@ export function reportFor(
     // The top of a trace says the most.
     trace = trace.slice(0, Math.floor(trace.length * 0.7)).replace(/\n[^\n]*$/, '') + '\n…';
     if (trace.length < 40) trace = '';
+    report = make();
+  }
+  // A message that is long on its own is cut too.
+  while (report.url.length > MAX_URL && message.length > 40) {
+    message = message.slice(0, Math.floor(message.length / 2)) + '…';
     report = make();
   }
   return report;
