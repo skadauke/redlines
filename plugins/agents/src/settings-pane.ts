@@ -31,6 +31,8 @@ export interface AgentsPaneSettings {
   defaultAgent?: string | null;
   /** The model chosen for each agent, by id (#530); an agent with none runs its default. */
   agentModels?: Record<string, string>;
+  /** Whether agents may use the web (#529): one switch for every agent. */
+  webAccess?: boolean;
 }
 
 /** An agent the person added, as the pane shows it. */
@@ -339,6 +341,27 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   const scopeExtras = el('div');
   scopeExtras.append(scopeNote, holdingBack);
   container.append(row('What agents may read', scope, scopeExtras));
+
+  // Web access (#529): one switch for every agent, off by default. Off, an agent that wants the web
+  // asks, and Allow Always turns this on.
+  const web = el('input');
+  web.type = 'checkbox';
+  web.setAttribute('aria-label', 'Let agents use the web');
+  web.checked = deps.settings().webAccess === true;
+  web.addEventListener('change', () => deps.update({ webAccess: web.checked }));
+  const webLabel = el('label', 'rl-pref-choice');
+  webLabel.append(web, ' Let agents use the web');
+  container.append(
+    row(
+      'Web access',
+      webLabel,
+      el(
+        'div',
+        'rl-pref-note',
+        'Lets Claude Code and Codex look things up and check sources. Off, they ask first: Allow Once, or Allow Always, which turns this on. An agent you added can’t use the web.',
+      ),
+    ),
+  );
 
   // The remembered answers: a row only while there are any.
   let remembered: HTMLElement | null = null;

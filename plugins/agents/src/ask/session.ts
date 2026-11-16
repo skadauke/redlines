@@ -63,6 +63,8 @@ export interface AskTurn {
   question: string;
   answer: string;
   agent: { id: string; name: string };
+  /** The agent used the web for this answer (#529): the bubble says so. */
+  web?: true;
 }
 
 export interface AskState {
@@ -430,8 +432,9 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
         }
         const event: AgentEvent = next.value;
         if (event.type === 'started') logPath = event.logPath;
-        else if (event.type === 'status') set({ line: running(agent, event.text) });
-        else if (event.type === 'error') {
+        else if (event.type === 'status' || event.type === 'web') {
+          set({ line: running(agent, event.text) });
+        } else if (event.type === 'error') {
           return fail(mine, agent, event.message, logPath, event.setup === true);
         } else {
           const answer = event.finalText?.trim() ?? '';
@@ -442,7 +445,12 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
           return finish(mine, {
             turns: [
               ...state.turns,
-              { question, answer, agent: { id: agent.id, name: agent.name } },
+              {
+                question,
+                answer,
+                agent: { id: agent.id, name: agent.name },
+                ...(event.web === true ? { web: true as const } : {}),
+              },
             ],
             line: null,
           });

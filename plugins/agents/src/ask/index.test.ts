@@ -562,6 +562,18 @@ describe('putting it away', () => {
     expect(bubble()).not.toBeNull();
   });
 
+  it('stays for a press on a notification, which can answer it (Allow Once, #529)', () => {
+    const { editor } = mount();
+    select(editor, 'first lien');
+    editor.commands.run('ask.start');
+    const card = document.body.appendChild(document.createElement('section'));
+    card.className = 'rl-notifications';
+    const button = card.appendChild(document.createElement('button'));
+    button.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    expect(bubble()).not.toBeNull();
+    card.remove();
+  });
+
   it('goes on Cancel', () => {
     const { editor } = mount();
     select(editor, 'first lien');

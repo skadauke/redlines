@@ -19,6 +19,8 @@ export interface NotificationAction {
 export interface NotificationOptions {
   text: string;
   action?: NotificationAction;
+  /** A second choice, before the action: Allow Once, with Allow Always as the action (#529). */
+  alternative?: NotificationAction;
   /** The dismiss button's word, such as "Later"; without one, the button is a cross. */
   dismissLabel?: string;
   /** Closes it after this many milliseconds; without it, it stays until it is handled. */
@@ -123,6 +125,11 @@ export function createNotifications(container: HTMLElement): Notifications {
       makeButton('rl-notification-close', null, dismiss);
     } else {
       makeButton('rl-notification-dismiss', dismissLabel, dismiss);
+    }
+    if (options.alternative) {
+      card.classList.add('rl-notification-wide');
+      const { alternative } = options;
+      makeButton('rl-notification-dismiss', alternative.label, () => alternative.run(notification));
     }
     if (action) makeButton('rl-notification-action', action.label, () => action.run(notification));
     if (!action && dismissLabel === undefined) card.classList.add('rl-notification-compact');

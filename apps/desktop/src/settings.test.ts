@@ -74,6 +74,7 @@ describe('settings', () => {
       agentHandles: {},
       defaultAgent: null,
       agentModels: {},
+      webAccess: false,
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
@@ -105,6 +106,7 @@ describe('settings', () => {
       agentHandles: { claude: 'ada' },
       defaultAgent: 'codex',
       agentModels: { claude: 'opus' },
+      webAccess: true,
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
@@ -707,5 +709,15 @@ describe('settings', () => {
     expect(loadSettings().agentModels).toEqual({ claude: 'opus' });
     localStorage.setItem(SETTINGS_KEY, '{"agentModels":[1]}');
     expect(loadSettings().agentModels).toEqual({});
+  });
+
+  it('keeps web access only when it is true, and off otherwise (#529)', () => {
+    expect(loadSettings().webAccess).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, '{"webAccess":true}');
+    expect(loadSettings().webAccess).toBe(true);
+    for (const bad of ['"yes"', '1', 'null']) {
+      localStorage.setItem(SETTINGS_KEY, `{"webAccess":${bad}}`);
+      expect(loadSettings().webAccess).toBe(false);
+    }
   });
 });

@@ -9,10 +9,12 @@ import type {
   AgentEvent,
   AgentInfo,
   AgentProvider,
+  AgentRequest,
   AgentState,
   HostAgents,
   HostRelay,
   McpEndpoint,
+  ToolLines,
 } from '@redlines/plugin-api';
 import { DEFAULT_HANDLES, displayName, handleOf } from './handles.ts';
 
@@ -46,6 +48,19 @@ export interface MacAgentsOptions {
    * request that names no model of its own (Ask's picker does) runs the one chosen here.
    */
   models?: () => Readonly<Record<string, string>>;
+  /**
+   * Whether Preferences' switch lets agents use the web (#529), asked at every run: one switch for
+   * every agent, off by default.
+   */
+  web?: () => boolean;
+  /**
+   * What the person says when an agent that may not use the web reaches for it: Allow Once (this
+   * run only), Allow Always (which turns the switch on, through `allowWeb`) or neither. Without
+   * it, the answer is no.
+   */
+  askWeb?: (agent: string, name: string, signal: AbortSignal) => Promise<'once' | 'always' | 'no'>;
+  /** Turns the switch on, for Allow Always. */
+  allowWeb?: () => void;
 }
 
 export function createMacAgents(
@@ -114,6 +129,56 @@ export function createMacAgents(
     },
 
     async *run(agent, asked, tools, signal): AsyncGenerator<AgentEvent> {
+      // The web (#529): the run is held to the switch. An agent that reaches for it with the switch
+      // off stops there, the person is asked, and the run starts again with the answer; asked
+      // once, a run that is turned down goes on without, and is not asked again.
+      let web = options.web?.() === true;
+      let turnedDown = false;
+      for (;;) {
+        const stop = new AbortController();
+        const forward = () => stop.abort();
+        if (signal.aborted) stop.abort();
+        signal.addEventListener('abort', forward, { once: true });
+        let wanted: string | undefined;
+        let used = false;
+        try {
+          for await (const event of runOnce(agent, { ...asked, web }, tools, stop.signal)) {
+            if (event.type === 'web') {
+              if (event.allowed) used = true;
+              else if (!web && !turnedDown) {
+                wanted = event.text;
+                stop.abort();
+                break;
+              }
+              yield { type: 'status', text: event.text };
+              continue;
+            }
+            yield event.type === 'done' && used ? { ...event, web: true } : event;
+            if (event.type === 'done' || event.type === 'error') return;
+          }
+        } finally {
+          signal.removeEventListener('abort', forward);
+        }
+        if (wanted === undefined || signal.aborted) return;
+        yield { type: 'status', text: 'Waiting for your answer' };
+        const name = current.find(({ id }) => id === agent)?.name ?? agent;
+        const answer = await (options.askWeb?.(agent, name, signal) ??
+          Promise.resolve('no' as const));
+        if (signal.aborted) return;
+        if (answer === 'always') options.allowWeb?.();
+        if (answer === 'no') turnedDown = true;
+        else web = true;
+      }
+    },
+  };
+  /** One start of an agent, held to what `asked.web` says. */
+  async function* runOnce(
+    agent: string,
+    asked: AgentRequest,
+    tools: ToolLines,
+    signal: AbortSignal,
+  ): AsyncGenerator<AgentEvent> {
+    {
       // An agent added since the last look is looked for once more.
       const find = (list: readonly AgentProvider[]) => list.find(({ id }) => id === agent);
       const provider = find(current) ?? (options.more ? find(await look()) : undefined);
@@ -165,7 +230,7 @@ export function createMacAgents(
       } finally {
         line.close();
       }
-    },
-  };
+    }
+  }
   return agents;
 }

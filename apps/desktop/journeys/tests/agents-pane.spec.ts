@@ -64,4 +64,64 @@ test.describe('the agents pane @views', () => {
     await chooser.selectOption('codex');
     await shot('agents-pane-default-agent');
   });
+
+  // Web access (#529): one switch for every agent, off by default. With it off, an agent that
+  // wants the web asks; Allow Always turns the switch on, and the Ask bubble says the web was used.
+  test('web access: the switch, the ask, and the bubble’s note', async ({ start }) => {
+    const j = await start({ doc: 'Hello world, this is a sentence.\n', tracking: false });
+    const prefs = await j.page.context().newPage();
+    await prefs.setViewportSize({ width: 900, height: 700 });
+    await prefs.goto('/preferences.html');
+    await prefs.emulateMedia({ colorScheme: j.options.scheme });
+    await prefs.getByRole('tab', { name: 'Agents' }).click();
+    const web = prefs.getByLabel('Let agents use the web');
+    await expect(web).not.toBeChecked();
+    await expect(prefs.locator('[data-row="Web access"]')).toContainText(
+      'Allow Once, or Allow Always',
+    );
+    await writeShot(prefs, j.info, shotName('agents-pane-web-off', j.options));
+
+    // Ask something that needs the web: the card asks first.
+    const ask = async (question: string) => {
+      await j.page.bringToFront();
+      await j.selectText('sentence');
+      await j.page.keyboard.press('Meta+Alt+a');
+      await j.page.keyboard.type(question);
+      await j.page.keyboard.press('Enter');
+    };
+    await ask('Is this on the web?');
+    const consent = j.page.getByRole('button', { name: 'Just This Document' });
+    if (await consent.isVisible({ timeout: 3000 }).catch(() => false)) await consent.click();
+    const card = j.page.locator('.rl-notification', { hasText: 'wants to use the web' });
+    await expect(card).toBeVisible();
+    await expect(card.getByRole('button')).toHaveText([
+      'Don’t Allow',
+      'Allow Once',
+      'Allow Always',
+    ]);
+    await j.shot('web-ask');
+
+    // Allow Once: the answer used the web, and the bubble says so; the switch stays off.
+    await card.getByRole('button', { name: 'Allow Once' }).click();
+    await expect(j.page.locator('.rl-qa-web')).toHaveText('Used the web for this answer.');
+    await j.shot('web-bubble-note');
+    await prefs.bringToFront();
+    await prefs.reload();
+    await prefs.getByRole('tab', { name: 'Agents' }).click();
+    await expect(prefs.getByLabel('Let agents use the web')).not.toBeChecked();
+
+    // Allow Always turns the switch on, and nothing asks again.
+    await j.page.keyboard.press('Escape');
+    await ask('And is that on the web too?');
+    await j.page
+      .locator('.rl-notification', { hasText: 'wants to use the web' })
+      .getByRole('button', { name: 'Allow Always' })
+      .click();
+    await expect(j.page.locator('.rl-qa-web')).toHaveText('Used the web for this answer.');
+    await prefs.bringToFront();
+    await prefs.reload();
+    await prefs.getByRole('tab', { name: 'Agents' }).click();
+    await expect(prefs.getByLabel('Let agents use the web')).toBeChecked();
+    await writeShot(prefs, j.info, shotName('agents-pane-web-on', j.options));
+  });
 });

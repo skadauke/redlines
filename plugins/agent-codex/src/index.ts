@@ -161,7 +161,8 @@ export function codexArgs(request: AgentRequest, tools: McpEndpoint, setup: Code
     `developer_instructions=${JSON.stringify(request.systemPrompt)}`,
     ...DISABLED_FEATURES.flatMap((feature) => ['--disable', feature]),
     '-c',
-    'web_search="disabled"',
+    // Codex has its own search, which a run may use only when the person allowed the web (#529).
+    request.web === true ? 'web_search="live"' : 'web_search="disabled"',
     // Skills, the person's own among them (Redlines' skill, installed from Preferences, is one),
     // are for a Codex run by hand: a run here acts through the toolbox, and a skill's file is
     // outside what it may read. Tested with `codex debug prompt-input`, which then lists none.
@@ -180,11 +181,22 @@ export interface CodexState {
   lastError?: string;
   /** What the run may read, to tell a refused read in it from a limit doing its work. */
   reach?: RunReach;
+  /** Whether the run may use the web (#529). */
+  web?: boolean;
+  /** Whether the agent used the web, for the note of the answer. */
+  usedWeb?: boolean;
 }
 
-export function newCodexState(reach?: RunReach): CodexState {
-  return reach === undefined ? {} : { reach };
+export function newCodexState(reach?: RunReach, web = false): CodexState {
+  return { ...(reach === undefined ? {} : { reach }), ...(web ? { web } : {}) };
 }
+
+/**
+ * A command that reaches for the web by its program's name. The search is off without the switch,
+ * so a run that wants the web can only try a command, which the profile holds back: seeing one is
+ * how the host knows to ask (#529).
+ */
+const WEB_COMMAND = /(?:^|[\s;&|(`'"/])(?:curl|wget)(?=[\s;&|)`'"]|$)/;
 
 /**
  * The files a command's output says it couldn't read: `cat: /path: Operation not permitted`, as the
@@ -246,7 +258,11 @@ export function parseCodexLine(line: string, state: CodexState): AgentEvent | nu
       return { type: 'status', text: 'Thinking…' };
     case 'turn.completed':
       // The last message can be empty (after a successful `reply`): then there is nothing to say.
-      return state.lastMessage ? { type: 'done', finalText: state.lastMessage } : { type: 'done' };
+      return {
+        type: 'done',
+        ...(state.lastMessage ? { finalText: state.lastMessage } : {}),
+        ...(state.usedWeb === true ? { web: true as const } : {}),
+      };
     case 'turn.failed': {
       const error = event.error;
       const message = isRecord(error) && typeof error.message === 'string' ? error.message : '';
@@ -278,7 +294,16 @@ export function parseCodexLine(line: string, state: CodexState): AgentEvent | nu
         }
         case 'collab_tool_call':
           return started ? { type: 'status', text: 'Asking a helper' } : null;
+        case 'web_search':
+          if (!started) return null;
+          state.usedWeb = true;
+          return { type: 'web', allowed: true, text: 'Searching the web' };
         case 'command_execution': {
+          if (started && state.web !== true && typeof item.command === 'string') {
+            if (WEB_COMMAND.test(item.command)) {
+              return { type: 'web', allowed: false, text: 'Reaching for the web' };
+            }
+          }
           if (started) return { type: 'status', text: 'Running a command' };
           // A command that couldn't read a file inside what the agent may read is news, and says
           // why if it can.
@@ -371,7 +396,7 @@ export function createCodexProvider(
             const programFolders = [...new Set([dirName(program), dirName(real)])];
             return codexArgs(asked, tools, { folder, programFolders });
           },
-          newState: () => newCodexState(reachOf(request)),
+          newState: () => newCodexState(reachOf(request), request.web === true),
           parse: parseCodexLine,
           failure: (state) =>
             state.lastError === undefined ? undefined : failureFrom(state.lastError),
