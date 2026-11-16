@@ -306,3 +306,99 @@ describe('the current-match hook', () => {
     ]);
   });
 });
+
+describe('review fixes', () => {
+  const para = (n: number) => `Paragraph ${n} has a cat in it.`;
+  const DOC = `${para(1)}\n\n${para(2)}\n\n${para(3)}\n`;
+
+  it('Find in Selection after a query was typed limits to the block the person selected', () => {
+    const editor = mount(DOC, { tracking: false });
+    search(editor, 'cat');
+    // The match is the selection now; the person selects two paragraphs, then types and steps.
+    selectRange(editor, 0, DOC.indexOf('Paragraph 3') - 1);
+    editor.commands.run('find.next');
+    expect(selected(editor)).toBe('cat');
+    bar(editor).press('Find in Selection');
+    expect(bar(editor).pressed('Find in Selection')).toBe(true);
+    expect(bar(editor).count).toMatch(/of 2$/);
+  });
+
+  it('seeding a phrase with Regular Expression on escapes it, and drops an old scope', () => {
+    const editor = mount('Use C++ or (foo) here, and C++ again.\n\nMore.\n', { tracking: false });
+    search(editor, 'x');
+    bar(editor).press('Regular Expression');
+    selectRange(editor, 4, 7);
+    editor.commands.run('find.open');
+    expect(bar(editor).query!.value).toBe('C\\+\\+');
+    expect(bar(editor).count).toMatch(/of 2$/);
+    expect(bar(editor).pressed('Find in Selection')).toBe(false);
+  });
+
+  it('a seeded phrase clears the scope from before', () => {
+    const editor = mount(`${DOC}`, { tracking: false });
+    selectRange(editor, 0, DOC.indexOf('Paragraph 2') + 3);
+    editor.commands.run('find.open');
+    expect(bar(editor).pressed('Find in Selection')).toBe(true);
+    closeBar(editor);
+    selectRange(editor, 0, 0);
+    selectRange(editor, DOC.indexOf('cat'), DOC.indexOf('cat') + 3);
+    editor.commands.run('find.open');
+    expect(bar(editor).query!.value).toBe('cat');
+    expect(bar(editor).pressed('Find in Selection')).toBe(false);
+    expect(bar(editor).count).toMatch(/of 3$/);
+  });
+
+  it('the scope follows edits made inside it', () => {
+    const editor = mount(DOC, { tracking: false });
+    selectRange(editor, 0, DOC.indexOf('Paragraph 2') + 3);
+    editor.commands.run('find.open');
+    editor.view.dispatch({ changes: { from: 3, insert: ' cat' } });
+    search(editor, 'cat');
+    expect(bar(editor).count).toBe('1 of 2');
+  });
+
+  it('Undo in the toast does nothing once the document has changed', () => {
+    const toasts: { action?: { run: () => void } }[] = [];
+    const editor = mount(
+      'cat, cat.\n\ncat.\n',
+      { tracking: false },
+      { toast: (toast) => toasts.push(toast) },
+    );
+    search(editor, 'cat');
+    editor.commands.run('find.replace');
+    bar(editor).replacement!.value = 'dog';
+    bar(editor).press('Replace All');
+    const first = toasts[0]!;
+    editor.view.dispatch({ changes: { from: 0, insert: 'x' } });
+    first.action?.run();
+    expect(editor.getDoc()).toBe('xdog, dog.\n\ndog.\n');
+  });
+
+  it('Replace All of adjacent matches under tracking makes the changes replacing by hand makes', () => {
+    const doc = 'catcatcat and cat.\n';
+    const byHand = mount(doc, { tracking: true });
+    search(byHand, 'cat');
+    byHand.commands.run('find.replace');
+    bar(byHand).replacement!.value = 'dog';
+    for (let i = 0; i < 4; i++) bar(byHand).press('Replace');
+    const all = mount(doc, { tracking: true });
+    search(all, 'cat');
+    all.commands.run('find.replace');
+    bar(all).replacement!.value = 'dog';
+    bar(all).press('Replace All');
+    expect(newestView(all.getDoc()).text).toBe('dogdogdog and dog.\n');
+    expect(all.getUiState().changes.length).toBe(byHand.getUiState().changes.length);
+    // The separate one at the end is a change of its own.
+    expect(all.getUiState().changes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('onCurrentMatch is called when typing selects a match, and closing leaves no DOM', () => {
+    const seen: number[] = [];
+    const editor = mount('a cat\n', {}, { onCurrentMatch: (m) => seen.push(m.from) });
+    search(editor, 'cat');
+    expect(seen).toEqual([2]);
+    closeBar(editor);
+    expect(editor.view.dom.querySelector('.rl-find-bar')).toBeNull();
+    expect(editor.view.dom.querySelector('.rl-find-match')).toBeNull();
+  });
+});

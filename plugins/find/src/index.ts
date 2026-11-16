@@ -7,6 +7,7 @@ import type { Plugin } from '@redlines/plugin-api';
 import { findBar, type FindHost } from './bar.ts';
 import {
   currentMatchHandlers,
+  escapeRegExp,
   findState,
   type Match,
   seedOf,
@@ -52,7 +53,14 @@ export function createFind(editor: Editor, options: FindPluginOptions = {}): () 
       effects: setFind.of({
         open: true,
         replace: replace || undefined,
-        ...(seed?.query !== undefined ? { query: seed.query } : {}),
+        // A phrase is searched for as it is written, even with Regular Expression on, and it
+        // replaces any scope from before; a scope is set, never left over.
+        ...(seed?.query !== undefined
+          ? {
+              query: findState(view.state).regex ? escapeRegExp(seed.query) : seed.query,
+              scope: null,
+            }
+          : {}),
         ...(seed?.scope ? { scope: seed.scope } : {}),
       }),
     });
@@ -100,7 +108,14 @@ export function createFind(editor: Editor, options: FindPluginOptions = {}): () 
       run: () => {
         const query = selectedText(view.state);
         if (!query) return false;
-        view.dispatch({ effects: setFind.of({ open: true, query }) });
+        const { regex } = findState(view.state);
+        view.dispatch({
+          effects: setFind.of({
+            open: true,
+            query: regex ? escapeRegExp(query) : query,
+            scope: null,
+          }),
+        });
         return true;
       },
     }),

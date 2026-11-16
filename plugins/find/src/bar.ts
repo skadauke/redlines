@@ -10,6 +10,7 @@
 
 import { type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { type EditorState } from '@codemirror/state';
 import { type Editor, undo } from '@redlines/editor';
 import {
   currentIndex,
@@ -133,6 +134,8 @@ class FindBar {
     one: HTMLButtonElement;
   };
   private wasOpen = false;
+  /** The last selection that was not a match: what Find in Selection limits to, once a match is current. */
+  private chosen: { from: number; to: number } | null = null;
 
   constructor(view: EditorView, editor: Editor, host: FindHost) {
     this.view = view;
@@ -143,6 +146,19 @@ class FindBar {
 
   update(update: ViewUpdate): void {
     const open = findState(update.state).open;
+    if (this.chosen && update.docChanged) {
+      this.chosen = {
+        from: update.changes.mapPos(this.chosen.from, -1),
+        to: update.changes.mapPos(this.chosen.to, 1),
+      };
+    }
+    // A selection a person made, not one find made by stepping or replacing.
+    if (
+      update.selectionSet &&
+      !update.transactions.some((tr) => tr.isUserEvent('select.find') || tr.isUserEvent('input'))
+    ) {
+      this.remember(update.state);
+    }
     if (open !== this.wasOpen) {
       if (open) this.show();
       else this.hide();
@@ -150,6 +166,14 @@ class FindBar {
       if (update.transactions.length) this.refresh();
       if (update.geometryChanged) this.place();
     }
+  }
+
+  /** Keeps the selection a person made, so that stepping to a match does not replace it. */
+  private remember(state: EditorState): void {
+    const { from, to } = state.selection.main;
+    const found = findState(state);
+    if (from === to || found.matches.some((m) => m.from === from && m.to === to)) return;
+    this.chosen = { from, to };
   }
 
   /** Puts the caret in the find box (or the replace box) with its text selected. */
@@ -182,9 +206,9 @@ class FindBar {
     if (findState(view.state).scope) {
       view.dispatch({ effects: setFind.of({ scope: null }) });
     } else {
-      const { from, to } = view.state.selection.main;
-      if (from === to) return;
-      view.dispatch({ effects: setFind.of({ scope: { from, to } }) });
+      const scope = this.chosen;
+      if (!scope) return;
+      view.dispatch({ effects: setFind.of({ scope: { ...scope } }) });
     }
     this.settleOnMatch();
   }
@@ -321,13 +345,15 @@ class FindBar {
       this.error.hidden = false;
     }
     if (!replaced) return;
+    const after = view.state.doc;
     host.toast?.({
       text: `Replaced ${replaced} ${replaced === 1 ? 'match' : 'matches'}.`,
       action: {
         label: 'Undo',
-        // Only while Replace All is still the last step: never some later edit.
+        // Only while the document is as this Replace All left it: never a later edit, or another
+        // Replace All.
         run: () => {
-          if (editor.getUiState().undo === 'Replace All') undo(view);
+          if (view.state.doc === after && editor.getUiState().undo === 'Replace All') undo(view);
         },
       },
     });

@@ -16,7 +16,7 @@ import {
   type TransactionSpec,
 } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { trackingField } from '@redlines/editor';
+import { joinsNewestStep, trackingField } from '@redlines/editor';
 import { newestView, parse } from '@redlines/format';
 
 /** A match, as positions in the document (CodeMirror's), which may span hidden markers. */
@@ -24,7 +24,9 @@ export interface Match {
   from: number;
   to: number;
   /** The groups of a regular expression's match, for `$1` in the replacement: whole match first. */
-  groups?: readonly string[];
+  groups?: readonly (string | undefined)[];
+  /** The named groups of a regular expression's match, for `$<name>`. */
+  named?: Readonly<Record<string, string | undefined>>;
 }
 
 /** The ways a search is narrowed, besides its text. */
@@ -64,20 +66,37 @@ export const setFind =
     Partial<Pick<FindState, 'open' | 'replace' | 'query' | 'scope' | keyof FindOptions>>
   >();
 
-const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const WORD = '[\\p{L}\\p{N}_]';
+export const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const plain: FindOptions = { matchCase: false, wholeWord: false, regex: false };
 
-/** The expression a query stands for, or null when it is a regular expression that is no good. */
+/** Matches that are made at most: a search with more is cut off. */
+export const MAX_MATCHES = 10_000;
+/** A regular expression is run over no more text than this (characters a reader sees). */
+const MAX_REGEX_TEXT = 2_000_000;
+/** A quantified group holding a quantifier, `(a+)+`: the shape that backtracks without end. */
+const RUNAWAY = /\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)[+*{]/;
+
+/**
+ * The expression a query stands for, or null when it is a regular expression that is no good, or
+ * of a shape that can hang the page (a quantified group holding a quantifier). Written with the
+ * `u` flag, which is exact about Unicode; a pattern that only a plain expression accepts, such as
+ * `\-`, is taken without it. `^` and `$` match at the ends of each line.
+ */
 export function expressionOf(query: string, options: FindOptions = plain): RegExp | null {
-  let source = options.regex ? query : escapeRegExp(query);
-  if (options.wholeWord) source = `(?<!${WORD})(?:${source})(?!${WORD})`;
-  try {
-    return new RegExp(source, options.matchCase ? 'gu' : 'giu');
-  } catch {
-    return null;
+  if (options.regex && RUNAWAY.test(query)) return null;
+  const flags = (options.matchCase ? 'g' : 'gi') + 'm';
+  for (const unicode of [true, false]) {
+    const word = unicode ? '[\\p{L}\\p{N}_]' : '[A-Za-z0-9_]';
+    let source = options.regex ? query : escapeRegExp(query);
+    if (options.wholeWord) source = `(?<!${word})(?:${source})(?!${word})`;
+    try {
+      return new RegExp(source, unicode ? `${flags}u` : flags);
+    } catch {
+      // Try again without `u`.
+    }
   }
+  return null;
 }
 
 /** What a tracked insertion, replacement or format change holds: no match is made there. */
@@ -106,6 +125,7 @@ export function searchDoc(
   const expression = expressionOf(query, { ...plain, ...options });
   if (!expression) return { matches: [], invalid: true };
   const { text, map } = newestView(doc);
+  if (options.regex && text.length > MAX_REGEX_TEXT) return { matches: [], invalid: true };
   const tracked = options.skipTracked ? trackedRanges(doc) : [];
   const { scope } = options;
   const matches: Match[] = [];
@@ -116,7 +136,14 @@ export function searchDoc(
     const to = map.toSource(found.index + found[0].length, -1);
     if (scope && (from < scope.from || to > scope.to)) continue;
     if (tracked.some((range) => from < range.to && to > range.from)) continue;
-    matches.push({ from, to, ...(options.regex ? { groups: [...found] } : {}) });
+    matches.push({
+      from,
+      to,
+      ...(options.regex
+        ? { groups: [...found], ...(found.groups ? { named: found.groups } : {}) }
+        : {}),
+    });
+    if (matches.length >= MAX_MATCHES) break;
   }
   return { matches, invalid: false };
 }
@@ -126,13 +153,25 @@ export function findMatches(doc: string, query: string): Match[] {
   return searchDoc(doc, query).matches;
 }
 
-/** The replacement for a match: with a regular expression, `$1`, `$&` and `$$` are filled in. */
+/**
+ * The replacement for a match. With a regular expression it reads `$&`, `$$`, `$1` to `$99` and
+ * `$<name>` as JavaScript's replace does: a group that took no part is empty, and a number with no
+ * such group stays as written (`$10` with nine groups is `$1` and a 0).
+ */
 export function replacementFor(match: Match, text: string): string {
-  const { groups } = match;
+  const { groups, named } = match;
   if (!groups) return text;
-  return text.replace(/\$(\$|&|\d{1,2})/g, (whole, what: string) =>
-    what === '$' ? '$' : what === '&' ? (groups[0] ?? '') : (groups[Number(what)] ?? whole),
-  );
+  const count = groups.length - 1;
+  return text.replace(/\$(\$|&|\d{1,2}|<[^>]*>)/g, (whole, what: string) => {
+    if (what === '$') return '$';
+    if (what === '&') return groups[0] ?? '';
+    if (what.startsWith('<')) return named ? (named[what.slice(1, -1)] ?? '') : whole;
+    const two = Number(what);
+    if (what.length === 2 && two >= 1 && two <= count) return groups[two] ?? '';
+    const one = Number(what[0]);
+    if (one >= 1 && one <= count) return (groups[one] ?? '') + what.slice(1);
+    return whole;
+  });
 }
 
 /** The index of the match the selection covers exactly, or -1. */
@@ -370,6 +409,24 @@ export function replaceAll(view: EditorView, text: string): { replaced: number; 
   const refused = matches.find((match) => !ok.includes(match));
   // Dispatched for the reason it gives, as a replacement one at a time would.
   if (refused) view.dispatch(replacing([refused], text));
-  if (ok.length) view.dispatch(replacing(ok, text, 'input.replace.all'));
+  if (ok.length) {
+    // One transaction for each match, last to first so that the places of the earlier ones hold,
+    // and one step to undo. A single transaction would join matches that touch (`catcat`) into
+    // one change; replaced by hand, each is its own.
+    let state = view.state;
+    const steps = [...ok].reverse().map((match, i, all) => {
+      const spec = replacing([match], text, 'input.replace.all');
+      const tr = state.update({
+        ...spec,
+        annotations: [
+          i === 0 ? isolateHistory.of('before') : joinsNewestStep.of(true),
+          ...(i === all.length - 1 ? [isolateHistory.of('after')] : []),
+        ],
+      });
+      state = tr.state;
+      return tr;
+    });
+    view.dispatch(steps);
+  }
   return { replaced: ok.length, left: matches.length - ok.length };
 }
