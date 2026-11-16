@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Where an inserted block goes, and Quote, Callout and Code Block with a selection (#555).
 import { forceParsing } from '@codemirror/language';
-import { newestView } from '@redlines/format';
+import { acceptAll, applyChanges, newestView, rejectAll } from '@redlines/format';
 import { createEditor, type Editor, undo } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from './index.ts';
@@ -152,7 +152,8 @@ describe.each([false, true])('with text selected (tracking %s)', (tracking) => {
     const { editor, notices } = mount(doc, tracking);
     select(editor, at(editor, 'Intro', 2), at(editor, '| 1', 4));
     expect(editor.commands.run('insert.quote')).toBe(true);
-    expect(notices).toEqual([]);
+    // Said, not refused: the block went below.
+    expect(notices).toEqual([expect.stringMatching(/put below it/)]);
     const text = seen(editor);
     expect(text).toContain('| a | b |');
     expect(text.indexOf('> Text')).toBeGreaterThan(text.indexOf('| 1 | 2 |'));
@@ -163,7 +164,7 @@ describe.each([false, true])('with text selected (tracking %s)', (tracking) => {
     const { editor, notices } = mount(doc, tracking);
     select(editor, at(editor, 'Intro', 2), at(editor, 'End', 1));
     expect(editor.commands.run('block.alert')).toBe(true);
-    expect(notices).toEqual([]);
+    expect(notices).toEqual([expect.stringMatching(/put below it/)]);
     expect(seen(editor)).toContain('![An image](a.png)');
     expect(seen(editor)).toContain('[!NOTE]');
   });
@@ -187,5 +188,23 @@ describe('the Quote of Insert', () => {
     select(editor, 2);
     editor.commands.run('block.quote');
     expect(editor.getDoc()).toBe('> One two.\n');
+  });
+});
+
+describe('a wrap with Track Changes on reads the same in every order of decisions', () => {
+  const DOC = 'Intro.\n\n# Head\n\n- one\n- two\n\nEnd.\n';
+  it.each(['insert.quote', 'block.alert'])('%s over a heading and a list', (id) => {
+    const { editor, notices } = mount(DOC, true);
+    select(editor, at(editor, 'Head', 1), at(editor, 'two', 2));
+    expect(editor.commands.run(id)).toBe(true);
+    expect(notices).toEqual([]);
+    const doc = editor.getDoc();
+    expect(editor.getParsed().marks.length).toBeGreaterThan(0);
+    // Accepting every change gives the wrapped blocks; rejecting every one, the document as it was.
+    const accepted = applyChanges(doc, acceptAll(doc));
+    const rejected = applyChanges(doc, rejectAll(doc));
+    const head = id === 'block.alert' ? '> [!NOTE]\n' : '';
+    expect(newestView(accepted).text).toContain(`${head}> # Head\n>\n> - one\n> - two`);
+    expect(newestView(rejected).text).toBe(DOC);
   });
 });

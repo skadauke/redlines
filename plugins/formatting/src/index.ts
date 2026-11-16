@@ -110,6 +110,9 @@ const reachesOut = (state: EditorState): boolean => {
   const { from, to, empty } = state.selection.main;
   return !empty && !tablesOf(state).some((table) => from >= table.from && to <= table.to);
 };
+/** Said where a selection can't be wrapped and the block goes below it instead (not a refusal). */
+const NOT_WRAPPED =
+  'The selection holds a table, an image or changes that are pending, so the block was put below it.';
 /** What Quote writes where it inserts one: a body whose text is selected, as Alert's is. */
 const QUOTE = '> Text';
 const QUOTE_BODY = 'Text';
@@ -734,7 +737,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   const quoteBlock = (): boolean => {
     if (!editable()) return false;
     if (view.state.selection.main.empty || wrapRange() === null) {
-      return insertBlock(QUOTE, '> ', 2, QUOTE_BODY.length, true, insertAt());
+      return insertBlock(QUOTE, '> ', 2, QUOTE_BODY.length, true, insertAt(true));
     }
     return wrapped('');
   };
@@ -748,16 +751,20 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         ALERT.length - ALERT_BODY.length,
         ALERT_BODY.length,
         true,
-        insertAt(),
+        insertAt(true),
       );
     }
     return wrapped('> [!NOTE]');
   };
 
   /** Where a block that can't wrap the selection goes by: the caret, or the selection's end. */
-  const insertAt = (): number => {
-    const { head, to, empty } = view.state.selection.main;
-    return empty ? head : to;
+  const insertAt = (unwrapped = false): number => {
+    const { head, from, to, empty } = view.state.selection.main;
+    if (empty) return head;
+    // The selection is of text that can't be wrapped: say where the block went instead.
+    if (unwrapped) notice(NOT_WRAPPED);
+    // A selection that ends at the start of a line ends in the block before it.
+    return to > from && to === view.state.doc.lineAt(to).from ? to - 1 : to;
   };
 
   const codeBlock = (): boolean => {
@@ -782,7 +789,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     }
     if (inserting) {
       if (!editable()) return false;
-      return insertBlock('```\n\n```', '```\n', 4, 0, true, insertAt());
+      return insertBlock('```\n\n```', '```\n', 4, 0, true, insertAt(!empty));
     }
     let first = doc.lineAt(from);
     let last = doc.lineAt(to);
