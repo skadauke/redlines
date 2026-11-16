@@ -12,6 +12,7 @@ import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import {
   type ImageAlign,
   IMAGE_NODES,
+  imageAt,
   imageOfNode,
   noticeFacet,
   setImageLook,
@@ -429,8 +430,21 @@ function localPathOf(state: EditorState, node: SyntaxNode): string | null {
   return source.kind === 'local' ? source.path : null;
 }
 
+/** The `Image` node whose attribute block ends at `pos`, or null. */
+function imageAtEnd(state: EditorState, pos: number): SyntaxNode | null {
+  const image = imageAt(state, pos);
+  if (image === null || image.to !== pos || image.form !== 'markdown' || image.block === null) {
+    return null;
+  }
+  const node = syntaxTree(state).resolveInner(image.from, 1);
+  return node.name === 'Image' ? node : null;
+}
+
 /** The image node, a `![]()` or an `<img>`, that holds or touches `pos`, or null. */
 function imageNodeAt(state: EditorState, pos: number): SyntaxNode | null {
+  // A caret after a pandoc image's attribute block is beside the image, as one after `)` is.
+  const ended = imageAtEnd(state, pos);
+  if (ended !== null) return ended;
   for (const side of [1, -1] as const) {
     for (
       let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);

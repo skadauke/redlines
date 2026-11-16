@@ -239,6 +239,8 @@ export const IMAGE_NODES = new Set(['Image', 'HTMLTag', 'HTMLBlock']);
 
 /** The image whose text holds or touches `pos`, or null. */
 export function imageAt(state: EditorState, pos: number): ImageElement | null {
+  const ended = imageEndingAt(state, pos);
+  if (ended !== null) return ended;
   for (const side of [1, -1] as const) {
     for (
       let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);
@@ -251,6 +253,16 @@ export function imageAt(state: EditorState, pos: number): ImageElement | null {
     }
   }
   return null;
+}
+
+/** The image whose text, a pandoc attribute block included, ends at `pos`: a caret after its `}`. */
+function imageEndingAt(state: EditorState, pos: number): ImageElement | null {
+  if (state.facet(dialectFacet) !== 'pandoc' || state.sliceDoc(pos - 1, pos) !== '}') return null;
+  const line = state.doc.lineAt(pos);
+  const open = state.sliceDoc(line.from, pos).lastIndexOf('{');
+  if (open === -1) return null;
+  const image = imageAt(state, line.from + open - 1);
+  return image !== null && image.to === pos ? image : null;
 }
 
 /** The image under the caret, or the first in the selection. */

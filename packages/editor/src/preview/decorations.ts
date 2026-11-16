@@ -22,7 +22,7 @@ import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
-import { imageOfNode } from '../image-size.ts';
+import { dialectFacet, imageOfNode } from '../image-size.ts';
 import { htmlBreak, htmlChip, htmlElement, htmlWbr } from './html-draw.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
@@ -722,7 +722,9 @@ function updatePreview(value: Preview, tr: Transaction): Preview {
     openBlock(tr.startState) !== null ||
     state.field(viewModeField, false) !== tr.startState.field(viewModeField, false) ||
     // The names of emoji that a host gave, or took away, after the text was drawn.
-    state.facet(emojiLookup) !== tr.startState.facet(emojiLookup);
+    state.facet(emojiLookup) !== tr.startState.facet(emojiLookup) ||
+    // A rename to another dialect reads an image's attribute block, or stops reading it.
+    state.facet(dialectFacet) !== tr.startState.facet(dialectFacet);
   const tree = syntaxTree(state);
   // A selection set, even to where it was, ends what a paste has just added (`freshlyAdded`).
   const moved = selectionMoved(tr) || tr.selection !== undefined;

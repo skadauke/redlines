@@ -270,6 +270,9 @@ function normalizeLabel(label: string): string {
   return label.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** A pandoc attribute block: `{`, no brace, angle bracket or line break, `}` (§3.5). */
+const ATTRIBUTE_BLOCK = /\{[^{}<>\r\n]*\}/y;
+
 /** Everything in the paragraph that takes no marker inside it. `v` is its visible text. */
 export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } {
   const { masked: w, code } = maskCode(v);
@@ -360,7 +363,8 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
       if (end === -1) continue;
       if (open > 0 && w[open - 1] === '!' && !isEscaped(w, open - 1)) {
         // A pandoc attribute block right after it, `{width=50%}`, is part of the image (§3.5).
-        const block = /^\{[^{}<>\r\n]*\}/.exec(w.slice(end + 1, end + 1 + 400))?.[0].length ?? 0;
+        ATTRIBUTE_BLOCK.lastIndex = end + 1;
+        const block = ATTRIBUTE_BLOCK.exec(w)?.[0].length ?? 0;
         hits.push({
           lo: open,
           hi: block === 0 ? end : end + block,

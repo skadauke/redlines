@@ -152,6 +152,18 @@ describe('an image in a .md file', () => {
     expect(imageInSelection(view.state)).toMatchObject({ to: 17, widthText: null, width: null });
   });
 
+  it('finds the image from a caret just after its block, and redraws at a rename', () => {
+    const editor = load('![A cat](a.png){width=40px}\n', 'gfm');
+    editor.setKind('markdown', 'pandoc');
+    editor.view.dispatch({ selection: { anchor: 27 } });
+    expect(imageInSelection(editor.view.state)).toMatchObject({ from: 0, to: 27, width: 40 });
+    const ranges: [number, number][] = [];
+    previewDecorations(editor.view.state).between(0, 27, (from, to, value) => {
+      if ((value.spec as { imageAtom?: true }).imageAtom) ranges.push([from, to]);
+    });
+    expect(ranges).toEqual([[0, 27]]);
+  });
+
   it('takes a dialect change, as a rename to .qmd does', () => {
     const editor = load('![A cat](a.png)\n', 'gfm');
     editor.setKind('markdown', 'pandoc');
