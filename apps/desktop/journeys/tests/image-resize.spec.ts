@@ -47,8 +47,13 @@ async function save(page: Page, path: string, color: string, width: number, heig
 const width = (image: Locator) => image.evaluate((img) => img.getBoundingClientRect().width);
 
 /** A document with the picture, the caret away from it so that it is drawn, ready to resize. */
-async function open(start: Start, tracking: boolean, doc = DOC) {
-  const j = await start({ tracking: false, view: 'redlines' });
+async function open(
+  start: Start,
+  tracking: boolean,
+  doc = DOC,
+  scheme: 'light' | 'dark' = 'light',
+) {
+  const j = await start({ tracking: false, view: 'redlines', scheme });
   // The picture is 400 px wide as it is drawn at any text size (a width is in px at 100%).
   const scale = j.options.textSize;
   await save(j.page, 'red.png', '#c0392b', 400 / scale, 200 / scale);
@@ -76,30 +81,59 @@ async function drag(j: Journey, side: 'left' | 'right', dx: number) {
 }
 
 test.describe('resizing an image @blocks', () => {
-  test('the handles show on the two edges while the pointer is over the image', async ({
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`the handles show just outside the two edges while the pointer is over the image (${scheme})`, async ({
+      start,
+    }) => {
+      const { j, image } = await open(start, false, DOC, scheme);
+      const handles = j.page.locator('.rl-image-handle');
+      await expect(handles).toHaveCount(2);
+      // Away from the image they are drawn but not shown.
+      await j.page.mouse.move(2, 2);
+      for (const handle of await handles.all()) await expect(handle).toHaveCSS('opacity', '0');
+      await j.shot(`image-resize-at-rest-${scheme}`);
+      await image.hover();
+      for (const handle of await handles.all()) await expect(handle).toHaveCSS('opacity', '1');
+      // Beside the image's own left and right edges, and nowhere else: never over the picture (#676).
+      const [box, left, right] = await Promise.all([
+        image.boundingBox(),
+        j.page.locator('.rl-image-handle-left').boundingBox(),
+        j.page.locator('.rl-image-handle-right').boundingBox(),
+      ]);
+      expect(
+        Math.abs(left!.x + left!.width - box!.x),
+        'the left handle ends at the left edge',
+      ).toBeLessThan(2);
+      expect(
+        Math.abs(right!.x - (box!.x + box!.width)),
+        'the right handle starts at the right edge',
+      ).toBeLessThan(2);
+      expect(left!.width, 'wide enough to grab').toBeGreaterThanOrEqual(12);
+      await j.shot(`image-resize-hover-${scheme}`);
+    });
+  }
+
+  test('an image as wide as the column has its handles in the margin, where they can be grabbed', async ({
     start,
   }) => {
-    const { j, image } = await open(start, false);
-    const handles = j.page.locator('.rl-image-handle');
-    await expect(handles).toHaveCount(2);
-    // Away from the image they are drawn but not shown.
-    await j.page.mouse.move(2, 2);
-    for (const handle of await handles.all()) await expect(handle).toHaveCSS('opacity', '0');
-    await j.shot('image-resize-at-rest');
+    const j = await start({ tracking: false, view: 'redlines' });
+    await save(j.page, 'red.png', '#c0392b', 1600, 300);
+    await j.page.evaluate((text) => window.__redlines!.editor.setDoc(text), DOC);
+    await j.caretAtEnd();
+    const image = j.page.locator('.rl-image img');
+    await expect.poll(() => width(image)).toBeGreaterThan(600);
     await image.hover();
-    for (const handle of await handles.all()) await expect(handle).toHaveCSS('opacity', '1');
-    // On the image's own left and right edges, and nowhere else.
-    const [box, left, right] = await Promise.all([
-      image.boundingBox(),
-      j.page.locator('.rl-image-handle-left').boundingBox(),
-      j.page.locator('.rl-image-handle-right').boundingBox(),
-    ]);
-    expect(Math.abs(left!.x - box!.x), 'the left handle is on the left edge').toBeLessThan(2);
-    expect(
-      Math.abs(right!.x + right!.width - (box!.x + box!.width)),
-      'the right handle is on the right edge',
-    ).toBeLessThan(2);
-    await j.shot('image-resize-hover');
+    for (const side of ['left', 'right'] as const) {
+      const box = (await j.page.locator(`.rl-image-handle-${side}`).boundingBox())!;
+      const top = await j.page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.className ?? '',
+        { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+      );
+      expect(top, `the ${side} handle is what is under the pointer on it`).toContain(
+        'rl-image-handle',
+      );
+    }
+    await j.shot('image-resize-full-column');
   });
 
   test('a drag resizes the image, the size is in the file, and one Undo takes it back', async ({

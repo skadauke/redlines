@@ -232,7 +232,8 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-image-own img': { display: 'block', margin: '0', verticalAlign: 'top' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
   // Resize handles (#526): on the left and right edges only, while the pointer is over the image.
-  // Each is a strip along its edge, wide enough to grab, with a light pill that shows on any picture.
+  // Each is a strip along its edge, wide enough to grab, just outside it (#676) so that it never covers
+  // the picture, with a light pill that shows on any background.
   '.rl-image-handle': {
     position: 'absolute',
     top: '0',
@@ -246,8 +247,8 @@ export const baseThemeSpec: ThemeSpec = {
     touchAction: 'none',
     userSelect: 'none',
   },
-  '.rl-image-handle-left': { left: '0' },
-  '.rl-image-handle-right': { right: '0' },
+  '.rl-image-handle-left': { right: '100%' },
+  '.rl-image-handle-right': { left: '100%' },
   '.rl-image-handle::before': {
     content: '""',
     width: '6px',
