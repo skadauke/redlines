@@ -454,7 +454,7 @@ pub mod test_support {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::Mutex;
     use std::sync::mpsc;
     use std::time::Duration;
@@ -464,12 +464,15 @@ mod tests {
     use super::test_support::TempFolder;
     use super::*;
 
-    /// Programs with `claude` in a known place, as a link to `target`.
+    /// Programs with `claude` in a known place, as a script that runs `target`. Not a link: a
+    /// multicall binary (uutils' coreutils, on Ubuntu 26.04) picks its utility by the name it was
+    /// started as, and refuses `claude`.
     fn programs_with_claude(temp: &Path, target: &str) -> (Programs, String) {
         let known = temp.join("known");
         std::fs::create_dir_all(&known).unwrap();
         let claude = known.join("claude");
-        symlink(target, &claude).unwrap();
+        std::fs::write(&claude, format!("#!/bin/sh\nexec '{target}' \"$@\"\n")).unwrap();
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
         let environment = vec![(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))];
         let programs = Programs::new(
             vec![known],
