@@ -8,9 +8,25 @@
 // pasteboard, a paste of a range lands in the cells and adds the rows and columns it needs, deleted, inserted and
 // moved rows and columns are drawn (ghosts lined up to the pixel, tints, double marks, bars in Simple),
 // the grips, the + and the dragging of rows and columns work, an alignment change is drawn, carded and
-// made from the menu and the grip, and a keystroke in a 300-row
+// made, with Track Changes off and on, from the menu and the grip (the point mark that ends the header's
+// last cell, which Redlines writes, and the span around the table, which another tool wrote), a table
+// deleted whole is a ghost table (its columns lined up, the rows past eight folded into one line, not
+// editable, carded), a row with fewer cells than the header is
+// drawn with empty cells after its last and typing in one writes its pipes first, a row with more draws
+// none beyond the header's and no key puts the caret in one, an empty cell holds a filler of its own
+// whatever its padding and its row is as tall as a row of text, the caret can stand in an empty cell
+// with one space of padding or none (Tab, the arrows, a press and typing reach it), Delete Table and a
+// second ⌫ delete the emptied rows, columns and table, and a keystroke in a 300-row
 // table stays within the budget. Serve the page with `VITE_TABLE_CHECK=1 pnpm dev` (or
 // `pnpm tauri dev`, for WKWebView) and open it in WebKit: it reads nothing in a release build.
+//
+// The checks of Stage 4 (the ghost table, the cells a row lacks, the empty cell's filler, the second
+// ⌫) were first run in Chromium, the built-in browser's engine, which is not WKWebView: what they
+// measure there (the hit test, the layout of the cells, `user-select`, typing by `execCommand`) is
+// Chromium's until the sweep runs the file in WKWebView, and each says where the engine could differ. So
+// are those of the tracked alignment (#281: the point mark written, drawn, carded and undone, and drawn
+// as in a padded header when the header has no last pipe): the computed alignment, the rows' heights, the
+// cells' edges, the underline's style, the card's hit test and the typing are Chromium's, and each says so.
 //
 // Each check loads its document and does what a person does, and reports one console line,
 // `TABLE-CHECK <name> pass` or `TABLE-CHECK <name> FAIL <json>`, then
@@ -248,6 +264,15 @@ const painted = (el: Element) => {
   return color !== '' && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)';
 };
 
+/**
+ * Whether a selected cell is tinted: the selection's color is a gradient on the cell, from one
+ * column line to the next (78ac64b7, #673), so its background color stays transparent.
+ */
+const selectionPainted = (el: Element) => {
+  const { backgroundImage } = getComputedStyle(el);
+  return painted(el) || (backgroundImage !== '' && backgroundImage !== 'none');
+};
+
 /** An input method's events in WebKit's order, with the changes it makes between them. */
 function compose(editor: Editor, steps: string[], commit: string): void {
   const fire = (type: string, data = '') => {
@@ -308,6 +333,15 @@ function hover(editor: Editor, x: number, y: number): void {
   );
 }
 
+/**
+ * A right-click on a grip, which opens its menu: a click on a grip only selects its row or column
+ * (5e885b9f), so the menu comes from the `contextmenu` event, as the grip listens for it.
+ */
+function openGripMenu(grip: HTMLElement): void {
+  const box = grip.getBoundingClientRect();
+  mouse(grip, 'contextmenu', box.left + 3, box.top + 3, { button: 2, buttons: 2 });
+}
+
 /** A mouse event at a point, on `target` (or the element there). */
 function mouse(target: EventTarget, type: string, x: number, y: number, init: MouseEventInit = {}) {
   target.dispatchEvent(
@@ -344,9 +378,32 @@ async function gripOf(editor: Editor, row: number): Promise<HTMLElement | null> 
 /** A document with the table and a ledger, for the row checks: Track Changes decides what it writes. */
 const ROWS = GRID.replace('| Plums | 4 | a\\|b<br>x |', '| Plums | 4 | ok |');
 
-/** A table whose Count column was centered by someone else (the old delimiter row kept in the change),
- * with its ledger. */
+/** A table whose Count column was centered by someone else, as Redlines writes it (format §3.7, #281): one
+ * mark with no closer ends the header's last cell, and keeps the old delimiter row. With its ledger. */
 const WITH_ALIGN = [
+  'Intro paragraph.',
+  '',
+  '| Fruit | Count<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|--> |',
+  '| ----- | :---: |',
+  '| Apples | 3 |',
+  '| Plums | 4 |',
+  '',
+  'Below.',
+  '',
+  '<!-- redlines',
+  'version: 1',
+  'people:',
+  '  bo: {name: Bo Chen}',
+  'marks:',
+  '  k3x9: {by: bo, at: 2026-11-01T10:00Z}',
+  '-->',
+  '',
+].join('\n');
+
+/** The same change as another tool writes it, which Redlines reads and no longer writes: the opener on the
+ * line above the table and the closer below it, with the old delimiter row kept in the change and a
+ * ledger. */
+const WITH_ALIGN_SPAN = [
   'Intro paragraph.',
   '',
   '<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|-->',
@@ -369,6 +426,51 @@ const WITH_ALIGN = [
   '-->',
   '',
 ].join('\n');
+
+/**
+ * The point form of `WITH_ALIGN`'s table where the mark is the line's end, because the header has no
+ * closing pipe or none of its pipes at the edges: the header, the delimiter row and the rows are `header`,
+ * `delimiter` and `rows`, with a ledger.
+ */
+const alignEnd = (header: string, delimiter: string, rows: string[]): string =>
+  [
+    'Intro paragraph.',
+    '',
+    header,
+    delimiter,
+    ...rows,
+    '',
+    'Below.',
+    '',
+    '<!-- redlines',
+    'version: 1',
+    'people:',
+    '  bo: {name: Bo Chen}',
+    'marks:',
+    '  k3x9: {by: bo, at: 2026-11-01T10:00Z}',
+    '-->',
+    '',
+  ].join('\n');
+
+/** The point form where the header has no closing pipe, where no row has a pipe at its edges, and where
+ * spaces follow the mark: the mark is the line's end, and the spaces stay after it. */
+const ALIGN_ENDS: Record<string, string> = {
+  'no-closing-pipe': alignEnd(
+    '| Fruit | Count<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\x2d-->',
+    '| ----- | :---:',
+    ['| Apples | 3', '| Plums | 4'],
+  ),
+  'no-pipes-at-the-edges': alignEnd(
+    'Fruit | Count<!--fmt k3x9 align=-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\x2d-->',
+    '----- | :---:',
+    ['Apples | 3', 'Plums | 4'],
+  ),
+  'spaces-after-the-mark': alignEnd(
+    'Fruit | Count<!--fmt k3x9 align=-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\x2d-->   ',
+    '----- | :---:',
+    ['Apples | 3', 'Plums | 4'],
+  ),
+};
 
 /** The computed text alignment of each cell of column `col`, row by row. */
 const alignedAs = (editor: Editor, col: number): string[] =>
@@ -403,19 +505,23 @@ const ghostCols = (editor: Editor): HTMLElement[] => [
   ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl .rl-ghost-col'),
 ];
 
+/** How far the cells of each row of a grid are from the cells of its first row, left edge by left
+ * edge, in px: the columns must line up in every row, which must have as many cells as the first. */
+function gridOff(grid: HTMLElement[][]): { cells: number[]; off: number } {
+  const lefts = grid.map((row) => row.map((cell) => cell.getBoundingClientRect().left));
+  const first = lefts[0] ?? [];
+  let off = 0;
+  for (const row of lefts) {
+    if (row.length !== first.length) return { cells: lefts.map((r) => r.length), off: Infinity };
+    row.forEach((left, i) => (off = Math.max(off, Math.abs(left - (first[i] ?? 0)))));
+  }
+  return { cells: lefts.map((r) => r.length), off };
+}
+
 /** How far the cells of each row are from the cells of the first row, left edge by left edge, in px:
  * ghosts and all, the columns must line up in every row. */
 function linedUp(editor: Editor): { cells: number[]; off: number } {
-  const grid = cellElements(editor).map((row) =>
-    row.map((cell) => cell.getBoundingClientRect().left),
-  );
-  const first = grid[0] ?? [];
-  let off = 0;
-  for (const row of grid) {
-    if (row.length !== first.length) return { cells: grid.map((r) => r.length), off: Infinity };
-    row.forEach((left, i) => (off = Math.max(off, Math.abs(left - (first[i] ?? 0)))));
-  }
-  return { cells: grid.map((r) => r.length), off };
+  return gridOff(cellElements(editor));
 }
 
 /** Puts the pointer on column `col` of the header and returns the column grip that then shows. */
@@ -431,6 +537,211 @@ async function colGripOf(editor: Editor, col: number): Promise<HTMLElement | nul
 /** The header's real cells, left to right: ghosts are no column of the document. */
 const headerCells = (editor: Editor): HTMLElement[] =>
   (cellElements(editor)[0] ?? []).filter((cell) => cell.dataset['col'] !== undefined);
+
+/** What the page's notice line says now, or null when it shows nothing. */
+const shownNotice = (): string | null => {
+  const box = document.querySelector<HTMLElement>('.rl-notice');
+  return box && !box.hidden ? (box.textContent ?? '').trim() : null;
+};
+
+/** Waits for a passing notice to give the line back (they show for 2.4 s), so that one shown next is new. */
+async function noticeClears(): Promise<void> {
+  for (let tries = 0; tries < 40 && shownNotice() !== null; tries++)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/** A press of the primary button on `target`, as a click makes it (down, then up at the same place), and
+ * the card that opens over it, or null. */
+async function cardOver(editor: Editor, target: HTMLElement): Promise<HTMLElement | null> {
+  const box = await reveal(target);
+  const x = box.left + box.width / 2;
+  const y = box.top + box.height / 2;
+  mouse(target, 'mousedown', x, y);
+  mouse(window, 'mouseup', x, y);
+  await frames();
+  await frames();
+  return editor.view.dom.ownerDocument.querySelector<HTMLElement>('.rl-card');
+}
+
+/** What the page draws of the table now: each cell's text, alignment and box, the bars on the rows, the
+ * dotted underlines, and whether a marker shows. */
+function shapeOf(editor: Editor) {
+  const grid = cellElements(editor);
+  return {
+    texts: gridTexts(grid),
+    aligns: grid.map((row) => row.map((cell) => getComputedStyle(cell).textAlign)),
+    boxes: grid.flatMap((row) =>
+      row.flatMap((cell) => {
+        const box = cell.getBoundingClientRect();
+        return [box.left, box.top, box.width, box.height];
+      }),
+    ),
+    bars: lineElements(editor).map((line) => line.classList.contains('rl-bar')),
+    underlined: [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')].map(
+      (el) => el.textContent,
+    ),
+    marker: /<!--|align=/.test(editor.view.contentDOM.textContent ?? ''),
+    lined: linedUp(editor),
+  };
+}
+
+/** How the shape of a table differs from the one it should have: the texts, alignments, bars and
+ * underlines as they are, the boxes to within half a pixel; or null where it does not. */
+function shapeDiff(want: ReturnType<typeof shapeOf>, shape: ReturnType<typeof shapeOf>) {
+  const out: Record<string, unknown> = {};
+  for (const key of ['texts', 'aligns', 'bars', 'underlined', 'marker'] as const) {
+    if (!same(want[key], shape[key])) out[key] = { want: want[key], got: shape[key] };
+  }
+  if (
+    want.boxes.length !== shape.boxes.length ||
+    shape.boxes.some((n, i) => !(Math.abs(n - (want.boxes[i] ?? NaN)) <= 0.5))
+  )
+    out['boxes'] = { want: want.boxes.map(Math.round), got: shape.boxes.map(Math.round) };
+  if (!(shape.lined.off <= 0.5)) out['lines-up'] = shape.lined;
+  return Object.keys(out).length ? out : null;
+}
+
+/** A table of `rows` rows, the header's and the body's, in three columns whose cells differ in length
+ * from row to row, so that lining them up is the browser's work: a layout that gave each row its own
+ * widths would show. */
+function fruitTable(rows: number): string {
+  const body = Array.from({ length: rows - 1 }, (_, n) => {
+    if (n % 3 === 0) return `| Apples ${n + 1} | 3 | short |`;
+    if (n % 3 === 1) return '| A fruit with a long name | 1234567 | x |';
+    return '| Pear | 12 | a note that runs on a good while |';
+  });
+  return ['| Fruit | Count | Note |', '| ----- | ----- | ---- |', ...body].join('\n');
+}
+
+/** A document with `source` between two paragraphs. */
+const around = (source: string): string => `Intro paragraph.\n\n${source}\n\nBelow.`;
+
+/** The ghost tables the page draws: a table deleted whole, in Redlines (`ghost-table.ts`). */
+const ghostTables = (editor: Editor): HTMLElement[] => [
+  ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-ghost-table'),
+];
+
+/** The rows of a ghost table that are drawn, and the cells of each, as the page has them. */
+const ghostGrid = (ghost: HTMLElement): HTMLElement[][] =>
+  [...ghost.querySelectorAll<HTMLElement>('.rl-ghost-row')].map((row) => [
+    ...row.querySelectorAll<HTMLElement>(':scope > .rl-tc'),
+  ]);
+
+/** What a ghost table says of its size, as it carries it: the columns, the rows, and those not drawn. */
+const ghostData = (ghost: HTMLElement) => ({
+  columns: ghost.dataset['columns'],
+  rows: ghost.dataset['rows'],
+  more: ghost.dataset['more'],
+});
+
+/** The text of each row of a grid as a person reads it, the cells apart by `|` (a filler is no text). */
+const gridTexts = (grid: HTMLElement[][]): string[] =>
+  grid.map((row) => row.map((cell) => (cell.textContent ?? '').replace(/\u200b/g, '')).join('|'));
+
+/** `source` loaded with Track Changes on and its table deleted whole by the Table menu's command, as
+ * Redlines draws it: the one ghost table the page then has, or null where it has none or several. */
+async function deleteWhole(editor: Editor, source: string): Promise<HTMLElement | null> {
+  await load(editor, source, true);
+  await place(editor, cellOf(editor, 1, 0).textFrom);
+  if (!editor.commands.run('table.deleteTable')) return null;
+  editor.setViewMode('redlines');
+  await frames();
+  return ghostTables(editor).length === 1 ? (ghostTables(editor)[0] ?? null) : null;
+}
+
+/**
+ * A press of the primary button on the first struck text of a ghost table, as the pointer makes it (down,
+ * then up at the same place), and what it did: whether the press landed on the ghost, was taken whole,
+ * moved the selection, and what the card that opened says.
+ */
+async function pressGhost(editor: Editor, ghost: HTMLElement) {
+  const struck = ghost.querySelector<HTMLElement>('.rl-tc .rl-del') ?? ghost;
+  const box = await reveal(struck);
+  const x = box.left + box.width / 2;
+  const y = box.top + box.height / 2;
+  const target = document.elementFromPoint(x, y);
+  const before = editor.view.state.selection.main;
+  const down = new MouseEvent('mousedown', {
+    clientX: x,
+    clientY: y,
+    button: 0,
+    buttons: 1,
+    detail: 1,
+    bubbles: true,
+    cancelable: true,
+  });
+  (target ?? struck).dispatchEvent(down);
+  mouse(window, 'mouseup', x, y);
+  await frames();
+  await frames();
+  const after = editor.view.state.selection.main;
+  return {
+    hit: target !== null && ghost.contains(target),
+    taken: down.defaultPrevented,
+    moved: after.anchor !== before.anchor || after.head !== before.head,
+    card:
+      editor.view.dom.ownerDocument.querySelector('.rl-card .rl-card-what')?.textContent ?? null,
+  };
+}
+
+/** The column of the cell its row lacks that the page draws the caret in, or null where it draws it in
+ * none (`missing.ts`). */
+const caretMissing = (editor: Editor): string | null =>
+  editor.view.contentDOM.querySelector<HTMLElement>('.rl-tc-active')?.dataset['col'] ?? null;
+
+/** The cells of each row that the page shows: an extra cell (`rl-tc-hidden`) is kept and not drawn. */
+const shownCells = (editor: Editor): HTMLElement[][] =>
+  cellElements(editor).map((row) =>
+    row.filter((cell) => getComputedStyle(cell).display !== 'none'),
+  );
+
+/** A table whose first body row has one cell and whose second has two, under a header of three. */
+const FEWER = around(
+  [
+    '| Fruit | Count | Note |',
+    '| ----- | ----- | ---- |',
+    '| Apples |',
+    '| Plums | 4 |',
+    '| Pears | 12 | short |',
+  ].join('\n'),
+);
+
+/** A table whose first body row has a cell more than the header, which has two. */
+const MORE = around(['| a | b |', '| - | - |', '| c | d | EXTRA |', '| f | g |'].join('\n'));
+
+/** A table of three columns whose last body row is `row`, below a row of text to compare it with. */
+const withRow = (row: string): string =>
+  around(['| a | b | c |', '| - | - | - |', '| 1 | 2 | 3 |', row].join('\n'));
+
+/**
+ * Rows with an empty cell, by the padding that decides where its one caret stop is: with two spaces it
+ * is between them, inside the cell; with one space or none it is the cell's end, where the next cell
+ * begins. (The cell's filler once stood in the next cell then.)
+ */
+const EMPTY_FORMS: [string, string][] = [
+  ['one space in the middle', withRow('| 1 | | x |')],
+  ['one space in the first cell', withRow('| | 1 | x |')],
+  ['no space in the middle', withRow('| 1 || x |')],
+  ['two spaces in the middle', withRow('| 1 |  | x |')],
+  ['two spaces in the first cell', withRow('|  | 1 | x |')],
+  ['one space in the last cell', withRow('| 1 | x | |')],
+  ['no space in the last cell', withRow('| 1 | x ||')],
+  ['two empty cells side by side', withRow('| | | x |')],
+  ['in the header', around(['| | | x |', '| - | - | - |', '| 1 | 2 | 3 |'].join('\n'))],
+];
+
+/** The top of the first text a cell shows, as the page draws it (the filler's zero-width space is no
+ * text), or null for a cell with none. */
+function textTop(cell: HTMLElement): number | null {
+  const walk = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    if ((node.textContent ?? '').replace(/\u200b/g, '') === '') continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.getBoundingClientRect().top;
+  }
+  return null;
+}
 
 const CHECKS: Check[] = [
   {
@@ -749,9 +1060,8 @@ const CHECKS: Check[] = [
       const unpainted = marked.filter((el) => {
         // The cell is painted (a mark inside an empty cell has no width of its own).
         const cell = el.closest('.rl-tc') ?? el;
-        const color = getComputedStyle(cell).backgroundColor;
         const box = cell.getBoundingClientRect();
-        return color === 'rgba(0, 0, 0, 0)' || color === 'transparent' || !(box.width > 0);
+        return !selectionPainted(cell) || !(box.width > 0);
       });
       if (unpainted.length) problems['unpainted'] = unpainted.length;
       // The last row is not reached.
@@ -788,7 +1098,7 @@ const CHECKS: Check[] = [
         const drawn = selectedLabels(editor);
         if (!same(drawn, labels([1, 2], [0, 1]))) problems[`${view}-drawn`] = drawn;
         const mark = editor.view.contentDOM.querySelector('.rl-sel');
-        if (!mark || !painted(mark.closest('.rl-tc') ?? mark))
+        if (!mark || !selectionPainted(mark.closest('.rl-tc') ?? mark))
           problems[`${view}-color`] = 'the selected cells are not painted';
         if (doc(editor) !== GRID) problems[`${view}-wrote`] = 'a drag wrote something';
         // Back in the first cell: text again, with nothing drawn as cells.
@@ -1000,7 +1310,9 @@ const CHECKS: Check[] = [
         await frames();
         const lines = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line.rl-trow')];
         const bars = lines.filter((line) => line.classList.contains('rl-bar')).length;
-        const tinted = lines.filter((line) => line.classList.contains('rl-ins-row'));
+        const tinted = lines.filter((line) =>
+          line.classList.contains(view === 'simple' ? 'rl-ins-row-plain' : 'rl-ins-row'),
+        );
         const painted_ = tinted.some((line) => painted(line.querySelector('.rl-tc') ?? line));
         if (bars < 2) problems[`${view}-bars`] = bars;
         if (view === 'redlines' && (!tinted.length || !painted_))
@@ -1067,8 +1379,9 @@ const CHECKS: Check[] = [
   {
     // An input method composing over selected cells, in the order WebKit sends the events:
     // compositionstart, the document changes and compositionupdates, compositionend. Committed, the
-    // text lands in the first cell with its pipe escaped, the other cells are cleared, and one
-    // Undo gives every cell back. Never across the pipes between cells.
+    // text lands in the first cell with its pipe escaped, the other cells stay as they were (typing
+    // over a rectangle clears its top-left cell alone, 8fd0716f, #521), and one Undo gives the first
+    // cell back. Never across the pipes between cells.
     name: 'composition-over-cells-commits-into-the-first',
     async run(editor) {
       await load(editor, GRID);
@@ -1085,7 +1398,7 @@ const CHECKS: Check[] = [
       );
       if (!rows || rows.length !== 4 || rows.some((row) => row.cells.length !== 3)) {
         problems['shape'] = shown;
-      } else if (shown?.[1]?.[0] !== 'a\\|b' || shown[1][1] !== '' || shown[2]?.[0] !== '') {
+      } else if (shown?.[1]?.[0] !== 'a\\|b' || shown[1][1] !== '3' || shown[2]?.[0] !== 'Plums') {
         problems['text'] = shown;
       }
       if (!undo(editor.view) || doc(editor) !== GRID) problems['undo'] = doc(editor);
@@ -1161,7 +1474,7 @@ const CHECKS: Check[] = [
     // draws a row's bar) and a click on it, which never reaches the row's text, switches the views
     // (`bar-switch.ts`'s `.rl-trow` fallback, which happy-dom cannot reach). A click beside the bar
     // does nothing.
-    name: 'bar-click-on-an-inserted-row-switches-views',
+    name: 'bar-click-on-an-inserted-row-opens-its-card-in-simple',
     async run(editor) {
       await load(editor, WITH_ROW, false);
       editor.setViewMode('simple');
@@ -1188,7 +1501,11 @@ const CHECKS: Check[] = [
       editor.view.scrollDOM.dispatchEvent(mouse('mousedown', x));
       document.dispatchEvent(mouse('mouseup', x));
       await frames();
-      if (editor.getUiState().view !== 'redlines') problems['switched'] = editor.getUiState().view;
+      // In the simple look a bar click opens the change's card and the look stays (#716).
+      if (editor.getUiState().markupView !== 'simple') {
+        problems['switched'] = editor.getUiState().markupView;
+      }
+      if (!editor.view.dom.querySelector('.rl-card-what')) problems['card'] = 'none opened';
       // Beside the bar: nothing.
       editor.setViewMode('simple');
       await frames();
@@ -1392,13 +1709,12 @@ const CHECKS: Check[] = [
           problems[`${view}-beside-row`] = [box.top, line.top];
         if (editor.view.dom.querySelector('.rl-grips')?.getAttribute('aria-hidden') !== 'true')
           problems[`${view}-aria`] = 'not hidden';
-        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        openGripMenu(grip);
         await frames();
         const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
         if (
           items.map((i) => i.textContent).join('|') !==
-          'Insert Row Above|Insert Row Below|Delete Row|Move Row Up|Move Row Down|Clear Contents'
+          'Insert Row Above|Insert Row Below|Delete Row|Delete Table|Move Row Up|Move Row Down|Clear Contents'
         )
           problems[`${view}-items`] = items.map((i) => i.textContent);
         const selected = rectOf(editor.view.state);
@@ -1763,13 +2079,12 @@ const CHECKS: Check[] = [
           problems[`${view}-strip`] = [box.top, box.bottom, top];
         if (editor.view.dom.querySelector('.rl-grips')?.getAttribute('aria-hidden') !== 'true')
           problems[`${view}-aria`] = 'not hidden';
-        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        openGripMenu(grip);
         await frames();
         const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
         if (
           items.map((i) => i.textContent).join('|') !==
-          'Insert Column Left|Insert Column Right|Delete Column|Move Column Left|Move Column Right|Align Left|Align Center|Align Right|Default Alignment|Clear Contents'
+          'Insert Column Left|Insert Column Right|Delete Column|Delete Table|Move Column Left|Move Column Right|Align Left|Align Center|Align Right|Default Alignment|Clear Contents'
         )
           problems[`${view}-items`] = items.map((i) => i.textContent);
         const selected = touchedCols(editor.view.state);
@@ -1804,11 +2119,23 @@ const CHECKS: Check[] = [
         if (!second) return { why: 'no header drawn' };
         const box = await reveal(second);
         const y = box.top - 10;
-        hover(editor, box.left + 9, y);
+        // The + stands on the column line, which is left of the cell's box (a gap's half: 78ac64b7,
+        // #673), so the line is read from the + that comes up at the cell's edge: from it, 7.5 px is
+        // within the reach and 9 is not.
+        hover(editor, box.left, y);
+        await frames();
+        const found = editor.view.dom
+          .querySelector<HTMLElement>('.rl-col-plus')
+          ?.getBoundingClientRect();
+        if (!found) return { ...problems, [`${view}-plus`]: 'none shows at the cell edge' };
+        const gapMiddle = found.left + found.width / 2;
+        hover(editor, -100, -100);
+        await frames();
+        hover(editor, gapMiddle + 9, y);
         await frames();
         if (editor.view.dom.querySelector('.rl-col-plus'))
           problems[`${view}-at-9`] = 'a + shows 9 px away';
-        hover(editor, box.left + 8, y);
+        hover(editor, gapMiddle + 7.5, y);
         await frames();
         const plus = editor.view.dom.querySelector<HTMLElement>('.rl-col-plus');
         if (!plus) return { ...problems, [`${view}-plus`]: 'none shows within 8 px' };
@@ -1984,41 +2311,125 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // Align with Track Changes on is refused, in words on the page's notice, and writes nothing: never a
-    // silent no-op, from the command and from the column grip's menu.
-    name: 'align-with-track-changes-on-is-refused-in-words',
+    // Align with Track Changes on, from the Table menu's command and from the column grip's menu (format
+    // §3.7, #281): one point mark at the end of the header line, in front of its last pipe, with the old
+    // delimiter row in it, the delimiter row as asked and nothing else written, so that no row grew a line.
+    // In Clean, Simple and Redlines the column draws as asked, the others as they were, and the columns
+    // still line up; Redlines has the bar on the header row and the dotted underline under the changed
+    // column's header text and no other, Simple the bar alone, Clean neither, and no marker shows. The caret
+    // stays in its cell (the grip's column stays selected), and one Undo gives the document back, the caret
+    // with it. Chromium-measured: the computed alignment, the rows' heights, the cells' edges and the
+    // underline's style.
+    name: 'align-with-track-changes-on-writes-the-point-mark-and-undoes',
     async run(editor) {
-      const WORDS =
-        "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
       const problems: Record<string, unknown> = {};
-      const shown = () => {
-        const box = document.querySelector<HTMLElement>('.rl-notice');
-        return box && !box.hidden ? (box.textContent ?? '').trim() : null;
-      };
-      await load(editor, ROWS, true);
-      await place(editor, cellOf(editor, 1, 1).textFrom);
-      const before = doc(editor);
-      if (!editor.commands.run('table.alignCenter')) return { why: 'Align Center did nothing' };
-      await frames();
-      if (doc(editor) !== before) problems['written'] = doc(editor);
-      if (shown() !== WORDS) problems['notice'] = shown();
-      // From the column grip's menu.
-      await load(editor, ROWS, true);
-      const grip = await colGripOf(editor, 1);
-      if (!grip) return { ...problems, grip: 'none shows' };
-      const box = grip.getBoundingClientRect();
-      mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-      mouse(window, 'mouseup', box.left + 3, box.top + 3);
-      await frames();
-      const item = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')].find(
-        (i) => i.textContent === 'Align Right',
-      );
-      if (!item) return { ...problems, menu: 'no Align Right' };
-      const text = doc(editor);
-      mouse(item, 'mousedown', 0, 0);
-      await frames();
-      if (doc(editor) !== text) problems['menu-written'] = doc(editor);
-      if (shown() !== WORDS) problems['menu-notice'] = shown();
+      const views = ['clean', 'simple', 'redlines'] as const;
+      const heights = () => lineElements(editor).map((line) => line.getBoundingClientRect().height);
+      const columns = () => [0, 1, 2].map((col) => alignedAs(editor, col));
+      for (const route of ['command', 'grip'] as const) {
+        const want = route === 'command' ? 'center' : 'right';
+        const delimiter =
+          route === 'command' ? '| ----- | :---: | ---- |' : '| ----- | ----: | ---- |';
+        await load(editor, ROWS, true);
+        // What each view draws before: the rows' heights and the alignment of each column.
+        const snapshot = () => ({ heights: heights(), aligns: columns() });
+        const before = {} as Record<(typeof views)[number], ReturnType<typeof snapshot>>;
+        for (const view of views) {
+          editor.setViewMode(view);
+          await frames();
+          before[view] = snapshot();
+        }
+        editor.setViewMode('redlines');
+        await frames();
+        await place(editor, cellOf(editor, 1, 1).textFrom);
+        const caret = head(editor);
+        if (route === 'command') {
+          if (!editor.commands.run('table.alignCenter')) return { why: 'Align Center did nothing' };
+        } else {
+          const grip = await colGripOf(editor, 1);
+          if (!grip) return { ...problems, grip: 'none shows' };
+          openGripMenu(grip);
+          await frames();
+          const item = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')].find(
+            (i) => i.textContent === 'Align Right',
+          );
+          if (!item) return { ...problems, menu: 'no Align Right' };
+          mouse(item, 'mousedown', 0, 0);
+        }
+        await frames();
+        // The file: one mark on the header line, in front of its last pipe; the delimiter row as asked; and
+        // nothing else but the ledger written.
+        const text = doc(editor);
+        const marks = text.match(/<!--fmt /g) ?? [];
+        if (marks.length !== 1) problems[`${route}-marks`] = marks.length;
+        const header = text.split('\n')[2];
+        if (!/^\| Fruit \| Count \| Note<!--fmt [a-z0-9]{4} align=[^>]*--> \|$/.test(header ?? ''))
+          problems[`${route}-header`] = header;
+        if (text.split('\n')[3] !== delimiter) problems[`${route}-delimiter`] = text.split('\n')[3];
+        const body = text.slice(0, Math.max(0, text.indexOf('<!-- redlines'))).trimEnd();
+        if (
+          body.replace(/<!--fmt [a-z0-9]{4} align=[^>]*-->/, '') !==
+          ROWS.replace('| ----- | ----- | ---- |', delimiter)
+        )
+          problems[`${route}-written`] = body;
+        for (const view of views) {
+          editor.setViewMode(view);
+          await frames();
+          const label = `${route}-${view}`;
+          const now = snapshot();
+          if (!(now.aligns[1]?.length === 4 && now.aligns[1].every((a) => a === want)))
+            problems[`${label}-aligned`] = now.aligns[1];
+          if (
+            !same(now.aligns[0], before[view].aligns[0]) ||
+            !same(now.aligns[2], before[view].aligns[2])
+          )
+            problems[`${label}-others`] = [now.aligns[0], now.aligns[2]];
+          // No row grew a line: the mark takes no room.
+          if (
+            now.heights.length !== before[view].heights.length ||
+            now.heights.some((h, i) => !(Math.abs(h - (before[view].heights[i] ?? NaN)) <= 0.5))
+          )
+            problems[`${label}-height`] = { before: before[view].heights, after: now.heights };
+          const lined = linedUp(editor);
+          if (!(lined.off <= 0.5) || lined.cells.some((n) => n !== 3))
+            problems[`${label}-lines-up`] = lined;
+          const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+          if (
+            bars.join() !==
+            (view === 'clean' ? 'false,false,false,false' : 'true,false,false,false')
+          )
+            problems[`${label}-bars`] = bars;
+          const marked = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')];
+          const underlined = marked.map((el) => el.textContent).join('|');
+          if (underlined !== (view === 'redlines' ? 'Count' : ''))
+            problems[`${label}-underline`] = underlined;
+          if (view === 'redlines') {
+            const style = marked[0] && getComputedStyle(marked[0]);
+            if (
+              !style?.textDecorationLine.includes('underline') ||
+              style.textDecorationStyle !== 'dotted'
+            )
+              problems[`${label}-dotted`] = style && [
+                style.textDecorationLine,
+                style.textDecorationStyle,
+              ];
+          }
+          if (/<!--|align=/.test(editor.view.contentDOM.textContent ?? ''))
+            problems[`${label}-marker`] = (editor.view.contentDOM.textContent ?? '').slice(0, 100);
+        }
+        if (route === 'command') {
+          if (!inText(cellOf(editor, 1, 1), head(editor)))
+            problems['command-caret'] = [head(editor), cellOf(editor, 1, 1).textFrom];
+        } else {
+          const cols = touchedCols(editor.view.state);
+          if (cols?.first !== 1 || cols.last !== 1)
+            problems['grip-selection'] = cols && [cols.first, cols.last];
+        }
+        if (!undo(editor.view) || doc(editor) !== ROWS)
+          problems[`${route}-undo`] = doc(editor).replaceAll('\n', '⏎').slice(0, 200);
+        else if (route === 'command' && head(editor) !== caret)
+          problems['command-undo-caret'] = [head(editor), caret];
+      }
       return Object.keys(problems).length ? problems : null;
     },
   },
@@ -2032,9 +2443,7 @@ const CHECKS: Check[] = [
       const open = async () => {
         const grip = await colGripOf(editor, 1);
         if (!grip) return null;
-        const box = grip.getBoundingClientRect();
-        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        openGripMenu(grip);
         await frames();
         return [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
       };
@@ -2064,13 +2473,74 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // Someone else's pending alignment change in Redlines: the new alignment, a dotted underline under the
-    // header text of the column changed and a bar on the header row; its card names the column and the old
-    // alignment; and with Track Changes on a letter typed right under its table is refused, in words
-    // naming the person, and writes nothing.
-    name: 'pending-alignment-change-in-redlines-is-drawn-carded-and-guards-the-gap',
+    // Someone else's pending alignment change, the point mark that ends the header's last cell, in Redlines
+    // (format §3.7, #281): the new alignment, a dotted underline under the header text of the column
+    // changed and a bar on the header row; its card names the column and the old alignment, with Accept and
+    // Reject; and with Track Changes on a letter typed at the end of the last header cell lands in front of
+    // the mark, and one typed on the line under the table is written, with no notice: the mark has no closer
+    // there for it to share a line with. Chromium-measured: the underline's style, the hit test of the card's
+    // press, and the typing, which is the engine's own (`execCommand`).
+    name: 'pending-alignment-change-in-redlines-is-drawn-and-carded',
     async run(editor) {
       await load(editor, WITH_ALIGN, false);
+      editor.setViewMode('redlines');
+      await frames();
+      const problems: Record<string, unknown> = {};
+      const marked = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')];
+      if (marked.map((el) => el.textContent).join('|') !== 'Count')
+        problems['underlined'] = marked.map((el) => el.textContent);
+      const style = marked[0] && getComputedStyle(marked[0]);
+      if (
+        !style?.textDecorationLine.includes('underline') ||
+        style.textDecorationStyle !== 'dotted'
+      )
+        problems['dotted'] = style && [style.textDecorationLine, style.textDecorationStyle];
+      const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+      if (bars.join() !== 'true,false,false') problems['bars'] = bars;
+      if (alignedAs(editor, 1).some((a) => a !== 'center'))
+        problems['centered'] = alignedAs(editor, 1);
+      const target = marked[0];
+      if (!target) return { ...problems, card: 'nothing to press' };
+      const card = await cardOver(editor, target);
+      const what = card?.querySelector('.rl-card-what')?.textContent;
+      if (what !== 'Formatted: column Count centered (was default)')
+        problems['card'] = what ?? 'no card';
+      const buttons = [...(card?.querySelectorAll<HTMLElement>('.rl-card-button') ?? [])].map(
+        (button) => button.getAttribute('aria-label') ?? button.textContent,
+      );
+      if (buttons.join() !== 'Accept,Reject') problems['buttons'] = buttons;
+      // With Track Changes on, a letter at the end of the last header cell is in front of the mark.
+      editor.setTracking(true, { inFile: false });
+      await noticeClears();
+      await place(editor, cellOf(editor, 0, 1).textTo);
+      document.execCommand('insertText', false, 'x');
+      await frames();
+      if (
+        !/\| Fruit \| Count<!--ins ([a-z0-9]{4})-->x<!--\/\1--><!--fmt k3x9 align=/.test(
+          doc(editor),
+        )
+      )
+        problems['header-letter'] = doc(editor).split('\n')[2];
+      // One on the line under the table is written, and says nothing.
+      const under = doc(editor).indexOf('Below.');
+      await place(editor, under);
+      document.execCommand('insertText', false, 'y');
+      await frames();
+      if (!/<!--ins ([a-z0-9]{4})-->\s*y<!--\/\1-->Below\./.test(doc(editor)))
+        problems['gap-letter'] = doc(editor).slice(under - 20, under + 40);
+      if (shownNotice() !== null) problems['gap-notice'] = shownNotice();
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The span form of an alignment change, which another tool wrote and Redlines still reads and draws
+    // (format §3.7, #281): the opener above the table, the closer below it. In Redlines the new alignment, a
+    // dotted underline under the header text of the column changed and a bar on the header row; its card
+    // names the column and the old alignment; and with Track Changes on a letter typed right under its table
+    // is refused, in words naming the person, and writes nothing: the closer stands there.
+    name: 'span-form-alignment-change-from-another-tool-is-still-drawn-and-guards-the-gap',
+    async run(editor) {
+      await load(editor, WITH_ALIGN_SPAN, false);
       editor.setViewMode('redlines');
       await frames();
       const problems: Record<string, unknown> = {};
@@ -2118,36 +2588,101 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // Someone else's pending alignment change in Simple: the bar on the header row and nothing else of
-    // the change (no underline), the new alignment, and the visible text Clean's, with no gap where the
-    // markers and the blank lines around them are.
+    // Someone else's pending alignment change in Simple, as the point form and as the span form: the bar on
+    // the header row and nothing else of the change (no underline), the new alignment, and the visible text
+    // Clean's, with no gap where the markers and the blank lines around the span form's are. Chromium-
+    // measured: the rows' tops, the cells' edges and the computed alignment and decoration.
     name: 'pending-alignment-change-in-simple',
     async run(editor) {
-      await load(editor, WITH_ALIGN, false);
       const problems: Record<string, unknown> = {};
-      editor.setViewMode('clean');
-      await frames();
-      const clean = editor.view.contentDOM.textContent ?? '';
-      const cleanTop = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
-      editor.setViewMode('simple');
-      await frames();
-      const text = editor.view.contentDOM.textContent ?? '';
-      if (text !== clean)
-        problems['text'] = { simple: text.slice(0, 100), clean: clean.slice(0, 100) };
-      if (/align=|<!--/.test(text)) problems['markers'] = text.slice(0, 100);
-      const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
-      if (bars.join() !== 'true,false,false') problems['bars'] = bars;
-      if (editor.view.contentDOM.querySelector('.rl-fmt')) problems['underline'] = 'drawn';
-      for (const cell of headerCells(editor)) {
-        if (getComputedStyle(cell).textDecorationLine !== 'none')
-          problems['header-decoration'] = getComputedStyle(cell).textDecorationLine;
+      for (const [form, source] of [
+        ['point', WITH_ALIGN],
+        ['span', WITH_ALIGN_SPAN],
+      ] as const) {
+        await load(editor, source, false);
+        editor.setViewMode('clean');
+        await frames();
+        const clean = editor.view.contentDOM.textContent ?? '';
+        const cleanTop = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
+        editor.setViewMode('simple');
+        await frames();
+        const text = editor.view.contentDOM.textContent ?? '';
+        if (text !== clean)
+          problems[`${form}-text`] = { simple: text.slice(0, 100), clean: clean.slice(0, 100) };
+        if (/align=|<!--/.test(text)) problems[`${form}-markers`] = text.slice(0, 100);
+        const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+        if (bars.join() !== 'true,false,false') problems[`${form}-bars`] = bars;
+        if (editor.view.contentDOM.querySelector('.rl-fmt'))
+          problems[`${form}-underline`] = 'drawn';
+        for (const cell of headerCells(editor)) {
+          if (getComputedStyle(cell).textDecorationLine !== 'none')
+            problems[`${form}-header-decoration`] = getComputedStyle(cell).textDecorationLine;
+        }
+        if (alignedAs(editor, 1).some((a) => a !== 'center'))
+          problems[`${form}-centered`] = alignedAs(editor, 1);
+        const top = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
+        if (Math.abs(top - cleanTop) > 0.5)
+          problems[`${form}-gap`] = { simple: top, clean: cleanTop };
+        const aligned = linedUp(editor);
+        if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 2))
+          problems[`${form}-lines-up`] = aligned;
       }
-      if (alignedAs(editor, 1).some((a) => a !== 'center'))
-        problems['centered'] = alignedAs(editor, 1);
-      const top = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
-      if (Math.abs(top - cleanTop) > 0.5) problems['gap'] = { simple: top, clean: cleanTop };
-      const aligned = linedUp(editor);
-      if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 2)) problems['lines-up'] = aligned;
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A pending alignment change, the point mark, in a header that has no closing pipe, in a table with no
+    // pipe at the edges of its rows, and in a header with spaces after the mark (the mark is the line's end
+    // there, and the spaces stay after it): drawn as it is in the padded header, in Redlines, Simple and
+    // Clean: the same text, alignment, bars and underline, the same cells to within half a pixel, the
+    // columns lined up, no marker shown; and its card names the column and the old alignment. Each form is
+    // checked for what the padded one is as well, so that a pass means it draws right. Chromium-measured:
+    // the cells' edges, the computed alignment and the hit test of the card's press.
+    name: 'pending-alignment-change-in-a-header-without-its-last-pipe-draws-as-a-padded-one',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      const views = ['redlines', 'simple', 'clean'] as const;
+      const shapes = async (source: string) => {
+        await load(editor, source, false);
+        const found = {} as Record<(typeof views)[number], ReturnType<typeof shapeOf>>;
+        for (const view of views) {
+          editor.setViewMode(view);
+          await frames();
+          found[view] = shapeOf(editor);
+        }
+        return found;
+      };
+      const padded = await shapes(WITH_ALIGN);
+      for (const view of views) {
+        const shape = padded[view];
+        if (shape.texts.join('/') !== 'Fruit|Count/Apples|3/Plums|4')
+          problems[`padded-${view}-texts`] = shape.texts;
+        if (shape.aligns.length !== 3 || shape.aligns.some((row) => row[1] !== 'center'))
+          problems[`padded-${view}`] = shape.aligns;
+        if (shape.lined.cells.some((n) => n !== 2)) problems[`padded-${view}-cells`] = shape.lined;
+        if (shape.bars.join() !== (view === 'clean' ? 'false,false,false' : 'true,false,false'))
+          problems[`padded-${view}-bars`] = shape.bars;
+        if (shape.underlined.join('|') !== (view === 'redlines' ? 'Count' : ''))
+          problems[`padded-${view}-underline`] = shape.underlined;
+      }
+      for (const [name, source] of Object.entries(ALIGN_ENDS)) {
+        const found = await shapes(source);
+        for (const view of views) {
+          const diff = shapeDiff(padded[view], found[view]);
+          if (diff) problems[`${name}-${view}`] = diff;
+        }
+        // The card, in Redlines.
+        editor.setViewMode('redlines');
+        await frames();
+        const target = editor.view.contentDOM.querySelector<HTMLElement>('.rl-fmt');
+        if (!target) {
+          problems[`${name}-card`] = 'nothing to press';
+          continue;
+        }
+        const what = (await cardOver(editor, target))?.querySelector('.rl-card-what')?.textContent;
+        if (what !== 'Formatted: column Count centered (was default)')
+          problems[`${name}-card`] = what ?? 'no card';
+      }
       return Object.keys(problems).length ? problems : null;
     },
   },
@@ -2294,6 +2829,893 @@ const CHECKS: Check[] = [
       const said = (card?.textContent ?? '').split(' · ');
       if (said.length !== 25 || said.some((one) => one !== 'Formatted: Bold'))
         problems['card'] = card?.textContent ?? 'no card';
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A table deleted whole (Delete Table, Track Changes on) is a ghost table in Redlines, where the
+    // table was: the three rows of a table of three, in the table's own layout (the header cell and the
+    // body cells of a column share their left edge), struck in the author's color on the author's tint,
+    // with the bar and no fold line. It is not editable and has no text to select; a press on it puts no
+    // caret there and opens its card, and ↑ ↓ step over it. Clean and Simple draw none, and Simple keeps
+    // the bar. Chromium-measured: the hit test, the cells' layout and `isContentEditable` are the engine's,
+    // and `user-select` is read under either of its names (WebKit's is prefixed in older versions).
+    name: 'deleted-table-of-three-rows-is-a-ghost-table-lined-up-and-not-editable',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      const ghost = await deleteWhole(editor, around(fruitTable(3)));
+      if (!ghost) {
+        return {
+          why: 'no ghost table',
+          ghosts: ghostTables(editor).length,
+          marked: /<!--del /.test(doc(editor)),
+        };
+      }
+      const grid = ghostGrid(ghost);
+      const rows = [...ghost.querySelectorAll<HTMLElement>('.rl-ghost-row')];
+      const heads = rows.map((row) => row.classList.contains('rl-th'));
+      if (!same(heads, [true, false, false])) problems['header'] = heads;
+      const texts = gridTexts(grid);
+      if (
+        !same(texts, ['Fruit|Count|Note', 'Apples 1|3|short', 'A fruit with a long name|1234567|x'])
+      )
+        problems['texts'] = texts;
+      // The columns: a cell of each, lined up to the pixel, each column to the right of the one before.
+      const aligned = gridOff(grid);
+      if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 3)) problems['lines-up'] = aligned;
+      const lefts = (grid[0] ?? []).map((cell) => cell.getBoundingClientRect().left);
+      if (!lefts.every((left, i) => i === 0 || left > (lefts[i - 1] ?? Infinity)))
+        problems['columns'] = lefts;
+      const data = ghostData(ghost);
+      if (!same(data, { columns: '3', rows: '3', more: '0' })) problems['data'] = data;
+      if (ghost.querySelector('.rl-ghost-fold')) problems['fold'] = 'a fold line under three rows';
+      // Struck, on the author's tint, with the bar.
+      const struck = ghost.querySelector('.rl-tc .rl-del');
+      if (!struck || !getComputedStyle(struck).textDecorationLine.includes('line-through'))
+        problems['struck'] = 'no line-through';
+      if (!painted(grid[1]?.[0] ?? ghost)) problems['tint'] = 'no tint';
+      if (!ghost.classList.contains('rl-bar')) problems['bar'] = 'no change bar';
+      // Where the table was, and none of it left as a table of the document or as source.
+      const lineOf = (text: string) =>
+        [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')].find(
+          (line) => line.textContent === text,
+        );
+      const above = lineOf('Intro paragraph.')?.getBoundingClientRect();
+      const below = lineOf('Below.')?.getBoundingClientRect();
+      const box = ghost.getBoundingClientRect();
+      if (!above || !below || box.top < above.bottom - 1 || box.bottom > below.top + 1)
+        problems['place'] = [above?.bottom, box.top, box.bottom, below?.top];
+      if (
+        editor.view.contentDOM.querySelector('.rl-tbl, .cm-line.rl-trow') ||
+        tablesOf(editor.view.state).length
+      )
+        problems['real-table'] = 'a table of the document is still drawn';
+      if (editor.view.contentDOM.textContent?.includes('<!--'))
+        problems['source'] = 'the deletion marker shows';
+      // Not editable, nothing to select.
+      const style = getComputedStyle(ghost);
+      const select = style.userSelect || style.webkitUserSelect;
+      if (
+        ghost.isContentEditable ||
+        !ghost.closest('[contenteditable="false"]') ||
+        select !== 'none'
+      )
+        problems['editable'] = {
+          isContentEditable: ghost.isContentEditable,
+          inNoneditable: ghost.closest('[contenteditable="false"]') !== null,
+          select,
+        };
+      // A press on it: taken whole, no caret there, its card.
+      const pressed = await pressGhost(editor, ghost);
+      if (!pressed.hit || !pressed.taken || pressed.moved) problems['press'] = pressed;
+      if (pressed.card !== 'Deleted table (3 columns, 3 rows)') problems['card'] = pressed.card;
+      // ↓ from the line above goes to the line below it, ↑ back: the ghost has no caret.
+      const lineAtCaret = () => editor.view.state.doc.lineAt(head(editor)).text;
+      await place(editor, doc(editor).indexOf('Intro paragraph.') + 'Intro paragraph.'.length);
+      press(editor, 'ArrowDown');
+      await frames();
+      if (lineAtCaret() !== 'Below.') problems['down'] = lineAtCaret();
+      press(editor, 'ArrowUp');
+      await frames();
+      if (lineAtCaret() !== 'Intro paragraph.') problems['up'] = lineAtCaret();
+      // Clean and Simple draw none; Simple keeps the bar, on the text after the table.
+      for (const view of ['simple', 'clean'] as const) {
+        editor.setViewMode(view);
+        await frames();
+        if (ghostTables(editor).length) problems[`${view}-ghost`] = ghostTables(editor).length;
+        if (editor.view.contentDOM.textContent?.includes('Fruit'))
+          problems[`${view}-text`] = 'the deleted table shows';
+        const bar = lineOf('Below.')?.classList.contains('rl-bar');
+        if (view === 'simple' && !bar) problems['simple-bar'] = 'the text after it has no bar';
+        if (view === 'clean' && bar) problems['clean-bar'] = 'the text after it has a bar';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A table of twenty rows deleted whole draws eight of them, the header and seven body rows, and one
+    // line for the other twelve, "and 12 more rows", under the rows and as wide as the table, in which
+    // the columns still line up; its card counts the whole table. Nine rows fold to "and 1 more row",
+    // and eight rows are not folded. Chromium-measured, as the check above.
+    name: 'deleted-table-of-twenty-rows-draws-eight-and-one-fold-line',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      const cases: [number, string | null][] = [
+        [20, 'and 12 more rows'],
+        [9, 'and 1 more row'],
+        [8, null],
+      ];
+      for (const [rows, words] of cases) {
+        const ghost = await deleteWhole(editor, around(fruitTable(rows)));
+        if (!ghost) {
+          problems[`${rows}-ghost`] = {
+            ghosts: ghostTables(editor).length,
+            marked: /<!--del /.test(doc(editor)),
+          };
+          continue;
+        }
+        const grid = ghostGrid(ghost);
+        const folds = [...ghost.querySelectorAll<HTMLElement>('.rl-ghost-fold')];
+        const data = ghostData(ghost);
+        const want = { columns: '3', rows: String(rows), more: String(Math.max(0, rows - 8)) };
+        if (!same(data, want)) problems[`${rows}-data`] = data;
+        if (grid.length !== 8 || grid.some((row) => row.length !== 3))
+          problems[`${rows}-rows`] = grid.map((row) => row.length);
+        if (folds.length !== (words ? 1 : 0) || (words && folds[0]?.textContent !== words))
+          problems[`${rows}-fold`] = folds.map((fold) => fold.textContent);
+        const aligned = gridOff(grid);
+        if (aligned.off > 0.5) problems[`${rows}-lines-up`] = aligned;
+        // The line is after the rows, never among them, and runs the width of the box that holds the
+        // table (which the rows fill, and which scrolls sideways where they are wider).
+        const [fold] = folds;
+        const line = fold?.getBoundingClientRect();
+        const held = ghost.querySelector<HTMLElement>('.rl-ghost-scroll')?.getBoundingClientRect();
+        const last = grid.at(-1)?.[0]?.getBoundingClientRect();
+        if (line && held && last) {
+          if (line.top < last.bottom - 1) problems[`${rows}-fold-place`] = [line.top, last.bottom];
+          if (Math.abs(line.left - held.left) > 1 || Math.abs(line.width - held.width) > 1)
+            problems[`${rows}-fold-width`] = [line.left, line.width, held.left, held.width];
+        }
+        if (rows !== 20) continue;
+        // A row past the eighth is not drawn (`Apples 10` is the eleventh: the header, then ten rows of
+        // the body); a press opens the card of the whole table.
+        if (ghost.textContent?.includes('Apples 10'))
+          problems['20-eleventh'] = 'a row past the eighth is drawn';
+        const pressed = await pressGhost(editor, ghost);
+        if (!pressed.hit || !pressed.taken || pressed.moved) problems['20-press'] = pressed;
+        if (pressed.card !== 'Deleted table (3 columns, 20 rows)')
+          problems['20-card'] = pressed.card;
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A row with fewer cells than the header is drawn with empty cells after its last, in Clean, Simple
+    // and Redlines: each in the column of its header cell (its left edge and its width), with a box and
+    // no text but the filler; drawing them writes nothing. Chromium-measured: the cells' layout.
+    name: 'a-row-with-fewer-cells-is-drawn-with-empty-cells-in-its-header-columns',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const view of ['clean', 'simple', 'redlines'] as const) {
+        await load(editor, FEWER);
+        editor.setViewMode(view);
+        await frames();
+        const grid = cellElements(editor);
+        const header = headerCells(editor);
+        const drawn = grid.map((row) => row.length);
+        if (!same(drawn, [3, 3, 3, 3])) problems[`${view}-cells`] = drawn;
+        const missing = grid.map((row) =>
+          row
+            .filter((cell) => cell.classList.contains('rl-tc-missing'))
+            .map((cell) => cell.dataset['col'])
+            .join(),
+        );
+        if (!same(missing, ['', '1,2', '2', ''])) problems[`${view}-missing`] = missing;
+        grid.forEach((row, r) =>
+          row.forEach((cell) => {
+            const above = header
+              .find((h) => h.dataset['col'] === cell.dataset['col'])
+              ?.getBoundingClientRect();
+            const box = cell.getBoundingClientRect();
+            if (
+              !above ||
+              Math.abs(box.left - above.left) > 0.5 ||
+              Math.abs(box.width - above.width) > 0.5
+            )
+              problems[`${view}-column-r${r}c${cell.dataset['col']}`] = [
+                box.left,
+                box.width,
+                above?.left,
+                above?.width,
+              ];
+          }),
+        );
+        const aligned = linedUp(editor);
+        if (aligned.off > 0.5) problems[`${view}-lines-up`] = aligned;
+        const empty = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tc-missing')];
+        if (
+          empty.length !== 3 ||
+          empty.some(
+            (cell) =>
+              !(cell.getBoundingClientRect().width > 0) ||
+              (cell.textContent ?? '').replace(/\u200b/g, '') !== '',
+          )
+        )
+          problems[`${view}-empty`] = empty.map((cell) => cell.getBoundingClientRect().width);
+        if (doc(editor) !== FEWER) problems[`${view}-wrote`] = doc(editor);
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // Tab goes into a cell its row lacks and writes nothing (the cell draws the caret, and the line's own
+    // is hidden); typing in the second of two writes the pipes first, plain, and then the text, `| 1 | | x |`
+    // with Track Changes off and the text an insertion with it on, as the row's cells now are cells of the
+    // row; one Undo takes the pipes and the text back together. The typing is WebKit's own (`execCommand`),
+    // which reaches the editor at the end of the row beside the widgets that draw the cells: Chromium-
+    // measured, where the page's caret and its DOM may stand elsewhere than in WKWebView.
+    name: 'typing-in-a-missing-cell-writes-its-pipes-first',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      // (a row of text below, for the row typed in to be as tall as)
+      const start = around('| a | b | c |\n| - | - | - |\n| 1 |\n| 2 | 3 | 4 |');
+      for (const tracking of [false, true]) {
+        const label = tracking ? 'tracked' : 'plain';
+        await load(editor, start, tracking);
+        await place(editor, cellOf(editor, 1, 0).textTo);
+        press(editor, 'Tab');
+        await frames();
+        const first = caretMissing(editor);
+        press(editor, 'Tab');
+        await frames();
+        if (first !== '1' || caretMissing(editor) !== '2')
+          problems[`${label}-tab`] = [first, caretMissing(editor)];
+        if (doc(editor) !== start) problems[`${label}-tab-wrote`] = doc(editor);
+        // The cell draws the caret, a line high, while the editor has the focus, and none without it; the
+        // page's own is hidden in the row. CodeMirror marks the focus (`cm-focused`) only where the document
+        // has it too, as a pane that is not the active window has not, so the class is put on for the one
+        // measure and off for the other, and left as it was.
+        const active = editor.view.contentDOM.querySelector<HTMLElement>('.rl-tc-active');
+        const fill = active?.querySelector<HTMLElement>(':scope > .rl-tc-fill');
+        const root = editor.view.dom;
+        const focused = root.classList.contains('cm-focused');
+        const lineWith = (focus: boolean) => {
+          root.classList.toggle('cm-focused', focus);
+          const style = fill && getComputedStyle(fill, '::after');
+          return style ? { width: style.borderLeftWidth, height: parseFloat(style.height) } : null;
+        };
+        const drawn = lineWith(true);
+        const blurred = lineWith(false);
+        root.classList.toggle('cm-focused', focused);
+        if (!drawn || drawn.width !== '1px' || !(drawn.height > 4))
+          problems[`${label}-caret`] = drawn ?? 'no cell draws the caret';
+        if (blurred && blurred.width !== '0px') problems[`${label}-caret-unfocused`] = blurred;
+        const own = active && getComputedStyle(active.closest('.cm-line') ?? active).caretColor;
+        if (own !== 'transparent' && own !== 'rgba(0, 0, 0, 0)')
+          problems[`${label}-own-caret`] = own ?? 'no cell draws the caret';
+        document.execCommand('insertText', false, 'x');
+        await frames();
+        const written = doc(editor);
+        if (tracking) {
+          if (!/\| 1 \| \| <!--ins ([a-z0-9]{4})-->x<!--\/\1--> \|/.test(written))
+            problems[`${label}-doc`] = written.replaceAll('\n', '⏎').slice(0, 200);
+        } else if (written !== start.replace('| 1 |', '| 1 | | x |')) {
+          problems[`${label}-doc`] = written.replaceAll('\n', '⏎');
+        }
+        const cells = table(editor).rows[1]?.cells.length;
+        if (cells !== 3 || editor.view.contentDOM.querySelector('.rl-tc-missing'))
+          problems[`${label}-cells`] = cells;
+        if (written.slice(head(editor) - 1, head(editor)) !== 'x')
+          problems[`${label}-caret-after`] = written.slice(head(editor) - 3, head(editor) + 3);
+        // The row is drawn as any row of text is, empty cell between and all: as tall as the row below,
+        // and the text of its cells at one height. (A pass must mean it draws right.)
+        const lines = lineElements(editor);
+        const heights = [lines[1], lines[2]].map((line) => line?.getBoundingClientRect().height);
+        if (!(Math.abs((heights[0] ?? NaN) - (heights[1] ?? NaN)) <= 0.5))
+          problems[`${label}-height`] = heights;
+        const tops = (cellElements(editor)[1] ?? [])
+          .map(textTop)
+          .filter((top): top is number => top !== null);
+        if (tops.length !== 2 || Math.max(...tops) - Math.min(...tops) > 0.5)
+          problems[`${label}-tops`] = tops;
+        if (!undo(editor.view) || doc(editor) !== start)
+          problems[`${label}-undo`] = doc(editor).replaceAll('\n', '⏎').slice(0, 200);
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A press on a cell a row lacks puts the caret in it, in its own column and its own row, and writes
+    // nothing: the pointer's hit test finds the cell the row's widget draws. Chromium-measured: the hit test.
+    name: 'a-press-on-a-missing-cell-puts-the-caret-in-it',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      await load(editor, FEWER);
+      for (const [row, col] of [
+        [1, 1],
+        [1, 2],
+        [2, 2],
+      ] as const) {
+        editor.view.dispatch({ selection: EditorSelection.cursor(0) });
+        await frames();
+        const element = cellElements(editor)[row]?.[col];
+        if (!element?.classList.contains('rl-tc-missing')) {
+          problems[`r${row}c${col}`] = 'no cell its row lacks drawn there';
+          continue;
+        }
+        const box = await reveal(element);
+        pressAt(editor, box.left + box.width / 2, box.top + box.height / 2);
+        await frames();
+        const active = cellElements(editor)[row]?.[col];
+        if (caretMissing(editor) !== String(col) || !active?.classList.contains('rl-tc-active'))
+          problems[`r${row}c${col}-caret`] = caretMissing(editor);
+        if (head(editor) !== table(editor).rows[row]?.to)
+          problems[`r${row}c${col}-head`] = head(editor);
+        if (doc(editor) !== FEWER) problems[`r${row}c${col}-wrote`] = doc(editor);
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // An empty cell holds a filler of its own, whatever its padding (`| |` and `||` as well as `|  |`), and
+    // no cell with text holds one; a row with an empty cell is as tall as a row of text (the same row with
+    // text in those cells, and the row above it), and the text beside an empty cell stands as high as it
+    // does then; where the cell's stop is inside it (two spaces of padding), a press on it puts the caret in
+    // it, and the DOM place the editor gives the caret at its stop (`domAtPos`) is in it. (The filler of a
+    // cell with one space of padding or none once stood in the next cell, which held that cell's text
+    // 6.85 px low and its row 6.85 px tall; and any filler, a baseline-aligned box with `overflow:
+    // hidden`, rested its bottom edge on the baseline and made its row 6.85 px taller.) Chromium-measured,
+    // in px: the heights and tops and the hit test; WebKit's line layout and hit test are the sweep's.
+    name: 'an-empty-cell-holds-its-own-filler-and-its-row-is-as-tall-as-a-row-of-text',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const [form, source] of EMPTY_FORMS) {
+        await load(editor, source);
+        const found = table(editor);
+        const withEmpty = found.rows.flatMap((row, r) => {
+          const empty = row.cells.filter((cell) => cell.textFrom === cell.textTo);
+          return empty.length ? [{ r, row, empty }] : [];
+        });
+        if (withEmpty.length === 0) {
+          problems[`${form}-fixture`] = 'no empty cell';
+          continue;
+        }
+        const grid = cellElements(editor);
+        const lines = lineElements(editor);
+        const wanted = withEmpty.flatMap(({ row }) =>
+          row.cells.filter((cell) => cell.textFrom === cell.textTo),
+        ).length;
+        const total = editor.view.contentDOM.querySelectorAll('.rl-tc-fill').length;
+        if (total !== wanted) problems[`${form}-fillers-in-all`] = { total, wanted };
+        const before = withEmpty.map(({ r }) => ({
+          height: lines[r]?.getBoundingClientRect().height ?? NaN,
+          tops: (grid[r] ?? []).map(textTop),
+        }));
+        withEmpty.forEach(({ r, row, empty }) => {
+          const cells = grid[r] ?? [];
+          // One filler in each empty cell, none in a cell with text, each at its own cell's left edge.
+          const fills = cells.map((cell) => cell.querySelectorAll('.rl-tc-fill').length);
+          const want = row.cells.map((cell) => (cell.textFrom === cell.textTo ? 1 : 0));
+          if (!same(fills, want)) problems[`${form}-r${r}-fillers`] = { fills, want };
+          for (const cell of empty) {
+            const own = cells[cell.col];
+            const box = own?.getBoundingClientRect();
+            const fill = own?.querySelector('.rl-tc-fill')?.getBoundingClientRect();
+            if (!box || !fill || fill.left < box.left - 0.5 || fill.left > box.right - 0.5)
+              problems[`${form}-r${r}c${cell.col}-filler-box`] = [
+                fill?.left,
+                box?.left,
+                box?.right,
+              ];
+          }
+          // The text of a cell beside an empty one stands as high as the text of the others.
+          const tops = (grid[r] ?? []).map(textTop).filter((top): top is number => top !== null);
+          if (Math.max(...tops) - Math.min(...tops) > 0.5) problems[`${form}-r${r}-tops`] = tops;
+        });
+        // The same rows with text in the empty cells: the heights and the tops must not move.
+        editor.view.dispatch({
+          changes: withEmpty.flatMap(({ empty }) =>
+            empty.map((cell) => ({ from: cell.textFrom, insert: 'y' })),
+          ),
+        });
+        await frames();
+        withEmpty.forEach(({ r }, i) => {
+          const height = lineElements(editor)[r]?.getBoundingClientRect().height ?? NaN;
+          const was = before[i];
+          if (!was || !(Math.abs(was.height - height) <= 0.5))
+            problems[`${form}-r${r}-height`] = { empty: was?.height, text: height };
+          const tops = (cellElements(editor)[r] ?? []).map(textTop);
+          tops.forEach((top, c) => {
+            const earlier = was?.tops[c];
+            if (typeof earlier === 'number' && !(top !== null && Math.abs(earlier - top) <= 0.5))
+              problems[`${form}-r${r}c${c}-top`] = { empty: earlier, text: top };
+          });
+          // And the row above the last one is a row of text as well: the same height as a row with an
+          // empty cell, in the body.
+          const above = lineElements(editor)[1]?.getBoundingClientRect().height;
+          if (r >= 2 && !(was && above !== undefined && Math.abs(was.height - above) <= 0.5))
+            problems[`${form}-r${r}-height-above`] = { empty: was?.height, above };
+        });
+        // A press in the middle of each empty cell puts the caret in it, and the DOM place the editor gives
+        // the caret at its stop (`domAtPos`, on the side its selection says) is in that cell, whatever its
+        // padding: with one space or none the stop is where the next cell begins, and the caret leans to the
+        // cell it is the end of.
+        await load(editor, source);
+        for (const { r, empty } of withEmpty) {
+          for (const cell of empty) {
+            editor.view.dispatch({ selection: EditorSelection.cursor(0) });
+            await frames();
+            const own = cellElements(editor)[r]?.[cell.col];
+            if (!own) {
+              problems[`${form}-r${r}c${cell.col}-cell`] = 'not drawn';
+              continue;
+            }
+            const box = await reveal(own);
+            pressAt(editor, box.left + box.width / 2, box.top + box.height / 2);
+            await frames();
+            if (head(editor) !== cell.textFrom)
+              problems[`${form}-r${r}c${cell.col}-press`] = [head(editor), cell.textFrom];
+            const { node } = editor.view.domAtPos(
+              cell.textFrom,
+              editor.view.state.selection.main.assoc || 1,
+            );
+            const holder = (node instanceof Element ? node : node.parentElement)?.closest('.rl-tc');
+            if (holder !== own)
+              problems[`${form}-r${r}c${cell.col}-caret-place`] = {
+                in: holder?.getAttribute('data-col') ?? holder?.className ?? 'no cell',
+                want: String(cell.col),
+              };
+          }
+        }
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The caret can stand in an empty cell with one space of padding or none (`| |`, `||`), where the
+    // cell's one stop is the end of its own mark and the start of the next cell's: Tab and ⇧Tab visit it, →
+    // and ← step into it and out of it, a press on its box puts the caret in it, the page draws the caret
+    // there (the DOM selection is inside the cell's own mark, at its left edge: a caret leans to the cell it
+    // is the end of), and the browser's own typing writes into it, a letter and a second, and into no
+    // other cell. (The caret could not stand there: Tab, → and a press put it at the start of the next
+    // cell's text, ← from there did not move, and the browser's typing went into the next cell.) Two
+    // spaces of padding are here as a control. Chromium-measured: the hit test, `coordsAtPos` and the editing; WebKit's are
+    // the sweep's.
+    name: 'the-caret-stands-in-an-empty-cell-with-one-space-or-none',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const [form, source] of EMPTY_FORMS) {
+        await load(editor, source);
+        const wanted = table(editor).rows.flatMap((row) =>
+          row.cells
+            .filter((cell) => cell.textFrom === cell.textTo)
+            .map((cell) => [row.index, cell.col]),
+        );
+        if (wanted.length === 0) {
+          problems[`${form}-fixture`] = 'no empty cell';
+          continue;
+        }
+        for (const [r, c] of wanted) {
+          // Each on the document as it was given: what is typed into one is not in the next.
+          await load(editor, source);
+          const order = table(editor).rows.flatMap((row) =>
+            row.cells.map((cell) => ({ row, cell })),
+          );
+          const found = order.find(({ row, cell }) => row.index === r && cell.col === c);
+          if (!found) {
+            problems[`${form}-r${r}c${c}-fixture`] = 'no such cell';
+            continue;
+          }
+          const { row, cell } = found;
+          const label = `${form}-r${row.index}c${cell.col}`;
+          const at = order.findIndex((one) => one.cell === cell);
+          const before = order[at - 1];
+          const after = order[at + 1];
+          const element = () => cellElements(editor)[row.index]?.[cell.col];
+          // The caret is in the cell, as the model has it and as the page draws it: the DOM selection is
+          // collapsed inside the cell's own mark, and the caret's place is at the cell's left edge.
+          const drawn = (step: string) => {
+            const picked = window.getSelection();
+            const node = picked?.anchorNode;
+            const holder = (node instanceof Element ? node : node?.parentElement)?.closest(
+              '.rl-tc',
+            );
+            const own = element();
+            if (head(editor) !== cell.textFrom && step !== 'typed')
+              problems[`${label}-${step}-head`] = [head(editor), cell.textFrom];
+            if (!own || !picked?.isCollapsed || holder !== own)
+              problems[`${label}-${step}-dom`] = {
+                collapsed: picked?.isCollapsed,
+                in: holder?.getAttribute('data-col') ?? holder?.className ?? 'no cell',
+                want: String(cell.col),
+              };
+            const { assoc } = editor.view.state.selection.main;
+            const coords = editor.view.coordsAtPos(head(editor), assoc || 1);
+            const box = own?.getBoundingClientRect();
+            // At the cell's left edge; after what was typed, a little way along its text.
+            const along = step === 'typed' ? box?.right : box?.left;
+            if (!coords || !box || coords.left < box.left - 2 || coords.left > (along ?? 0) + 2)
+              problems[`${label}-${step}-x`] = {
+                caret: coords?.left,
+                cell: [box?.left, box?.right],
+              };
+          };
+          // Tab from the cell before it, and ⇧Tab from the cell after it.
+          if (before) {
+            await place(editor, before.cell.textFrom);
+            press(editor, 'Tab');
+            await frames();
+            drawn('tab');
+          }
+          if (after) {
+            await place(editor, after.cell.textFrom);
+            press(editor, 'Shift-Tab');
+            await frames();
+            drawn('shift-tab');
+          }
+          // → from the end of the text before it, and then on into the next cell; ← the other way.
+          if (before && before.row === row) {
+            await place(editor, before.cell.textTo);
+            press(editor, 'ArrowRight');
+            await frames();
+            drawn('right');
+            if (after && after.row === row) {
+              press(editor, 'ArrowRight');
+              await frames();
+              if (head(editor) !== after.cell.textFrom)
+                problems[`${label}-right-on`] = [head(editor), after.cell.textFrom];
+            }
+          }
+          if (after && after.row === row) {
+            await place(editor, after.cell.textFrom);
+            press(editor, 'ArrowLeft');
+            await frames();
+            drawn('left');
+            if (before && before.row === row) {
+              press(editor, 'ArrowLeft');
+              await frames();
+              if (head(editor) !== before.cell.textTo)
+                problems[`${label}-left-on`] = [head(editor), before.cell.textTo];
+            }
+          }
+          // A press in the middle of its box.
+          await place(editor, 0);
+          const own = element();
+          if (!own) {
+            problems[`${label}-cell`] = 'not drawn';
+            continue;
+          }
+          const box = await reveal(own);
+          pressAt(editor, box.left + box.width / 2, box.top + box.height / 2);
+          await frames();
+          drawn('press');
+          // (A frame between reading the caret's coordinates and the browser's typing: typed in the same
+          // turn as `coordsAtPos` was asked, the first letter is lost, in any cell.)
+          await frames();
+          // The browser's own typing at that caret: a letter, and a second, in the cell and no other.
+          document.execCommand('insertText', false, 'Y');
+          await frames();
+          document.execCommand('insertText', false, 'Z');
+          await frames();
+          const want = `${source.slice(0, cell.textFrom)}YZ${source.slice(cell.textFrom)}`;
+          if (doc(editor) !== want) problems[`${label}-typed`] = doc(editor).replaceAll('\n', '⏎');
+          else {
+            if (head(editor) !== cell.textFrom + 2)
+              problems[`${label}-typed-head`] = [head(editor), cell.textFrom + 2];
+            drawn('typed');
+          }
+        }
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A row with more cells than the header draws no cell beyond the header's columns, in Clean, Simple
+    // and Redlines: the extra cell is kept in the text and not drawn. No key puts the caret in it, from
+    // each place around it: the arrows (↑ ↓ by the page's own geometry), Home and End, ⌥ with the arrows,
+    // Tab and ⇧Tab. (The delete keys, which no browser decides, are in the unit tests' every-key
+    // test.) Chromium-measured: ↑ ↓, Home and End take the page's coordinates.
+    name: 'a-row-with-more-cells-draws-none-beyond-the-header-and-no-key-lands-in-one',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const view of ['clean', 'simple', 'redlines'] as const) {
+        await load(editor, MORE);
+        editor.setViewMode(view);
+        await frames();
+        const shown = shownCells(editor);
+        const counts = shown.map((row) => row.length);
+        if (!same(counts, [2, 2, 2])) problems[`${view}-cells`] = counts;
+        const hidden = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tc-hidden')];
+        if (
+          hidden.length !== 1 ||
+          getComputedStyle(hidden[0]!).display !== 'none' ||
+          !hidden[0]?.textContent?.includes('EXTRA')
+        )
+          problems[`${view}-hidden`] = hidden.map((cell) => cell.textContent);
+        if (editor.view.contentDOM.innerText.includes('EXTRA'))
+          problems[`${view}-drawn`] = 'the extra cell is drawn';
+        const aligned = gridOff(shown);
+        if (aligned.off > 0.5) problems[`${view}-lines-up`] = aligned;
+        if (doc(editor) !== MORE) problems[`${view}-wrote`] = doc(editor);
+      }
+      await load(editor, MORE);
+      const row = table(editor).rows[1];
+      const reach = cellOf(editor, 1, 2);
+      if (!row) return { ...problems, why: 'no row with an extra cell' };
+      await place(editor, row.from);
+      const places = [
+        row.from,
+        cellOf(editor, 1, 0).textFrom,
+        cellOf(editor, 1, 1).textFrom,
+        cellOf(editor, 1, 1).textTo,
+        reach.from,
+        reach.from + 1,
+        reach.textFrom,
+        reach.textTo,
+        reach.to,
+      ];
+      const keys = [
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Home',
+        'End',
+        'Alt-ArrowLeft',
+        'Alt-ArrowRight',
+        'Tab',
+        'Shift-Tab',
+      ];
+      const inside = (pos: number) => pos >= reach.textFrom && pos <= reach.to;
+      // The keys do move the caret (a loop that never moved it would find nothing to be wrong): → from
+      // the end of d goes on to f in the next row, over the extra cell, ← comes back, and Tab selects f.
+      const end = cellOf(editor, 1, 1).textTo;
+      editor.view.dispatch({ selection: EditorSelection.cursor(end) });
+      press(editor, 'ArrowRight');
+      if (head(editor) !== cellOf(editor, 2, 0).textFrom) problems['right-moves'] = head(editor);
+      press(editor, 'ArrowLeft');
+      if (head(editor) !== end) problems['left-moves'] = head(editor);
+      editor.view.dispatch({ selection: EditorSelection.cursor(cellOf(editor, 1, 1).textFrom) });
+      press(editor, 'Tab');
+      const picked = editor.view.state.selection.main;
+      if (editor.view.state.sliceDoc(picked.from, picked.to) !== 'f')
+        problems['tab-moves'] = [picked.from, picked.to];
+      for (const from of places) {
+        for (const key of keys) {
+          const label = `${key} at ${from - row.from}`;
+          editor.view.dispatch({ selection: EditorSelection.cursor(from) });
+          try {
+            press(editor, key);
+          } catch (error) {
+            problems[`${label}-threw`] = String(error);
+            continue;
+          }
+          const { anchor, head: to } = editor.view.state.selection.main;
+          if (inside(anchor) || inside(to) || editor.view.contentDOM.querySelector('.rl-tc-active'))
+            problems[label] = [anchor - row.from, to - row.from];
+          if (doc(editor) !== MORE) problems[`${label}-wrote`] = doc(editor);
+        }
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // Select Column on a column that the last row does not reach selects that column alone: the cells
+    // the rows have in it (the header's and the first row's), drawn selected, and not the cell the last
+    // row lacks, nor any other column's. On a column that no body row reaches it selects the header's
+    // cell alone, as text, which is no rectangle, from the header and from a cell a row lacks.
+    name: 'select-column-on-a-column-the-last-row-does-not-reach-selects-that-column-alone',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      await load(editor, around('| a | b | c |\n| - | - | - |\n| 1 | 2 | 3 |\n| 4 | 5 |'));
+      await place(editor, cellOf(editor, 0, 2).textFrom);
+      if (!editor.commands.run('table.selectColumn')) return { why: 'Select Column did nothing' };
+      await frames();
+      const found = rect(editor);
+      if (!found || !same(found.cols, [2, 2]) || found.whole !== 'column') problems['rect'] = found;
+      const drawn = selectedLabels(editor);
+      if (!same(drawn, ['r0c2', 'r1c2'])) problems['drawn'] = drawn;
+      const lacking = cellElements(editor)[2]?.find((cell) =>
+        cell.classList.contains('rl-tc-missing'),
+      );
+      if (!lacking || painted(lacking))
+        problems['missing-cell'] = lacking ? 'painted as selected' : 'not drawn';
+      // No body row has a cell in the column: the header's cell, as text.
+      const none = around('| a | b | c |\n| - | - | - |\n| 1 | 2 |\n| 4 | 5 |');
+      for (const where of ['header', 'missing'] as const) {
+        await load(editor, none);
+        await place(editor, cellOf(editor, 0, 2).textFrom);
+        if (where === 'missing') {
+          await place(editor, cellOf(editor, 2, 1).textTo);
+          press(editor, 'ArrowRight');
+          await frames();
+          if (caretMissing(editor) !== '2') {
+            problems[`${where}-caret`] = caretMissing(editor);
+            continue;
+          }
+        }
+        if (!editor.commands.run('table.selectColumn')) {
+          problems[`${where}-ran`] = false;
+          continue;
+        }
+        await frames();
+        const { from, to } = editor.view.state.selection.main;
+        const text = editor.view.state.sliceDoc(from, to);
+        if (text !== 'c' || rect(editor) || selectedLabels(editor).length)
+          problems[`${where}-selected`] = {
+            text,
+            rect: rect(editor),
+            drawn: selectedLabels(editor),
+          };
+        if (doc(editor) !== none) problems[`${where}-wrote`] = doc(editor);
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // Delete Table from the Table menu's command, with the caret in a cell. With Track Changes on it is
+    // one block deletion, drawn in Redlines as the ghost table where the table was (Clean draws none, nor
+    // any table), the caret on the text after it; off, the table's text goes. Each is one step to undo.
+    name: 'delete-table-draws-the-ghost-table-tracked-and-takes-the-text-untracked',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      const start = around(fruitTable(4));
+      for (const tracking of [true, false]) {
+        const label = tracking ? 'tracked' : 'plain';
+        await load(editor, start, tracking);
+        await place(editor, cellOf(editor, 2, 1).textFrom);
+        if (!editor.commands.run('table.deleteTable')) {
+          problems[`${label}-ran`] = false;
+          continue;
+        }
+        editor.setViewMode('redlines');
+        await frames();
+        const marked = /<!--del [a-z0-9]{4} /.test(doc(editor));
+        if (marked !== tracking) problems[`${label}-marked`] = marked;
+        if (!tracking && doc(editor) !== 'Intro paragraph.\n\nBelow.')
+          problems[`${label}-text`] = doc(editor);
+        if (doc(editor).slice(head(editor), head(editor) + 6) !== 'Below.')
+          problems[`${label}-caret`] = doc(editor).slice(head(editor) - 4, head(editor) + 6);
+        const [ghost] = ghostTables(editor);
+        if (tracking && (ghostTables(editor).length !== 1 || ghost?.dataset['rows'] !== '4'))
+          problems[`${label}-ghost`] = ghostTables(editor).map((g) => g.dataset['rows']);
+        if (!tracking && ghostTables(editor).length) problems[`${label}-ghost`] = 'a ghost table';
+        if (editor.view.contentDOM.querySelector('.rl-tbl') || tablesOf(editor.view.state).length)
+          problems[`${label}-table`] = 'a table of the document is still drawn';
+        editor.setViewMode('clean');
+        await frames();
+        if (ghostTables(editor).length || editor.view.contentDOM.textContent?.includes('Fruit'))
+          problems[`${label}-clean`] = 'the deleted table shows in Clean';
+        if (!undo(editor.view) || doc(editor) !== start)
+          problems[`${label}-undo`] = doc(editor).replaceAll('\n', '⏎').slice(0, 200);
+        await frames();
+        if (tablesOf(editor.view.state).length !== 1) problems[`${label}-undone`] = 'no table back';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // ⌫ on a selected row clears its cells and the row stays, with its text or without; ⌫ again, the
+    // cells being empty (what the page shows), deletes it: with Track Changes off the row's text goes
+    // and the caret is in the row then there; on, a ghost row appears (in Redlines) in its place, the
+    // clearing folded into the one deletion line.
+    name: 'second-backspace-deletes-an-emptied-row-and-a-ghost-row-appears-tracked',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const tracking of [false, true]) {
+        const label = tracking ? 'tracked' : 'plain';
+        await load(editor, ROWS, tracking);
+        if (tracking) editor.setViewMode('redlines');
+        await frames();
+        await place(editor, cellOf(editor, 2, 1).textFrom);
+        press(editor, 'Ctrl-l');
+        await frames();
+        if (rect(editor)?.whole !== 'row') {
+          problems[`${label}-selected`] = rect(editor);
+          continue;
+        }
+        press(editor, 'Backspace');
+        await frames();
+        // The first: the row's text is cleared (a deletion in each cell, tracked), and the row stays,
+        // selected.
+        if (lineElements(editor).length !== 4 || ghostElements(editor).length)
+          problems[`${label}-first-rows`] = [
+            lineElements(editor).length,
+            ghostElements(editor).length,
+          ];
+        if (!tracking && doc(editor) !== ROWS.replace('| Plums | 4 | ok |', '|  |  |  |'))
+          problems[`${label}-first`] = doc(editor);
+        if (tracking && (doc(editor).match(/<!--del /g) ?? []).length !== 3)
+          problems[`${label}-first-marks`] = doc(editor).match(/<!--del /g)?.length;
+        if (rect(editor)?.whole !== 'row') problems[`${label}-first-selected`] = rect(editor);
+        press(editor, 'Backspace');
+        await frames();
+        // The second: the row goes.
+        if (
+          lineElements(editor).length !== 3 ||
+          firstColumn(editor).join() !== 'Fruit,Apples,Pears'
+        )
+          problems[`${label}-second-rows`] = firstColumn(editor);
+        if (!tracking && doc(editor) !== ROWS.replace('| Plums | 4 | ok |\n', ''))
+          problems[`${label}-second`] = doc(editor);
+        if (tracking) {
+          if (ghostElements(editor).length !== 1)
+            problems[`${label}-ghost-row`] = ghostElements(editor).length;
+          const marks = doc(editor).match(/<!--del /g) ?? [];
+          if (marks.length !== 1 || !/<!--del [a-z0-9]{4} row=2 /.test(doc(editor)))
+            problems[`${label}-second-marks`] = marks.length;
+        }
+        if (!inText(cellOf(editor, 2, 0), head(editor))) problems[`${label}-caret`] = head(editor);
+        editor.setViewMode('clean');
+        await frames();
+        if (editor.view.contentDOM.textContent?.includes('Plums'))
+          problems[`${label}-clean`] = 'the deleted row shows in Clean';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The same on a selected column, and on the whole table: ⌫ clears and they stay; ⌫ again deletes the
+    // column (a ghost cell in every row, tracked) or the table (the ghost table, tracked; the text
+    // gone, untracked).
+    name: 'second-backspace-deletes-an-emptied-column-and-the-whole-table',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const tracking of [false, true]) {
+        const label = tracking ? 'tracked' : 'plain';
+        // The column.
+        await load(editor, ROWS, tracking);
+        if (tracking) editor.setViewMode('redlines');
+        await frames();
+        await place(editor, cellOf(editor, 1, 1).textFrom);
+        editor.commands.run('table.selectColumn');
+        await frames();
+        press(editor, 'Backspace');
+        await frames();
+        if (table(editor).columns !== 3 || rect(editor)?.whole !== 'column')
+          problems[`${label}-column-first`] = [table(editor).columns, rect(editor)?.whole];
+        press(editor, 'Backspace');
+        await frames();
+        if (tracking) {
+          const ghosts = ghostCols(editor).map((g) => g.textContent);
+          if (ghosts.join('|') !== 'Count|3|4|5') problems[`${label}-column-ghosts`] = ghosts;
+        } else if (table(editor).columns !== 2 || /\| 3 \|/.test(doc(editor))) {
+          problems[`${label}-column-second`] = doc(editor);
+        }
+        // The table.
+        await load(editor, ROWS, tracking);
+        if (tracking) editor.setViewMode('redlines');
+        await frames();
+        await place(editor, cellOf(editor, 2, 1).textFrom);
+        editor.commands.run('table.selectTable');
+        await frames();
+        press(editor, 'Backspace');
+        await frames();
+        if (
+          editor.view.contentDOM.querySelectorAll('.rl-tbl').length !== 1 ||
+          ghostTables(editor).length ||
+          rect(editor)?.whole !== 'table'
+        )
+          problems[`${label}-table-first`] = [
+            editor.view.contentDOM.querySelectorAll('.rl-tbl').length,
+            ghostTables(editor).length,
+            rect(editor)?.whole,
+          ];
+        press(editor, 'Backspace');
+        await frames();
+        if (editor.view.contentDOM.querySelector('.rl-tbl') || tablesOf(editor.view.state).length)
+          problems[`${label}-table-second`] = 'a table of the document is still drawn';
+        if (tracking) {
+          const [ghost] = ghostTables(editor);
+          if (ghostTables(editor).length !== 1 || ghost?.dataset['rows'] !== '4')
+            problems[`${label}-ghost`] = ghostTables(editor).map((g) => g.dataset['rows']);
+          // The clearing is folded into the deletion: the table is drawn as it read before it.
+          if (ghost && gridTexts(ghostGrid(ghost))[2] !== 'Plums|4|ok')
+            problems[`${label}-ghost-text`] = gridTexts(ghostGrid(ghost));
+        } else if (doc(editor) !== 'Intro.\n\nBelow.') {
+          problems[`${label}-table-text`] = doc(editor);
+        }
+      }
       return Object.keys(problems).length ? problems : null;
     },
   },

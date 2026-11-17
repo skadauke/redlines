@@ -92,6 +92,16 @@ describe('markdownToHtml', () => {
     expect(out).not.toContain('<input');
   });
 
+  it('copies a sized image, a tag, as the image element (#633)', () => {
+    expect(html('<img src="https://example.com/p.png" alt="a &amp; b" width="320">')).toContain(
+      '<p><img src="https://example.com/p.png" alt="a &amp; b" width="320"></p>',
+    );
+    expect(html('Words <img src="https://example.com/p.png" width="50%"> more.')).toContain(
+      'Words <img src="https://example.com/p.png" alt=""> more.',
+    );
+    expect(html('<img src="javascript:alert(1)" alt="x">')).not.toContain('<img');
+  });
+
   it('escapes raw HTML in the source instead of copying it live', () => {
     const out = html(
       'A <script>alert(1)</script> and <b onclick="x()">bold</b>.\n\n<div>block</div>\n\n<!-- note -->',
@@ -145,5 +155,17 @@ describe('markdownToHtml', () => {
     expect(out).toContain('The note[^1] is here.');
     expect(out).toContain('<p>[^1]: note</p>');
     expect(out).not.toContain('<a ');
+  });
+});
+
+describe('emoji shortcodes in a copy (#388)', () => {
+  const lookup = (name: string) => (name === 'tent' ? '⛺' : undefined);
+  it('writes the character for a shortcode the host knows, and keeps any other as text', () => {
+    const out = markdownToHtml('Camp :tent: and :nope: `:tent:`', undefined, undefined, lookup);
+    expect(out).toContain('Camp ⛺ and :nope:');
+    expect(out).toContain('>:tent:</code>');
+  });
+  it('keeps the shortcode as text without a lookup', () => {
+    expect(html('Camp :tent:')).toContain('Camp :tent:');
   });
 });

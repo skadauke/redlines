@@ -9,6 +9,7 @@ import {
   type EditContext,
   type FormatOp,
   alignLabel,
+  deletedTable,
   formatChange,
   type InlineFormat,
   type MarkRange,
@@ -19,6 +20,7 @@ import {
   suggestions,
   type TextChange,
   type Time,
+  plainPayload,
 } from '@redlines/format';
 
 /** The editor that the review interface works on, and the person using it. */
@@ -224,13 +226,26 @@ export function rowsDone(changes: readonly MarkRange[]): string | null {
     : `${first.replace(/ (row|column)$/, ` ${changes.length} $1s`)}`;
 }
 
+/**
+ * What a table deleted whole did, in the words of a card and a note: `Deleted table (3 columns, 20
+ * rows)`, its rows the header's and the body's. Null for any other change, a deletion of more than
+ * the table included.
+ */
+export function tableDeleted(change: MarkRange): string | null {
+  const table = change.kind === 'del' && change.payload ? deletedTable(change.payload) : null;
+  if (!table) return null;
+  const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+  return `Deleted table (${count(table.columns, 'column')}, ${count(table.rows, 'row')})`;
+}
+
 /** What a change took out and what it put in: the one reading of a change's kind. A format change
  * changed no text, and has its label instead. */
 export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
   if (change.kind === 'fmt') {
     return { old: '', added: '', label: formatLabel(formatChange(parsed, change)) };
   }
-  const old = change.kind === 'del' || change.kind === 'sub' ? (change.payload ?? '') : '';
+  const old =
+    change.kind === 'del' || change.kind === 'sub' ? plainPayload(change.payload ?? '') : '';
   const added =
     change.kind === 'split' ? '\n' : change.kind === 'del' ? '' : insertedText(parsed, change);
   return { old, added };
@@ -249,13 +264,13 @@ function isBreak(text: string): boolean {
 
 /**
  * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
- * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs` or
- * `Formatted: Bold`: on the card, and in the simple look on the note. A substitution with no old
- * text, such as the second part of one that untracked typing split (format §3.10), inserted its
- * text.
+ * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs`,
+ * `Deleted table (3 columns, 20 rows)` or `Formatted: Bold`: on the card, and in the simple look on
+ * the note. A substitution with no old text, such as the second part of one that untracked typing
+ * split (format §3.10), inserted its text.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
-  const row = rowsDone([change]);
+  const row = rowsDone([change]) ?? tableDeleted(change);
   if (row !== null) return row;
   const { old, added, label } = changeTexts(parsed, change);
   if (label !== undefined) return `Formatted: ${label}`;
@@ -442,6 +457,26 @@ export function button(
     el.textContent = label;
   }
   el.addEventListener('mousedown', (event) => event.preventDefault());
-  el.addEventListener('click', () => run());
+  // A button grayed with a reason (`setReason`) stays under the pointer, so its hint shows.
+  el.addEventListener('click', () => {
+    if (el.getAttribute('aria-disabled') !== 'true') run();
+  });
   return el;
+}
+
+/**
+ * Grays a button and gives its hint the reason it can't be used ("This change can only be
+ * accepted: its block no longer has that syntax."), or makes it usable again with `undefined`. The
+ * button isn't `disabled`, which would let go of the pointer and its hint: it says it is disabled
+ * to assistive technology, and takes no click (`button`).
+ */
+export function setReason(el: HTMLButtonElement, reason: string | undefined): void {
+  el.classList.toggle('rl-reason-disabled', reason !== undefined);
+  if (reason === undefined) {
+    el.removeAttribute('aria-disabled');
+    el.removeAttribute('title');
+    return;
+  }
+  el.setAttribute('aria-disabled', 'true');
+  el.title = reason;
 }

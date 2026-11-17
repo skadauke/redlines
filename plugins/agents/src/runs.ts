@@ -32,6 +32,7 @@ import type {
 } from '@redlines/plugin-api';
 import type { PostedComment } from '@redlines/review';
 import { mentionedAgents } from './mentions.ts';
+import { decideReach, type Reach } from './reach.ts';
 
 /** What a thread shows of its run, for now: never written to the file. */
 export type LiveLine =
@@ -105,6 +106,8 @@ export interface RunDeps {
   author: Author;
   document: {
     path(): string | null;
+    /** Whether it is a Plain-only file (text or code): the tools that mark refuse there. */
+    plainOnly(): boolean;
     /** Bumped whenever another document replaces this one. */
     generation(): number;
     read(): string;
@@ -147,8 +150,6 @@ export interface RunDeps {
 
 /** The line a run starts with, until the agent says what it is doing. */
 const STARTING = 'Starting…';
-/** Said on the line when the folder is the home folder or the disk's root. */
-const TOO_BROAD = 'Folder too broad: this document only';
 /** Said on the line when the home folder was allowed and the host could not list it. */
 const NO_HOME = 'No home folder found: this folder only';
 /** Said on the line while macOS may be asking whether Redlines can read a folder. */
@@ -205,22 +206,6 @@ interface ThreadState {
    * post shows its own line while it runs, and puts this back when it ends well.
    */
   failure: { post: number; line: LiveLine } | null;
-}
-
-/** How wide each scope reads, for holding an answer to what Preferences allow. */
-const WIDTH: Record<AgentScope, number> = { document: 0, folder: 1, everything: 2 };
-
-/** The narrower of two scopes. */
-function narrower(one: AgentScope, other: AgentScope): AgentScope {
-  return WIDTH[one] <= WIDTH[other] ? one : other;
-}
-
-/** Where a run may read, once that is settled. */
-interface Reach {
-  scope: AgentScope;
-  folder?: string;
-  /** Said on the line as the run starts. */
-  note?: string;
 }
 
 /** The handle an agent writes as when it acts for `me`, such as `claude-ada` (spec: What happens). */
@@ -488,31 +473,17 @@ export function createRuns(deps: RunDeps): RunController {
     const { agent } = run.job;
     const root = path === null ? null : await deps.projectRoot(path);
     if (run.over || stopIfGone(run)) return null;
-    const folder = root && !root.tooBroad ? root.folder : undefined;
-    const atDocument: Reach = root?.tooBroad
-      ? { scope: 'document', note: TOO_BROAD }
-      : { scope: 'document' };
-    const machine = agent.readLimit === 'machine';
-    const allowed = deps.settings.defaultScope();
-    if (!machine && (folder === undefined || allowed === 'document')) return atDocument;
-    const asked = folder ?? root?.folder ?? '';
-    let answer = deps.settings.consent(agent.id, asked);
-    // Only the answers that allow something are remembered; a no an earlier version stored asks
-    // again. A machine-wide agent has no This document, and no home folder to hold it to.
-    if (answer === 'no' || (machine && answer !== 'folder')) answer = undefined;
-    if (answer === undefined) {
-      const home = !machine && allowed === 'everything';
-      const given = await ask(run, asked, home);
-      if (given === null || given === 'no' || stopIfGone(run)) return null;
-      deps.settings.setConsent(agent.id, asked, given);
-      answer = given;
+    return decideReach({
+      agent,
+      root,
+      defaultScope: () => deps.settings.defaultScope(),
+      consent: (id, folder) => deps.settings.consent(id, folder),
+      setConsent: (id, folder, answer) => deps.settings.setConsent(id, folder, answer),
+      ask: (folder, home) => ask(run, folder, home),
+      over: () => stopIfGone(run),
       // The question is answered: the line says the run goes on, and not the question.
-      running(run, STARTING);
-    }
-    // Preferences may have been narrowed while the question was up: the setting as it is now holds.
-    const scope = machine ? answer : narrower(answer, deps.settings.defaultScope());
-    if (scope === 'document' || folder === undefined) return atDocument;
-    return { scope, folder };
+      answered: () => running(run, STARTING),
+    });
   }
 
   /**
@@ -610,6 +581,7 @@ export function createRuns(deps: RunDeps): RunController {
       thread: job.thread,
       now: () => new Date(),
       requestedBy: me,
+      plainOnly: () => deps.document.plainOnly(),
       onStatus: (status) => running(run, status),
       onReply: () => {
         run.replied = true;
@@ -672,6 +644,9 @@ export function createRuns(deps: RunDeps): RunController {
       } else if (event.type === 'status') {
         running(run, event.text);
         if (event.blocked) tellBlocked(run, event.blocked);
+      } else if (event.type === 'web') {
+        // The host answers the web itself (mac-agents); a line is all that can reach here.
+        running(run, event.text);
       } else if (event.type === 'error') {
         return finish(run, failed(run, event.message, event.setup === true));
       } else {

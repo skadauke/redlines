@@ -7,10 +7,10 @@ import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import type { FormatOp } from './format-ops.ts';
-import { trackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat } from './formatting.ts';
 import { ada, bodyOf, context } from './test-helpers.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
-import { trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import type { Range, TextChange } from './types.ts';
 
@@ -253,8 +253,8 @@ describe('no marker goes between a letter or a digit and a shortcode (#312)', ()
   it('refuses the opener that would stand between a letter and a shortcode, with words to follow', () => {
     const why = refusal(() => edit(text, { from: at - 1, to: at, insert: '' }));
     expect(why).toMatch(STUCK);
-    // Raw is read-only while Track Changes is on, which is when this is said: it is no advice.
-    expect(why).not.toMatch(/Raw/);
+    // Plain is read-only while Track Changes is on, which is when this is said: it is no advice.
+    expect(why).not.toMatch(/Plain/);
   });
 
   it('takes a space or punctuation typed there, and a word replaced by one that ends in a space', () => {

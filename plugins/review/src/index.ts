@@ -1,18 +1,34 @@
 // The review interface (design §5.5–§5.7): margin notes, change cards and the review bar.
 
-import type { Extension } from '@codemirror/state';
+import type { EditorState, Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
-import { type Author, barClickHandlers, type Editor } from '@redlines/editor';
+import {
+  type Author,
+  barClickHandlers,
+  type Editor,
+  inFrontMatter,
+  isChange,
+  parsedField,
+  viewModeField,
+} from '@redlines/editor';
 import type { PluginManifest } from '@redlines/plugin-api';
-import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
+import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar, start } from './bar.ts';
 import { cards } from './cards.ts';
-import { rail, type RailOptions } from './rail.ts';
-import type { ReviewContext } from './shared.ts';
+import {
+  highlightDisabledReason,
+  highlightsAt,
+  highlightTitle,
+  toggleHighlight,
+} from './highlight.ts';
+import { type PinnedElement, rail, type RailOptions } from './rail.ts';
+import { EditError, type MarkRange, rejectReason } from '@redlines/format';
+import { decideSuggestion, type ReviewContext, spanOf } from './shared.ts';
 import { reviewTheme } from './styles.ts';
 
 export type { FieldAttachment, PostedComment } from './comment-box.ts';
 export { icon, type IconName } from './icons.ts';
-export type { ThreadExtras } from './rail.ts';
+export type { PinnedElement, ThreadExtras } from './rail.ts';
+export { RAIL_GAP } from './styles.ts';
 
 /**
  * What the review interface is and needs. It reads and changes the document, and keeps the comments
@@ -25,9 +41,21 @@ export const manifest: PluginManifest = {
   needs: ['document:read', 'document:edit', 'document:data'],
 };
 
+/**
+ * The id of the Highlight command, for a host that draws it itself, such as a palette that finds it
+ * in the editor's commands. It makes a reviewer's highlight on the selection, or on the word under
+ * the caret, and takes it away where the selection or caret is in one.
+ */
+export const HIGHLIGHT_COMMAND = 'highlight.toggle';
+
 export interface ReviewController {
   /** Opens the review bar, which is hidden until asked for. */
   openBar(): void;
+  /**
+   * Review Changes: opens the bar on the first change of the document, or the first the selection
+   * touches (the selection goes), marked in the text and on its bars.
+   */
+  startReview(): void;
   closeBar(): void;
   isBarOpen(): boolean;
   /** Selects the next change and opens the bar (⌥⌘]). */
@@ -37,7 +65,7 @@ export interface ReviewController {
   /**
    * Opens a box for a new comment (⌥⌘M), level with what it is on: the selection, or else the word
    * under the caret, or else the caret. A document shown Clean switches to the markup view, and what Escape
-   * set aside on that anchor comes back. Returns false when it did nothing: Raw takes no comments,
+   * set aside on that anchor comes back. Returns false when it did nothing: Plain takes no comments,
    * and says so through the editor's `onNotice`. With `initialText`, an empty box opens with it, the
    * caret after it and nothing posted; a draft that Escape set aside, or a box being written in,
    * keeps its own words.
@@ -72,7 +100,7 @@ export interface ReviewController {
   /** Draws a thread's note again, with its text and its footer, and lays the rail out. */
   refreshThread(thread: string): void;
   /**
-   * Shows a thread's note, as Show in a notification asks: a document shown Clean or Raw switches
+   * Shows a thread's note, as Show in a notification asks: a document shown Clean or Plain switches
    * to the markup view, the note is selected and scrolled into view, and in a narrow editor it is pinned
    * over the page from its dot. Returns false, changing nothing, when the rail has no note for it:
    * no such thread, or a resolved one that isn't shown.
@@ -90,6 +118,31 @@ export interface ReviewController {
    * and applies the rule once.
    */
   holdRail(held: boolean): void;
+  /**
+   * Has the rail lay out `el`, an element of the host's, among its notes, level with the text at
+   * `anchor` (a position the host keeps up with edits, which the rail reads when it syncs its
+   * notes, that is when the document or the selection changes, among other things, and not at
+   * each layout): as a new comment's box is, it stays level with its anchor, and the notes around
+   * it go up or down to clear it, so that none is covered. Ask's bubble is one. The rail sets the
+   * element's `left` and `top`, as for a note, and nothing else: it neither draws the element nor
+   * moves it in the page, and the host makes it as wide as a note (the rail's width), fills it,
+   * tells the rail when its height changes (`resized`, which measures the height again and
+   * nothing more) and takes it out of the page itself.
+   *
+   * The element is the one that stays level, and anything else is placed around it: a comment's
+   * box open at the same time is laid out like any note, below the element if its text is, and so
+   * may sit lower than its text. The rail holds one element at a time in this way: given two, the
+   * first in the text stays level, and the other is laid out around it as a note is.
+   *
+   * It returns null, and lays out nothing, where the rail doesn't show its notes in full: in a
+   * narrow editor (the notes are dots), in Clean and Plain, and when the rail has no note of its own,
+   * where the column makes no room for it, and when `anchor` throws. The host places the element
+   * itself then, as it would without a rail. One that was laid out is let go when the rail stops
+   * showing its notes, or when `anchor` throws, and `lost` is called, once, after the update that
+   * did it, for the host to place the element. Calling `release` takes it out of the layout, and
+   * the notes go back to their places.
+   */
+  pinToRail(el: HTMLElement, anchor: () => number, lost: () => void): PinnedElement | null;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
@@ -101,13 +154,52 @@ export interface ReviewOptions extends RailOptions {
    * It may come while the editor is updating, so it must not change the editor itself.
    */
   onOpenChange?: (open: boolean) => void;
+  /** Says in one line, without interrupting, why a decision from the toolbar was refused. */
+  notice?: (message: string) => void;
+}
+
+const NO_CHANGE = 'Put the caret in a tracked change to decide it.';
+const NO_CHANGES = 'There are no changes to review.';
+
+/** Why Add Comment can't run where the selection is, or undefined: Plain shows markers as text, and
+ * front matter has no text to anchor in (format §3.8). */
+function commentDisabledReason(state: EditorState): string | undefined {
+  if (state.field(viewModeField, false) === 'raw') {
+    return "A comment can't be made in Plain. Switch to Clean or Redlines.";
+  }
+  if (inFrontMatter(state))
+    return "A comment can't be anchored in front matter. Select text in the body.";
+  return undefined;
+}
+
+/**
+ * The pending changes of `state`, read from the text: a command's reason is asked for while the
+ * editor builds its state for the host, so it can't ask the editor for that.
+ */
+const pendingChanges = (state: EditorState): MarkRange[] =>
+  (state.field(parsedField, false)?.marks ?? []).filter(isChange);
+
+/** The change the selection touches, or undefined: the one a decision from the toolbar is for. */
+function changeAtSelection(state: EditorState): MarkRange | undefined {
+  const { from, to } = state.selection.main;
+  const changes = pendingChanges(state);
+  const reaches = (strict: boolean) =>
+    changes.find((mark) => {
+      const span = spanOf(mark);
+      return strict
+        ? span.from < Math.max(to, from + 1) && span.to > from
+        : span.from <= to && span.to >= from;
+    });
+  // Inside a change, before one that only touches the selection's edge: a caret between two
+  // changes decides the one it is in the middle of, or the first it touches.
+  return reaches(true) ?? reaches(false);
 }
 
 /**
  * Adds the review interface to an editor: notes in the right margin, cards on changes, and the
  * review bar. The host routes its menu commands and shortcuts to the controller, and draws Add
- * Comment (`comment.add`) from the editor's commands. The interface stays when the editor opens
- * another document (`Editor.setDoc`), with the bar closed.
+ * Comment (`comment.add`) and Highlight (`HIGHLIGHT_COMMAND`) from the editor's commands. The
+ * interface stays when the editor opens another document (`Editor.setDoc`), with the bar closed.
  */
 export function createReview(editor: Editor, options: ReviewOptions): ReviewController {
   const { view } = editor;
@@ -139,21 +231,77 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     }),
   ];
   const remove = editor.addExtension(extension);
-  // Comes last in the Format menu, which lists commands in the order they are registered.
+  // Add Comment is the Review menu's first command, and Ask… follows it; Highlight is Format's, in a
+  // group of its own. Highlight has ⇧⌘H: ⌥⌘H is the Mac's Hide Others.
+  const decideAtSelection = (how: 'accept' | 'reject'): boolean => {
+    const found = changeAtSelection(view.state);
+    if (!found) return false;
+    try {
+      decideSuggestion(ctx, how, found.id);
+      return true;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      options.notice?.(error.message);
+      return false;
+    }
+  };
   const removeCommands = editor.commands.register([
     {
       id: 'comment.add',
       title: 'Add Comment',
       shortcut: 'Mod-Alt-m',
+      menu: 'review',
+      group: 'comment',
+      disabledReason: commentDisabledReason,
+      run: () => notes.startComment(),
+    },
+    {
+      id: HIGHLIGHT_COMMAND,
+      title: highlightTitle,
+      shortcut: 'Mod-Shift-h',
       menu: 'format',
       group: 'comment',
-      run: () => notes.startComment(),
+      disabledReason: highlightDisabledReason,
+      run: () => toggleHighlight(ctx),
+      isActive: (state) => highlightsAt(state).length > 0,
+    },
+    // The toolbar's Review menu: decide the change at the selection, and go through all of them.
+    {
+      id: 'change.accept',
+      title: 'Accept',
+      disabledReason: (state) => (changeAtSelection(state) ? undefined : NO_CHANGE),
+      run: () => decideAtSelection('accept'),
+    },
+    {
+      id: 'change.reject',
+      title: 'Reject',
+      disabledReason: (state) => {
+        const found = changeAtSelection(state);
+        if (!found) return NO_CHANGE;
+        const parsed = state.field(parsedField, false);
+        return parsed ? rejectReason(parsed, found) : undefined;
+      },
+      run: () => decideAtSelection('reject'),
+    },
+    {
+      id: 'review.start',
+      title: 'Review Changes',
+      disabledReason: (state) => (pendingChanges(state).length === 0 ? NO_CHANGES : undefined),
+      run: () => {
+        start(view, ctx);
+        report();
+        return true;
+      },
     },
   ]);
 
   return {
     openBar() {
       openBar(view, ctx);
+      report();
+    },
+    startReview() {
+      start(view, ctx);
       report();
     },
     closeBar() {
@@ -183,6 +331,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       notes.closePopover();
     },
     holdRail: (held) => notes.hold(held),
+    pinToRail: (el, anchor, lost) => notes.pinToRail(el, anchor, lost),
     destroy() {
       if (destroyed) return;
       destroyed = true;

@@ -4,6 +4,7 @@
 
 import type {
   AgentEvent,
+  AgentModel,
   AgentProvider,
   AgentRequest,
   HostProcesses,
@@ -31,7 +32,29 @@ export const SIGNED_OUT_HELP = 'Run `claude auth login`.';
 /** What Claude Code's own site says to run to install it. Redlines shows it and never runs it. */
 export const INSTALL_COMMAND = 'curl -fsSL https://claude.ai/install.sh | bash';
 
-const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'];
+/**
+ * The models a run can be told to use, by the aliases Claude Code takes, which follow its newest
+ * version of each (#530). A run with none says nothing, and Claude Code uses its own default.
+ */
+export const CLAUDE_MODELS: readonly AgentModel[] = [
+  { id: 'opus', name: 'Opus' },
+  { id: 'sonnet', name: 'Sonnet' },
+  { id: 'haiku', name: 'Haiku' },
+];
+
+/** The tools that read files, at a folder. */
+const FILE_TOOLS = ['Read', 'Grep', 'Glob'];
+
+/**
+ * The web tools (#529). They are always on the tool list, so that an agent that wants the web
+ * reaches for one; they are allowed only when the run may use the web, and `dontAsk` refuses them
+ * otherwise, which the stream shows as a call to one of them (`web`, `allowed: false`).
+ */
+const WEB_TOOLS = ['WebSearch', 'WebFetch'];
+
+// `view_image` is offered only to a request to describe an image, which has the one picture it is
+// about; it is allowed here for every run, and a run that is not offered it never sees it.
+const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status', 'view_image'];
 
 /**
  * The whole command line, in one place, so that a correction is a one-line change, here and in the
@@ -65,6 +88,8 @@ export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] 
     '--output-format',
     'stream-json',
     '--verbose',
+    // Only a model the provider lists is passed on; anything else is left to Claude Code.
+    ...(CLAUDE_MODELS.some(({ id }) => id === request.model) ? ['--model', request.model!] : []),
     '--restricted',
     ...(wide
       ? [...wide.roots.flatMap((root) => ['--add-dir', root]), '--disable-slash-commands']
@@ -72,9 +97,12 @@ export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] 
     '--permission-mode',
     'dontAsk',
     '--tools',
-    request.scope === 'document' ? '' : 'Read,Grep,Glob',
+    [...(request.scope === 'document' ? [] : FILE_TOOLS), ...WEB_TOOLS].join(','),
     '--allowedTools',
-    TOOLBOX.map((tool) => `mcp__redlines__${tool}`).join(','),
+    [
+      ...TOOLBOX.map((tool) => `mcp__redlines__${tool}`),
+      ...(request.web === true ? WEB_TOOLS : []),
+    ].join(','),
     '--mcp-config',
     JSON.stringify({
       mcpServers: { redlines: { command: tools.command, args: tools.args } },
@@ -124,10 +152,20 @@ export interface ClaudeState {
   reach?: RunReach;
   /** The file the agent's reading tools were asked for, by call, to say which one was refused. */
   reads: Map<string, string>;
+  /** Whether the run may use the web (#529). */
+  web: boolean;
+  /** Whether the agent used the web, for the note of the answer. */
+  usedWeb: boolean;
 }
 
-export function newClaudeState(reach?: RunReach): ClaudeState {
-  return { retry: false, reads: new Map(), ...(reach === undefined ? {} : { reach }) };
+export function newClaudeState(reach?: RunReach, web = false): ClaudeState {
+  return {
+    retry: false,
+    reads: new Map(),
+    web,
+    usedWeb: false,
+    ...(reach === undefined ? {} : { reach }),
+  };
 }
 
 /** The file or folder a Read, Grep or Glob call names. */
@@ -212,6 +250,15 @@ function toolStatus(name: string, input: unknown): string | null {
  * Unknown events and lines that aren't JSON are ignored, and never throw.
  */
 export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | null {
+  const events = parseClaudeEvents(line, state);
+  return Array.isArray(events) ? (events[0] ?? null) : events;
+}
+
+/** Like `parseClaudeLine`, with every event of a line: a message can have several refused reads. */
+export function parseClaudeEvents(
+  line: string,
+  state: ClaudeState,
+): AgentEvent | AgentEvent[] | null {
   state.retry = false;
   let event: unknown;
   try {
@@ -250,15 +297,18 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
       delete state.failure;
       const message = event.message;
       const content = isRecord(message) && Array.isArray(message.content) ? message.content : [];
+      // A model that makes several reads at once can have more than one refused: each is news.
+      const refused: AgentEvent[] = [];
       for (const block of content) {
         if (!isRecord(block) || block.type !== 'tool_result' || block.is_error !== true) continue;
         const path = state.reads.get(String(block.tool_use_id));
         if (path === undefined || state.reach === undefined) continue;
         // A read inside what the agent may read that was refused is news, and says why if it can.
         const blocked = blockedRead(path, resultText(block.content), state.reach);
-        if (blocked) return { type: 'status', text: blockedStatus(blocked), blocked };
+        if (blocked) refused.push({ type: 'status', text: blockedStatus(blocked), blocked });
       }
-      return null;
+      if (refused.length === 0) return null;
+      return refused.length === 1 ? (refused[0] ?? null) : refused;
     }
     case 'assistant': {
       const failure = failureFor(event.error, 'ok');
@@ -281,6 +331,14 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
       for (const block of content) {
         if (!isRecord(block)) continue;
         if (block.type === 'thinking') return { type: 'status', text: 'Thinking…' };
+        if (block.type === 'tool_use' && WEB_TOOLS.includes(String(block.name))) {
+          if (state.web) state.usedWeb = true;
+          return {
+            type: 'web',
+            allowed: state.web,
+            text: block.name === 'WebSearch' ? 'Searching the web' : 'Reading a web page',
+          };
+        }
         if (block.type === 'tool_use' && typeof block.name === 'string') {
           const text = toolStatus(block.name, block.input);
           if (text !== null) return { type: 'status', text };
@@ -294,7 +352,11 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
       if (event.is_error === true || event.subtype !== 'success') {
         return { type: 'error', message: state.failure ?? failureFromText(text) };
       }
-      return text ? { type: 'done', finalText: text } : { type: 'done' };
+      return {
+        type: 'done',
+        ...(text ? { finalText: text } : {}),
+        ...(state.usedWeb ? { web: true as const } : {}),
+      };
     }
     default:
       return null;
@@ -325,6 +387,9 @@ export function createClaudeProvider(
     id: 'claude',
     name: 'Claude',
     readLimit: 'folder',
+    models: CLAUDE_MODELS,
+    // Claude Code passes an MCP tool's image to the model (`view_image`).
+    seesImages: true,
 
     async detect() {
       const state = await detectAgent(processes, {
@@ -354,8 +419,8 @@ export function createClaudeProvider(
           binary: 'claude',
           ...(version === undefined ? {} : { version }),
           args: ({ request: asked }) => Promise.resolve(claudeArgs(asked, tools)),
-          newState: () => newClaudeState(reachOf(request)),
-          parse: parseClaudeLine,
+          newState: () => newClaudeState(reachOf(request), request.web === true),
+          parse: parseClaudeEvents,
           held: (state) => state.retry,
           failure: (state) => state.failure,
           // Signing in again is Preferences' to offer; a usage limit or a network error isn't.

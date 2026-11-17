@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { UNTRUSTED_NOTE, addComment, applyChanges, parse, reply, resolve } from '@redlines/format';
-import { TOOL_DEFINITIONS, callTool } from './tools.ts';
+import {
+  UNTRUSTED_NOTE,
+  addComment,
+  applyChanges,
+  parse,
+  reject,
+  reply,
+  resolve,
+} from '@redlines/format';
+import { PLAIN_ONLY_ERROR, TOOL_DEFINITIONS, callTool } from './tools.ts';
 import { PLAN, fakeContext, fakeDocument } from './test-helpers.ts';
 import type { Calls } from './test-helpers.ts';
 
@@ -557,7 +565,78 @@ describe('the set of tools', () => {
   });
 });
 
+describe('str_replace after a bare list marker (#580)', () => {
+  const MARKERS = ['-', '*', '+', '1.', '1)'];
+  for (const marker of MARKERS) {
+    it(`writes the marker's space as it is, before the insertion: ${marker}`, async () => {
+      const first = `${marker} one`;
+      const numbered = /^\d/.test(marker);
+      const bare = numbered ? `2${marker.slice(1)}` : marker;
+      const next = numbered ? `3${marker.slice(1)}` : marker;
+      for (const tail of ['', `\n${next} three`]) {
+        const doc = fakeDocument(`${first}\n${bare}${tail}\n`);
+        const result = await callTool(fakeContext(doc), 'str_replace', {
+          old_str: `${first}\n${bare}${tail}`,
+          new_str: `${first}\n${bare} a${tail}`,
+        });
+        expect(result.isError).toBe(false);
+        const body = doc.text.slice(0, doc.text.indexOf('<!-- redlines'));
+        // Never a marker's character right in front of the insertion's opener.
+        expect(body).not.toMatch(/(?:^|\n)(?:[-*+]|\d[.)])<!--ins/);
+        expect(body).toContain(`${bare} <!--ins `);
+        const rejected = reject(doc.text, parse(doc.text).marks[0]?.id ?? '');
+        expect(applyChanges(doc.text, rejected).startsWith(`${first}\n${bare} `)).toBe(true);
+      }
+    });
+  }
+});
+
 // Replies to a thread by a person, for the tests of read_thread.
 function replyChanges(text: string, id: string, by: string, body: string) {
   return reply(text, id, body, { author: { handle: by, name: by }, time: TIME });
 }
+
+describe('a Plain-only file', () => {
+  const plainContext = (doc = fakeDocument()) => ({
+    ...fakeContext(doc, undefined, 'k3x9'),
+    plainOnly: () => true,
+  });
+
+  it('refuses the tools that would mark it, and writes nothing', async () => {
+    const doc = fakeDocument();
+    const ctx = plainContext(doc);
+    const calls: [string, object][] = [
+      ['str_replace', { old_str: 'March', new_str: 'April' }],
+      ['comment', { quote: 'March', text: 'Why?' }],
+      ['reply', { text: 'Done.' }],
+    ];
+    for (const [name, args] of calls) {
+      const done = await callTool(ctx, name, args);
+      expect(done, name).toEqual({ text: PLAIN_ONLY_ERROR, isError: true });
+    }
+    expect(doc.writes).toBe(0);
+    expect(doc.text).toBe(PLAN);
+    expect(PLAIN_ONLY_ERROR).toBe(
+      "This is a plain text file, which can't hold tracked changes or comments.",
+    );
+  });
+
+  it('still reads it, and says its status', async () => {
+    const ctx = plainContext();
+    const seen = await callTool(ctx, 'view', {});
+    expect(seen.isError).toBe(false);
+    expect(seen.text).toContain('We will ship the importer in March.');
+    expect((await callTool(ctx, 'status', { text: 'Reading' })).isError).toBe(false);
+  });
+
+  it('leaves the document writable as plain text, and Markdown files unchanged', async () => {
+    const doc = fakeDocument();
+    await plainContext(doc).doc.write('a\n');
+    expect(doc.text).toBe('a\n');
+    const marked = fakeDocument();
+    const ctx = { ...fakeContext(marked), plainOnly: () => false };
+    const done = await callTool(ctx, 'str_replace', { old_str: 'March', new_str: 'April' });
+    expect(done.isError).toBe(false);
+    expect(marked.writes).toBe(1);
+  });
+});

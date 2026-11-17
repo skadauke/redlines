@@ -1,42 +1,93 @@
-// The review bar (design §5.6). It is hidden until you ask for it, with Review Changes or the
-// next- and previous-change shortcuts, and floats 22px above the bottom of the window, centered
-// under the text column and its notes: previous, "Change 3 of 17" through the changes in document
-// order, next; Accept and Reject, which decide the current change and move on to the next; and
-// close. Moving selects the change and scrolls it into view. Esc closes the bar.
+// Review Changes (design §5.6): a panel that starts at once on the first change and sits beside it,
+// in the margin where there is room, else below or above it, never over it. It can be dragged by
+// its title, and then stays where it was put. It names the change (who, when, what), and has Accept
+// (A) and Reject (R), which decide the change and move on to the next; Comment (C), a field to ask
+// about the change; and Previous (←) and Next (→). It takes the keyboard when it opens and after
+// each change; a click into the document gives the keyboard back to the document. Esc or its close
+// button closes it. Moving selects the change's mark and scrolls it into view.
 
 import {
   EditorSelection,
-  type EditorState,
+  EditorState,
   type Extension,
   Prec,
   StateEffect,
   StateField,
 } from '@codemirror/state';
-import { EditorView, keymap, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import { setViewModeEffect, viewModeField } from '@redlines/editor';
-import type { MarkRange } from '@redlines/format';
+import { Decoration, EditorView, keymap, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import {
+  currentChange,
+  parsedField,
+  setCurrentChange,
+  setViewModeEffect,
+  viewModeField,
+} from '@redlines/editor';
+import { addComment, EditError, type MarkRange, type Parsed, rejectReason } from '@redlines/format';
+import { authorLine, byline, colorClass } from './people.ts';
 import { icon, type IconName } from './icons.ts';
 import {
+  applyEdit,
   attempt,
   button,
   changesOf,
   decideSuggestion,
+  describeChanges,
+  editContext,
   element,
   errorLine,
+  flash,
   type ReviewContext,
   segmentSpan,
   spanOf,
   suggestionIn,
   suggestionsOf,
   visibleSpace,
+  setReason,
 } from './shared.ts';
 
-/** How far the bar floats above the bottom of the window. */
-const BAR_LIFT = 22;
-/** The least room between the bar and the sides of the window. */
-const BAR_MARGIN = 16;
-/** Room kept under the text the editor scrolls into view while the bar is open. */
-const BAR_ROOM = 84;
+/**
+ * Gives the keyboard to the panel, and takes the page's own highlight of the selection that was in
+ * the document: the review leaves nothing selected, and the browser keeps drawing the old selection
+ * while the document is out of focus.
+ */
+/**
+ * Where the panel may be: the part of the window where the editor can be seen, inside the editor's
+ * own box, and inside every ancestor that clips it (a sheet in a page that clips its editor).
+ */
+function clippedSpace(view: EditorView, win: Window): PanelSpace['visible'] {
+  const seen = visibleSpace(view);
+  const space = { ...seen };
+  const clip = (r: { left: number; top: number; right: number; bottom: number }) => {
+    space.left = Math.max(space.left, r.left);
+    space.top = Math.max(space.top, r.top);
+    space.right = Math.min(space.right, r.right);
+    space.bottom = Math.min(space.bottom, r.bottom);
+  };
+  clip(view.dom.getBoundingClientRect());
+  for (let el = view.dom.parentElement; el && el !== el.ownerDocument.body; el = el.parentElement) {
+    const style = win.getComputedStyle(el);
+    if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+    clip(el.getBoundingClientRect());
+  }
+  return space;
+}
+
+/** Whether a key is part of an input method's composition (Safari ends it before the key). */
+function composing(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
+
+function takeFocus(panel: HTMLElement): void {
+  panel.focus({ preventScroll: true });
+  panel.ownerDocument.getSelection()?.removeAllRanges();
+}
+
+/** The panel's width, and the room kept between it and the change, and the window's edges. */
+const PANEL_WIDTH = 328;
+/** The narrowest it is made to fit the margin; with less room it goes below or above the change. */
+const PANEL_MIN_WIDTH = 240;
+const PANEL_GAP = 16;
+const PANEL_MARGIN = 12;
 
 const setBarOpen = StateEffect.define<boolean>();
 
@@ -45,8 +96,9 @@ const barOpen = StateField.define<boolean>({
   update(open, tr) {
     for (const effect of tr.effects) if (effect.is(setBarOpen)) open = effect.value;
     // A person who chooses to read has stopped deciding: showing the simple look closes the bar, so
-    // that it never steps through changes the page doesn't show. In the app nothing but a click on
-    // a change bar shows it, and while the bar is open that click opens a card instead.
+    // that it never steps through changes the page doesn't show. In the app a click on a change bar
+    // or the View menu's Simple Look switch shows it; while the bar is open, that click opens a
+    // card instead.
     const simple = (state: EditorState) => state.field(viewModeField) === 'simple';
     return open && simple(tr.state) && !simple(tr.startState) ? false : open;
   },
@@ -84,6 +136,14 @@ function currentIndex(state: EditorState, changes: readonly MarkRange[]): number
     return from === main.from && to === main.to;
   });
   if (exact >= 0) return exact;
+  // A caret at an edge that two changes share (a deletion then an insertion) is on the one that
+  // starts there, which is where the review put it, not on the one that ends there.
+  if (main.empty) {
+    const starting = changes.findIndex((change) =>
+      change.segments.some((segment) => segmentSpan(segment).from === main.head),
+    );
+    if (starting >= 0) return starting;
+  }
   let found = -1;
   let size = Infinity;
   changes.forEach((change, index) => {
@@ -112,7 +172,7 @@ function currentGroup(
 }
 
 /**
- * What opens the bar. The changes are shown while you review them: a document shown Clean or Raw
+ * What opens the bar. The changes are shown while you review them: a document shown Clean or Plain
  * switches to Redlines.
  */
 function opening(view: EditorView, ctx: ReviewContext): StateEffect<unknown>[] {
@@ -132,25 +192,73 @@ export function closeBar(view: EditorView): void {
 }
 
 /**
- * Moves to a change: selects it, scrolled into view, and opens the bar. A suggestion of several
- * marks is selected whole, from the start of its first mark to the end of its last.
+ * Moves to a change: puts the caret at its start, scrolled into view, marks the change as the
+ * current one (its text and its bars, which the theme draws apart from a selection), and opens the
+ * bar. A suggestion of several marks is marked whole. Nothing stays selected: the person's own
+ * selection, if there was one, goes.
  */
 function select(view: EditorView, ctx: ReviewContext, change: MarkRange): void {
   const marks = suggestionIn(ctx, change.id);
-  const range = EditorSelection.range(
-    spanOf(marks[0] ?? change).from,
-    spanOf(marks.at(-1) ?? change).to,
-  );
+  const first = marks[0] ?? change;
+  const ranges = marks.flatMap((mark) => mark.segments.map(segmentSpan));
+  const caret = EditorSelection.cursor(spanOf(first).from);
   view.dispatch({
-    selection: range,
+    selection: caret,
     effects: [
       ...opening(view, ctx),
       moveTo.of(change.id),
-      EditorView.scrollIntoView(range, { y: 'center' }),
+      setCurrentChange.of({ ids: marks.map((mark) => mark.id), ranges }),
+      EditorView.scrollIntoView(caret, { y: 'center' }),
     ],
     userEvent: 'select.review',
   });
-  view.focus();
+  // The panel takes the keyboard after each change, so that A, R, C and the arrows reach it.
+  const panel = view.dom.querySelector<HTMLElement>('.rl-review-panel');
+  if (panel) takeFocus(panel);
+  else view.focus();
+}
+
+/** The current change's text, drawn as the review's own mark (`rl-review-current`). */
+const currentMark = Decoration.mark({ class: 'rl-review-current' });
+const currentDecorations = EditorView.decorations.compute([currentChange, barOpen], (state) => {
+  const current = state.field(currentChange);
+  if (!current || !isBarOpen(state)) return Decoration.none;
+  return Decoration.set(
+    current.ranges
+      .filter(({ from, to }) => from < to)
+      .map(({ from, to }) => currentMark.range(from, to)),
+    true,
+  );
+});
+
+/** The current change goes when the bar closes, however it closes. */
+const clearOnClose = EditorState.transactionExtender.of((tr) =>
+  isBarOpen(tr.startState) && !isBarOpen(tr.state) && tr.startState.field(currentChange, false)
+    ? { effects: setCurrentChange.of(null) }
+    : null,
+);
+
+/**
+ * What Review Changes starts with: the document's first change, wherever the caret is. With a
+ * selection, the first change the selection touches, and when it touches none, the first change
+ * after it, round to the top. Either way the selection goes, and the change is marked. With no
+ * changes the bar just opens (the command is disabled then).
+ */
+export function start(view: EditorView, ctx: ReviewContext): void {
+  const groups = suggestionsOf(ctx);
+  const { from, to, empty } = view.state.selection.main;
+  const spans = (marks: readonly MarkRange[]) =>
+    marks.flatMap((mark) => mark.segments.map(segmentSpan));
+  let target = groups[0];
+  if (!empty) {
+    target =
+      groups.find((marks) => spans(marks).some((at) => at.from < to && at.to > from)) ??
+      groups.find((marks) => marks.some((mark) => spanOf(mark).from >= to)) ??
+      groups[0];
+  }
+  const change = target?.[0];
+  if (change) select(view, ctx, change);
+  else openBar(view, ctx);
 }
 
 /**
@@ -185,22 +293,23 @@ function decide(
   ctx: ReviewContext,
   how: 'accept' | 'reject',
   line: HTMLElement,
-): void {
+): boolean {
   const groups = suggestionsOf(ctx);
   const current = currentGroup(view.state, changesOf(ctx), groups);
   const change = groups[current]?.[0];
-  if (!change) return;
+  if (!change) return false;
   const ran = attempt(line, () => decideSuggestion(ctx, how, change.id));
-  if (!ran) return;
+  if (!ran) return false;
   const remaining = new Map(changesOf(ctx).map((left) => [left.id, left]));
   const after = [...groups.slice(current + 1), ...groups.slice(0, current)];
   const next = after
     .map((marks) => marks.map(({ id }) => remaining.get(id)).find((left) => left !== undefined))
     .find((left) => left !== undefined);
   if (next) select(view, ctx, next);
+  return true;
 }
 
-/** A button with an icon, explained by a hint on hover: its name and shortcut. */
+/** A button with an icon alone, explained by a hint on hover: its name and shortcut. */
 function iconButton(name: IconName, label: string, keys: string, run: () => void) {
   const el = button('rl-bar-icon', label, run, icon(name));
   const hint = element('span', 'rl-hint', label);
@@ -210,46 +319,97 @@ function iconButton(name: IconName, label: string, keys: string, run: () => void
   return el;
 }
 
-/**
- * A button with a label and an icon. The label is in a span, so that a bar too wide for its
- * window can show the icon alone (`rl-review-bar-narrow`), and the button is named for assistive
- * technology and by its hint either way.
- */
-function textButton(name: IconName, label: string, run: () => void) {
-  const el = button('rl-bar-text', label, run, icon(name, 15));
-  el.append(element('span', 'rl-bar-label', label));
-  const hint = element('span', 'rl-hint', label);
-  hint.setAttribute('aria-hidden', 'true');
-  el.append(hint);
+/** A button with an icon, a label and the letter that presses it, which the panel's keys use. */
+function keyButton(name: IconName, label: string, key: string, run: () => void, named = label) {
+  const el = button('rl-bar-text', named, run, icon(name, 15));
+  el.append(element('span', 'rl-bar-label', label), element('span', 'rl-bar-key', key));
+  el.setAttribute('aria-keyshortcuts', key);
   return el;
 }
 
-/**
- * Whether the bar, which is `fullWidth` wide with its labels, doesn't fit a window `windowWidth`
- * wide with 16 px to spare on each side: it then shows Accept and Reject as icons.
- */
-export function barNarrow(fullWidth: number, windowWidth: number): boolean {
-  return fullWidth > windowWidth - 2 * BAR_MARGIN;
-}
-
-/** What the bar shows that changes with the document and the selection. */
+/** What the panel shows that changes with the document and the selection. */
 interface Controls {
   count: HTMLElement;
+  body: HTMLElement;
   previous: HTMLButtonElement;
   next: HTMLButtonElement;
   accept: HTMLButtonElement;
   reject: HTMLButtonElement;
+  comment: HTMLButtonElement;
+  form: HTMLElement;
+  field: HTMLTextAreaElement;
+  actions: HTMLElement;
+  nav: HTMLElement;
 }
 
-class Bar {
+/** Where the panel goes: the box of the change, the box of the text column, the window. */
+export interface PanelSpace {
+  change: { left: number; right: number; top: number; bottom: number };
+  column: { left: number; right: number };
+  visible: { left: number; top: number; right: number; bottom: number };
+  /** The margin notes the panel must not cover, where they are drawn. */
+  notes?: readonly { top: number; bottom: number }[];
+}
+
+/**
+ * Where the panel's top left goes, in the window's own coordinates: beside the change, in the margin
+ * to the right of the text column, level with the change's top; where the margin has no room for
+ * it, below the change, or above it when it doesn't fit below. It is never over the change, and
+ * never outside `visible`.
+ */
+export function panelPlace(
+  space: PanelSpace,
+  size: { width: number; height: number },
+): { left: number; top: number; width: number } {
+  const { change, column, visible } = space;
+  const clamp = (value: number, low: number, high: number) =>
+    Math.max(low, Math.min(value, Math.max(low, high)));
+  const topLimit = visible.top + PANEL_MARGIN;
+  const bottomLimit = visible.bottom - PANEL_MARGIN;
+  // In the margin right of the text, as wide as the margin lets it be, level with the change; or, where
+  // a note is there, in the nearest place along the margin that no note is in.
+  const room = visible.right - PANEL_MARGIN - (column.right + PANEL_GAP);
+  if (room >= PANEL_MIN_WIDTH) {
+    const width = Math.min(size.width, room);
+    const notes = space.notes ?? [];
+    const wanted = clamp(change.top - 6, topLimit, bottomLimit - size.height);
+    const free = (top: number) =>
+      top >= topLimit &&
+      top + size.height <= bottomLimit &&
+      notes.every((note) => top + size.height + 6 <= note.top || top >= note.bottom + 6);
+    const candidates = [
+      wanted,
+      ...notes.flatMap((note) => [note.bottom + 8, note.top - size.height - 8]),
+    ].toSorted((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted));
+    const top = candidates.find(free);
+    if (top !== undefined) return { left: column.right + PANEL_GAP, top, width };
+  }
+  const width = Math.min(size.width, visible.right - visible.left - 2 * PANEL_MARGIN);
+  const left = clamp(
+    change.left,
+    visible.left + PANEL_MARGIN,
+    visible.right - PANEL_MARGIN - width,
+  );
+  const below = change.bottom + 10;
+  if (below + size.height <= bottomLimit) return { left, top: below, width };
+  const above = change.top - size.height - 10;
+  if (above >= topLimit) return { left, top: above, width };
+  // No room above or below: below, as far up as the window lets it, whatever it covers.
+  return { left, top: clamp(below, topLimit, bottomLimit - size.height), width };
+}
+
+class Panel {
   private readonly view: EditorView;
   private readonly ctx: ReviewContext;
   private readonly changed: () => void;
-  private bar: HTMLElement | null = null;
+  private panel: HTMLElement | null = null;
   private controls: Controls | null = null;
-  /** Whether the bar shows icons alone, and how wide it is while it doesn't. */
-  private narrow = false;
-  private fullWidth = 0;
+  private error: HTMLElement | null = null;
+  /** Where a drag put the panel; null while it goes by the change. */
+  private dragged: { left: number; top: number } | null = null;
+  /** What the body shows, so that it is drawn again only when it changes. */
+  private shown = '';
+  private onScroll: (() => void) | null = null;
 
   constructor(view: EditorView, ctx: ReviewContext, changed: () => void) {
     this.view = view;
@@ -264,69 +424,193 @@ class Bar {
       if (open) this.show();
       else {
         this.hide();
-        // Closed from outside the bar, as when the simple look is shown: the host hears of it too.
+        // Closed from outside the panel, as when the simple look is shown: the host hears of it too.
         this.changed();
       }
-    } else if (this.bar) {
+    } else if (this.panel) {
       if (update.transactions.length) this.refresh(update.state);
-      if (update.geometryChanged) this.place();
+      if (update.geometryChanged || update.transactions.length) this.place();
     }
+  }
+
+  private close(): void {
+    closeBar(this.view);
+    this.changed();
+    this.view.focus();
   }
 
   private show(): void {
     const { view, ctx } = this;
-    const close = () => {
-      closeBar(view);
-      this.changed();
-    };
     const error = errorLine('rl-bar-error');
-    const controls: Controls = {
-      count: element('span', 'rl-bar-count'),
-      previous: iconButton('previous', 'Previous change', '⌥⌘[', () => move(view, ctx, -1)),
-      next: iconButton('next', 'Next change', '⌥⌘]', () => move(view, ctx, 1)),
-      accept: textButton('accept', 'Accept', () => decide(view, ctx, 'accept', error)),
-      reject: textButton('reject', 'Reject', () => decide(view, ctx, 'reject', error)),
-    };
-    controls.count.setAttribute('aria-live', 'polite');
-    const bar = element('div', 'rl-review-bar');
-    bar.setAttribute('role', 'toolbar');
-    bar.setAttribute('aria-label', 'Review changes');
-    bar.append(
-      controls.previous,
-      controls.count,
-      controls.next,
-      element('span', 'rl-bar-divider'),
-      controls.accept,
-      controls.reject,
-      element('span', 'rl-bar-divider'),
-      iconButton('close', 'Close', 'Esc', close),
-      error,
+    const field = element('textarea', 'rl-rp-field');
+    field.rows = 2;
+    field.placeholder = 'Ask about this change';
+    field.setAttribute('aria-label', 'Comment');
+    const form = element('div', 'rl-rp-form');
+    form.hidden = true;
+    form.append(field);
+    const count = element('span', 'rl-bar-count');
+    count.setAttribute('aria-live', 'polite');
+    const top = element('div', 'rl-rp-top');
+    top.title = 'Drag to move';
+    top.append(
+      element('b', 'rl-rp-title', 'Review Changes'),
+      count,
+      iconButton('close', 'Close', 'Esc', () => this.close()),
     );
-    bar.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      close();
-      view.focus();
-    });
-    view.dom.append(bar);
-    this.bar = bar;
+    const body = element('div', 'rl-rp-body');
+    // What the next change is, who made it and what it did, is read out when it comes up.
+    body.setAttribute('aria-live', 'polite');
+    const controls: Controls = {
+      count,
+      body,
+      form,
+      field,
+      previous: keyButton(
+        'previous',
+        'Previous',
+        '←',
+        () => move(view, ctx, -1),
+        'Previous change',
+      ),
+      next: keyButton('next', 'Next', '→', () => move(view, ctx, 1), 'Next change'),
+      accept: keyButton('accept', 'Accept', 'A', () => this.decide('accept')),
+      reject: keyButton('reject', 'Reject', 'R', () => this.decide('reject')),
+      comment: keyButton('reply', 'Comment', 'C', () => this.comment()),
+      actions: element('div', 'rl-rp-actions'),
+      nav: element('div', 'rl-rp-nav'),
+    };
+    controls.actions.append(controls.accept, controls.reject, controls.comment);
+    controls.nav.append(controls.previous, controls.next);
+    const panel = element('div', 'rl-review-panel');
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Review changes');
+    panel.tabIndex = -1;
+    panel.append(top, body, form, controls.actions, controls.nav, error);
+    panel.addEventListener('keydown', (event) => this.keydown(event));
+    this.drag(top);
+    view.dom.append(panel);
+    this.panel = panel;
     this.controls = controls;
+    this.error = error;
+    this.shown = '';
     this.refresh(view.state);
     this.place();
+    // Scrolling the page moves the change from under the panel's place.
+    this.onScroll = () => this.place();
+    view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
+    window.addEventListener('scroll', this.onScroll, { passive: true, capture: true });
+    takeFocus(panel);
   }
 
   private hide(): void {
-    this.bar?.remove();
-    this.bar = this.controls = null;
-    this.narrow = false;
+    if (this.onScroll) {
+      this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
+      window.removeEventListener('scroll', this.onScroll, { capture: true });
+    }
+    this.onScroll = null;
+    this.panel?.remove();
+    this.panel = this.controls = this.error = null;
+    this.dragged = null;
+    this.shown = '';
   }
 
-  /** Brings the count and the buttons up to date. */
+  /** The panel's keys: A, R and C, and the arrows. In the comment field, Return posts and Esc leaves. */
+  private keydown(event: KeyboardEvent): void {
+    const { controls, panel } = this;
+    if (!controls || !panel) return;
+    if (event.target === controls.field) {
+      if (event.key === 'Escape' && !composing(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeForm();
+        takeFocus(panel);
+      } else if (event.key === 'Enter' && !event.shiftKey && !composing(event)) {
+        event.preventDefault();
+        this.comment();
+      }
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.close();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || composing(event)) return;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    const target =
+      { a: controls.accept, r: controls.reject, c: controls.comment }[key] ??
+      (key === 'ArrowRight' ? controls.next : key === 'ArrowLeft' ? controls.previous : null);
+    if (!target || target.disabled) return;
+    // A key held down decides one change, not the rest of the document.
+    if (
+      event.repeat &&
+      (target === controls.accept || target === controls.reject || target === controls.comment)
+    ) {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    target.click();
+  }
+
+  private decide(how: 'accept' | 'reject'): void {
+    // The comment being written goes only when the decision is made and the panel moves on (a
+    // refused decision leaves the change, and the words, where they are).
+    if (this.error) decide(this.view, this.ctx, how, this.error);
+    if (this.panel) takeFocus(this.panel);
+  }
+
+  private closeForm(): void {
+    if (!this.controls) return;
+    this.controls.form.hidden = true;
+    this.controls.field.value = '';
+  }
+
+  /** Comment: opens the field; with words in it, posts them as a comment on the change. */
+  private comment(): void {
+    const { controls, view, ctx, error } = this;
+    if (!controls || !error) return;
+    const groups = suggestionsOf(ctx);
+    const current = currentGroup(view.state, changesOf(ctx), groups);
+    const change = groups[current]?.[0];
+    if (!change) return;
+    if (controls.form.hidden) {
+      controls.form.hidden = false;
+      controls.field.focus();
+      this.place();
+      return;
+    }
+    const text = controls.field.value.trim();
+    if (!text) {
+      controls.field.focus();
+      return;
+    }
+    try {
+      const range = spanOf(change);
+      const { changes } = addComment(
+        view.state.doc.toString(),
+        range,
+        text,
+        editContext(ctx.author),
+      );
+      applyEdit(view, changes, 'review.comment');
+    } catch (failure) {
+      if (!(failure instanceof EditError || failure instanceof RangeError)) throw failure;
+      flash(error, failure.message);
+      return;
+    }
+    this.closeForm();
+    if (this.panel) takeFocus(this.panel);
+  }
+
+  /** Brings the count, the change's description and the buttons up to date. */
   private refresh(state: EditorState): void {
     if (!this.controls) return;
-    const { count, previous, next, accept, reject } = this.controls;
+    const { count, body, previous, next, accept, reject, comment, actions, nav } = this.controls;
     const groups = suggestionsOf(this.ctx);
-    const current = currentGroup(state, changesOf(this.ctx), groups);
+    const changes = changesOf(this.ctx);
+    const current = currentGroup(state, changes, groups);
     const n = groups.length;
     count.textContent = !n
       ? 'No changes'
@@ -334,41 +618,171 @@ class Bar {
         ? `Change ${current + 1} of ${n}`
         : `${n} ${n === 1 ? 'change' : 'changes'}`;
     previous.disabled = next.disabled = !n;
-    accept.disabled = reject.disabled = current < 0;
+    accept.disabled = reject.disabled = comment.disabled = current < 0;
+    actions.hidden = nav.hidden = !n;
+    const marks = groups[current];
+    const first = marks?.[0];
+    // A change that can only be accepted: Reject is grayed, and its hint says why.
+    setReason(
+      reject,
+      current < 0 || !marks ? undefined : firstReason(state.field(parsedField), marks),
+    );
+    const key = !n
+      ? 'none'
+      : first
+        ? `${marks.map((mark) => mark.id).join(',')}|${current}|${n}`
+        : `unplaced|${n}`;
+    if (key === this.shown) return;
+    // A different change: the comment being written was about the last one.
+    if (this.shown !== '') this.closeForm();
+    this.shown = key;
+    body.replaceChildren();
+    if (!n) {
+      body.append(element('div', 'rl-rp-what', 'No more changes to review.'));
+      body.append(button('rl-bar-text rl-rp-done', 'Done', () => this.close()));
+      return;
+    }
+    if (!first || !marks) {
+      body.append(element('div', 'rl-rp-what', `${n} ${n === 1 ? 'change' : 'changes'} to review`));
+      return;
+    }
+    const parsed = state.field(parsedField);
+    const head = authorLine(
+      'rl-rp',
+      byline(parsed, first.entry.by, this.ctx.author),
+      first.entry.at,
+    );
+    head.classList.add(colorClass(state, first.entry.by));
+    const what = describeChanges(parsed, marks);
+    body.append(head, element('div', 'rl-rp-what', what));
   }
 
-  /**
-   * Centers the bar under the text column, with the margin notes beside it when they show (the
-   * column's box holds both, centered together on the page), and keeps it inside the window, 22px
-   * above the bottom of the part of the window where the editor can be seen: in the desktop app,
-   * the window's bottom, however short the document.
-   */
+  /** Puts the panel beside the current change (or where a drag left it). */
   private place(): void {
+    const panel = this.panel;
+    if (!panel) return;
     this.view.requestMeasure({
       key: this,
       read: (view) => {
         const win = view.dom.ownerDocument.defaultView ?? window;
+        // The part of the window where the editor can be seen, and inside the editor's own box: an
+        // editor that is a sheet in a page keeps its panel on the sheet.
+        const visible = clippedSpace(view, win);
         const content = view.contentDOM.getBoundingClientRect();
-        // Its width with its labels is what it is while it shows them: the window zoom makes
-        // the page narrower, and the bar must still fit.
-        if (!this.narrow) this.fullWidth = this.bar?.offsetWidth ?? 0;
-        const narrow = barNarrow(this.fullWidth, win.innerWidth);
-        const half = (this.bar?.offsetWidth ?? 0) / 2;
-        const widest = win.innerWidth - BAR_MARGIN - half;
-        const middle = (content.left + content.right) / 2;
-        const center = Math.max(BAR_MARGIN + half, Math.min(middle, widest));
-        return { center, narrow, bottom: win.innerHeight - visibleSpace(view).bottom + BAR_LIFT };
+        // The text's own edges, inside the padding that holds the margin notes.
+        const style = win.getComputedStyle(view.contentDOM);
+        const text = {
+          left: content.left + (Number.parseFloat(style.paddingLeft) || 0),
+          right: content.right - (Number.parseFloat(style.paddingRight) || 0),
+        };
+        const current = view.state.field(currentChange, false);
+        const ranges = (current?.ranges ?? []).filter(({ from, to }) => from <= to);
+        const first = ranges[0];
+        const last = ranges.at(-1);
+        const start = first ? view.coordsAtPos(first.from, 1) : null;
+        const end = last ? view.coordsAtPos(last.to, -1) : null;
+        const a = start ?? end;
+        const z = end ?? start;
+        const change =
+          a && z
+            ? {
+                left: Math.min(a.left, z.left),
+                right: Math.max(a.right, z.right),
+                top: Math.min(a.top, z.top),
+                bottom: Math.max(a.bottom, z.bottom),
+              }
+            : null;
+        const notes = [...view.dom.querySelectorAll('.rl-rail .rl-note')].map((note) => {
+          const r = note.getBoundingClientRect();
+          return { top: r.top, bottom: r.bottom };
+        });
+        return {
+          visible,
+          notes,
+          column: text,
+          change,
+          width: panel.offsetWidth || PANEL_WIDTH,
+          height: panel.offsetHeight,
+          win: { width: win.innerWidth, height: win.innerHeight },
+        };
       },
-      write: ({ center, narrow, bottom }) => {
-        if (!this.bar) return;
-        this.bar.style.left = `${center}px`;
-        this.bar.style.bottom = `${bottom}px`;
-        if (narrow === this.narrow) return;
-        // The icons make the bar narrower: place it again at that width.
-        this.narrow = narrow;
-        this.bar.classList.toggle('rl-review-bar-narrow', narrow);
-        this.place();
+      write: ({ visible, notes, column, change, width, height, win }) => {
+        if (!this.panel) return;
+        // An editor scrolled out of the page takes its panel with it.
+        const gone = visible.right <= visible.left || visible.bottom <= visible.top;
+        this.panel.style.visibility = gone ? 'hidden' : '';
+        if (gone) return;
+        let at: { left: number; top: number; width?: number } | null = this.dragged;
+        if (!at) {
+          // A change off the screen leaves the panel where it is, kept on the screen.
+          const off = !change || change.bottom < visible.top || change.top > visible.bottom;
+          const space: PanelSpace = {
+            change: change ?? {
+              left: column.left,
+              right: column.right,
+              top: visible.top + 80,
+              bottom: visible.top + 100,
+            },
+            column,
+            visible,
+            notes,
+          };
+          at = panelPlace(space, { width: PANEL_WIDTH, height });
+          if (off && change) {
+            at = {
+              left: at.left,
+              top: Math.max(
+                visible.top + PANEL_MARGIN,
+                Math.min(at.top, visible.bottom - height - PANEL_MARGIN),
+              ),
+            };
+          }
+        }
+        const left = Math.max(0, Math.min(at.left, win.width - width));
+        const top = Math.max(0, Math.min(at.top, win.height - height));
+        this.panel.style.left = `${Math.round(left)}px`;
+        this.panel.style.top = `${Math.round(top)}px`;
+        if (at.width !== undefined) this.panel.style.width = `${Math.round(at.width)}px`;
+        // Where Accept, Reject and Comment don't fit with their keys, they go without them (#665):
+        // measured, as the fonts and the text size decide how wide they are.
+        this.panel.classList.remove('rl-rp-narrow');
+        const row = this.controls?.actions;
+        if (row && row.scrollWidth > row.clientWidth) this.panel.classList.add('rl-rp-narrow');
       },
+    });
+  }
+
+  /** The title is the handle: dragging it moves the panel, and it stays where it was put. */
+  private drag(handle: HTMLElement): void {
+    handle.addEventListener('pointerdown', (event) => {
+      const panel = this.panel;
+      if (!panel || event.button !== 0 || (event.target as Element).closest('button')) return;
+      event.preventDefault();
+      const box = panel.getBoundingClientRect();
+      const grab = { x: event.clientX - box.left, y: event.clientY - box.top };
+      const win = this.view.dom.ownerDocument.defaultView ?? window;
+      panel.classList.add('rl-review-panel-dragging');
+      const move = (e: PointerEvent) => {
+        const left = Math.max(0, Math.min(e.clientX - grab.x, win.innerWidth - panel.offsetWidth));
+        const top = Math.max(0, Math.min(e.clientY - grab.y, win.innerHeight - panel.offsetHeight));
+        this.dragged = { left, top };
+        panel.style.left = `${Math.round(left)}px`;
+        panel.style.top = `${Math.round(top)}px`;
+      };
+      const end = () => {
+        panel.classList.remove('rl-review-panel-dragging');
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+      };
+      try {
+        handle.setPointerCapture(event.pointerId);
+      } catch {
+        // (no capture, as in a test: the moves still reach the handle)
+      }
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
     });
   }
 
@@ -376,11 +790,13 @@ class Bar {
     this.hide();
   }
 }
-
 /**
  * What a click on a change bar does while the review bar is open (the core's `barClickHandlers`):
  * the card of the change on that line opens, in place of the switch between Redlines' two looks,
- * which the review bar would leave to the person who has stopped deciding. Nothing otherwise.
+ * which the review bar would leave to the person who has stopped deciding. In the simple look, a
+ * click on the bar of a change opens its card as well, bar open or not (#664): the card is what says
+ * what the hidden text was; a click on a bar with no change at it still switches the looks.
+ * Nothing otherwise.
  * `pos` is where the bar's line starts, and `piece` the part of a line that wraps which the piece
  * of the bar that was clicked stands beside: the change there is the one.
  */
@@ -389,11 +805,13 @@ export function barClickHandler(
   pin: (view: EditorView, id: string) => void,
 ): (view: EditorView, pos: number, mark?: string, span?: { from: number; to: number }) => boolean {
   return (view, pos, mark, piece) => {
-    if (!isBarOpen(view.state)) return false;
+    const open = isBarOpen(view.state);
+    const simple = view.state.field(viewModeField) === 'simple';
+    if (!open && !simple) return false;
     // The bar of a struck block is its change's own: found by its id, not by its place.
     if (mark !== undefined) {
       if (changesOf(ctx).some((change) => change.id === mark)) pin(view, mark);
-      return true;
+      return open || changesOf(ctx).some((change) => change.id === mark);
     }
     const line = view.state.doc.lineAt(pos);
     const changes = changesOf(ctx);
@@ -424,23 +842,31 @@ export function barClickHandler(
         const at = segmentSpan(segment);
         return at.to <= piece.from && at.to >= line.from;
       });
-    const found =
-      changes.find(beside) ??
-      changes.findLast(before) ??
-      changes.find(onLine) ??
-      changes.findLast(above);
+    // In the simple look, with the review bar closed, only a change drawn on that line or beside
+    // that piece: a bar beside a comment, or beside text a hidden deletion left, opens no card of a
+    // change the person did not point at.
+    const found = !open
+      ? (changes.find(beside) ?? changes.find(onLine))
+      : (changes.find(beside) ??
+        changes.findLast(before) ??
+        changes.find(onLine) ??
+        changes.findLast(above));
     if (found) pin(view, found.id);
-    // The bar is open: a click never switches the view.
-    return true;
+    // The bar is open: a click never switches the view. In the simple look it does only where it
+    // found no change to open.
+    return open || !!found;
   };
 }
 
-/** The review bar. `changed` is called after the bar opens or closes from the bar itself. */
+/** The review panel. `changed` is called after it opens or closes from the panel itself. */
 export function reviewBar(ctx: ReviewContext, changed: () => void): Extension {
   return [
     barOpen,
     movedTo,
-    ViewPlugin.define((view) => new Bar(view, ctx, changed)),
+    currentChange,
+    currentDecorations,
+    clearOnClose,
+    ViewPlugin.define((view) => new Panel(view, ctx, changed)),
     Prec.high(
       keymap.of([
         {
@@ -454,6 +880,14 @@ export function reviewBar(ctx: ReviewContext, changed: () => void): Extension {
         },
       ]),
     ),
-    EditorView.scrollMargins.of((view) => (isBarOpen(view.state) ? { bottom: BAR_ROOM } : null)),
   ];
+}
+
+/** The first reason that one of `marks` can't be rejected, stopping there (each is a dry run). */
+function firstReason(parsed: Parsed, marks: readonly MarkRange[]): string | undefined {
+  for (const mark of marks) {
+    const reason = rejectReason(parsed, mark);
+    if (reason !== undefined) return reason;
+  }
+  return undefined;
 }

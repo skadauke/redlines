@@ -23,12 +23,18 @@ function commands() {
     rename: vi.fn(),
     revealInFinder: vi.fn(),
     print: vi.fn(),
+    exportPdf: vi.fn(),
+    exportWord: vi.fn(),
+    openDocx: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
+    acceptAllAndStopTracking: vi.fn(),
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
+    toggleWordCount: vi.fn(),
     pastePlain: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -44,6 +50,8 @@ function commands() {
     openAbout: vi.fn(),
     openPreferences: vi.fn(),
     showAgentLogs: vi.fn(),
+    reportProblem: vi.fn(),
+    revealCrashLog: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -63,17 +71,21 @@ const command = (id: string, overrides: Partial<EditorCommand> = {}): EditorComm
 });
 
 const state = (overrides: Partial<MenuState> = {}): MenuState => ({
+  plainOnly: false,
   view: 'clean',
   tracking: false,
   hasRedlines: false,
+  canAcceptAll: false,
   sidebarOpen: false,
   showResolved: false,
+  showWordCount: true,
   zoom: 1,
   textSize: 1,
   hasFile: true,
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  disabledReasons: {},
   commandTitles: {},
   undo: null,
   redo: null,
@@ -152,6 +164,23 @@ describe('Open Recent', () => {
   });
 });
 
+describe('Simple Look (#330)', () => {
+  const row = () => actionRow(appMenuModel(commands(), registryOf()), 'View', 'Simple Look');
+
+  it('is on while Redlines shows its simple look, and off in the full markup', () => {
+    expect(row().checked?.(state({ view: 'simple' }))).toBe(true);
+    expect(row().checked?.(state({ view: 'redlines' }))).toBe(false);
+  });
+
+  it('can be chosen only while Redlines shows: Clean and Plain have no look to switch', () => {
+    expect(row().enabled?.(state({ view: 'simple' }))).toBe(true);
+    expect(row().enabled?.(state({ view: 'redlines' }))).toBe(true);
+    expect(row().enabled?.(state({ view: 'clean' }))).toBe(false);
+    expect(row().enabled?.(state({ view: 'raw' }))).toBe(false);
+    expect(row().checked?.(state({ view: 'clean' }))).toBe(false);
+  });
+});
+
 describe('the menu model', () => {
   it('keeps every item the v0.1 menu had', () => {
     const model = appMenuModel(commands(), registryOf());
@@ -176,7 +205,11 @@ describe('the menu model', () => {
       '---',
       'Close',
       '---',
+      ['Open .docx…', undefined],
+      ['Export to Word…', undefined],
+      '---',
       ['Print…', 'CmdOrCtrl+P'],
+      ['Export as PDF…', undefined],
     ]);
     expect(readsAll(model, 'Edit')).toEqual([
       ['Undo', 'CmdOrCtrl+Z'],
@@ -188,11 +221,13 @@ describe('the menu model', () => {
       ['Paste as Plain Text', 'Shift+CmdOrCtrl+V'],
       'SelectAll',
     ]);
-    // Simple is Redlines' simple look, switched by a click on a change bar and by nothing here.
+    // Simple Look is Redlines' simple look, a switch below the three views (#330).
     expect(readsAll(model, 'View')).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
       ['Redlines', 'Alt+CmdOrCtrl+2'],
-      ['Raw', 'Alt+CmdOrCtrl+3'],
+      ['Plain', 'Alt+CmdOrCtrl+3'],
+      '---',
+      ['Simple Look', 'Alt+CmdOrCtrl+4'],
       '---',
       ['Actual Size', 'CmdOrCtrl+0'],
       ['Zoom In', 'CmdOrCtrl+='],
@@ -203,10 +238,13 @@ describe('the menu model', () => {
       ['Smaller Text', 'Ctrl+Cmd+-'],
       '---',
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Word Count', undefined],
+      '---',
       'Enter Full Screen',
     ]);
     expect(readsAll(model, 'Review')).toEqual([
       ['Track Changes', 'Shift+CmdOrCtrl+E'],
+      ['Accept All Changes and Stop Tracking', undefined],
       '---',
       ['Review Changes', undefined],
       ['Next Change', 'Alt+CmdOrCtrl+]'],
@@ -230,7 +268,12 @@ describe('the menu model', () => {
     ]);
     expect(readsAll(model, 'Window')).toEqual(['Minimize', 'Zoom', '---', 'BringAllToFront']);
     expect(model.menus.find((menu) => menu.title === 'Window')?.windowsMenu).toBe(true);
-    expect(readsAll(model, 'Help')).toEqual([['Show Agent Logs', undefined]]);
+    expect(readsAll(model, 'Help')).toEqual([
+      ['Report a Problem…', undefined],
+      ['Reveal Log', undefined],
+      '---',
+      ['Show Agent Logs', undefined],
+    ]);
     expect(model.menus.find((menu) => menu.title === 'Help')?.helpMenu).toBe(true);
   });
 
@@ -252,11 +295,20 @@ describe('the menu model', () => {
     expect(c.revealInFinder).toHaveBeenCalledOnce();
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
-    click('View', 'Raw');
+    click('File', 'Open .docx…');
+    expect(c.openDocx).toHaveBeenCalledOnce();
+    click('File', 'Export to Word…');
+    expect(c.exportWord).toHaveBeenCalledOnce();
+    click('View', 'Plain');
     expect(c.setView).toHaveBeenLastCalledWith('raw');
-    // Redlines, which the editor shows in the look last chosen with a click on a change bar.
+    // Redlines, which the editor shows in the look last chosen with a click on a change bar or the
+    // Simple Look switch.
     click('View', 'Redlines');
     expect(c.setView).toHaveBeenLastCalledWith('redlines');
+    expect(c.setView).toHaveBeenCalledTimes(2);
+    // The simple look is no view: its row switches the look, and shows no other view.
+    click('View', 'Simple Look');
+    expect(c.switchLook).toHaveBeenCalledOnce();
     expect(c.setView).toHaveBeenCalledTimes(2);
     click('View', 'Larger Text');
     expect(c.biggerText).toHaveBeenCalledOnce();
@@ -276,6 +328,8 @@ describe('the menu model', () => {
     expect(c.toggleSidebar).toHaveBeenCalledOnce();
     click('Review', 'Track Changes');
     expect(c.toggleTracking).toHaveBeenCalledOnce();
+    click('Review', 'Accept All Changes and Stop Tracking');
+    expect(c.acceptAllAndStopTracking).toHaveBeenCalledOnce();
     click('Review', 'Review Changes');
     expect(c.openReview).toHaveBeenCalledOnce();
     click('Review', 'Next Change');
@@ -286,6 +340,10 @@ describe('the menu model', () => {
     expect(c.previousChange).toHaveBeenCalledOnce();
     click('Redlines', 'Preferences…');
     expect(c.openPreferences).toHaveBeenCalledOnce();
+    click('Help', 'Report a Problem…');
+    expect(c.reportProblem).toHaveBeenCalledOnce();
+    click('Help', 'Reveal Log');
+    expect(c.revealCrashLog).toHaveBeenCalledOnce();
     click('Help', 'Show Agent Logs');
     expect(c.showAgentLogs).toHaveBeenCalledOnce();
     click('Redlines', 'Quit Redlines');
@@ -312,6 +370,12 @@ describe('the menu model', () => {
     // Any document with a rail can show them.
     expect(resolved.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
 
+    // Accept All Changes and Stop Tracking waits for a change to accept, in the selection or the
+    // document: the editor says (`canAcceptAll`), and no refusal stands in for it.
+    const accept = actionRow(model, 'Review', 'Accept All Changes and Stop Tracking');
+    expect(accept.enabled?.(state({ canAcceptAll: false }))).toBe(false);
+    expect(accept.enabled?.(state({ canAcceptAll: true }))).toBe(true);
+
     const next = actionRow(model, 'Review', 'Next Change');
     expect(next.enabled?.(state({ hasRedlines: false }))).toBe(false);
     expect(next.enabled?.(state({ hasRedlines: true }))).toBe(true);
@@ -319,6 +383,10 @@ describe('the menu model', () => {
     const files = actionRow(model, 'View', 'Show Files');
     expect(files.textFor?.(state({ sidebarOpen: false }))).toBe('Show Files');
     expect(files.textFor?.(state({ sidebarOpen: true }))).toBe('Hide Files');
+
+    const words = actionRow(model, 'View', 'Show Word Count');
+    expect(words.textFor?.(state({ showWordCount: false }))).toBe('Show Word Count');
+    expect(words.textFor?.(state({ showWordCount: true }))).toBe('Hide Word Count');
   });
 
   it('enables the size rows between the ends', () => {
@@ -386,7 +454,7 @@ describe('the menu model', () => {
           title: 'Insert Row Below',
           menu: 'table',
           shortcut: 'Mod-Enter',
-          isEnabled: () => false,
+          disabledReason: () => 'Not here.',
         }),
         command('format.italic', { title: 'Italic', menu: 'format', group: 'inline' }),
         command('format.link', {
@@ -434,16 +502,19 @@ describe('the menu model', () => {
       ['Find', 'CmdOrCtrl+F'],
     ]);
     expect(readsAll(model, 'File').slice(-3)).toEqual([
-      ['Print…', 'CmdOrCtrl+P'],
+      ['Export as PDF…', undefined],
       '---',
       ['Rename…', undefined],
     ]);
-    expect(readsAll(model, 'View').slice(-5)).toEqual([
+    // Enter Full Screen closes View, as it does on the Mac: what plugins register comes before it.
+    expect(readsAll(model, 'View').slice(-7)).toEqual([
       ['Show Files', 'Ctrl+Cmd+S'],
-      'Enter Full Screen',
+      ['Show Word Count', undefined],
       '---',
       ['Zoom In', undefined],
       ['Zoom Out', undefined],
+      '---',
+      'Enter Full Screen',
     ]);
     const everyRow = model.menus.flatMap((menu) => menu.rows.map(reads));
     expect(everyRow).not.toContainEqual(['Hidden', 'CmdOrCtrl+H']);
@@ -452,7 +523,7 @@ describe('the menu model', () => {
   it('runs a registered command through the registry, and follows the ui state', () => {
     const registry = registryOf([
       command('format.bold', { title: 'Bold', menu: 'format', isActive: () => false }),
-      command('format.link', { title: 'Link…', menu: 'format', isEnabled: () => false }),
+      command('format.link', { title: 'Link…', menu: 'format', disabledReason: () => 'Not here.' }),
       command('format.clear', { title: 'Clear', menu: 'format' }),
     ]);
     const model = appMenuModel(commands(), registry);
@@ -462,7 +533,8 @@ describe('the menu model', () => {
     expect(registry.run).toHaveBeenCalledWith('format.bold');
     expect(bold.checked?.(state({ activeCommands: ['format.bold'] }))).toBe(true);
     expect(bold.checked?.(state())).toBe(false);
-    expect(bold.enabled).toBeUndefined();
+    expect(bold.enabled?.(state({ enabledCommands: ['format.bold'] }))).toBe(true);
+    expect(bold.enabled?.(state({ enabledCommands: [] }))).toBe(false);
 
     const link = actionRow(model, 'Format', 'Link…');
     expect(link.checked).toBeUndefined();
@@ -471,7 +543,7 @@ describe('the menu model', () => {
 
     const clear = actionRow(model, 'Format', 'Clear');
     expect(clear.checked).toBeUndefined();
-    expect(clear.enabled).toBeUndefined();
+    expect(clear.enabled?.(state({ enabledCommands: [] }))).toBe(false);
   });
 
   it('leaves the keys of registered commands to the editor', () => {

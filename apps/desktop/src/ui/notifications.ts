@@ -19,6 +19,8 @@ export interface NotificationAction {
 export interface NotificationOptions {
   text: string;
   action?: NotificationAction;
+  /** A second button, beside the action, for what is less likely to be wanted (Allow Once, with Allow Always as the action, #529). */
+  secondaryAction?: NotificationAction;
   /** The dismiss button's word, such as "Later"; without one, the button is a cross. */
   dismissLabel?: string;
   /** Closes it after this many milliseconds; without it, it stays until it is handled. */
@@ -70,6 +72,7 @@ export function createNotifications(container: HTMLElement): Notifications {
 
     const card = document.createElement('div');
     card.className = 'rl-notification';
+    if (options.key !== undefined) card.dataset['key'] = options.key;
     const text = document.createElement('p');
     text.className = 'rl-notification-text';
     text.textContent = options.text;
@@ -123,6 +126,13 @@ export function createNotifications(container: HTMLElement): Notifications {
       makeButton('rl-notification-close', null, dismiss);
     } else {
       makeButton('rl-notification-dismiss', dismissLabel, dismiss);
+    }
+    if (options.secondaryAction) {
+      card.classList.add('rl-notification-wide');
+      const { secondaryAction } = options;
+      makeButton('rl-notification-dismiss', secondaryAction.label, () =>
+        secondaryAction.run(notification),
+      );
     }
     if (action) makeButton('rl-notification-action', action.label, () => action.run(notification));
     if (!action && dismissLabel === undefined) card.classList.add('rl-notification-compact');

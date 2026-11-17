@@ -5,7 +5,7 @@
 // Preferences (src-tauri/src/agents/skills.rs embeds them), so a copy that drifted would be
 // installed as it is.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { COMMANDS } from '../../../packages/cli/src/commands.ts';
@@ -181,6 +181,21 @@ describe('the skill and the command line', () => {
     }
   });
 
+  it('names, anywhere in its text, only options that some command has', () => {
+    // The prose too: a bullet may not name an option (`--notes`) that was never there.
+    const known = new Set(Object.keys(COMMANDS).flatMap((name) => [...optionsOf(name)]));
+    for (const copy of copies) {
+      // Every `--word` that isn't part of a longer word, a dash run or a marker (`{--`, `<!--`).
+      const named = [...copy.text.matchAll(/(?<![\w{<!~=+>-])--([a-z][a-z-]*)/g)].map(
+        (found) => found[1]!,
+      );
+      expect(named.length, copy.path).toBeGreaterThan(8);
+      for (const option of named) {
+        expect([...known], `${copy.path}: --${option}`).toContain(option);
+      }
+    }
+  });
+
   it('shows every option the text of a command can be given as', () => {
     // The options that take a text from a file, as the skill's quoting rule names them.
     for (const copy of copies) {
@@ -226,6 +241,23 @@ describe('the Claude Code plugin', () => {
     expect(manifest.name).toBe(entry.name);
     expect(existsSync(join(ROOT, entry.source, 'skills/redlines/SKILL.md'))).toBe(true);
     expect(existsSync(join(ROOT, entry.source, 'SKILL.md'))).toBe(false);
+  });
+
+  it('holds nothing but the manifest and the skill, which its version follows', () => {
+    // The version bumps when the skill's text changes. A hook or an MCP configuration in the
+    // plugin would change without it, and an installed plugin would not update: whoever adds one
+    // changes the version rule first (apps/desktop/scripts/build-skills.ts, `pluginManifest`).
+    const files = readdirSync(join(ROOT, 'integrations/claude-code'), {
+      recursive: true,
+      withFileTypes: true,
+    })
+      .filter((entry) => entry.isFile())
+      .map((entry) => join(entry.parentPath, entry.name).slice(ROOT.length + 1))
+      .sort();
+    expect(files).toEqual([
+      'integrations/claude-code/.claude-plugin/plugin.json',
+      'integrations/claude-code/skills/redlines/SKILL.md',
+    ]);
   });
 
   it('is at a version that follows the skill’s', () => {

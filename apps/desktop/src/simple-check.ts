@@ -1,6 +1,7 @@
 // Debug only: checks Redlines' simple look in WebKit, where happy-dom can't: the click on a change
-// bar through real layout (the target found by `posAtCoords` and the layer's bars, the line kept
-// where it was, the hand and the wider bar), and the drawing as the page has it. Serve the page with
+// bar through real layout (the target found by `posAtCoords` and the layer's bars: it opens the
+// card of the change there and leaves the look, as #716 made it; the line kept where it was, the
+// hand and the wider bar), and the drawing as the page has it. Serve the page with
 // `VITE_SIMPLE_CHECK=1 pnpm dev` (or `pnpm tauri dev`, for WKWebView) and open it in WebKit: it
 // reads nothing in a release build. Each check reports one console line, `SIMPLE-CHECK <name> pass`
 // or `SIMPLE-CHECK <name> FAIL <json>`, then `SIMPLE-CHECK done <passed> passed, <failed> failed`.
@@ -256,7 +257,7 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
     },
   },
   {
-    name: 'click-switches-and-keeps-the-line',
+    name: 'click-opens-the-card-and-keeps-the-line-and-the-look',
     async run(editor) {
       await open(editor, 'simple');
       const target = barTarget(editor);
@@ -264,17 +265,35 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
       const taken = click(editor, target.x, target.y);
       await frames();
       const after = editor.getUiState();
-      if (!taken || after.view !== 'redlines') return { taken, view: after.view };
+      // In Simple, a click on a change's bar opens that change's card, and the look stays (#664).
+      const card = editor.view.dom.querySelector('.rl-card-what')?.textContent ?? null;
+      if (!taken || after.markupView !== 'simple' || !card) {
+        return { taken, view: after.view, markupView: after.markupView, card };
+      }
       // The line that was under the pointer is where it was, to the pixel.
       const moved = target.line.isConnected
         ? target.line.getBoundingClientRect().top - target.top
         : null;
       const next = barTarget(editor);
       const drift = next ? next.top - target.top : null;
-      if (drift === null || Math.abs(drift) > 1) return { moved, drift };
-      click(editor, next!.x, next!.y);
+      return drift === null || Math.abs(drift) > 1 ? { moved, drift } : null;
+    },
+  },
+  {
+    name: 'click-in-redlines-switches-to-simple-and-keeps-the-line',
+    async run(editor) {
+      await open(editor, 'redlines');
+      const target = barTarget(editor);
+      if (!target) return { note: 'no bar drawn' };
+      const taken = click(editor, target.x, target.y);
       await frames();
-      return editor.getUiState().view === 'simple' ? null : { view: editor.getUiState().view };
+      const after = editor.getUiState();
+      if (!taken || after.markupView !== 'simple') {
+        return { taken, view: after.view, markupView: after.markupView };
+      }
+      const next = barTarget(editor);
+      const drift = next ? next.top - target.top : null;
+      return drift === null || Math.abs(drift) > 1 ? { drift } : null;
     },
   },
   {
@@ -329,12 +348,14 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
         click(editor, target.x, target.y);
         if (editor.getUiState().view !== view) problems[view] = editor.getUiState().view;
       }
-      // A double-click switches once.
-      await open(editor, 'simple');
+      // A double-click in Redlines switches once, to Simple, and not back.
+      await open(editor, 'redlines');
       const again = barTarget(editor)!;
       click(editor, again.x, again.y);
       click(editor, again.x, again.y, { detail: 2 });
-      if (editor.getUiState().view !== 'redlines') problems['double'] = editor.getUiState().view;
+      if (editor.getUiState().markupView !== 'simple') {
+        problems['double'] = editor.getUiState().markupView;
+      }
       return Object.keys(problems).length ? problems : null;
     },
   },
@@ -452,6 +473,92 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
       if (longBar!.bottom < long!.bottom - 3 || longBar!.height > long!.height / 2)
         problems['long'] = [longBar!.top, longBar!.bottom, long!.top, long!.bottom];
       return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    name: 'a-bar-stays-on-the-rows-of-its-change-where-markers-and-widgets-start-rows',
+    async run(editor) {
+      await open(editor, 'redlines');
+      // A paragraph with one change and, before it, a marker the page hides or a widget it draws,
+      // after a number of words that moves where the line wraps: for some numbers the marker or
+      // widget starts a row. The bar must be beside the rows of the change, and no row beyond.
+      const words = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
+      const markers = [
+        '**bold words**',
+        '`code span`',
+        '[a link](https://example.org)',
+        '<sup>raised</sup>',
+        '<!--del m3m3 struck words in a widget-->',
+      ];
+      const ledger = (deleting: boolean) =>
+        [
+          '<!-- redlines',
+          'version: 1',
+          'people:',
+          '  ada: {name: Ada Lovelace}',
+          'marks:',
+          ...(deleting ? ['  m3m3: {by: ada, at: 2026-10-31T09:31Z}'] : []),
+          '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+          '-->',
+          '',
+        ].join('\n');
+      const failures: unknown[] = [];
+      let tried = 0;
+      for (const marker of markers) {
+        for (let n = 0; n < 26; n++) {
+          const doc = `${words(n)} ${marker} ${words(30)} <!--ins k3x9-->CHANGED words<!--/k3x9--> ${words(8)}\n\n${ledger(marker.startsWith('<!--del'))}`;
+          editor.reloadDoc(doc);
+          editor.setViewMode('redlines');
+          measureNow(editor);
+          measureNow(editor);
+          const changed = [
+            ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-ins, .rl-del'),
+          ].flatMap((el) => [...el.getClientRects()]);
+          const segs = [...editor.view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg')].map(
+            (el) => el.getBoundingClientRect(),
+          );
+          if (!changed.length || !segs.length) {
+            failures.push({ marker, n, changed: changed.length, segments: segs.length });
+            continue;
+          }
+          tried++;
+          const top = Math.min(...changed.map((r) => r.top));
+          const bottom = Math.max(...changed.map((r) => r.bottom));
+          // A bar's band reaches the line's own top and bottom, spacing included: less than a row.
+          const stray = segs.filter((r) => r.top < top - 12 || r.bottom > bottom + 12);
+          if (stray.length) {
+            failures.push({
+              marker,
+              n,
+              change: [Math.round(top), Math.round(bottom)],
+              bars: segs.map((r) => [Math.round(r.top), Math.round(r.bottom)]),
+            });
+          }
+        }
+      }
+      // Right-to-left text: a bar down its paragraph is all it promises, but beside the change.
+      const hebrew = Array.from({ length: 60 }, (_, i) => `מילה${i}`).join(' ');
+      editor.reloadDoc(`${hebrew} <!--ins k3x9-->שונה<!--/k3x9--> ${hebrew}\n\n${ledger(false)}`);
+      editor.setViewMode('redlines');
+      measureNow(editor);
+      measureNow(editor);
+      const inserted = editor.view.contentDOM.querySelector('.rl-ins')?.getBoundingClientRect();
+      const bars = [...editor.view.scrollDOM.querySelectorAll<HTMLElement>('.rl-bar-seg')].map(
+        (el) => el.getBoundingClientRect(),
+      );
+      const beside = bars.some(
+        (bar) => !!inserted && bar.top <= inserted.top + 2 && bar.bottom >= inserted.bottom - 2,
+      );
+      if (!beside) {
+        failures.push({
+          rtl: true,
+          change: inserted && [inserted.top, inserted.bottom],
+          bars: bars.map((r) => [r.top, r.bottom]),
+        });
+      }
+      return failures.length
+        ? { tried, failed: failures.length, first: failures.slice(0, 4) }
+        : null;
     },
   },
   {

@@ -1,13 +1,23 @@
 // Images in the preview (design, Rendering): a local path relative to the document, or a URL,
-// drawn in place of its syntax, except while the caret is on it. What a pending change contains is
-// never fetched: an agent misled by text it read could otherwise leak what it read through an image
-// URL the moment its edit lands, so the image shows its alt text until the change is accepted.
+// drawn in place of its syntax, except while the caret is on it (but for a link a paste or a drop
+// has just added, which is drawn while the caret is still at its end: `fresh.ts`). What a pending
+// change contains is never fetched: an agent misled by text it read could otherwise leak what it
+// read through an image URL the moment its edit lands, so the image shows its alt text until the
+// change is accepted.
 
-import type { EditorState } from '@codemirror/state';
+import type { EditorState, Extension } from '@codemirror/state';
 import { Facet, StateEffect } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
-import { Decoration, type EditorView, WidgetType } from '@codemirror/view';
-import { parsedField } from '../tracked/field.ts';
+import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import {
+  type ImageAlign,
+  IMAGE_NODES,
+  imageAt,
+  imageOfNode,
+  noticeFacet,
+  setImageLook,
+} from '../image-size.ts';
+import { parsedField, viewModeField } from '../tracked/field.ts';
 import { textPx } from './theme.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -20,25 +30,68 @@ export const imageResolver = Facet.define<ImageResolver, ImageResolver | null>({
   combine: (values) => values[0] ?? null,
 });
 
+/** A local image's bytes, base64, with its type, for a copy to embed; null when it can't be read. */
+export type ImageData = (path: string) => Promise<{ mimeType: string; data: string } | null>;
+
+/** The host's reader of local image files (`EditorOptions.imageData`). */
+export const imageReader = Facet.define<ImageData, ImageData | null>({
+  combine: (values) => values[0] ?? null,
+});
+
+/** An image's size in px, as its file says: what a page may reserve the room for before it loads. */
+export interface ImageSize {
+  width: number;
+  height: number;
+}
+
+/** The host's answer for the size of a local image, as written in the document; null for unknown. */
+export type ImageSizer = (src: string) => ImageSize | null | Promise<ImageSize | null>;
+
+/** The host's sizer (`EditorOptions.imageSize`). */
+export const imageSizer = Facet.define<ImageSizer, ImageSizer | null>({
+  combine: (values) => values[0] ?? null,
+});
+
 /** The host's resolver would answer differently now: images are drawn again. */
 export const refreshImagesEffect = StateEffect.define<null>();
 
 const REMOTE = /^https?:\/\//i;
+/** Embedded image data: nothing is fetched, so a pending change doesn't hold it back. */
+const DATA_IMAGE = /^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|svg\+xml)[;,]/i;
 const SCHEME = /^[a-z][a-z0-9+.-]*:|^\/\//i;
 
 /** Where an image's file is, as a URL or a path written in the document. */
-type Source = { kind: 'remote'; url: string } | { kind: 'local'; path: string } | { kind: 'none' };
+type Source =
+  | { kind: 'remote'; url: string }
+  | { kind: 'data'; url: string }
+  | { kind: 'local'; path: string }
+  | { kind: 'none' };
 
-function sourceOf(written: string): Source {
+export function sourceOf(written: string): Source {
   let url = written.trim();
   if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
   if (REMOTE.test(url)) return { kind: 'remote', url };
+  if (DATA_IMAGE.test(url)) return { kind: 'data', url };
   if (!url || SCHEME.test(url)) return { kind: 'none' };
-  try {
-    return { kind: 'local', path: decodeURI(url) };
-  } catch {
-    return { kind: 'local', path: url };
-  }
+  return { kind: 'local', path: decodePath(url) };
+}
+
+/**
+ * A path written as a link destination, with every percent code decoded, those of `#` and `?`
+ * included, which a path in a document is never a fragment or a query of: `Photo%20%232.png` is
+ * `Photo #2.png`. A name whose codes are broken, such as a lone `%`, stays as it is written.
+ */
+function decodePath(url: string): string {
+  return url
+    .split('/')
+    .map((name) => {
+      try {
+        return decodeURIComponent(name);
+      } catch {
+        return name;
+      }
+    })
+    .join('/');
 }
 
 /** Whether a pending change covers any of `from`–`to`: its markers or what they hold. */
@@ -71,6 +124,35 @@ function misread(state: EditorState): boolean {
   return state.field(parsedField).warnings.some((warning) => UNRELIABLE.has(warning.code));
 }
 
+/** The least width of an image that is dragged smaller, in px at the theme's own text size. */
+const LEAST_WIDTH = 24;
+
+/** How near the image's own size a drag ends to give the image its own size again, in px. */
+const SNAP = 4;
+
+/** The width of a resize handle's strip (the theme's `.rl-image-handle`). */
+const HANDLE_WIDTH = 14;
+
+/** The text column's width at `line`, in px as it is on screen: what an image may fill. */
+function columnPx(view: EditorView, line: Element | null): number {
+  const el = line ?? view.contentDOM;
+  const style = getComputedStyle(el);
+  return (
+    el.clientWidth - parseFloat(style.paddingLeft || '0') - parseFloat(style.paddingRight || '0')
+  );
+}
+
+/**
+ * The width of the text column in the unit a width is written in: px at the theme's own text size,
+ * which the text size multiplies when the image is drawn. What the Small, Medium and Large of an
+ * Image menu are fractions of.
+ */
+export function columnWidth(view: EditorView): number {
+  const scale = parseFloat(getComputedStyle(view.contentDOM).getPropertyValue('--rl-text-scale'));
+  const width = columnPx(view, null) / (scale || 1);
+  return width > 0 ? width : 720;
+}
+
 /** The picture, or its alt text. */
 class ImageWidget extends WidgetType {
   readonly alt: string;
@@ -78,21 +160,57 @@ class ImageWidget extends WidgetType {
   readonly url: string | null;
   /** The image is a line of its own, which centers it. */
   readonly own: boolean;
+  /** The width the document gives it, in px at the theme's own text size, or null. */
+  readonly width: number | null;
+  readonly align: ImageAlign;
+  /** The local path the host may know the size of, or null. */
+  readonly path: string | null;
+  /** The selection is this image (a click on it): it is drawn with an outline and its handles. */
+  readonly selected: boolean;
+  /** The image is all of a link's text, which opens with the key that opens (design §5.2). */
+  readonly linked: boolean;
 
-  constructor(alt: string, url: string | null, own: boolean) {
+  constructor(
+    alt: string,
+    url: string | null,
+    own: boolean,
+    width: number | null = null,
+    align: ImageAlign = 'center',
+    path: string | null = null,
+    selected = false,
+    linked = false,
+  ) {
     super();
+    this.path = path;
+    this.selected = selected;
+    this.linked = linked;
     this.alt = alt;
     this.url = url;
     this.own = own;
+    this.width = width;
+    this.align = align;
   }
 
   override eq(other: ImageWidget): boolean {
-    return other.alt === this.alt && other.url === this.url && other.own === this.own;
+    return (
+      other.alt === this.alt &&
+      other.url === this.url &&
+      other.own === this.own &&
+      other.width === this.width &&
+      other.align === this.align &&
+      other.path === this.path &&
+      other.selected === this.selected &&
+      other.linked === this.linked
+    );
   }
 
   override toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className = this.own ? 'rl-image rl-image-own' : 'rl-image';
+    if (this.own && this.align !== 'center') wrap.classList.add(`rl-image-${this.align}`);
+    if (this.selected) wrap.classList.add('rl-image-selected');
+    // The link that holds the image is drawn on it: a mark has no text of its own to wrap.
+    if (this.linked) wrap.classList.add('rl-link');
     const showAlt = () => {
       wrap.className += ' rl-image-missing';
       wrap.replaceChildren(this.alt || 'image');
@@ -105,43 +223,267 @@ class ImageWidget extends WidgetType {
     const img = document.createElement('img');
     img.alt = this.alt;
     img.draggable = false;
+    // The file is read when it is near, and its size is known before: the room is held, and the
+    // page doesn't move when it arrives.
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    this.reserve(view, img);
     // A remote image learns nothing of the document it is in.
     img.referrerPolicy = 'no-referrer';
+    // The width that is written, times the text size, which a CSS max-width keeps within the column.
+    if (this.width !== null) img.style.setProperty('width', textPx(this.width));
     img.addEventListener('load', () => {
-      // At its natural width times the text size, which a CSS max-width keeps within the column.
-      if (img.naturalWidth > 0) img.style.setProperty('width', textPx(img.naturalWidth));
+      // At its natural width times the text size, unless the document says another.
+      if (this.width === null && img.naturalWidth > 0) {
+        img.style.setProperty('width', textPx(img.naturalWidth));
+      }
       view.requestMeasure();
     });
     img.addEventListener('error', showAlt);
     img.src = this.url;
-    wrap.append(img);
+    // The image sits in a frame as big as it is, so that its handles are at its edges and as tall as
+    // it: an image on a line of its own would else have them at the text column's, and one in a line of
+    // text at the height of the line.
+    const frame = document.createElement('span');
+    frame.className = 'rl-image-frame';
+    wrap.append(frame);
+    frame.append(img);
+    // A handle stands outside the picture, unless that is outside the text column (a column-wide
+    // image): there it would lie in the margin, under a note, so it stands inside that edge instead.
+    const placeHandles = () => {
+      // Not while a drag holds a handle: it stays where the pointer took it.
+      if (frame.closest('.rl-image-resizing')) return;
+      const line = wrap.closest('.cm-line')?.getBoundingClientRect();
+      const box = frame.getBoundingClientRect();
+      if (!line || box.width === 0) return;
+      frame.classList.toggle('rl-handle-in-left', box.left - HANDLE_WIDTH < line.left);
+      frame.classList.toggle('rl-handle-in-right', box.right + HANDLE_WIDTH > line.right);
+    };
+    // On entering, and as the pointer moves over the image, so that a width or window that changed
+    // since is seen (a toggle that changes nothing costs nothing).
+    frame.addEventListener('pointerenter', placeHandles);
+    frame.addEventListener('pointermove', placeHandles);
+    for (const side of ['left', 'right'] as const) {
+      // The edge on the side an aligned image is anchored to stays where it is, so a handle there
+      // would widen the image without the edge following the pointer (#633): there is none.
+      if (this.own && this.align === side) continue;
+      const handle = document.createElement('span');
+      handle.className = `rl-image-handle rl-image-handle-${side}`;
+      handle.title = 'Drag to resize';
+      handle.addEventListener('pointerdown', (event) =>
+        beginResize(view, { wrap, frame, img, side, event, own: this.own, align: this.align }),
+      );
+      // The press is the handle's: the caret stays where it is, and the source stays hidden.
+      handle.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      frame.append(handle);
+    }
     return wrap;
   }
 
-  /** Clicking the image puts the caret on it, which shows its source. */
-  override ignoreEvent(): boolean {
-    return false;
+  /**
+   * Gives `img` the width and height of its file before it loads, from the host (`imageSize`): the
+   * width attribute and the height attribute make the browser hold the aspect ratio, and, unless the
+   * document says a width, the natural width times the text size is held too. Does nothing once the
+   * image has loaded, which knows its own size.
+   */
+  private reserve(view: EditorView, img: HTMLImageElement): void {
+    const sizer = this.path === null ? null : view.state.facet(imageSizer);
+    if (!sizer || this.path === null) return;
+    const apply = (size: ImageSize | null) => {
+      if (!size || !(size.width > 0) || !(size.height > 0) || img.naturalWidth > 0) return;
+      img.setAttribute('width', String(size.width));
+      img.setAttribute('height', String(size.height));
+      if (this.width === null && !img.style.getPropertyValue('width')) {
+        img.style.setProperty('width', textPx(size.width));
+      }
+    };
+    let answer: ReturnType<ImageSizer>;
+    try {
+      answer = sizer(this.path);
+    } catch {
+      return;
+    }
+    if (answer instanceof Promise) answer.then(apply, () => {});
+    else apply(answer);
+  }
+
+  /** A drag on a handle ends with the widget, whose pointer events then have nowhere to go. */
+  override destroy(dom: HTMLElement): void {
+    drags.get(dom)?.();
+  }
+
+  /** A click on the image selects it (`imageSelection`); a handle is pressed instead. */
+  override ignoreEvent(event: Event): boolean {
+    return event.target instanceof Element && event.target.closest('.rl-image-handle') !== null;
   }
 }
 
-/** The decoration that draws an `Image` node, or null for one that stays source. */
+/** The drags that are going on, by the image they resize, which a widget that goes ends. */
+const drags = new WeakMap<HTMLElement, () => void>();
+
+/** What a drag on a handle is told about the image it resizes. */
+interface Drag {
+  wrap: HTMLElement;
+  frame: HTMLElement;
+  img: HTMLImageElement;
+  side: 'left' | 'right';
+  event: PointerEvent;
+  own: boolean;
+  align: ImageAlign;
+}
+
+/**
+ * A drag on a handle: the image takes the width of the pointer as it moves (nothing is written),
+ * and the width is written when the pointer is released, as one change that one Undo takes back. It
+ * keeps its aspect, as its height follows its width. A centered image grows at both edges, so its
+ * edge follows the pointer at twice the distance. A drag that ends at the image's own size, or
+ * beyond what the column holds, gives it no width, so that it is `![]()` again; Escape gives the
+ * size it had.
+ */
+function beginResize(view: EditorView, drag: Drag): void {
+  const { wrap, frame, img, side, event, own, align } = drag;
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const handle = event.currentTarget as HTMLElement;
+  const scale =
+    parseFloat(getComputedStyle(view.contentDOM).getPropertyValue('--rl-text-scale')) || 1;
+  const column = columnPx(view, wrap.closest('.cm-line'));
+  const startWidth = img.getBoundingClientRect().width;
+  const startX = event.clientX;
+  const written = img.style.getPropertyValue('width');
+  // The edge follows the pointer when the image grows at both of its edges.
+  const gain = own && align === 'center' ? 2 : 1;
+  const least = Math.min(LEAST_WIDTH * scale, column);
+  const natural = img.naturalWidth * scale;
+  let width = startWidth;
+  const badge = document.createElement('span');
+  badge.className = 'rl-image-badge';
+  frame.append(badge);
+  const show = () => {
+    badge.textContent = `${Math.round(width / scale)} px`;
+  };
+  show();
+  wrap.classList.add('rl-image-resizing');
+  try {
+    handle.setPointerCapture(event.pointerId);
+  } catch {
+    // A pointer that is gone already: the drag has nothing to follow.
+  }
+
+  const move = (at: PointerEvent) => {
+    const delta = (side === 'right' ? at.clientX - startX : startX - at.clientX) * gain;
+    width = Math.min(Math.max(startWidth + delta, least), column);
+    img.style.setProperty('width', `${width}px`);
+    show();
+  };
+  const finish = (commit: boolean) => {
+    drags.delete(wrap);
+    handle.removeEventListener('lostpointercapture', cancel);
+    handle.removeEventListener('pointermove', move);
+    handle.removeEventListener('pointerup', up);
+    handle.removeEventListener('pointercancel', cancel);
+    window.removeEventListener('keydown', key, true);
+    badge.remove();
+    wrap.classList.remove('rl-image-resizing');
+    try {
+      handle.releasePointerCapture(event.pointerId);
+    } catch {
+      // Released already.
+    }
+    img.style.setProperty('width', written);
+    if (!commit || width === startWidth) return;
+    // The image's own size, or the column's if that is less, is no width at all.
+    const fit = natural > 0 ? Math.min(natural, column) : 0;
+    const asked = fit > 0 && Math.abs(width - fit) <= SNAP ? null : Math.round(width / scale);
+    let at: number;
+    try {
+      at = view.posAtDOM(wrap);
+    } catch {
+      // The widget was replaced while the pointer was down: the image is another now.
+      return;
+    }
+    setImageLook(view, { width: asked }, at, view.state.facet(noticeFacet));
+  };
+  const up = () => finish(true);
+  const cancel = () => finish(false);
+  const key = (at: Event) => {
+    if ((at as KeyboardEvent).key !== 'Escape') return;
+    at.stopPropagation();
+    finish(false);
+  };
+  drags.set(wrap, cancel);
+  handle.addEventListener('lostpointercapture', cancel);
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', up);
+  handle.addEventListener('pointercancel', cancel);
+  window.addEventListener('keydown', key, true);
+}
+
+/** A pending change's markers, as docs/format.md §2.1 defines them: `<!--ins k3x9-->`, `<!--/k3x9-->`,
+ * `<!--del k3x9 payload-->` (the payload on one line, any text but `-->`). */
+const ID = '[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}';
+const MARKER = new RegExp(
+  `<!--(?:/${ID}|(?:ins|del|sub|fmt|hl|cmt|split) ${ID}(?: (?:(?!-->).)*)?)-->`,
+  'g',
+);
+
+/**
+ * Whether the image stands alone in its paragraph's line: nothing but space and the markers of a
+ * pending change around it. Track Changes on writes the markers beside an image it adds, which must
+ * not draw it at the left where the same image is centered with it off.
+ */
+export function aloneInItsLine(state: EditorState, node: { from: number; to: number }): boolean {
+  const line = state.doc.lineAt(node.from);
+  if (node.to > line.to) return false;
+  const around = state.sliceDoc(line.from, node.from) + state.sliceDoc(node.to, line.to);
+  return around.replace(MARKER, '').trim() === '';
+}
+
+/** Whether an image node is inside a link that is drawn as one (it has a destination or a label). */
+function isLinked(node: SyntaxNode): boolean {
+  const link = node.parent;
+  return (
+    link?.name === 'Link' && (link.getChild('URL') !== null || link.getChild('LinkLabel') !== null)
+  );
+}
+
+/** The decoration that draws an image node, or null for one that stays source. */
 export function imageDecoration(state: EditorState, node: SyntaxNode): Decoration | null {
-  const marks = node.getChildren('LinkMark');
-  const urlNode = node.getChild('URL');
-  const [open, close] = marks;
-  // A reference-style image has no destination here.
-  if (!urlNode || !open || !close) return null;
-  const alt = state.sliceDoc(open.to, close.from);
-  const source = sourceOf(state.sliceDoc(urlNode.from, urlNode.to));
+  const image = imageOfNode(state, node);
+  if (!image) return null;
+  const source = sourceOf(image.src);
   let url: string | null = null;
+  let path: string | null = null;
   if (source.kind === 'remote') {
-    url = misread(state) || pending(state, node.from, node.to) ? null : source.url;
+    url = misread(state) || pending(state, image.from, image.to) ? null : source.url;
+  } else if (source.kind === 'data') {
+    url = source.url;
   } else if (source.kind === 'local') {
     url = state.facet(imageResolver)?.(source.path) ?? null;
+    if (url !== null) path = source.path;
   }
-  const line = state.doc.lineAt(node.from);
-  const own = line.text.trim() === state.sliceDoc(node.from, node.to) && node.to <= line.to;
-  return Decoration.replace({ widget: new ImageWidget(alt, url, own) });
+  const own = aloneInItsLine(state, image);
+  const selected = state.selection.ranges.some(
+    (range) => !range.empty && range.from === image.from && range.to === image.to,
+  );
+  // The caret steps over the image as one unit (`imageAtom`), as over a hard break's spaces.
+  return Decoration.replace({
+    widget: new ImageWidget(
+      image.alt,
+      url,
+      own,
+      image.width,
+      image.align,
+      path,
+      selected,
+      isLinked(node),
+    ),
+    imageAtom: true,
+  });
 }
 
 /**
@@ -157,13 +499,194 @@ export function heldRemoteImages(state: EditorState): Set<string> | null {
       from,
       to,
       enter(node) {
-        if (node.name !== 'Image') return;
-        const urlNode = node.node.getChild('URL');
-        if (!urlNode) return;
-        const source = sourceOf(state.sliceDoc(urlNode.from, urlNode.to));
-        if (source.kind === 'remote' && pending(state, node.from, node.to)) held.add(source.url);
+        if (!IMAGE_NODES.has(node.name)) return;
+        const image = imageOfNode(state, node.node);
+        if (!image) return;
+        const source = sourceOf(image.src);
+        if (source.kind === 'remote' && pending(state, image.from, image.to)) held.add(source.url);
       },
     });
   }
   return held;
+}
+
+/** The local path, as the document writes it and decoded, of an image node; null for a remote one. */
+function localPathOf(state: EditorState, node: SyntaxNode): string | null {
+  const image = imageOfNode(state, node);
+  if (!image) return null;
+  const source = sourceOf(image.src);
+  return source.kind === 'local' ? source.path : null;
+}
+
+/** The `Image` node whose attribute block ends at `pos`, or null. */
+function imageAtEnd(state: EditorState, pos: number): SyntaxNode | null {
+  const image = imageAt(state, pos);
+  if (image === null || image.to !== pos || image.form !== 'markdown' || image.block === null) {
+    return null;
+  }
+  const node = syntaxTree(state).resolveInner(image.from, 1);
+  return node.name === 'Image' ? node : null;
+}
+
+/** The image node, a `![]()` or an `<img>`, that holds or touches `pos`, or null. */
+function imageNodeAt(state: EditorState, pos: number): SyntaxNode | null {
+  // A caret after a pandoc image's attribute block is beside the image, as one after `)` is.
+  const ended = imageAtEnd(state, pos);
+  if (ended !== null) return ended;
+  for (const side of [1, -1] as const) {
+    for (
+      let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);
+      node;
+      node = node.parent
+    ) {
+      if (IMAGE_NODES.has(node.name) && imageOfNode(state, node)) return node;
+    }
+  }
+  return null;
+}
+
+/**
+ * The local image under the caret, or the first in the selection: its path as the document writes
+ * it, decoded (`img/a b.png`). Null when there is none, or it is a remote one, which no other app
+ * edits. What `openImage` is given, and what the command that edits an image answers to.
+ */
+export function localImageAt(state: EditorState): string | null {
+  const { from, to, empty } = state.selection.main;
+  if (empty) {
+    const node = imageNodeAt(state, from);
+    return node ? localPathOf(state, node) : null;
+  }
+  let found: string | null = null;
+  syntaxTree(state).iterate({
+    from,
+    to,
+    enter(node) {
+      if (found !== null || !IMAGE_NODES.has(node.name)) return;
+      found = localPathOf(state, node.node);
+    },
+  });
+  return found;
+}
+
+/**
+ * Whether the selection has an end strictly inside the image's syntax, which only a click in
+ * hidden text or an edit can bring about: the source shows then, so that it can be read and
+ * mended. A caret at either end of the image, or a selection of the whole image, does not show it.
+ */
+export function selectionInside(state: EditorState, from: number, to: number): boolean {
+  return state.selection.ranges.some((range) =>
+    range.empty
+      ? range.head > from && range.head < to
+      : (range.from > from && range.from < to) || (range.to > from && range.to < to),
+  );
+}
+
+/**
+ * A click on an image selects it, drawn as the image with its handles and an outline; its Markdown
+ * or HTML stays hidden (it shows in Plain, and the Image menu and the handles change its alt text
+ * and size). The caret moves past it with the arrows, and Delete or typing replaces it.
+ */
+export function imageSelection(): Extension {
+  return [selectedImageLook, clickSelects];
+}
+
+/** While the selection is one image, the page's own selection color stays off the line: the image's
+ * outline is the selection. */
+const selectedImageLook = EditorView.editorAttributes.compute(
+  ['selection', 'doc'],
+  (state): Record<string, string> => {
+    const { from, to, empty } = state.selection.main;
+    // Raw draws no image: its selection is the page's own.
+    if (empty || state.selection.ranges.length !== 1) return {};
+    if (state.field(viewModeField, false) === 'raw') return {};
+    const node = imageNodeAt(state, from);
+    const image = node && imageOfNode(state, node);
+    return image && image.from === from && image.to === to ? { class: 'rl-image-is-selected' } : {};
+  },
+);
+
+// A click, not the press: a press that starts a drag across text is the editor's own.
+const clickSelects = EditorView.domEventHandlers({
+  click(event, view) {
+    if (event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey) return false;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest('.rl-image-handle')) return false;
+    const wrap = target.closest('.rl-image');
+    if (!wrap || !view.contentDOM.contains(wrap)) return false;
+    let node: SyntaxNode | null;
+    try {
+      node = imageNodeAt(view.state, view.posAtDOM(wrap));
+    } catch {
+      return false;
+    }
+    const image = node && imageOfNode(view.state, node);
+    if (!image) return false;
+    view.focus();
+    view.dispatch({
+      selection: { anchor: image.from, head: image.to },
+      userEvent: 'select.pointer',
+    });
+    return true;
+  },
+});
+
+/** How long after the first click of a double-click the second may come, and how far it may move. */
+const DOUBLE_CLICK_MS = 700;
+const DOUBLE_CLICK_SLOP = 6;
+
+/**
+ * A double-click on an image hands its path to `open` (`EditorOptions.openImage`), the host's to
+ * open in an app. The first click does what a click on an image does, puts the caret on it and so
+ * shows its source, where the second lands; so the pair is told by the first click's image, and the
+ * second press is taken whole: no word is selected. A remote image has no file: the pair does
+ * nothing for it, not even select.
+ */
+export function imageOpening(open: (src: string) => void): Extension {
+  return EditorView.domEventHandlers({ mousedown: imagePress(open) });
+}
+
+/** The press handler of `imageOpening`, for a test to call without the editor's own handling. */
+export function imagePress(
+  open: (src: string) => void,
+): (event: MouseEvent, view: EditorView) => boolean {
+  let first: { from: number; doc: EditorState['doc']; at: number; x: number; y: number } | null =
+    null;
+  return (event, view) => {
+    if (event.button !== 0) return false;
+    if (event.detail === 2 && first) {
+      const press = first;
+      first = null;
+      const near =
+        Date.now() - press.at <= DOUBLE_CLICK_MS &&
+        Math.hypot(event.clientX - press.x, event.clientY - press.y) <= DOUBLE_CLICK_SLOP;
+      if (!near || view.state.doc !== press.doc) return false;
+      const node = imageNodeAt(view.state, press.from);
+      if (!node) return false;
+      const path = localPathOf(view.state, node);
+      if (path !== null) {
+        try {
+          open(path);
+        } catch (error) {
+          console.warn('Could not open the image', error);
+        }
+      }
+      return true;
+    }
+    first = null;
+    const target = event.target;
+    const wrap = target instanceof Element ? target.closest('.rl-image') : null;
+    if (event.detail === 1 && wrap && view.contentDOM.contains(wrap)) {
+      const node = imageNodeAt(view.state, view.posAtDOM(wrap));
+      if (node) {
+        first = {
+          from: node.from,
+          doc: view.state.doc,
+          at: Date.now(),
+          x: event.clientX,
+          y: event.clientY,
+        };
+      }
+    }
+    return false;
+  };
 }

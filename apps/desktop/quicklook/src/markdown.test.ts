@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { micromark } from 'micromark';
 import { gfm, gfmHtml } from 'micromark-extension-gfm';
-import { chunkEngine, chunkHeader, markdownToHtml, withoutComments } from './markdown.ts';
+import {
+  chunkEngine,
+  chunkHeader,
+  localImagePath,
+  localImageSources,
+  markdownImages,
+  markdownToHtml,
+  withoutComments,
+} from './markdown.ts';
 
 describe('markdownToHtml', () => {
   it('draws Markdown, with GitHub’s extensions', () => {
@@ -40,24 +48,223 @@ describe('markdownToHtml', () => {
     });
   });
 
-  describe('raw HTML', () => {
-    it('is text, never live', () => {
+  describe('raw HTML, as GitHub draws it', () => {
+    it('escapes the tags that GFM escapes', () => {
       const html = markdownToHtml(
-        'A <script>alert(1)</script> and <b onclick="x()">bold</b>.\n\n<div onclick="x()">\nblock\n</div>\n',
+        'A <script>alert(1)</script> and <iframe src="x"></iframe> <style>p{}</style> <textarea>t</textarea>.\n\n<title>x</title> <xmp>a</xmp> <noembed>n</noembed> <noframes>f</noframes> <plaintext>p\n',
       );
-      expect(html).not.toMatch(/<script|<b |<div/);
+      expect(html).not.toMatch(
+        /<(?:script|iframe|style|textarea|title|xmp|noembed|noframes|plaintext)/,
+      );
       expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-      expect(html).toContain('&lt;div onclick=&quot;x()&quot;&gt;');
+      expect(html).toContain('&lt;iframe src=&quot;x&quot;&gt;&lt;/iframe&gt;');
     });
 
-    it('is never an image', () => {
+    it('draws the inline tags on GitHub’s list', () => {
       const html = markdownToHtml(
-        '<img src="https://example.com/x.png" onerror="alert(1)">\n\nx <img src=y> z\n',
+        'H<sub>2</sub>O, <kbd>Esc</kbd>, <mark>marked</mark>, <ins>in</ins>, <abbr title="HyperText">HTML</abbr>, <q>q</q>, <small>s</small>, <ruby>漢<rt>kan</rt></ruby>, a<br>b, <b>bold</b> and <a href="https://example.com" title="T">link</a>.\n',
+      );
+      for (const part of [
+        '<sub>2</sub>',
+        '<kbd>Esc</kbd>',
+        '<mark>marked</mark>',
+        '<ins>in</ins>',
+        '<abbr title="HyperText">HTML</abbr>',
+        '<ruby>漢<rt>kan</rt></ruby>',
+        'a<br />b',
+        '<b>bold</b>',
+        '<a href="https://example.com" title="T">link</a>',
+      ]) {
+        expect(html).toContain(part);
+      }
+    });
+
+    it('drops a tag GitHub drops and keeps its text', () => {
+      const html = markdownToHtml(
+        '<u>under</u> <font color="red">red</font> <center>mid</center>\n',
+      );
+      expect(html).toBe('<p>under red mid</p>\n');
+    });
+
+    it('draws a chip where GitHub drops an element with nothing to show', () => {
+      const html = markdownToHtml(
+        '<video src="x.mp4" controls></video> <svg><path d="M0"/></svg>\n',
+      );
+      expect(html).toContain('<span class="rl-chip">video</span>');
+      expect(html).toContain('<span class="rl-chip">svg</span>');
+      expect(html).not.toMatch(/<video|<svg|<path/);
+    });
+
+    it('draws <div align> and other blocks, with Markdown after a blank line', () => {
+      const html = markdownToHtml(
+        '<div align="center">\n\n# Title\n\n**bold** text\n\n</div>\n\n<p align="right">right</p>\n',
+      );
+      expect(html).toContain('<div align="center">');
+      expect(html).toContain('<h1>Title</h1>');
+      expect(html).toContain('<strong>bold</strong>');
+      expect(html).toContain('</div>');
+      expect(html).toContain('<p align="right">right</p>');
+    });
+
+    it('does not read Markdown inside an HTML block without blank lines, as on GitHub', () => {
+      const html = markdownToHtml('<div>\n**not bold**\n</div>\n');
+      expect(html).toContain('**not bold**');
+      expect(html).not.toContain('<strong>');
+    });
+
+    it('draws <details> closed unless it says open', () => {
+      const html = markdownToHtml(
+        '<details>\n<summary>More</summary>\n\nHidden *text*.\n\n</details>\n\n<details open>\n<summary>Open</summary>\n\nShown.\n\n</details>\n',
+      );
+      expect(html).toContain('<details>\n<summary>More</summary>');
+      expect(html).toContain('<details open="">');
+      expect(html).toContain('<em>text</em>');
+      expect(html.match(/<details/g)).toHaveLength(2);
+      expect(html.match(/<\/details>/g)).toHaveLength(2);
+    });
+
+    it('closes an unclosed <details> at the end, so that it folds the rest', () => {
+      const html = markdownToHtml('<details>\n<summary>S</summary>\n\nBody\n');
+      expect(html.endsWith('</details>')).toBe(true);
+    });
+
+    it('draws a table with attributes, scrolling in its box', () => {
+      const html = markdownToHtml(
+        '<table align="center">\n<tr><th colspan="2">h</th></tr>\n<tr><td>a</td><td rowspan="2">b</td></tr>\n</table>\n',
+      );
+      expect(html).toContain('<div class="rl-tbl-scroll"><table align="center">');
+      expect(html).toContain('<th colspan="2">h</th>');
+      expect(html).toContain('<td rowspan="2">b</td>');
+      expect(html.match(/<div/g)).toHaveLength(html.match(/<\/div>/g)?.length ?? -1);
+    });
+
+    it('keeps a tag that is written over several lines', () => {
+      const html = markdownToHtml('<div\n  align="center"\n>\n\ntext\n\n</div>\n');
+      expect(html).toContain('align="center"');
+      expect(html).toContain('<p>text</p>');
+    });
+
+    it('shows a tag that never ends as text', () => {
+      expect(markdownToHtml('a <b onclick="x"\n')).not.toContain('<b');
+      expect(markdownToHtml('1 < 2 and a <3\n')).toContain('1 &lt; 2 and a &lt;3');
+    });
+
+    it('keeps character references', () => {
+      expect(markdownToHtml('<span>&copy; &amp; &lt;b&gt;</span>\n')).toMatch(
+        /<span>(?:&copy;|©) &amp; &lt;b&gt;<\/span>/,
+      );
+    });
+
+    it('balances what it draws', () => {
+      const html = markdownToHtml('<b>a <i>b</b> c</i> </span> <div><div>x\n');
+      expect(html.match(/<b>/g)).toHaveLength(html.match(/<\/b>/g)?.length ?? -1);
+      expect(html.match(/<div>/g)).toHaveLength(html.match(/<\/div>/g)?.length ?? -1);
+      expect(html).not.toContain('</span>');
+    });
+
+    describe('a hostile document', () => {
+      const hostile = [
+        '<a href="javascript:alert(1)" onclick="x()">js</a>',
+        '<a href="java\nscript:alert(1)">split</a>',
+        '<a href="data:text/html,x">data</a> <a href="file:///etc/passwd">file</a>',
+        '<b onmouseover="x()" style="color:red" class="c" id="i" name="n">b</b>',
+        '<img src="https://example.com/x.png" onerror="alert(1)">',
+        '<img src="javascript:alert(1)" alt="j">',
+        '<div style="background:url(http://x/y)">d</div>',
+        '<details open ontoggle="x()"><summary>s</summary></details>',
+        '<p align="center" onclick="x()">p</p> <table width="100%" onload="x()"></table>',
+        '<link rel="stylesheet" href="http://x/y.css"> <object data="x"></object> <embed src="x"> <form action="x"><input></form>',
+        '<picture><source srcset="https://example.com/a.png"><img src="https://example.com/a.png"></picture>',
+        '<math><style>x</style></math> <svg onload="x()"></svg>',
+      ].join('\n\n');
+
+      it('draws nothing live', () => {
+        const html = markdownToHtml(hostile);
+        expect(html).not.toMatch(
+          /<script|<iframe|<style|<link|<object|<embed|<form|<input|<source|<svg|<video/i,
+        );
+        expect(html).not.toMatch(/\son[a-z]+\s*=/i);
+        expect(html).not.toMatch(/\s(?:style|id|name|srcset)=|\sclass="(?!rl-)/);
+        expect(html).not.toMatch(/(?:javascript|data|file|vbscript):/i);
+        expect(html).not.toContain('<img');
+        expect(html).not.toContain('http://x');
+      });
+
+      it('still shows what the text said', () => {
+        const html = markdownToHtml(hostile);
+        for (const word of ['js', 'split', 'data', 'file', 'b', 'd']) expect(html).toContain(word);
+      });
+    });
+  });
+
+  describe('an <img> tag', () => {
+    it('is its alt text, and no file is loaded', () => {
+      const html = markdownToHtml('A <img src="https://example.com/x.png" alt="Remote"> b.\n');
+      expect(html).toContain('<span class="rl-image">Remote</span>');
+      expect(html).not.toContain('<img');
+    });
+  });
+
+  describe('an <img> tag with a local file', () => {
+    const loaded = new Map([
+      ['pics/a b.png', 'img-0'],
+      ['100%.png', 'img-1'],
+    ]);
+
+    it('is the picture, at its width and height', () => {
+      const html = markdownToHtml(
+        'A <img src="pics/a b.png" alt="Sized" width="120" height="80"> and <img src="pics/a b.png" width=50%>.\n',
+        loaded,
+      );
+      expect(html).toContain(
+        '<img class="rl-image" src="cid:img-0" alt="Sized" width="120" height="80">',
+      );
+      expect(html).toContain('<img class="rl-image" src="cid:img-0" alt="" width="50%">');
+    });
+
+    it('is drawn inside GitHub’s centered paragraph', () => {
+      const html = markdownToHtml(
+        '<p align="center">\n<img src="pics/a b.png" height="40">\n</p>\n',
+        loaded,
+      );
+      expect(html).toContain('<p align="center">');
+      expect(html).toContain('<img class="rl-image" src="cid:img-0" alt="" height="40">');
+    });
+
+    it('keeps a size that is a number, and no other', () => {
+      const html = markdownToHtml(
+        '<img src="pics/a b.png" width="9px" height="1e3"> <img src="pics/a b.png" width="12" height="calc(1px)">\n',
+        loaded,
+      );
+      expect(html).toContain('src="cid:img-0" alt="">');
+      expect(html).toContain('alt="" width="12">');
+      expect(html).not.toMatch(/calc|9px|1e3/);
+    });
+
+    it('has a name with a % that starts no escape', () => {
+      expect(markdownToHtml('<img src="100%.png" alt="p">\n', loaded)).toContain('src="cid:img-1"');
+    });
+
+    it('is its alt text when the host did not load the file, or for an address that is not a path', () => {
+      const html = markdownToHtml(
+        '<img src="other.png" alt="a" width="10"> <img src="https://example.com/x.png" alt="b"> <img src="javascript:x" alt="c">\n',
+        loaded,
       );
       expect(html).not.toContain('<img');
-      expect(html).toContain('&lt;img src=&quot;https://example.com/x.png&quot;');
+      for (const alt of ['a', 'b', 'c'])
+        expect(html).toContain(`<span class="rl-image">${alt}</span>`);
     });
 
+    it('is asked of the host like any local image', () => {
+      expect(
+        markdownImages(
+          '<img src="pics/a b.png"> <img src="https://example.com/x.png"> ![m](m.png)\n',
+        ),
+      ).toEqual(['pics/a b.png', 'm.png']);
+    });
+  });
+
+  describe('addresses', () => {
     it('keeps no address that could run or load a script', () => {
       const html = markdownToHtml(
         '[a](javascript:alert(1)) [b](data:text/html,x) [c](vbscript:x) [d](file:///etc/passwd)',
@@ -87,9 +294,35 @@ describe('markdownToHtml', () => {
     it('escapes what its alt text holds', () => {
       const html = markdownToHtml('![a "quoted" <b>word</b> & more](x.png)\n');
       expect(html).not.toContain('<b>');
-      expect(html).toContain(
-        '<span class="rl-image">a &quot;quoted&quot; &lt;b&gt;word&lt;/b&gt; &amp; more</span>',
+      expect(html).toContain('<span class="rl-image">a &quot;quoted&quot; word &amp; more</span>');
+    });
+
+    it('is the picture itself when the host loaded the file, and nothing else is', () => {
+      const html = markdownToHtml(
+        'A ![caret](icon.png "The icon") and ![other](other.png) and ![remote](https://example.com/icon.png).\n',
+        new Map([
+          ['icon.png', 'img-0'],
+          ['https://example.com/icon.png', 'img-1'],
+        ]),
       );
+      expect(html).toBe(
+        '<p>A <img class="rl-image" src="cid:img-0" alt="caret"> and <span class="rl-image">other</span> and <span class="rl-image">remote</span>.</p>\n',
+      );
+    });
+
+    it('is a picture under a name that is a name, and its alt text is escaped', () => {
+      const html = markdownToHtml(
+        '![a "q" <b>](x.png) ![y](y.png) ![z](z.png)\n',
+        new Map([
+          ['x.png', 'img-0'],
+          ['y.png', 'img" onerror="alert(1)'],
+          ['z.png', ''],
+        ]),
+      );
+      expect(html).toContain('<img class="rl-image" src="cid:img-0" alt="a &quot;q&quot; ">');
+      expect(html).not.toContain('onerror');
+      expect(html).toContain('<span class="rl-image">y</span>');
+      expect(html).toContain('<span class="rl-image">z</span>');
     });
 
     it('can be a link’s text', () => {
@@ -262,7 +495,7 @@ describe('markdownToHtml, where the text has nothing of what it changes', () => 
     '    indented code\n\nafter\n',
     'A line  \nwith a hard break and a\\\nbackslash one.\n',
     '> a quote\n> over two lines\n\n---\n\n- a\n- b\n  - c\n',
-    'Raw <b>HTML</b> and <div>blocks</div> are text.\n\n<div>\nblock\n</div>\n',
+    'Raw <script>x</script> is text.\n\n<style>\nblock\n</style>\n',
     '[a link](https://example.com "title") and <https://example.org> and https://example.net\n',
     'Setext\n======\n\nSetext two\n----------\n',
     '~~struck~~ text and a footnote.[^1]\n\n[^1]: The note.\n',
@@ -274,5 +507,52 @@ describe('markdownToHtml, where the text has nothing of what it changes', () => 
     expect(markdownToHtml(source).replaceAll(' class="rl-loose"', '')).toBe(
       micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()] }),
     );
+  });
+});
+
+describe('localImagePath', () => {
+  it('is the path the document wrote, undone from the HTML and from the percent-encoding', () => {
+    expect(localImagePath('images/one.png')).toBe('images/one.png');
+    expect(localImagePath('my%20pics/two%20.jpg')).toBe('my pics/two .jpg');
+    expect(localImagePath('a&amp;b.png')).toBe('a&b.png');
+    expect(localImagePath('../up/a.png')).toBe('../up/a.png');
+    expect(localImagePath('/abs/a.png')).toBe('/abs/a.png');
+    expect(localImagePath('caf%C3%A9.png')).toBe('café.png');
+  });
+
+  it('leaves out a query and a fragment, which are no part of a file’s name', () => {
+    expect(localImagePath('a.png?raw=1')).toBe('a.png');
+    expect(localImagePath('a.png#frag')).toBe('a.png');
+  });
+
+  it('is nothing for an address that is not a path', () => {
+    for (const src of [
+      'https://example.com/a.png',
+      'http://x/a.png',
+      'data:image/png;base64,AAAA',
+      'file:///etc/passwd',
+      '//host/a.png',
+      'C:/x/a.png',
+      'javascript:alert(1)',
+      '',
+      '#only-a-fragment',
+      '%ZZ.png',
+      'a%00b.png',
+    ]) {
+      expect(localImagePath(src), src).toBeNull();
+    }
+  });
+});
+
+describe('localImageSources', () => {
+  it('lists the local images of the HTML, in order, each once', () => {
+    const html =
+      '<p><img src="a.png" alt="" /> <img src="https://x/b.png" alt="" /> <img src="a.png" alt="" title="t" /> <img src="c%20d.png" alt="x" /></p>';
+    expect(localImageSources(html)).toEqual(['a.png', 'c d.png']);
+  });
+
+  it('is no more than a preview asks about', () => {
+    const html = Array.from({ length: 80 }, (_, n) => `<img src="n${n}.png" alt="" />`).join('');
+    expect(localImageSources(html)).toHaveLength(40);
   });
 });

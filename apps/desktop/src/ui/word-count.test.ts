@@ -7,7 +7,10 @@ import {
   createEditorWordCount,
   createWordCount,
   IDLE_MS,
+  SELECTION_MS,
+  textPartsLabel,
   wordCountLabel,
+  type TextParts,
   wordsIn,
 } from './word-count.ts';
 
@@ -42,28 +45,28 @@ const SOURCE = `Keep <!--ins k3x9-->this<!--/k3x9--> one.<!--del w2rf  gone word
 
 describe('wordsIn', () => {
   it('counts the words a reader sees, none of the markers, the deleted text or the ledger', () => {
-    expect(wordsIn(SOURCE, { from: 0, to: 0 })).toEqual({ total: 3, selected: null });
-    expect(wordsIn('', { from: 0, to: 0 })).toEqual({ total: 0, selected: null });
+    expect(wordsIn(SOURCE, { from: 0, to: 0 })).toMatchObject({ total: 3, selected: null });
+    expect(wordsIn('', { from: 0, to: 0 })).toMatchObject({ total: 0, selected: null });
   });
 
   it('counts the words a selection covers, as a reader sees them', () => {
     // "Keep <!--ins k3x9-->this" is "Keep this" to a reader.
     const through = SOURCE.indexOf('this') + 'this'.length;
-    expect(wordsIn(SOURCE, { from: 0, to: through })).toEqual({ total: 3, selected: 2 });
+    expect(wordsIn(SOURCE, { from: 0, to: through })).toMatchObject({ total: 3, selected: 2 });
     // Starting inside the insertion's marker: the nearest place a reader sees.
     const inside = SOURCE.indexOf('<!--ins') + 3;
-    expect(wordsIn(SOURCE, { from: inside, to: SOURCE.indexOf(' one.') + 5 })).toEqual({
+    expect(wordsIn(SOURCE, { from: inside, to: SOURCE.indexOf(' one.') + 5 })).toMatchObject({
       total: 3,
       selected: 2,
     });
   });
 
   it('says no selection for one with no words in it', () => {
-    expect(wordsIn('One two.\n\nThree.', { from: 8, to: 10 })).toEqual({
+    expect(wordsIn('One two.\n\nThree.', { from: 8, to: 10 })).toMatchObject({
       total: 3,
       selected: null,
     });
-    expect(wordsIn('One two.', { from: 3, to: 4 })).toEqual({ total: 2, selected: null });
+    expect(wordsIn('One two.', { from: 3, to: 4 })).toMatchObject({ total: 2, selected: null });
   });
 });
 
@@ -77,6 +80,65 @@ describe('wordCountLabel', () => {
   });
 });
 
+describe('the lines and characters', () => {
+  it("counts the lines and characters a reader sees, and the selection's", () => {
+    const parts = (from: number, to: number) =>
+      wordsIn('One two.\n\nThree four.', { from, to }).parts;
+    expect(parts(0, 0)).toEqual({
+      lines: 3,
+      characters: 19,
+      selectedLines: null,
+      selectedCharacters: null,
+    });
+    expect(parts(4, 14)).toMatchObject({ selectedLines: 3, selectedCharacters: 8 });
+    expect(wordsIn('', { from: 0, to: 0 }).parts).toMatchObject({ lines: 0, characters: 0 });
+    // An emoji is one character, a trailing line break starts a line, and a selection starting in a
+    // marker counts the text it covers.
+    expect(wordsIn('a\u{1F600}\n', { from: 0, to: 0 }).parts).toMatchObject({
+      lines: 2,
+      characters: 2,
+    });
+    const marked = 'Keep <!--ins k3x9-->this<!--/k3x9--> one.';
+    expect(
+      wordsIn(marked, { from: marked.indexOf('<!--ins'), to: marked.indexOf('<!--/') }).parts,
+    ).toMatchObject({ selectedLines: 1, selectedCharacters: 4 });
+  });
+
+  it('says them for the hint', () => {
+    expect(
+      textPartsLabel({ lines: 1, characters: 1, selectedLines: null, selectedCharacters: null }),
+    ).toBe('1 line \u00b7 1 character');
+    expect(
+      textPartsLabel({ lines: 1200, characters: 6400, selectedLines: 3, selectedCharacters: 120 }),
+    ).toBe('3 of 1,200 lines \u00b7 120 of 6,400 characters');
+  });
+
+  it("puts them in the label's title as the selection changes", () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const parts = {
+      lines: 2,
+      characters: 9,
+      selectedLines: null,
+      selectedCharacters: null,
+    } as TextParts;
+    const words = createWordCount(
+      parent,
+      { count: () => ({ total: 2, selected: null, parts }) },
+      { visible: true },
+    );
+    words.refresh();
+    vi.advanceTimersByTime(1);
+    const label = parent.querySelector<HTMLElement>('.rl-word-count');
+    expect(label?.title).toBe('2 lines \u00b7 9 characters');
+    parts.selectedLines = 1;
+    parts.selectedCharacters = 4;
+    words.schedule(false);
+    vi.advanceTimersByTime(SELECTION_MS);
+    expect(label?.title).toBe('1 of 2 lines \u00b7 4 of 9 characters');
+  });
+});
+
 describe('createWordCount', () => {
   const setup = (visible = true, total = 1204) => {
     const parent = document.createElement('div');
@@ -84,7 +146,16 @@ describe('createWordCount', () => {
     scroller.className = 'rl-scroller';
     parent.append(scroller);
     document.body.append(parent);
-    const counted = { total, selected: null as number | null };
+    const counted = {
+      total,
+      selected: null as number | null,
+      parts: {
+        lines: 12,
+        characters: 640,
+        selectedLines: null,
+        selectedCharacters: null,
+      } as TextParts,
+    };
     const count = vi.fn(() => ({ ...counted }));
     const words = createWordCount(parent, { count }, { visible });
     const label = () => parent.querySelector<HTMLElement>('.rl-word-count');
@@ -105,6 +176,48 @@ describe('createWordCount', () => {
     vi.advanceTimersByTime(1);
     expect(count).toHaveBeenCalledOnce();
     expect(label()?.textContent).toBe('1,204 words');
+  });
+
+  it('counts a moved selection soon, once for a drag, and again for the next move', () => {
+    const { words, count, counted, label } = setup();
+    counted.selected = 9;
+    for (let i = 0; i < 5; i++) words.schedule(false);
+    expect(count).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(SELECTION_MS);
+    expect(count).toHaveBeenCalledOnce();
+    expect(label()?.textContent).toBe('9 of 1,204 words');
+    words.schedule(false);
+    vi.advanceTimersByTime(SELECTION_MS);
+    expect(count).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts a moved selection while hidden never, and after a refresh or a show as usual', () => {
+    const { words, count } = setup(false);
+    words.schedule(false);
+    vi.advanceTimersByTime(SELECTION_MS * 2);
+    expect(count).not.toHaveBeenCalled();
+    words.setVisible(true);
+    expect(count).toHaveBeenCalledOnce();
+    words.refresh();
+    words.schedule(false);
+    vi.advanceTimersByTime(0);
+    expect(count).toHaveBeenCalledTimes(2);
+    words.setVisible(false);
+    words.setVisible(true);
+    words.schedule(false);
+    vi.advanceTimersByTime(SELECTION_MS);
+    expect(count).toHaveBeenCalledTimes(4);
+  });
+
+  it('lets a waiting count for a change to the text cover a selection moved meanwhile', () => {
+    const { words, count } = setup();
+    words.schedule();
+    vi.advanceTimersByTime(IDLE_MS - 10);
+    words.schedule(false);
+    vi.advanceTimersByTime(5);
+    expect(count).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(5);
+    expect(count).toHaveBeenCalledOnce();
   });
 
   it('counts a document that has just opened as soon as the page has drawn it, not on idle', () => {
@@ -270,7 +383,7 @@ describe('the word count of an editor', () => {
     vi.advanceTimersByTime(IDLE_MS);
     expect(label()).toBe('4 words');
     select(5, 13);
-    vi.advanceTimersByTime(IDLE_MS);
+    vi.advanceTimersByTime(SELECTION_MS);
     expect(label()).toBe('2 of 4 words');
   });
 

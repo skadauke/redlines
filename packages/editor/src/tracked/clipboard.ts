@@ -1,20 +1,20 @@
 // Copy, cut and paste (design §5.10). In Clean and Redlines, what is copied or cut is the newest
 // text of the selection (format §8): what it reads with every change accepted, without markers,
-// deleted text or the ledger. Raw copies the source as written.
+// deleted text or the ledger. Plain copies the source as written.
 //
 // A paste never creates marks from the clipboard's content. In Clean and Redlines, pasted text that
 // holds Redlines markup becomes its newest text before it goes in, so it is plain text of the
-// paster's own, an insertion of theirs while Track Changes is on. Raw, where markup is edited by
+// paster's own, an insertion of theirs while Track Changes is on. Plain, where markup is edited by
 // hand, pastes the text as it is.
 //
-// Rich text goes both ways outside Raw. A copy also puts the same newest text on the clipboard as
+// Rich text goes both ways outside Plain. A copy also puts the same newest text on the clipboard as
 // HTML (clipboard/copy-html.ts), and a paste whose clipboard has HTML that says more than its plain
 // text is turned into Markdown (clipboard/paste-html.ts), which then goes in as a plain-text paste
 // does, through the guard above. Paste as Plain Text never reads HTML: it sends the text alone.
 
 import { syntaxTree } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
-import { EditorView, ViewPlugin } from '@codemirror/view';
+import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import {
   newestView,
   parse,
@@ -22,10 +22,16 @@ import {
   serializeLedger,
   type Thread,
   type WarningCode,
+  plainPayload,
 } from '@redlines/format';
-import { type FontStacks, destination, fontStack, markdownToHtml } from '../clipboard/copy-html.ts';
+import { type FontStacks, destination, fontStack } from '../clipboard/copy-html.ts';
+import { documentHtml } from '../clipboard/document-html.ts';
+import { imageReader, imageResolver, sourceOf } from '../preview/image.ts';
 import { htmlToMarkdown, htmlToRange } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
+import { pasteListItems } from '../blocks/keys.ts';
+import { LOOKS_LIKE_ITEMS } from '../blocks/paste.ts';
+import { emojiLookup } from '../preview/emoji.ts';
 import { heldRemoteImages } from '../preview/image.ts';
 import { headCell, rectOf } from '../table/cells.ts';
 import {
@@ -124,9 +130,32 @@ function copiedText(text: string, state: EditorState): string {
   // Text from elsewhere than the selection, such as a dragged widget, is read on its own.
   if (written !== text) return plainText(text);
   const { text: shown, map } = newestView(state.doc.toString());
-  return ranges
+  const newestText = ranges
     .map(({ from, to }) => shown.slice(map.fromSource(from), map.fromSource(to)))
     .join(state.lineBreak);
+  // A selection of nothing but pending deleted text copies what is seen: the struck text, as plain
+  // text, with no marks (#35). Clean shows no deletion, and copies nothing.
+  if (newestText === '' && state.field(viewModeField) !== 'clean') {
+    return struckText(state, ranges) ?? newestText;
+  }
+  return newestText;
+}
+
+/**
+ * The old text of the pending deletions that `ranges` hold, in order, as plain text; null when they
+ * hold none.
+ */
+function struckText(state: EditorState, ranges: readonly Range[]): string | null {
+  const { marks } = parse(state.doc.toString());
+  const parts: string[] = [];
+  for (const { from, to } of ranges) {
+    for (const mark of marks) {
+      if (mark.kind !== 'del') continue;
+      const open = mark.segments[0]?.open;
+      if (open && open.from < to && from < open.to) parts.push(plainPayload(mark.payload ?? ''));
+    }
+  }
+  return parts.length ? parts.join(state.lineBreak) : null;
 }
 
 const raw = (state: EditorState) => state.field(viewModeField) === 'raw';
@@ -144,6 +173,76 @@ function fontsOf(view: EditorView): FontStacks {
     heading: fontStack(read('--rl-font-heading') || body),
     mono: fontStack(read('--rl-font-mono') || 'Cousine'),
   };
+}
+
+/** The files of a selection's local images, read ahead by the host: the URL they show at, as data. */
+const fetched = new WeakMap<EditorView, Map<string, string>>();
+const IMAGE_MARKUP = /!\[[^\]]*\]\(\s*(<[^>\n]*>|[^\s)]+)|\bsrc="([^"\n]*)"/g;
+/** The most text of a selection that is searched for images, and the images read for one. */
+const SEARCHED = 400_000;
+const MOST_IMAGES = 12;
+
+/**
+ * Reads the local images of the selection through the host, while the person reaches for the copy
+ * key, so that the copy (which can only write the clipboard before its event ends) has the bytes.
+ * An image not read in time is copied by its address.
+ */
+function readAhead(view: EditorView): void {
+  const reader = view.state.facet(imageReader);
+  const resolve = view.state.facet(imageResolver);
+  if (!reader || !resolve) return;
+  const { from, to } = view.state.selection.main;
+  if (from === to) return;
+  const text = view.state.sliceDoc(from, Math.min(to, from + SEARCHED));
+  // Each selection reads its images again, so that a file saved since is not copied as it was, and
+  // nothing outlives the selection it was read for.
+  const known = new Map<string, string>();
+  fetched.set(view, known);
+  const seen = new Set<string>();
+  for (const match of text.matchAll(IMAGE_MARKUP)) {
+    const found = sourceOf(destination(match[1] ?? match[2] ?? ''));
+    if (found.kind !== 'local' || seen.size >= MOST_IMAGES) continue;
+    const shown = resolve(found.path);
+    if (shown === null || seen.has(shown)) continue;
+    seen.add(shown);
+    reader(found.path)
+      .then((file) => {
+        // A newer selection has its own map by now; this one is dropped.
+        if (file && fetched.get(view) === known) {
+          known.set(shown, `data:${file.mimeType};base64,${file.data}`);
+        }
+      })
+      .catch(() => undefined);
+  }
+}
+
+/**
+ * An image the editor has drawn, as a `data:` address, which Word and Google Docs load where they
+ * fail a remote or local one. Null when it isn't loaded here or the page may not read its pixels.
+ */
+function embedded(view: EditorView, shown: string): string | null {
+  if (shown.startsWith('data:') || typeof document === 'undefined') return shown;
+  const read = fetched.get(view)?.get(shown);
+  if (read) return read;
+  for (const img of Array.from(view.dom.querySelectorAll('img'))) {
+    if (img.src !== shown && img.getAttribute('src') !== shown) continue;
+    if (!img.complete || !img.naturalWidth) return null;
+    // A picture too large to copy in a keystroke stays an address.
+    if (img.naturalWidth * img.naturalHeight > 12_000_000) return null;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      context.drawImage(img, 0, 0);
+      const url = canvas.toDataURL('image/png');
+      return url.startsWith('data:image') && url.length < 8_000_000 ? url : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 /** Whether `pos` is in code, where a paste is text as it is. */
@@ -232,7 +331,14 @@ function pasteInCells(view: EditorView, event: ClipboardEvent, ownText: string |
   return pasteRange(view, [[value]]);
 }
 
-/** Copy, cut, drag and paste of the newest text, outside Raw. */
+/** A paste of list items into a list item, made; false for any other paste. */
+function listPaste(view: EditorView, text: string): boolean {
+  if (!LOOKS_LIKE_ITEMS.test(text)) return false;
+  const plain = plainText(text);
+  return plain !== '' && pasteListItems(view, plain);
+}
+
+/** Copy, cut, drag and paste of the newest text, outside Plain. */
 export function clipboard(): Extension {
   // The text this editor last put on the clipboard, which it knows again when it is pasted.
   let lastCopied: string | null = null;
@@ -255,18 +361,30 @@ export function clipboard(): Extension {
         const holding = held;
         const altOnly = (href: string) =>
           holding === null || [...holding].some((url) => destination(url) === href);
+        const lookup = view.state.facet(emojiLookup);
         const own = cells && cells.text === text ? cells : null;
         cells = null;
         data.setData(
           'text/html',
           own
-            ? partsToHtml(own.parts, fontsOf(view), altOnly)
-            : markdownToHtml(text, fontsOf(view), altOnly),
+            ? partsToHtml(own.parts, fontsOf(view), altOnly, lookup)
+            : documentHtml(text, 'clean', {
+                office: true,
+                clip: true,
+                fonts: fontsOf(view),
+                emoji: lookup,
+                altOnly,
+                resolveImage: view.state.facet(imageResolver) ?? ((path) => path),
+                embedImage: (shown) => embedded(view, shown),
+              }),
         );
       };
       view.dom.addEventListener('copy', copied);
       view.dom.addEventListener('cut', copied);
       return {
+        update: (update: ViewUpdate) => {
+          if (update.selectionSet && !raw(update.state)) readAhead(view);
+        },
         destroy: () => {
           view.dom.removeEventListener('copy', copied);
           view.dom.removeEventListener('cut', copied);
@@ -290,6 +408,12 @@ export function clipboard(): Extension {
           return true;
         }
         const markdown = pastedMarkdown(data, lastCopied);
+        // List items into a list item are items of that list, whether they came as Markdown or as
+        // plain text; one step to undo (blocks/paste.ts).
+        if (!plainPastes.has(event) && listPaste(view, markdown ?? data.getData('text/plain'))) {
+          event.preventDefault();
+          return true;
+        }
         if (markdown === null) return false;
         event.preventDefault();
         const { from, to } = view.state.selection.main;

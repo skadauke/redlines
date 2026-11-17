@@ -12,7 +12,15 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
-import { applyChanges, parse, readTables, tableEdit, trackedFormat } from '@redlines/format';
+import {
+  applyChanges,
+  parse,
+  readTables,
+  tableEdit,
+  trackedEdit,
+  trackedFormat,
+  widen,
+} from '@redlines/format';
 import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
 import { undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
@@ -542,14 +550,16 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a
 });
 
 // A column aligned in the same table (tables, alignment): the third column centered and back to what it
-// was. It is one command, a cell of the delimiter row, and the editor reads the table again; it is held to what a column move is, the
-// document's parse 10 times and two milliseconds, with the bound found the same way. Only with Track Changes
-// off: with it on the command is refused for now (#281). A timing test: it runs
-// with REDLINES_COST set, and a run over the bound is timed twice more, each time with the parse.
+// was, with Track Changes off and on. Off, it is one command, a cell of the delimiter row, and the editor
+// reads the table again. On, the first command also writes the point mark at the end of the header's last
+// cell, which the format looks at in every order of deciding the changes there (#281), and the second
+// takes it away with its entry, the old alignments being back. Both are held to what a column move is,
+// the document's parse 10 times and two milliseconds, with the bound found the same way. A timing test: it
+// runs with REDLINES_COST set, and a run over the bound is timed twice more, each time with the parse.
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in a table', () => {
   it('costs at most 10 times the document’s parse, in a 300-row table', () => {
     const { doc } = longDocument({ table: true });
-    for (const tracking of [false]) {
+    for (const tracking of [false, true]) {
       const parent = document.createElement('div');
       document.body.append(parent);
       const editor = createEditor(parent, { doc, author: ada, tracking });
@@ -562,9 +572,15 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in
         for (let i = 0; i < 4; i++) {
           view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
           alignCols(view, 'center');
-          if (i === 0) expect(view.state.doc.toString()).toMatch(/\| :-+: \|/);
+          if (i === 0) {
+            expect(view.state.doc.toString()).toMatch(/\| :-+: \|/);
+            // What is timed with Track Changes on is the change, not a refusal.
+            expect(/<!--fmt \w{4} align=/.test(view.state.doc.toString())).toBe(tracking);
+          }
           view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
           alignCols(view, '');
+          // The old alignments are back: the change is gone.
+          if (i === 0) expect(view.state.doc.toString()).not.toMatch(/<!--fmt \w{4} align=/);
         }
         return (performance.now() - start) / 8;
       };
@@ -584,16 +600,17 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in
   }, 600_000);
 });
 
-// The keystroke in the same cell while an alignment change that another tool wrote is pending in the table:
-// the tracked layer finds the change and draws its bar and underline on every update, and a tracked
-// keystroke asks whether it is under the table (#281); it must cost what a keystroke costs on main (twice
-// it, as the table's own does). A timing test.
+// The keystroke in the same cell while an alignment change is pending in the table, as the format writes
+// it (`tableEdit`): a point mark at the end of the header's last cell (#281). The tracked layer finds the
+// change and draws its bar and underline on every update, and an edit in any cell is read against the
+// whole table while one is pending; it must cost what a keystroke costs on main (twice it, as the table's
+// own does). A timing test.
 describe.skipIf(!process.env['REDLINES_COST'])(
   'the cost of a keystroke in a table with an alignment change pending',
   () => {
     it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
       const plain = longDocument({ table: true }).doc;
-      // Another tool's change, written by the format.
+      // Bo's change, written by the format.
       const table = readTables(plain, parse(plain))[0]!.from;
       const doc = applyChanges(
         plain,
@@ -606,7 +623,7 @@ describe.skipIf(!process.env['REDLINES_COST'])(
           },
         ).changes,
       );
-      expect(doc).toMatch(/<!--fmt \w+ align=/);
+      expect(doc).toMatch(/\| Owner<!--fmt \w+ align=/);
       const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
       for (const tracking of [true, false]) {
         const parent = document.createElement('div');
@@ -636,6 +653,69 @@ describe.skipIf(!process.env['REDLINES_COST'])(
         );
         expect(result.ours, label).toBeLessThan(result.limit);
       }
+    }, 600_000);
+  },
+);
+
+// The keystroke at the end of the header's last cell, where the point mark of an alignment change stands
+// and another pending change ends the text in front of it (#281): it lands after that change and in front
+// of the mark, and the format walks the orders in which the changes of that cell can be decided, as it
+// does for an edit in no other cell, to see that the mark is read where it stands in each
+// (`assertPointHolds`). It is held to what the keystroke in any other cell is: twice main's. A timing test.
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of a keystroke at the end of the header’s last cell with an alignment change pending',
+  () => {
+    it('costs at most twice what main’s build costs, in a 300-row table', () => {
+      const plain = longDocument({ table: true }).doc;
+      const bo = { author: { handle: 'bo', name: 'Bo Chen' }, time: '2026-11-01T10:00Z' };
+      // Bo's alignment change, written by the format, and his insertion in front of its mark.
+      const table = readTables(plain, parse(plain))[0]!.from;
+      const aligned = applyChanges(
+        plain,
+        tableEdit(plain, { kind: 'align', table, cols: [1], align: 'center' }, bo).changes,
+      );
+      const end = readTables(aligned, parse(aligned))[0]!.rows[0]!.cells.at(-1)!.textTo;
+      const doc = applyChanges(
+        aligned,
+        trackedEdit(aligned, { from: end, to: end, insert: '!' }, bo),
+      );
+      expect(doc).toMatch(/\| Owner<!--ins \w{4}-->!<!--\/\w{4}--><!--fmt \w{4} align=/);
+      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking: true });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const at = tablesOf(view.state)[0]!.rows[0]!.cells.at(-1)!.textTo;
+      // One keystroke by hand: it stands in front of the mark, after the insertion.
+      view.dispatch({
+        changes: { from: at, insert: 'x' },
+        selection: EditorSelection.cursor(at + 1),
+        userEvent: 'input.type',
+      });
+      expect(view.state.sliceDoc(at, at + 60)).toMatch(
+        /^<!--ins \w{4}-->x<!--\/\w{4}--><!--fmt \w{4} align=/,
+      );
+      press(view, 'Backspace');
+      time(editor, at, 'type');
+      const runs: number[] = [];
+      for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+      const label = 'Track Changes on, cell, type';
+      const ours = median(runs);
+      if (record) return;
+      const main = TABLE_MAIN[label];
+      expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+      const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
+        const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
+        const more: number[] = [];
+        for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
+        return { ours: median(more), limit };
+      });
+      console.log(
+        `cost: alignment pending, last header cell, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+      );
+      expect(result.ours, label).toBeLessThan(result.limit);
     }, 600_000);
   },
 );
@@ -734,10 +814,19 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Tab in a numbered li
 // A typed letter and Backspace in the middle of a fenced code block of 200 lines, in a document with
 // paragraphs around it (Stage 6, format rule 9). With Track Changes on the first key replaces the
 // block whole, and the keys after it edit the newest code, which the block's own pending substitution
-// holds. Each case is held to what the long-document tests hold an update to: twice the document's
-// markdown parse and two milliseconds for noise (`bound`, as in `preview/long-document.test.ts`).
-// A timing test: it runs with REDLINES_COST set, and a run over the bound is timed twice more, each
-// time with the parse, before it fails.
+// holds. With Track Changes off the pair is held to what the long-document tests hold an update to:
+// twice the document's markdown parse and two milliseconds for noise (`bound`, as in
+// `preview/long-document.test.ts`); on CI it stands at 0.44 of that bound on a median run and 0.73
+// at worst (41 runs). With Track Changes on it was held to the same, and CI failed it once, 6.35 ms
+// against 5.99: there a key costs 2.6 times the parse (the median of 41 runs), so the best of its
+// up to three attempts stood at 0.86 of that bound on a median run. A parse is not the same work
+// as a key: over those runs the key in code varied by 19 % against the parse, and by 11 % against a
+// key in a paragraph. So with Track Changes on the pair is held to a pair of keys in a paragraph of
+// the same document, plus a millisecond, the two timed in turns so that a runner slowed for a few
+// seconds slows both: the code key costs 0.58 of a paragraph key (0.54 to 0.73 in 20 attempts in
+// CI's own load, 0.60 alone on a runner, 0.53 on a development Mac), so the bound is about twice
+// what it costs. Timing tests: they run with REDLINES_COST set, and a run over the bound is timed
+// twice more, each time with its yardstick, before it fails.
 const bound = (parse: number) => 2 * parse + 2;
 
 function codeDocument(lines = 200): string {
@@ -780,39 +869,77 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code'
     return total / rounds;
   }
 
-  it.each([
-    ['Track Changes on, with the substitution made', true, false],
-    ['Track Changes off', false, false],
-  ] as const)(
-    'is at most twice the document’s parse plus 2 ms: %s',
-    (label, tracking, fresh) => {
-      const parent = document.createElement('div');
-      document.body.append(parent);
-      const editor = createEditor(parent, { doc, author: ada, tracking });
-      open.push(editor);
-      forceParsing(editor.view, editor.view.state.doc.length, 10_000);
-      expect(editor.view.state.doc.toString()).toContain('line 100');
-      // The case with the substitution made starts with the first key made.
-      if (tracking && !fresh) codeTime(editor, true);
-      codeTime(editor, fresh);
-      const attempt = (): Held => {
-        const limit = bound(parseTime(doc));
-        const runs: number[] = [];
-        for (let i = 0; i < 7; i++) runs.push(codeTime(editor, fresh));
-        return { ours: median(runs), limit };
-      };
-      const result = held(attempt(), attempt);
-      console.log(
-        `cost: code, ${label}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
-      );
-      if (tracking) {
-        const marks = (editor.view.state.doc.toString().match(/<!--sub /g) ?? []).length;
-        expect(marks, 'one substitution for the block').toBe(1);
+  /** Milliseconds per typed letter and Backspace in a paragraph near the top of the file, as the
+   * file stands: what a key costs where there is no code. */
+  function paragraphTime(editor: Editor): number {
+    const { view } = editor;
+    let total = 0;
+    for (let i = 0; i < ROUNDS; i++) {
+      const at = view.state.doc.toString().indexOf('quick brown', 100) + 'quick '.length;
+      view.dispatch({ selection: EditorSelection.cursor(at) });
+      const start = performance.now();
+      view.dispatch({
+        changes: { from: at, insert: 'x' },
+        selection: EditorSelection.cursor(at + 1),
+        userEvent: 'input.type',
+      });
+      press(view, 'Backspace');
+      total += performance.now() - start;
+    }
+    return total / ROUNDS;
+  }
+
+  function codeEditor(tracking: boolean): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc, author: ada, tracking });
+    open.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    expect(editor.view.state.doc.toString()).toContain('line 100');
+    return editor;
+  }
+
+  it('is at most a key in a paragraph of the same document, plus 1 ms: Track Changes on, with the substitution made', () => {
+    const editor = codeEditor(true);
+    // The case with the substitution made starts with the first key made.
+    codeTime(editor, true);
+    codeTime(editor, false);
+    paragraphTime(editor);
+    // The code key and the paragraph key take turns, so that a runner slowed for a few seconds
+    // slows both; each is the median of its turns.
+    const attempt = (): Held => {
+      const code: number[] = [];
+      const paragraph: number[] = [];
+      for (let turn = 0; turn < 7; turn++) {
+        code.push(codeTime(editor, false));
+        paragraph.push(paragraphTime(editor));
       }
-      expect(result.ours, label).toBeLessThan(result.limit);
-    },
-    120_000,
-  );
+      return { ours: median(code), limit: median(paragraph) + 1 };
+    };
+    const result = held(attempt(), attempt);
+    console.log(
+      `cost: code, Track Changes on, with the substitution made: bound ${result.limit.toFixed(2)} ms (a paragraph key plus 1), now ${result.ours.toFixed(2)} ms`,
+    );
+    const marks = (editor.view.state.doc.toString().match(/<!--sub /g) ?? []).length;
+    expect(marks, 'one substitution for the block').toBe(1);
+    expect(result.ours, 'Track Changes on, with the substitution made').toBeLessThan(result.limit);
+  }, 120_000);
+
+  it('is at most twice the document’s parse plus 2 ms: Track Changes off', () => {
+    const editor = codeEditor(false);
+    codeTime(editor, false);
+    const attempt = (): Held => {
+      const limit = bound(parseTime(doc));
+      const runs: number[] = [];
+      for (let i = 0; i < 7; i++) runs.push(codeTime(editor, false));
+      return { ours: median(runs), limit };
+    };
+    const result = held(attempt(), attempt);
+    console.log(
+      `cost: code, Track Changes off: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+    );
+    expect(result.ours, 'Track Changes off').toBeLessThan(result.limit);
+  }, 120_000);
 });
 
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of the first key in code', () => {
@@ -916,6 +1043,99 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of ⌘B over a column o
     const result = held(attempt(), attempt);
     console.log(
       `cost: ⌘B over 300 cells: bound ${result.limit.toFixed(2)} ms (40 times one cell's ${((result.limit - 5) / 40).toFixed(2)} ms plus 5), now ${result.ours.toFixed(2)} ms`,
+    );
+    expect(result.ours).toBeLessThan(result.limit);
+  }, 600_000);
+});
+
+// The first keystroke that widens (format §3.12): it finds the unit, writes the replacement and runs
+// the gate (the views, the shape of the lists, and the two decisions of the replacement), so it
+// costs more than a fine keystroke, once: the keystrokes after it edit the replacement's new text
+// in place. It is held to a few times what a fine keystroke costs in the same process, at both
+// sizes with 200 pending changes, and to a ceiling that the machine's calibration scales. (Measured
+// at 12 ms and 16 ms against 3.5 ms and 6.7 ms for the fine keystroke, on a development Mac.)
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of the first keystroke that widens',
+  () => {
+    it.each([
+      ['16 KB', 16_000],
+      ['150 KB', 150_000],
+    ] as const)(
+      'costs at most five times a fine keystroke, on %s with 200 marks',
+      (size, bytes) => {
+        const doc = documentOf(bytes, 200);
+        const view = parse(doc);
+        expect(view.marks.length).toBe(200);
+        const text = doc
+          .slice(0, view.ledgerRange!.from)
+          .replace(/<!--\/?[a-z]+ ?[a-z0-9]{0,4}-->/g, '');
+        const at = text.indexOf('brown fox', text.length >> 1) + 'brown '.length;
+        const ctx = () => ({ author: ada, time: '2026-10-31T09:00Z' });
+        const run = (make: () => unknown) => {
+          make();
+          const runs: number[] = [];
+          for (let i = 0; i < 7; i++) {
+            const start = performance.now();
+            make();
+            runs.push(performance.now() - start);
+          }
+          return median(runs);
+        };
+        const edit = { from: at, to: at, insert: 'x' };
+        const scale = record ? 1 : calibrate() / CALIBRATION;
+        const fine = run(() => trackedEdit(doc, edit, ctx()));
+        const wide = run(() => widen(doc, [edit], ctx()));
+        console.log(
+          `cost: widening, ${size}: fine ${fine.toFixed(2)} ms, widening ${wide.toFixed(2)} ms`,
+        );
+        if (record) return;
+        expect(wide, `${size}: against a fine keystroke`).toBeLessThan(5 * fine + 5 * scale);
+        expect(wide, `${size}: ceiling`).toBeLessThan(100 * scale);
+      },
+      120_000,
+    );
+  },
+);
+
+// ⌫ over a selected column of a 300-row table (#456): the first press clears the text of 301 cells,
+// which Track Changes writes as 301 deletion marks. They are written in one pass, with the per-cell
+// checks of format §3.7 made once, so the tracked press costs the same order as the plain one (about
+// 15 times as much, 2.3 s, when each was planned and read on its own). The bound is 4 times the press
+// with Track Changes off, timed in the same attempt, and two milliseconds for noise. A timing test: it
+// runs with REDLINES_COST set, and a run over the bound is timed twice more before it fails.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of ⌫ over a 300-row column', () => {
+  it('costs at most 4 times the plain press, with Track Changes on', () => {
+    const rows = Array.from({ length: 300 }, (_, i) => `| r${i} | s${i} | t${i} |`);
+    const doc = `| a | b | c |\n| - | - | - |\n${rows.join('\n')}\n`;
+    const press = (tracking: boolean) => {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      view.dispatch({
+        selection: { anchor: doc.indexOf('| b |') + 2, head: doc.indexOf('s299') + 4 },
+      });
+      const start = performance.now();
+      runScopeHandlers(
+        view,
+        new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }),
+        'editor',
+      );
+      const took = performance.now() - start;
+      expect(editor.getDoc()).not.toBe(doc);
+      editor.destroy();
+      return took;
+    };
+    press(true);
+    const attempt = (): Held => {
+      const plain = median([press(false), press(false), press(false)]);
+      return { ours: median([press(true), press(true), press(true)]), limit: 4 * plain + 2 };
+    };
+    const result = held(attempt(), attempt);
+    console.log(
+      `cost: ⌫ over a column, Track Changes on: bound ${result.limit.toFixed(0)} ms, now ${result.ours.toFixed(0)} ms`,
     );
     expect(result.ours).toBeLessThan(result.limit);
   }, 600_000);

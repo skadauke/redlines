@@ -10,8 +10,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { macBlockCommands } from './keys.ts';
-import { gapSide, lineEndIn, lineStartIn } from './motion.ts';
+import { endOf, gapSide, lineEndIn, lineStartIn, restingPlace } from './motion.ts';
 import { type Script, scriptRows } from './script.ts';
+import { blockAt } from './structure.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const mounted: Editor[] = [];
@@ -166,63 +167,264 @@ describe('typing at the very end of a document that ends in a closer, after →'
   );
 });
 
-describe('⌥↑ and ⌥↓ by paragraph', () => {
+describe('End rests in front of the hidden closers at the end of a block’s text (#434)', () => {
+  // After the closer of a paragraph's own insertion, before the line break, a command (⌘2) writes
+  // its change and the caret then goes to the start of the next block. Typing leaves the caret in
+  // front of the closer, inside the insertion; End does the same, as ⌘→ does. (The jump itself, in
+  // the DOM, is in the WebKit check: `apps/desktop/src/block-check.ts`.)
+  scriptRows([
+    {
+      name: 'End at the end of a typed paragraph, Track Changes on: in front of its closer',
+      doc: 'One.‸⏎⏎Next.',
+      keys: ['Enter', { type: 'Para one.' }, 'End'],
+      tc: true,
+      expect: { caret: 'One.⏎⏎<ins>⏎⏎Para one.‸</ins>⏎⏎Next.' },
+    },
+    {
+      name: 'End in an insertion that ends its block: in front of the closer',
+      doc: 'One.⏎⏎Two <ins>th‸ree</ins>⏎⏎Next.',
+      keys: ['End'],
+      tc: true,
+      expect: { caret: 'One.⏎⏎Two <ins>three‸</ins>⏎⏎Next.' },
+    },
+    {
+      name: 'End in another person’s insertion that ends its block: in front of the closer',
+      doc: 'One <ins>t‸wo</ins>',
+      keys: ['End'],
+      tc: false,
+      others: 'bo',
+      expect: { caret: 'One <ins>two‸</ins>' },
+    },
+    {
+      name: 'End at the end of a block with no closer: its end, as ever',
+      doc: 'One th‸ree⏎⏎Next.',
+      keys: ['End'],
+      tc: true,
+      expect: { caret: 'One three‸⏎⏎Next.' },
+    },
+    {
+      name: 'End in a block that is not the last: the end of its own text, not the next block’s',
+      doc: 'One <ins>tw‸o</ins>⏎⏎Two <ins>three</ins>',
+      keys: ['End'],
+      tc: true,
+      expect: { caret: 'One <ins>two‸</ins>⏎⏎Two <ins>three</ins>' },
+    },
+  ]);
+});
+
+describe('a click past the end of a block’s text (#434)', () => {
+  // The caret that CodeMirror puts at the end of the line is inside the range of the hidden closers
+  // and the break after them, which the caret steps over: it goes on to the start of the next block.
+  // A click needs a layout, which happy-dom has none of (the click itself is in the WebKit check,
+  // `apps/desktop/src/block-check.ts`); `restingPlace` is where a click's position rests.
+  const LEDGER =
+    "\n\n<!-- redlines\n# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\nmarks:\n  k3x9: {by: ada, at: 2026-11-01T10:00Z}\n-->\n";
+  const body = 'One.\n\nTwo <!--ins k3x9-->three<!--/k3x9-->\n\nNext.\n\n```\ncode\n```';
+  const closer = '<!--/k3x9-->';
+
+  function mountFile(text = body): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc: text + LEDGER, author: ada, tracking: true });
+    mounted.push(editor);
+    return editor;
+  }
+
+  /** What the mouse selection styles make of a click that hits `pos` (the layout is stubbed). */
+  function clickAt(
+    editor: Editor,
+    pos: number,
+    options: { detail?: number; modifier?: boolean; extend?: boolean; drag?: number } = {},
+  ): EditorSelection | null {
+    const { view } = editor;
+    const where = (coords: { y: number }) =>
+      coords.y === 1 && options.drag !== undefined ? options.drag : pos;
+    view.posAtCoords = where;
+    view.posAndSideAtCoords = ((coords: { y: number }) => ({
+      pos: where(coords),
+      assoc: 1,
+    })) as never;
+    const event = new MouseEvent('mousedown', {
+      button: 0,
+      detail: options.detail ?? 1,
+      shiftKey: options.modifier ?? false,
+      clientX: 0,
+      clientY: 0,
+    });
+    for (const make of view.state.facet(EditorView.mouseSelectionStyle)) {
+      const style = make(view, event);
+      if (!style) continue;
+      const moved =
+        options.drag === undefined
+          ? event
+          : new MouseEvent('mousemove', { button: 0, clientX: 0, clientY: 1 });
+      return style.get(moved, options.extend ?? false, false);
+    }
+    return null;
+  }
+
+  it('rests in front of the closers that end the text', () => {
+    const { state } = mountFile().view;
+    const doc = state.doc.toString();
+    const before = doc.indexOf(closer);
+    expect(restingPlace(state, before + closer.length)).toBe(before);
+  });
+
+  it('leaves every other place where it is', () => {
+    const { state } = mountFile().view;
+    const doc = state.doc.toString();
+    const places = [
+      doc.indexOf('thr') + 2,
+      doc.indexOf(closer),
+      doc.indexOf('One.') + 4,
+      doc.indexOf('Next.') + 5,
+      doc.indexOf('Next.'),
+      doc.indexOf('code') + 2,
+      doc.indexOf('code') + 4,
+    ];
+    for (const place of places) expect(restingPlace(state, place), String(place)).toBe(place);
+  });
+
+  it('is the end of the text, not of the line: a heading with closing hashes, a blank line, the ledger', () => {
+    const { state } = mountFile('One.\n\n## Two <!--ins k3x9-->three<!--/k3x9--> ##\n\nNext.').view;
+    const doc = state.doc.toString();
+    const closer = '<!--/k3x9-->';
+    // The end of the heading's text, in front of its closing hashes, rests in front of the closer;
+    // the end of the line, past the hashes, is where it is.
+    expect(restingPlace(state, doc.indexOf(closer) + closer.length)).toBe(doc.indexOf(closer));
+    const lineEnd = doc.indexOf(' ##') + 3;
+    expect(restingPlace(state, lineEnd)).toBe(lineEnd);
+    // Where no block is: a blank line, the ledger.
+    for (const place of [doc.indexOf('\n\nNext') + 1, doc.indexOf('<!-- redlines') + 5]) {
+      expect(restingPlace(state, place), String(place)).toBe(place);
+    }
+  });
+
+  it('puts a click, a drag, a shift-click and a double-click past the closers in front of them', () => {
+    const editor = mountFile();
+    const doc = editor.view.state.doc.toString();
+    const before = doc.indexOf(closer);
+    const end = before + closer.length;
+    // The click rests in front of the closers; a drag from there starts there, and a drag from
+    // inside the text to past them ends there (#494).
+    const click = clickAt(editor, end);
+    expect(click?.main.anchor).toBe(before);
+    expect(click?.main.head).toBe(before);
+    const drag = clickAt(editor, end, { drag: doc.indexOf('One.') + 2 });
+    expect(drag?.main.anchor).toBe(before);
+    expect(drag?.main.head).toBe(doc.indexOf('One.') + 2);
+    const into = clickAt(editor, doc.indexOf('Two') + 1, { drag: end });
+    expect(into?.main.head, 'a drag that ends past the closers').toBe(before);
+    // A shift-click past them extends the selection to the text's end, and a double-click there
+    // puts the caret in front of them, never on their hidden text.
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('Two') } });
+    const shift = clickAt(editor, end, { extend: true });
+    expect(shift?.main.anchor).toBe(doc.indexOf('Two'));
+    expect(shift?.main.head).toBe(before);
+    const double = clickAt(editor, end, { detail: 2 });
+    expect(double?.main.head).toBeLessThanOrEqual(before);
+    // A click in the text is where it is; a double click in it and Plain are CodeMirror's, and a
+    // triple click is `tripleClicks`'.
+    expect(clickAt(editor, doc.indexOf('thr') + 2)?.main.head).toBe(doc.indexOf('thr') + 2);
+    expect(clickAt(editor, doc.indexOf('thr') + 2, { detail: 2 })).toBeNull();
+    expect(clickAt(editor, end, { detail: 3 })?.main.empty, 'the triple-click selects').toBe(false);
+    editor.setViewMode('raw');
+    expect(clickAt(editor, end)).toBeNull();
+  });
+
+  it('rests the end of a line of a block that takes no text in front of the closers on it (#494)', () => {
+    const { state } = mountFile('One.\n\n<div>\n<!--ins k3x9-->\nhello<!--/k3x9-->\n\nNext.').view;
+    const doc = state.doc.toString();
+    const closerAt = doc.indexOf('<!--/k3x9-->');
+    const lineEnd = closerAt + '<!--/k3x9-->'.length;
+    expect(restingPlace(state, lineEnd)).toBe(closerAt);
+    // End (⌘→) goes there, and the block's end for ⌥↓.
+    const block = blockAt(state, closerAt)!;
+    expect(lineEndIn(state, closerAt - 2, lineEnd)).toBe(closerAt);
+    expect(endOf(state, block)).toBe(closerAt);
+    // Where the line ends in text, and in other blocks, it is where it is.
+    expect(restingPlace(state, doc.indexOf('<div>') + 5)).toBe(doc.indexOf('<div>') + 5);
+    expect(restingPlace(state, doc.indexOf('hello') + 2)).toBe(doc.indexOf('hello') + 2);
+  });
+});
+
+describe('⌥↑ and ⌥↓ move blocks', () => {
   scriptRows(
     both([
       {
-        name: '⌥↑ in a paragraph: its start',
-        doc: 'One.⏎⏎Tw‸o.',
-        keys: ['Alt-ArrowUp'],
-        expect: { caret: 'One.⏎⏎‸Two.', file: 'One.⏎⏎Two.' },
-      },
-      {
-        name: '⌥↑ at the start of a paragraph: the start of the one before',
-        doc: 'One.⏎⏎‸Two.',
-        keys: ['Alt-ArrowUp'],
-        expect: { caret: '‸One.⏎⏎Two.', file: 'One.⏎⏎Two.' },
-      },
-      {
-        name: '⌥↓ in a paragraph: its end',
-        doc: 'On‸e.⏎⏎Two.',
+        name: '⌥↓ moves a paragraph below the next',
+        doc: 'One.⏎⏎Tw‸o.⏎⏎Three.',
         keys: ['Alt-ArrowDown'],
-        expect: { caret: 'One.‸⏎⏎Two.', file: 'One.⏎⏎Two.' },
+        expect: { newest: 'One.⏎⏎Three.⏎⏎Two.' },
       },
       {
-        name: '⌥↓ at the end of a paragraph: the end of the next one',
-        doc: 'One.‸⏎⏎Two.',
-        keys: ['Alt-ArrowDown'],
-        expect: { caret: 'One.⏎⏎Two.‸', file: 'One.⏎⏎Two.' },
+        name: '⌥↑ moves a paragraph above the one before',
+        doc: 'One.⏎⏎Two.⏎⏎Thr‸ee.',
+        keys: ['Alt-ArrowUp'],
+        expect: { newest: 'One.⏎⏎Three.⏎⏎Two.' },
       },
       {
-        name: '⌥↑ at the start of the first block, and ⌥↓ at the end of the last: nothing',
-        doc: '‸One.⏎⏎Two.',
-        keys: ['Alt-ArrowUp', 'Alt-ArrowDown', 'Alt-ArrowDown'],
-        expect: { caret: 'One.⏎⏎Two.‸', file: 'One.⏎⏎Two.' },
+        name: '⌥↑ then ⌥↓ puts it back, the caret in it',
+        doc: 'One.⏎⏎Tw‸o.⏎⏎Three.',
+        keys: ['Alt-ArrowUp', 'Alt-ArrowDown'],
+        expect: { newest: 'One.⏎⏎Two.⏎⏎Three.' },
       },
       {
-        name: '⌥↑ over a heading and its hidden marker',
+        name: '⌥↑ over a heading',
         doc: 'One.⏎⏎## Tw‸o⏎⏎Three.',
-        keys: ['Alt-ArrowUp', 'Alt-ArrowUp'],
-        expect: { caret: '‸One.⏎⏎## Two⏎⏎Three.', file: 'One.⏎⏎## Two⏎⏎Three.' },
-      },
-      {
-        name: '⌥↓ through list items, a quote and a paragraph',
-        doc: '‸- one⏎- two⏎⏎> Quote.⏎⏎Last.',
-        keys: ['Alt-ArrowDown', 'Alt-ArrowDown', 'Alt-ArrowDown', 'Alt-ArrowDown'],
-        expect: { caret: '- one⏎- two⏎⏎> Quote.⏎⏎Last.‸' },
-      },
-      {
-        name: '⌥↑ through list items',
-        doc: '- one⏎- tw‸o',
-        keys: ['Alt-ArrowUp', 'Alt-ArrowUp'],
-        expect: { caret: '- ‸one⏎- two', file: '- one⏎- two' },
-      },
-      {
-        name: 'a paragraph of two lines is one paragraph',
-        doc: 'One⏎two‸⏎⏎Next.',
         keys: ['Alt-ArrowUp'],
-        expect: { caret: '‸One⏎two⏎⏎Next.', file: 'One⏎two⏎⏎Next.' },
+        expect: { newest: '## Two⏎⏎One.⏎⏎Three.' },
       },
+      {
+        name: '⌥↑ moves a list item above its sibling',
+        doc: '- one⏎- tw‸o⏎- three',
+        keys: ['Alt-ArrowUp'],
+        expect: { newest: '- two⏎- one⏎- three' },
+      },
+      {
+        name: '⌥↓ moves the blocks a selection covers',
+        doc: '[One.⏎⏎Two.]⏎⏎Three.',
+        keys: ['Alt-ArrowDown'],
+        expect: { newest: 'Three.⏎⏎One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↑ at the first block, and ⌥↓ at the last, say so',
+        doc: '‸One.⏎⏎Two.',
+        keys: ['Alt-ArrowUp'],
+        expect: { newest: 'One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↓ at the last block does nothing',
+        doc: 'One.⏎⏎Tw‸o.',
+        keys: ['Alt-ArrowDown'],
+        expect: { newest: 'One.⏎⏎Two.' },
+      },
+    ]),
+  );
+});
+
+describe('⌥↓ moves a code block below a paragraph', () => {
+  scriptRows([
+    {
+      name: 'Track Changes off',
+      doc: 'One.⏎⏎```⏎co‸de⏎```⏎⏎Next.',
+      keys: ['Alt-ArrowDown'],
+      tc: false,
+      expect: { newest: 'One.⏎⏎Next.⏎⏎```⏎code⏎```' },
+    },
+    {
+      name: 'Track Changes on: the closer after the fence leaves a line break',
+      doc: 'One.⏎⏎```⏎co‸de⏎```⏎⏎Next.',
+      keys: ['Alt-ArrowDown'],
+      tc: true,
+      expect: { newest: 'One.⏎⏎Next.⏎⏎```⏎code⏎```⏎', original: 'One.⏎⏎```⏎code⏎```⏎⏎Next.' },
+    },
+  ]);
+});
+
+describe('⇧⌥↑ and ⇧⌥↓ by paragraph', () => {
+  scriptRows(
+    both([
       {
         name: '⇧⌥↑ selects to the start of the paragraph',
         doc: 'One.⏎⏎Tw‸o.',
@@ -275,7 +477,12 @@ describe('triple-click', () => {
   /** What the editor's mouse selection styles make of a click at `pos`, `detail` clicks in. */
   function click(editor: Editor, pos: number, detail = 3, drag?: number): EditorSelection | null {
     const { view } = editor;
-    view.posAtCoords = (coords) => (coords.y === 1 && drag !== undefined ? drag : pos);
+    const where = (coords: { y: number }) => (coords.y === 1 && drag !== undefined ? drag : pos);
+    view.posAtCoords = where;
+    view.posAndSideAtCoords = ((coords: { y: number }) => ({
+      pos: where(coords),
+      assoc: 1,
+    })) as never;
     const event = new MouseEvent('mousedown', { button: 0, detail, clientX: 0, clientY: 0 });
     for (const make of view.state.facet(EditorView.mouseSelectionStyle)) {
       const style = make(view, event);
@@ -309,8 +516,9 @@ describe('triple-click', () => {
     expect(selected(editor)).toBe(text);
   });
 
-  it('is CodeMirror’s for one and two clicks, in Raw, and on a thematic break', () => {
+  it('is not the triple-click’s for one and two clicks, in Plain, and on a thematic break', () => {
     const editor = mount('One.⏎⏎Tw‸o.');
+    // With no hidden closers at the end of a line, a click and a double-click are CodeMirror's.
     expect(click(editor, 8, 1)).toBeNull();
     expect(click(editor, 8, 2)).toBeNull();
     const rule = mount('One.⏎⏎---⏎⏎Tw‸o.');

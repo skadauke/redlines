@@ -17,7 +17,7 @@ import {
   tooltips,
 } from '@codemirror/view';
 import { parsedField, viewModeField } from '@redlines/editor';
-import { canReject, isAlignMark } from '@redlines/format';
+import { isAlignMark, plainPayload, rejectReason } from '@redlines/format';
 import type { MarkRange, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
@@ -36,6 +36,7 @@ import {
   suggestionIn,
   visibleSpace,
   visibleStart,
+  setReason,
 } from './shared.ts';
 
 // What a card says of a change, in Word's words, is `describeChange` in shared.ts: the notes of the
@@ -127,7 +128,8 @@ function struckChange(changes: readonly MarkRange[], pos: number, el: Element): 
       // Only a deletion's and a substitution's payload is deleted text: a format change's is its
       // operations, such as `+bold`.
       if (change.kind !== 'del' && change.kind !== 'sub') continue;
-      if (segment.payload === undefined || reading(segment.payload) !== struck) continue;
+      if (segment.payload === undefined || reading(plainPayload(segment.payload)) !== struck)
+        continue;
       const span = segmentSpan(segment);
       const away = Math.max(span.from - pos, pos - span.to, 0);
       if (away < distance) {
@@ -216,17 +218,19 @@ class Card implements TooltipView {
         icon('accept'),
       ),
     );
-    // A format change whose text has lost the formatting can only be accepted.
-    if (marks.every((mark) => canReject(parsed, mark))) {
-      buttons.append(
-        button(
-          'rl-card-button',
-          'Reject',
-          () => attempt(error, () => decideSuggestion(ctx, 'reject', change.id)),
-          icon('reject'),
-        ),
-      );
-    }
+    // A format change whose text has lost the formatting can only be accepted: Reject is grayed,
+    // and its hint says why.
+    const reject = button(
+      'rl-card-button',
+      'Reject',
+      () => attempt(error, () => decideSuggestion(ctx, 'reject', change.id)),
+      icon('reject'),
+    );
+    setReason(
+      reject,
+      marks.map((mark) => rejectReason(parsed, mark)).find((reason) => reason !== undefined),
+    );
+    buttons.append(reject);
     head.append(buttons);
     const what = describeChanges(parsed, marks.length > 1 ? marks : [change]);
     this.dom.setAttribute('aria-label', what);
@@ -279,8 +283,8 @@ class Card implements TooltipView {
 const CLICK_SLOP = 4;
 
 /**
- * Change cards on hover, pinned by a click, in the Redlines view only: in Simple the text reads as
- * accepted, and a card over plain-looking words would surprise. And `close`, which puts away the
+ * Change cards on hover in the full markup, and pinned by a click there and in the simple look,
+ * where the text reads as accepted and a card opens only when asked for. And `close`, which puts away the
  * card that shows, as a zoom change does: it was placed for the old layout.
  */
 export function cards(ctx: ReviewContext): {
@@ -294,6 +298,12 @@ export function cards(ctx: ReviewContext): {
   /** The change whose card is being pinned. */
   let pinning: Found | null = null;
   const redlines = (view: EditorView) => view.state.field(viewModeField) === 'redlines';
+  /** Where a click opens a card: the full markup, and the simple look, where the card is what tells
+   * what was changed, since a deletion is hidden (#664). Hover shows cards in the full markup only. */
+  const clickable = (view: EditorView) => {
+    const mode = view.state.field(viewModeField);
+    return mode === 'redlines' || mode === 'simple';
+  };
   /** The change under the pointer: the deleted text it is over, else the text at `pos`. */
   const pointedAt = (view: EditorView, pos: number, side: -1 | 1): Found | null => {
     const changes = changesOf(ctx);
@@ -348,8 +358,8 @@ export function cards(ctx: ReviewContext): {
   };
   const extension: Extension = [
     hover,
-    // A card over text that now reads as accepted would surprise, and its buttons could only switch
-    // back: choosing Simple puts it away.
+    // A card that hovering opened over the full markup is put away when Simple is chosen: the text
+    // now reads as accepted. A click in Simple opens one again.
     EditorState.transactionExtender.of((tr) =>
       tr.state.field(viewModeField) === 'simple' &&
       tr.startState.field(viewModeField) !== 'simple' &&
@@ -381,9 +391,9 @@ export function cards(ctx: ReviewContext): {
       mousedown(event, view) {
         const target = event.target instanceof Element ? event.target : null;
         const drawn = target?.closest(
-          '.rl-ins, .rl-del, .rl-fmt, .rl-ins-row, .rl-ins-col, .rl-struck, .rl-ghost',
+          '.rl-ins, .rl-ins-plain, .rl-ins-row-plain, .rl-ins-col-plain, .rl-del, .rl-fmt, .rl-ins-row, .rl-ins-col, .rl-struck, .rl-ghost',
         );
-        if (event.button !== 0 || !drawn || !redlines(view)) return;
+        if (event.button !== 0 || !drawn || !clickable(view)) return;
         const found = changeOf(view, changesOf(ctx), drawn);
         if (!found) return;
         const { doc } = view.state;
@@ -392,7 +402,7 @@ export function cards(ctx: ReviewContext): {
           const moved = Math.hypot(up.clientX - event.clientX, up.clientY - event.clientY);
           if (moved > CLICK_SLOP) return;
           setTimeout(() => {
-            if (view.dom.isConnected && view.state.doc === doc && redlines(view)) pin(view, found);
+            if (view.dom.isConnected && view.state.doc === doc && clickable(view)) pin(view, found);
           });
         };
         win.addEventListener('mouseup', release, { once: true });

@@ -4,6 +4,12 @@
 # except the skill's files, which are Markdown that a test checks against its source
 # (apps/desktop/src/skills.node.test.ts); the website has its own workflow, website.yml. A later
 # pattern of `paths` brings a file back that an earlier `!` pattern left out.
+#
+# Two kinds of run (#773). The thin one is a pull request, and a push to an Epic's integration
+# branch (`epic/**`): the tests a change reaches, and the Rust, Quick Look and journeys jobs only
+# when their paths change. The full one is a push to main, and the run every two hours, which
+# tests the open Epic branch in its time (`EPIC_BRANCH`, or the one `epic/*` branch there is,
+# `epic/collab` apart) and main when there is none.
 name: CI
 
 on:
@@ -16,7 +22,7 @@ on:
       - 'integrations/skill/**'
       - 'integrations/*/skills/**'
   push:
-    branches: [main]
+    branches: [main, 'epic/**']
     paths:
       - '**'
       - '!docs/**'
@@ -24,21 +30,175 @@ on:
       - '!**/*.md'
       - 'integrations/skill/**'
       - 'integrations/*/skills/**'
+  # A full run every two hours, of the open Epic branch (main when none is open), which nothing
+  # cancels (see `changes`, `concurrency` below). A schedule always runs the workflow file of
+  # main, and `changes` finds the branch. `gh workflow run ci.yml --ref <branch>` starts one by
+  # hand, of that branch.
+  schedule:
+    - cron: '23 */2 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pushes and pull requests: a newer commit replaces the run of the one before. A scheduled or
+# dispatched run is a full run of a branch, in a group of its own, and is never cancelled.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'ci-full' || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
 
 jobs:
-  check:
+  # Which parts of the repository a change touches, from the files it changes: against the pull
+  # request's base, or for a push against the commit before it. A change to a workflow sets every
+  # flag, and so does a diff that can't be made (a new branch, a forced push). No install: it is
+  # a few seconds of shell on Ubuntu. A scheduled or dispatched run is a full run: every flag is
+  # set. A scheduled run tests the open Epic branch (`ref`, which every checkout reads): the
+  # repository variable EPIC_BRANCH when it is set, else the one `epic/*` branch there is, the
+  # highest number if several, `epic/collab` never; main when there is none. It is skipped (`skip`,
+  # which every other job reads) when that head already has a finished full run, recorded by the
+  # `record` job as a commit status; a dispatch always runs, on the branch it was started on.
+  changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      statuses: read
+    outputs:
+      skip: ${{ steps.tested.outputs.skip }}
+      ref: ${{ steps.target.outputs.ref }}
+      thin: ${{ steps.target.outputs.thin }}
+      rust: ${{ steps.flags.outputs.rust }}
+      quicklook: ${{ steps.flags.outputs.quicklook }}
+      ui: ${{ steps.flags.outputs.ui }}
+    steps:
+      # What to test, and how much. Pull requests and pushes to an Epic branch are thin.
+      - name: Choose the commit to test
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          SHA: ${{ github.sha }}
+          EPIC_BRANCH: ${{ vars.EPIC_BRANCH }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          ref="$SHA"
+          thin=false
+          if [ "$EVENT" = pull_request ] || { [ "$EVENT" = push ] && [[ "$REF_NAME" == epic/* ]]; }; then
+            thin=true
+          fi
+          # The one pull request from an Epic branch to main gets the full run.
+          if [ "$EVENT" = pull_request ] && [ "$BASE_REF" = main ] && [[ "$HEAD_REF" == epic/* ]]; then
+            thin=false
+          fi
+          if [ "$EVENT" = schedule ]; then
+            branch="$EPIC_BRANCH"
+            if [ -z "$branch" ]; then
+              branch=$(gh api "repos/$REPO/git/matching-refs/heads/epic/" --jq '.[].ref' \
+                | sed 's#^refs/heads/##' | grep -v '^epic/collab$' | sort -V | tail -n 1 || true)
+            fi
+            if [ -n "$branch" ]; then
+              found=$(gh api "repos/$REPO/git/ref/heads/$branch" --jq '.object.sha' || true)
+              if [ -n "$found" ]; then
+                ref="$found"
+              elif [ -n "$EPIC_BRANCH" ]; then
+                echo "::error::EPIC_BRANCH is set to $EPIC_BRANCH, which is not a branch."
+                exit 1
+              fi
+            fi
+            echo "The scheduled run tests: ${branch:-main} at $ref"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "thin=$thin" >> "$GITHUB_OUTPUT"
+
+      # A full run (scheduled or dispatched) of this commit that has finished with a success or a
+      # failure (a cancelled run tested nothing), recorded by `record` as the commit status
+      # `ci-full`. Push runs never count: their flags come from their own diff, so a cancelled
+      # run's breakage could go unseen.
+      - name: Has this commit been tested?
+        id: tested
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.target.outputs.ref }}
+        shell: bash
+        run: |
+          skip=false
+          if [ "$EVENT" = schedule ]; then
+            n=$(gh api "repos/$REPO/commits/$SHA/statuses?per_page=100" \
+              --jq '[.[] | select(.context == "ci-full" and (.state == "success" or .state == "failure"))] | length')
+            echo "Finished full runs for $SHA: $n"
+            [ "$n" -gt 0 ] && skip=true
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "Skip the run: $skip"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.target.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: List the changed files and set the flags
+        id: flags
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+          THIN: ${{ steps.target.outputs.thin }}
+        shell: bash
+        run: |
+          base="$BASE"
+          [ "$EVENT" = push ] && base="$BEFORE"
+          all=false
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            all=true
+            : > changed.txt
+          elif ! git diff --name-only --no-renames "$base" HEAD > changed.txt 2>/dev/null; then
+            all=true
+          fi
+          echo "Changed files:"; cat changed.txt
+          flag() { # flag <name> <extended regex>
+            if [ "$all" = true ] || grep -Eq '^\.github/workflows/' changed.txt \
+              || grep -Eq "$2" changed.txt; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          # The redlines program bundles packages/cli and packages/format. In a thin run a
+          # change to packages/format alone doesn't run the Rust job, whose ten minutes it rarely
+          # affects; main's runs still take it.
+          if [ "$THIN" = true ]; then
+            flag rust '^(apps/desktop/src-tauri/|apps/desktop/redlines/|packages/cli/)'
+          else
+            flag rust '^(apps/desktop/src-tauri/|apps/desktop/redlines/|packages/cli/|packages/format/)'
+          fi
+          # In a thin run, only a change to the Quick Look code itself runs it, to spare the
+          # Macs; main's runs also take packages/format, which the renderer bundles.
+          if [ "$THIN" = true ]; then
+            flag quicklook '^(apps/desktop/quicklook/|apps/desktop/scripts/build-quicklook)'
+          else
+            flag quicklook '^(apps/desktop/quicklook/|packages/format/|apps/desktop/scripts/build-quicklook)'
+          fi
+          flag ui '^(apps/desktop/src/|apps/desktop/journeys/|plugins/|packages/editor/|packages/format/)'
+
+  check:
+    needs: changes
+    if: ${{ needs.changes.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.changes.outputs.ref }}
+          # Thin runs: the history, so that vitest can ask what changed since the base.
+          fetch-depth: ${{ needs.changes.outputs.thin == 'true' && '0' || '1' }}
           persist-credentials: false
 
       # The pnpm version comes from packageManager in package.json.
@@ -58,11 +218,30 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # A thin run (a pull request, a push to an Epic branch) runs the tests that a change can reach: vitest follows the imports from
+      # each changed file to the tests that load it (a package's dependents among them), and runs
+      # every test when a config or package.json changes. Main runs them all, as does the sweep.
+      # A push that makes a branch has no commit before it (all zeros): that run takes every test.
       - name: Test
-        run: pnpm test
+        run: |
+          if [ "$THIN" = true ] && [ -n "${BASE//0/}" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            pnpm exec vitest run --changed "$BASE" --passWithNoTests
+            # The rules every change must keep are tests that read the source files rather than
+            # import them, so --changed never picks them; they run on every thin run.
+            pnpm exec vitest run packages/format/src/refusals.node.test.ts \
+              apps/desktop/src/text-contrast.node.test.ts apps/desktop/src/interface-text.node.test.ts \
+              apps/desktop/src/command-permissions.node.test.ts apps/desktop/src/hints.node.test.ts \
+              apps/desktop/src/styles.node.test.ts apps/desktop/src/skills.node.test.ts
+          else
+            pnpm test
+          fi
         env:
-          # The block keys' cost test runs here, on a runner that does nothing else (see blocks/cost.test.ts).
-          REDLINES_COST: check
+          THIN: ${{ needs.changes.outputs.thin }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          # The timing tests (blocks/cost.test.ts, hidden.test.ts) run here on pushes to main and in the full runs. Thin
+          # runs skip them until the ten tests of #432 are re-bound and the timing files get a job
+          # of their own on pull requests.
+          REDLINES_COST: ${{ needs.changes.outputs.thin != 'true' && 'check' || '' }}
 
       - name: Check formatting
         run: pnpm format:check
@@ -80,11 +259,14 @@ jobs:
   # both architectures, and its renderer is run in the system's JavaScriptCore on the fixtures of
   # apps/desktop/quicklook (apps/desktop/scripts/build-quicklook).
   quicklook:
+    needs: changes
+    if: ${{ needs.changes.outputs.skip != 'true' && needs.changes.outputs.quicklook == 'true' }}
     runs-on: macos-15
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.changes.outputs.ref }}
           persist-credentials: false
 
       - uses: pnpm/action-setup@v6
@@ -101,11 +283,17 @@ jobs:
         run: apps/desktop/scripts/build-quicklook --check
 
   desktop:
-    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.skip != 'true' && needs.changes.outputs.rust == 'true' }}
+    # Ubuntu 26.04 replaces GNU coreutils with uutils, whose multicall binary refuses to run under
+    # another name (the agent tests run /bin/echo as a stand-in for claude) and stops a sleep
+    # differently. Pinned until the tests stop depending on GNU coreutils (#481).
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.changes.outputs.ref }}
           persist-credentials: false
 
       - name: Install Tauri's Linux dependencies
@@ -155,3 +343,39 @@ jobs:
       - name: Test
         working-directory: apps/desktop/src-tauri
         run: cargo test
+
+  # The journeys of a full run: the middle tier, as on a push to main (journeys.yml). A push has
+  # its own run of that workflow, so only the schedule and a dispatch call it from here.
+  journeys:
+    needs: changes
+    if: ${{ needs.changes.outputs.skip != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    uses: ./.github/workflows/journeys.yml
+    with:
+      main-tier: true
+      ref: ${{ needs.changes.outputs.ref }}
+
+  # Writes the commit status `ci-full` on the commit a scheduled or dispatched run tested, which
+  # is what lets the next scheduled run skip a head that has already been through one. A cancelled
+  # run writes nothing (it tested nothing); a skipped job counts as passing.
+  record:
+    needs: [changes, check, quicklook, desktop, journeys]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.skip != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Write the status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.changes.outputs.ref }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          case " $RESULTS " in *" cancelled "*) echo "Cancelled: nothing to record"; exit 0 ;; esac
+          state=success
+          case " $RESULTS " in *" failure "*) state=failure ;; esac
+          gh api "repos/$REPO/statuses/$SHA" -f state="$state" -f context=ci-full \
+            -f description="Full run: $state" -f target_url="$URL"

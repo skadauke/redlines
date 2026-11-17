@@ -16,7 +16,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tauri::http::header::{
-    CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS,
+    CACHE_CONTROL, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue,
+    X_CONTENT_TYPE_OPTIONS,
 };
 use tauri::http::{Request, Response, StatusCode, Uri};
 use tauri::plugin::TauriPlugin;
@@ -131,17 +132,31 @@ const POLICY: &str = "default-src 'none'; img-src data:; style-src 'unsafe-inlin
 
 /// How much of a file is looked at to tell what it is: more than any image's signature, and the
 /// start of an SVG up to its root element.
-const HEAD: usize = 8192;
+pub(crate) const HEAD: usize = 8192;
 
 /// The largest image the app serves: far more than any image a document shows, and little enough
 /// that a document can't make the app read a larger file into memory.
-const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 
 /// The raster images the preview shows, by the extensions of their names, lowercase.
 const RASTER_NAMES: [&str; 14] = [
     "png", "apng", "jpg", "jpeg", "gif", "webp", "avif", "jxl", "heic", "heif", "bmp", "ico",
     "tif", "tiff",
 ];
+
+/// Whether the name of `path` is that of an image the preview shows: a raster image of
+/// `RASTER_NAMES`, or an SVG. The bytes are another question (`image_type`).
+pub(crate) fn has_image_name(path: &Path) -> bool {
+    path.extension()
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|name| name == "svg" || RASTER_NAMES.contains(&name.as_str()))
+}
+
+/// The extensions of the images the preview shows, lowercase, for a panel that offers them.
+pub(crate) fn image_extensions() -> Vec<&'static str> {
+    RASTER_NAMES.iter().copied().chain(["svg"]).collect()
+}
 
 /// A test of the bytes a file starts with.
 type Signature = fn(&[u8]) -> bool;
@@ -160,6 +175,229 @@ const RASTER_TYPES: [(Signature, &str); 10] = [
     (infer::image::is_tiff, "image/tiff"),
 ];
 
+/// What tells that the file at `real` has been saved again: its modification time to the
+/// nanosecond, and its size, one text to compare. None for what isn't a plain file.
+fn stamp_of(real: &Path) -> Option<String> {
+    let metadata = std::fs::metadata(real)
+        .ok()
+        .filter(|metadata| metadata.is_file())?;
+    let since_epoch = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some(format!("{}-{}", since_epoch.as_nanos(), metadata.len()))
+}
+
+/// The stamp (`stamp_of`) of each file the page asks about, in order: of the file as it really is,
+/// and only if the page may load it (`Images::may_load`), so that it learns nothing of a file it
+/// can't see. None for a file that is outside, hidden, missing or no file.
+fn stamps(images: &Images, paths: &[String]) -> Vec<Option<String>> {
+    paths
+        .iter()
+        .map(|path| {
+            let path = Path::new(path);
+            let real = path
+                .is_absolute()
+                .then(|| images.may_load(path).ok())
+                .flatten()?;
+            stamp_of(&real)
+        })
+        .collect()
+}
+
+/// Tells which of the images the preview shows were saved again, since the page last asked: the
+/// stamp of each (`stamps`). The page compares them when its window regains the focus, after the
+/// person saved an image in Preview, and loads the ones that changed again. A command, not a watch:
+/// the app watches a document's own file alone (`watch.rs`).
+#[tauri::command(async)]
+pub fn image_stamps(app: AppHandle, paths: Vec<String>) -> Vec<Option<String>> {
+    match app.try_state::<Images>() {
+        Some(images) => stamps(&images, &paths),
+        None => vec![None; paths.len()],
+    }
+}
+
+/// The width and height in px of an image whose first bytes are `head`, read from its header: PNG,
+/// GIF, WebP and JPEG, the formats a document's images mostly are. None for another format, a
+/// header that is cut short (`HEAD_FOR_SIZE` bytes are read), or one that says zero.
+pub(crate) fn size_of_header(head: &[u8]) -> Option<(u32, u32)> {
+    let be32 = |at: usize| {
+        head.get(at..at + 4)
+            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let le16 = |at: usize| {
+        head.get(at..at + 2)
+            .map(|b| u32::from(u16::from_le_bytes([b[0], b[1]])))
+    };
+    let le24 = |at: usize| {
+        head.get(at..at + 3)
+            .map(|b| u32::from(b[0]) | u32::from(b[1]) << 8 | u32::from(b[2]) << 16)
+    };
+    let size = if head.starts_with(b"\x89PNG\r\n\x1a\n") && head.get(12..16) == Some(b"IHDR") {
+        (be32(16)?, be32(20)?)
+    } else if head.starts_with(b"GIF8") {
+        (le16(6)?, le16(8)?)
+    } else if head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP") {
+        match head.get(12..16)? {
+            b"VP8X" => (le24(24)? + 1, le24(27)? + 1),
+            b"VP8L" => {
+                let b = head.get(21..25)?;
+                let bits = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+                ((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1)
+            }
+            b"VP8 " => (le16(26)? & 0x3fff, le16(28)? & 0x3fff),
+            _ => return None,
+        }
+    } else if head.starts_with(&[0xff, 0xd8]) {
+        let mut at = 2;
+        loop {
+            while *head.get(at)? != 0xff {
+                at += 1;
+            }
+            let marker = *head.get(at + 1)?;
+            if marker == 0xff {
+                at += 1;
+                continue;
+            }
+            let length = u16::from_be_bytes([*head.get(at + 2)?, *head.get(at + 3)?]);
+            // The frame headers (not the tables that share their numbers).
+            if (0xc0..=0xcf).contains(&marker) && !matches!(marker, 0xc4 | 0xc8 | 0xcc) {
+                let height = u16::from_be_bytes([*head.get(at + 5)?, *head.get(at + 6)?]);
+                let width = u16::from_be_bytes([*head.get(at + 7)?, *head.get(at + 8)?]);
+                break (u32::from(width), u32::from(height));
+            }
+            at += 2 + usize::from(length);
+        }
+    } else {
+        return None;
+    };
+    (size.0 > 0 && size.1 > 0).then_some(size)
+}
+
+/// How much of a file is read to find its size: a JPEG's frame header may follow a thumbnail.
+const HEAD_FOR_SIZE: u64 = 128 * 1024;
+
+/// The size of each image the page asks about, in order: of the file as it really is, and only if
+/// the page may load it, as `stamps` does, so that it learns nothing of a file it can't see. Read
+/// from the header alone. None for a file outside, hidden, missing, or in a format not read.
+fn sizes(images: &Images, paths: &[String]) -> Vec<Option<(u32, u32)>> {
+    paths
+        .iter()
+        .map(|path| {
+            let path = Path::new(path);
+            let real = path
+                .is_absolute()
+                .then(|| images.may_load(path).ok())
+                .flatten()?;
+            let file = open(&real).ok()?;
+            if !file.metadata().ok()?.is_file() {
+                return None;
+            }
+            let mut head = Vec::new();
+            file.take(HEAD_FOR_SIZE).read_to_end(&mut head).ok()?;
+            size_of_header(&head)
+        })
+        .collect()
+}
+
+/// The width and height of the local images the preview is about to draw (`sizes`), so that it
+/// holds their room before they load and the page doesn't move when they arrive.
+#[tauri::command(async)]
+pub fn image_sizes(app: AppHandle, paths: Vec<String>) -> Vec<Option<(u32, u32)>> {
+    match app.try_state::<Images>() {
+        Some(images) => sizes(&images, &paths),
+        None => vec![None; paths.len()],
+    }
+}
+
+/// The most bytes of a picture that an agent is shown: 3.5 MB, which is under a model's 5 MB limit
+/// on one image once it is in base64 (a third larger), and is checked before the file is read.
+const AGENT_IMAGE_BYTES: u64 = 3_670_016;
+
+/// The types of picture an agent that can look at pictures takes.
+const AGENT_IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/// A picture handed to an agent to describe (`image_for_agent`).
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentImage {
+    mime_type: &'static str,
+    /// The file's bytes, in base64.
+    data: String,
+}
+
+/// The picture at `path` for an agent, or what is said to the person when it can't be handed over.
+fn agent_image(images: &Images, path: &str) -> Result<AgentImage, String> {
+    use base64::Engine;
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return Err("Couldn’t read the image.".into());
+    }
+    let (kind, bytes) = read_image(images, path, AGENT_IMAGE_BYTES).map_err(|status| {
+        if status == StatusCode::NOT_FOUND {
+            "The image file isn’t there.".to_string()
+        } else if status == StatusCode::PAYLOAD_TOO_LARGE {
+            "That image is larger than 3.5 MB, which is too big to describe.".to_string()
+        } else {
+            "Redlines can’t read that image: it is outside the folders it shows, or isn’t a picture.".to_string()
+        }
+    })?;
+    if !AGENT_IMAGE_TYPES.contains(&kind) {
+        return Err("Only PNG, JPEG, GIF and WebP pictures can be described.".into());
+    }
+    Ok(AgentImage {
+        mime_type: kind,
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+/// The one picture an agent is shown to write its alt text (Alt Text, #553): the file at `path`, an
+/// absolute path, only where the page may load it (`Images::may_load`: inside a folder a sidebar
+/// shows, never a hidden file, every link followed), read whole as the preview reads it and no
+/// larger than `AGENT_IMAGE_BYTES`. It gives the agent no other file and no path to read.
+#[tauri::command(async)]
+pub fn image_for_agent(app: AppHandle, path: String) -> Result<AgentImage, String> {
+    match app.try_state::<Images>() {
+        Some(images) => agent_image(&images, &path),
+        None => Err("Couldn’t read the image.".into()),
+    }
+}
+
+/// The picture at `path` for the page to crop (Crop, #624), or what is said to the person when it
+/// can't be read: the file as the preview reads it, of any type it shows, as large as one may be. The
+/// page draws the part that is kept to a canvas, which it can't do with the picture it loads from
+/// the app's own address (the canvas would be tainted), and saves that as a copy.
+fn crop_image(images: &Images, path: &str) -> Result<AgentImage, String> {
+    use base64::Engine;
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return Err("Couldn’t read the image.".into());
+    }
+    let (kind, bytes) = read_image(images, path, MAX_IMAGE_BYTES).map_err(|status| {
+        if status == StatusCode::NOT_FOUND {
+            "The image file isn’t there.".to_string()
+        } else {
+            "Redlines can’t read that image: it is outside the folders it shows, or isn’t a picture.".to_string()
+        }
+    })?;
+    Ok(AgentImage {
+        mime_type: kind,
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+/// The one picture the page crops: the file at `path`, an absolute path, only where the page may
+/// load it (`Images::may_load`), read whole. It gives the page no other file and no path to read;
+/// the cropped copy goes back through `add_pasted_image` like any image added.
+#[tauri::command(async)]
+pub fn image_for_crop(app: AppHandle, path: String) -> Result<AgentImage, String> {
+    match app.try_state::<Images>() {
+        Some(images) => crop_image(&images, &path),
+        None => Err("Couldn’t read the image.".into()),
+    }
+}
+
 /// The answer to the page's request for `asset://localhost/<path>`: the image at `path`, if the
 /// page may load it (`image`), and otherwise nothing, with the status Tauri's own asset protocol
 /// gives: 403 for a file the page may not load, 404 for one that isn't there.
@@ -177,7 +415,27 @@ fn image(
     request: &Request<Vec<u8>>,
 ) -> Result<(&'static str, Vec<u8>), StatusCode> {
     let path = requested(request.uri()).ok_or(StatusCode::FORBIDDEN)?;
-    let real = images.may_load(&path)?;
+    read_image(images, &path, MAX_IMAGE_BYTES)
+}
+
+/// The status for a file over `limit`: the preview's own limit is refused as before (403), a smaller
+/// limit, an agent's, as the one that says it is too large.
+fn too_large(limit: u64) -> StatusCode {
+    if limit == MAX_IMAGE_BYTES {
+        StatusCode::FORBIDDEN
+    } else {
+        StatusCode::PAYLOAD_TOO_LARGE
+    }
+}
+
+/// The image at `path`, if the page may load it, read whole as `image` reads it, and never more than
+/// `limit` bytes of it: a larger file is refused before it is read.
+fn read_image(
+    images: &Images,
+    path: &Path,
+    limit: u64,
+) -> Result<(&'static str, Vec<u8>), StatusCode> {
+    let real = images.may_load(path)?;
     let refused = |_| StatusCode::FORBIDDEN;
     let mut file = open(&real).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
@@ -185,8 +443,11 @@ fn image(
     })?;
     // Of the file opened, whatever is at its path by now: no pipe, folder or device.
     let metadata = file.metadata().map_err(refused)?;
-    if !metadata.is_file() || metadata.len() > MAX_IMAGE_BYTES {
+    if !metadata.is_file() {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if metadata.len() > limit {
+        return Err(too_large(limit));
     }
     let mut bytes = Vec::new();
     (&mut file)
@@ -195,10 +456,10 @@ fn image(
         .map_err(refused)?;
     let kind = image_type(&real, &bytes).ok_or(StatusCode::FORBIDDEN)?;
     // The rest, and never more than an image may be, should the file have grown since.
-    let rest = MAX_IMAGE_BYTES + 1 - bytes.len() as u64;
+    let rest = (limit + 1).saturating_sub(bytes.len() as u64);
     file.take(rest).read_to_end(&mut bytes).map_err(refused)?;
-    if bytes.len() as u64 > MAX_IMAGE_BYTES {
-        return Err(StatusCode::FORBIDDEN);
+    if bytes.len() as u64 > limit {
+        return Err(too_large(limit));
     }
     Ok((kind, bytes))
 }
@@ -206,7 +467,7 @@ fn image(
 /// Opens the file at `real`, a path with no link in it: never through a link put in its place
 /// since (`O_NOFOLLOW`), and without waiting for a writer, should it be a pipe by now
 /// (`O_NONBLOCK`), which is no image anyway.
-fn open(real: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open(real: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -238,6 +499,8 @@ fn answer(image: Result<(&'static str, Vec<u8>), StatusCode>) -> Response<Vec<u8
     let headers = response.headers_mut();
     headers.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(POLICY));
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    // A file saved again in another app must show its new bytes: the webview asks every time.
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
 }
 
@@ -248,7 +511,7 @@ fn answer(image: Result<(&'static str, Vec<u8>), StatusCode>) -> Response<Vec<u8
 /// an SVG is a filter, not a proof (a document type's subset can be built to fool it); what keeps
 /// an SVG inert is the policy and `nosniff` on every answer, and that the page loads it in an
 /// `<img>`.
-fn image_type(path: &Path, head: &[u8]) -> Option<&'static str> {
+pub(crate) fn image_type(path: &Path, head: &[u8]) -> Option<&'static str> {
     let name = path.extension()?.to_str()?.to_ascii_lowercase();
     if name == "svg" {
         svg_markup(head).then_some("image/svg+xml")
@@ -342,6 +605,21 @@ fn requested(uri: &Uri) -> Option<PathBuf> {
 
 #[cfg(all(test, unix))]
 mod tests {
+
+    #[test]
+    fn it_reads_an_images_size_from_its_header() {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&[0, 0, 1, 0x2c, 0, 0, 0, 0x64]);
+        assert_eq!(size_of_header(&png), Some((300, 100)));
+        assert_eq!(size_of_header(b"GIF89a\x0a\0\x14\0"), Some((10, 20)));
+        let jpeg = [
+            0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 11, 8, 0, 0x40, 0, 0x80, 3,
+        ];
+        assert_eq!(size_of_header(&jpeg), Some((128, 64)));
+        assert_eq!(size_of_header(&jpeg[..12]), None);
+        assert_eq!(size_of_header(b"not an image"), None);
+        assert_eq!(size_of_header(b""), None);
+    }
     use super::*;
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -366,6 +644,121 @@ mod tests {
                 fs::write(&path, "").unwrap();
             }
         }
+    }
+
+    #[test]
+    fn hands_an_agent_one_picture_of_the_project_and_nothing_else() {
+        use base64::Engine;
+        let folder = folder("agent-image");
+        make(
+            &folder,
+            &["repo/.gi\u{74}/", "repo/docs/plan.md", "other/owl.png"],
+        );
+        let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+        fs::write(folder.join("repo/cat.png"), png).unwrap();
+        fs::write(folder.join("repo/cat.bmp"), b"BM\0\0\0\0\0\0\0\0\0\0\0\0").unwrap();
+        fs::write(folder.join("other/owl.png"), png).unwrap();
+        let app = tauri::test::mock_app();
+        let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
+        allow_shown(&images, &projects);
+        projects.show(&folder.join("repo/docs/plan.md"));
+        let at = |name: &str| agent_image(&images, &folder.join(name).to_string_lossy());
+        let seen = at("repo/cat.png").unwrap();
+        assert_eq!(seen.mime_type, "image/png");
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(seen.data)
+                .unwrap(),
+            png
+        );
+        // A picture of a type no model takes, a file outside the project, a missing one, a path
+        // that isn't absolute.
+        assert!(
+            at("repo/cat.bmp")
+                .unwrap_err()
+                .contains("PNG, JPEG, GIF and WebP")
+        );
+        // A picture over the agent's limit is refused before it is read.
+        let mut big = png.to_vec();
+        big.resize(AGENT_IMAGE_BYTES as usize + 1, 0);
+        fs::write(folder.join("repo/big.png"), big).unwrap();
+        assert!(
+            at("repo/big.png")
+                .unwrap_err()
+                .contains("larger than 3.5 MB")
+        );
+        assert!(at("other/owl.png").is_err());
+        assert!(at("repo/gone.png").unwrap_err().contains("isn’t there"));
+        assert!(agent_image(&images, "repo/cat.png").is_err());
+    }
+
+    #[test]
+    fn hands_the_page_one_picture_to_crop_and_nothing_else() {
+        let folder = folder("crop-image");
+        make(
+            &folder,
+            &["repo/.gi\u{74}/", "repo/docs/plan.md", "other/owl.png"],
+        );
+        let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+        fs::write(folder.join("repo/cat.png"), png).unwrap();
+        fs::write(folder.join("other/owl.png"), png).unwrap();
+        let app = tauri::test::mock_app();
+        let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
+        allow_shown(&images, &projects);
+        projects.show(&folder.join("repo/docs/plan.md"));
+        let at = |name: &str| crop_image(&images, &folder.join(name).to_string_lossy());
+        assert_eq!(at("repo/cat.png").unwrap().mime_type, "image/png");
+        assert!(at("other/owl.png").is_err());
+        assert!(at("repo/gone.png").unwrap_err().contains("isn’t there"));
+        assert!(crop_image(&images, "repo/cat.png").is_err());
+    }
+
+    #[test]
+    fn tells_which_images_were_saved_again_by_a_stamp_and_only_for_those_the_page_may_load() {
+        let folder = folder("stamps");
+        make(
+            &folder,
+            &[
+                "repo/.git/",
+                "repo/docs/plan.md",
+                "repo/cat.png",
+                "repo/.hidden.png",
+                "other/owl.png",
+            ],
+        );
+        symlink(folder.join("other/owl.png"), folder.join("repo/linked.png")).unwrap();
+        let app = tauri::test::mock_app();
+        let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
+        allow_shown(&images, &projects);
+        projects.show(&folder.join("repo/docs/plan.md"));
+        let ask = |names: &[&str]| {
+            let paths: Vec<String> = names
+                .iter()
+                .map(|name| folder.join(name).to_string_lossy().into_owned())
+                .collect();
+            stamps(&images, &paths)
+        };
+        let before = ask(&["repo/cat.png"]);
+        assert!(before[0].is_some());
+        // Asked again with nothing saved: the same.
+        assert_eq!(ask(&["repo/cat.png"]), before);
+        // Saved again, with other bytes: another stamp.
+        fs::write(folder.join("repo/cat.png"), "newer bytes").unwrap();
+        assert_ne!(ask(&["repo/cat.png"]), before);
+        // Nothing for a file outside, hidden, missing, a folder, or a link out.
+        assert_eq!(
+            ask(&[
+                "other/owl.png",
+                "repo/.hidden.png",
+                "repo/missing.png",
+                "repo/docs",
+                "repo/linked.png"
+            ]),
+            vec![None; 5]
+        );
+        // Nor for a path that isn't absolute.
+        assert_eq!(stamps(&images, &["cat.png".to_string()]), vec![None]);
+        fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]

@@ -16,6 +16,7 @@
 
 import type { AgentStep, Editor } from '@redlines/editor';
 import { agentWorkOf, type Handle } from '@redlines/format';
+import { documentKind, markdownDialect } from './file-names.ts';
 import {
   basename,
   dirname,
@@ -59,7 +60,14 @@ const UNTITLED = 'Untitled';
 /** What the controller needs of the editor. */
 type DocumentEditor = Pick<
   Editor,
-  'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc' | 'applyAgentEdit' | 'recordView'
+  | 'getDoc'
+  | 'getParsed'
+  | 'setDoc'
+  | 'setKind'
+  | 'reloadDoc'
+  | 'applyAgentEdit'
+  | 'recordView'
+  | 'recordTracking'
 >;
 
 export interface DocumentOptions {
@@ -265,7 +273,8 @@ export class DocumentController {
       if (choice === 'cancel') return false;
       if (choice === 'saveAs') return this.saveAs();
     }
-    // The view the document is in goes into the file with the edits (format §5.6).
+    // Track Changes and the view the document is in go into the file with the edits (format §5.6).
+    this.#editor.recordTracking();
     this.#editor.recordView();
     const text = this.#editor.getDoc();
     try {
@@ -280,9 +289,12 @@ export class DocumentController {
 
   /** Asks where to save, then saves there. Resolves to whether it saved. */
   async saveAs(): Promise<boolean> {
-    // As Save does: a document with edits, or no file yet, takes its view into the file. One with
-    // neither isn't made edited by asking where to write a copy.
-    if (this.#state.dirty || this.#state.path === null) this.#editor.recordView();
+    // As Save does: a document with edits, or no file yet, takes Track Changes and its view into the
+    // file. One with neither isn't made edited by asking where to write a copy.
+    if (this.#state.dirty || this.#state.path === null) {
+      this.#editor.recordTracking();
+      this.#editor.recordView();
+    }
     const text = this.#editor.getDoc();
     let path: string | null;
     try {
@@ -301,6 +313,8 @@ export class DocumentController {
     }
     if (path === null) return false;
     const moved = path !== this.#state.path;
+    // The new name may make it another kind of file: Markdown, or text or code.
+    this.#editor.setKind(documentKind(path) ?? 'markdown', markdownDialect(path) ?? 'gfm');
     this.#saved(path, text);
     if (moved) this.#watch(path);
     return true;
@@ -337,6 +351,7 @@ export class DocumentController {
     // Another file may have been opened while the file was renamed.
     if (this.#state.path !== path) return true;
     this.#update({ path: target, name: wanted });
+    this.#editor.setKind(documentKind(target) ?? 'markdown', markdownDialect(target) ?? 'gfm');
     this.#watch(target);
     return true;
   }
@@ -391,8 +406,10 @@ export class DocumentController {
       this.#update({ dirty: false, notice: null });
     } else if (!this.#state.dirty) {
       this.#base = text;
-      this.#takeFromDisk(text);
-      this.#update({ dirty: false, notice: null });
+      // A file that newly asks everyone to track changes is read as one that is opened: the editor
+      // turns Track Changes on (`reloadDoc`), and the person is told why (design §5.4, #364).
+      const newlyAsks = this.#takeFromDisk(text);
+      this.#update({ dirty: false, notice: newlyAsks ? TRACKING_FOR_EVERYONE : null });
     } else {
       // A file changed back to the base is no conflict.
       this.#update({ notice: text === this.#base ? null : CHANGED_ON_DISK });
@@ -403,21 +420,24 @@ export class DocumentController {
    * Shows the file's `text` in place of the editor's, which has no unsaved edits. When the change
    * is nothing but the work of the author's agents, it is a step of theirs, one per change on disk,
    * which Undo takes back; any other change is a reload, which starts the history over. Asked once
-   * per change on disk, never per keystroke.
+   * per change on disk, never per keystroke. Says whether the file newly asks everyone to track
+   * changes, which a reload turns Track Changes on for.
    */
-  #takeFromDisk(text: string): void {
+  #takeFromDisk(text: string): boolean {
     const work = this.#agentWorkOn(text);
     if (work) {
       this.#diskSteps++;
       try {
         this.#editor.applyAgentEdit(text, { group: `disk-${this.#diskSteps}`, agent: work.agent });
-        return;
+        return false;
       } catch (error) {
         // The editor must show the file it now counts as saved: a reload, as for any change.
         console.error('Could not take the change on disk as a step', error);
       }
     }
+    const asked = this.#editor.getParsed().ledger.tracking === 'everyone';
     this.#editor.reloadDoc(text);
+    return !asked && this.#editor.getParsed().ledger.tracking === 'everyone';
   }
 
   /** Whose work alone turns the editor's text into `text`: the author's agents', or null. */
@@ -504,6 +524,36 @@ export class DocumentController {
    * meanwhile. */
   async #agentEditsWritten(): Promise<void> {
     while (this.#agentPending > 0) await this.#agentWrites;
+  }
+
+  /**
+   * Puts back the edits a crash cut short (#693): the document is the one that was open, as it is
+   * now, and `text` is what it held when its recovery copy was last kept. The file stays what it
+   * is, so the edits are unsaved, and the text goes in as a reload does: not as an edit, which
+   * Track Changes would mark. Resolves to whether it did, which it doesn't when the person has
+   * typed already, or the text is what the document holds.
+   */
+  restore(path: string | null, text: string): boolean {
+    if (path !== this.#state.path || this.#state.dirty || this.#editor.getDoc() === text) {
+      return false;
+    }
+    this.#editor.reloadDoc(text);
+    this.markEdited(text);
+    return true;
+  }
+
+  /**
+   * Shows the file as it was saved, in place of the edits that were recovered (#693). They are
+   * given up: the document has no unsaved edits afterwards.
+   */
+  async showSavedVersion(): Promise<void> {
+    const path = this.#state.path;
+    const saved = path === null ? '' : await this.#read(path);
+    if (typeof saved !== 'string' || path !== this.#state.path) return;
+    this.#base = saved;
+    this.#disk = saved;
+    this.#editor.reloadDoc(saved);
+    this.#update({ dirty: false, notice: null });
   }
 
   /** Dismisses the notice, or only the one that says `only`, so that another one stays. */
@@ -596,7 +646,11 @@ export class DocumentController {
     this.#disk = saved;
     this.#savedAt = null;
     this.#onLoading(path);
-    this.#editor.setDoc(text);
+    this.#editor.setDoc(
+      text,
+      (path !== null && documentKind(path)) || 'markdown',
+      (path !== null && markdownDialect(path)) || 'gfm',
+    );
     const everyone = this.#editor.getParsed().ledger.tracking === 'everyone';
     this.#state = {
       path,

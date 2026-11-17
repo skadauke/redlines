@@ -6,13 +6,20 @@
 // hidden and their content is kept, so the newest and the original view show them the same. The
 // original view leaves out the break a `split` stands for (format §3.4).
 
-import { openerRange, splitEnd } from './blocks.ts';
-import { applyChanges, eolOf, inEol } from './changes.ts';
+import { closerRange, openerRange, splitEnd } from './blocks.ts';
+import { applyChanges, eolOf, plainPayload } from './changes.ts';
 import { EditError } from './errors.ts';
 import { decidesFormat, isAlignOps, opsOf, parseFormatOps } from './format-ops.ts';
 import { alignChange, alignHide, alignLabel } from './table-align.ts';
 import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
+import {
+  ledgerForSite,
+  newestOfPayload,
+  originalText,
+  payloadAt,
+  prefixBefore,
+} from './payload-marks.ts';
 import { formatDecision, underscoreRewrites } from './format-undo.ts';
 import { parse } from './parse.ts';
 import { insertedCols, insertedRows, readRowCells, tablesOfText } from './table.ts';
@@ -57,16 +64,16 @@ function wholeSegment(segment: Segment, insert: string): TextChange {
   return { from: segment.open.from, to: (segment.close ?? openerRange(segment)).to, insert };
 }
 
-/** The ledger and its blank line, as a change. */
+/** The ledger and its blank line, as a change; and those of the other parts of a joined file. */
 function ledgerChanges(parsed: Parsed): TextChange[] {
-  const range = parsed.ledgerRange;
-  return range ? [{ from: range.from, to: range.to, insert: '' }] : [];
+  const ranges = [...parsed.earlierLedgers, ...(parsed.ledgerRange ? [parsed.ledgerRange] : [])];
+  return ranges.map((range) => ({ from: range.from, to: range.to, insert: '' }));
 }
 
 /** Changes that hide every marker of a segment and keep what lies between them. */
-function hideMarkers(segment: Segment): TextChange[] {
+function hideMarkers(text: string, segment: Segment): TextChange[] {
   const changes = [{ ...openerRange(segment), insert: '' }];
-  if (segment.close) changes.push({ ...segment.close, insert: '' });
+  if (segment.close) changes.push({ ...closerRange(text, segment.close), insert: '' });
   return changes;
 }
 
@@ -76,7 +83,7 @@ function hiddenBy(text: string, mark: MarkRange): (segment: Segment) => TextChan
   return (segment) =>
     mark.kind === 'fmt' && isAlignOps(opsOf(mark, segment))
       ? alignHide(text, segment)
-      : hideMarkers(segment);
+      : hideMarkers(text, segment);
 }
 
 /**
@@ -248,9 +255,10 @@ export function originalChanges(
 ): OriginalChange[] {
   const changes: OriginalChange[] = [];
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
-  // Restored text has the file's line breaks, as rejecting writes it.
   const eol = eolOf(text, parsed.ledgerRange);
-  const restored = (segment: Segment) => inEol(segment.payload ?? '', eol);
+  // Restored text has the file's line breaks, as rejecting writes it, and the marks that the old
+  // text of a replacement holds are rejected too (format §3.12).
+  const restored = (mark: MarkRange, segment: Segment) => originalText(text, parsed, mark, segment);
   // The rows of a table: inserted rows go, deleted rows and the old place of a moved row come back.
   const handled = new Set<string>();
   const isRow = (mark: MarkRange) =>
@@ -272,7 +280,9 @@ export function originalChanges(
     for (const table of tablesOfText(text, parsed)) {
       const ids = colMarkIds(table);
       if (ids.size === 0) continue;
-      const done = decideCols(text, parsed, table, ids, 'reject', true);
+      // The mark of an alignment change is kept at the end of the header's last cell for the second step of
+      // the original view, which undoes it there; a view that hides it here hides it where it stands.
+      const done = decideCols(text, parsed, table, ids, 'reject', true, !formats);
       changes.push(...done.changes);
       for (const id of ids) handled.add(id);
     }
@@ -286,12 +296,12 @@ export function originalChanges(
         changes.push(wholeSegment(segment, ''));
       } else if (mark.kind === 'sub') {
         changes.push({
-          ...wholeSegment(segment, restored(segment)),
+          ...wholeSegment(segment, restored(mark, segment)),
           opener: openerRange(segment),
         });
       } else if (mark.kind === 'del') {
         const opener = openerRange(segment);
-        changes.push({ ...opener, insert: restored(segment), opener });
+        changes.push({ ...opener, insert: restored(mark, segment), opener });
       } else if (mark.kind === 'split') {
         // The break after it, and the prefix of the block that follows, were inserted with it. So
         // was the deletion of the break that someone recorded after it.
@@ -369,7 +379,7 @@ function holds(outer: MarkRange, inner: MarkRange): boolean {
 /** The changes that undo one segment of a format change, or that hide its markers when it can't
  * be undone. */
 function undoneFormat(reader: FormatReader, mark: MarkRange, segment: Segment): TextChange[] {
-  if (!decidesFormat(mark)) return hideMarkers(segment);
+  if (!decidesFormat(mark)) return hideMarkers(reader.text, segment);
   try {
     return formatDecision(reader, mark, segment, 'reject');
   } catch (error) {
@@ -392,9 +402,9 @@ function notation(
     case 'ins':
       return segment.close ? { open: '{++', close: `++}${tag}` } : { open: '', close: '' };
     case 'sub':
-      return { open: `{~~${segment.payload ?? ''}~>`, close: `~~}${tag}` };
+      return { open: `{~~${plainPayload(segment.payload ?? '')}~>`, close: `~~}${tag}` };
     case 'del':
-      return { open: `{--${segment.payload ?? ''}--}${tag}`, close: '' };
+      return { open: `{--${plainPayload(segment.payload ?? '')}--}${tag}`, close: '' };
     case 'hl':
       return { open: '{==', close: `==}${tag}` };
     case 'fmt': {
@@ -510,11 +520,28 @@ export function reviewView(text: string): string {
       if (mark.kind === 'fmt' && (!named(mark, segment) || heldBy(mark, segment))) {
         open = close = '';
       }
+      // The old text of a replacement holds other people's marks: it shows as their changes would
+      // leave it, and a note names them, so that they can be decided by id (format §8).
+      const site = mark.kind === 'sub' ? payloadAt(parsed, mark, segment) : undefined;
+      if (site) {
+        const marks = site.marks.filter((held) => held.kind !== 'hl');
+        open = `{~~${newestOfPayload(
+          site.text,
+          ledgerForSite(parsed, site),
+          prefixBefore(text, segment.open.from),
+        )}~>`;
+        const names = marks.map((held) => `[${held.id} ${held.entry.by}]`);
+        const last = names.pop();
+        const note = names.length > 0 ? `${names.join(', ')} and ${last}` : last;
+        if (note !== undefined && mark.segments.at(-1) === segment) {
+          close += `{>>[${mark.id} ${mark.entry.by}] Its old text holds ${note}<<}`;
+        }
+      }
       const inside = held.get(segment);
       if (inside)
         close = close.replace(/<<}$/, `; ${inside.map((m) => noteOf(m, parsed)).join('; ')}<<}`);
       changes.push({ ...openerRange(segment), insert: open });
-      if (segment.close) changes.push({ ...segment.close, insert: close });
+      if (segment.close) changes.push({ ...closerRange(text, segment.close), insert: close });
     }
   }
   // An inserted row's cells are inserted text, and a note follows the row (format §8).

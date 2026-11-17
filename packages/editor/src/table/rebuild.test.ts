@@ -193,3 +193,29 @@ describe('what a change builds again', () => {
     expect(tablesOf(gone.next)).toHaveLength(1);
   });
 });
+
+describe('the parse going on', () => {
+  it('builds the tables it reads, and no other, and equals a build from nothing (#744)', () => {
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => `| r${i} | v${i} |`);
+    const table = (n: number) => `| a${n} | b |\n| - | - |\n${rows(5).join('\n')}`;
+    const doc = Array.from({ length: 60 }, (_, n) => `Paragraph ${n} text.\n\n${table(n)}`).join(
+      '\n\n',
+    );
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: doc.length },
+      extensions: [markdown({ extensions: GFM }), tableLayout(), tableStops()],
+    });
+    let current = state;
+    let total = 0;
+    for (let at = 1000; at < doc.length + 1000; at += 1000) {
+      ensureSyntaxTree(current, Math.min(at, doc.length), 5000);
+      layoutStats.rows = 0;
+      current = current.update({}).state;
+      total += layoutStats.rows;
+      expectKept(current, `parsed to ${at}`);
+    }
+    // Each row is built once, as it comes into the tree: none again at each step.
+    expect(total).toBeLessThan(60 * 7 * 2);
+  });
+});

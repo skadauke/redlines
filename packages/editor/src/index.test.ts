@@ -207,6 +207,53 @@ describe('isChange', () => {
       expect(selected(editor)).toBe('importer');
     });
 
+    describe('Track Changes and a file that asks everyone to track (#364)', () => {
+      const ledger = (...settings: string[]) =>
+        `<!-- redlines\nversion: 1\n${settings.map((line) => `${line}\n`).join('')}-->\n`;
+      const plain = `One.\n\n${ledger()}`;
+      const asking = `One.\n\n${ledger('tracking: everyone')}`;
+      const tracking = (editor: ReturnType<typeof mount>) => editor.getUiState().tracking;
+
+      it('turns Track Changes on when the reloaded file newly asks everyone to track', () => {
+        const editor = mount(plain);
+        expect(tracking(editor)).toBe(false);
+        editor.reloadDoc(asking);
+        expect(tracking(editor)).toBe(true);
+        // The file asks already: the switch writes nothing, and the text is the file's.
+        expect(editor.getDoc()).toBe(asking);
+        expect(editor.getUiState()).toMatchObject({ canUndo: false });
+      });
+
+      it('does so for a file that gained a ledger, and for a window that was tracking before', () => {
+        const editor = mount('One.\n');
+        editor.reloadDoc(asking);
+        expect(tracking(editor)).toBe(true);
+        // On already: it stays on.
+        const on = mount(plain);
+        on.setTracking(true, { inFile: false });
+        on.reloadDoc(asking);
+        expect(tracking(on)).toBe(true);
+      });
+
+      it('leaves Track Changes as it is when the file asked already: a person who turned it off keeps it off', () => {
+        const editor = mount(asking);
+        expect(tracking(editor)).toBe(true);
+        editor.setTracking(false, { inFile: false });
+        editor.reloadDoc(asking.replace('One.', 'One, two.'));
+        expect(tracking(editor)).toBe(false);
+      });
+
+      it('leaves Track Changes on when the reloaded file stops asking, and off when it never asked', () => {
+        const editor = mount(asking);
+        expect(tracking(editor)).toBe(true);
+        editor.reloadDoc(plain);
+        expect(tracking(editor)).toBe(true);
+        const never = mount(plain);
+        never.reloadDoc(plain.replace('One.', 'One, two.'));
+        expect(tracking(never)).toBe(false);
+      });
+    });
+
     it('keeps a backwards selection backwards', () => {
       const editor = mount('Alpha beta importer gamma delta.\n');
       const from = editor.view.state.doc.toString().indexOf('importer');
@@ -283,7 +330,7 @@ describe('Undo and Redo that have nothing to take back', () => {
     expect(nothing).toBe(3);
   });
 
-  it('are enabled for the menu when they would say why, and the menu says it too', () => {
+  it('are grayed for the menu with the reason as their hint, and the key says it too', () => {
     const parent = document.createElement('div');
     document.body.append(parent);
     const notices: string[] = [];
@@ -294,7 +341,14 @@ describe('Undo and Redo that have nothing to take back', () => {
     });
     editor.view.dispatch({ changes: { from: 3, insert: '!' }, userEvent: 'input.type' });
     editor.reloadDoc('Two.\n');
-    expect(editor.getUiState()).toMatchObject({ canUndo: true, canRedo: true });
+    const ui = editor.getUiState();
+    expect(ui).toMatchObject({ canUndo: false, canRedo: false });
+    expect(ui.disabledReasons['edit.undo']).toBe(
+      'Undo isn’t available after the file changed on disk.',
+    );
+    expect(ui.disabledReasons['edit.redo']).toBe(
+      'Redo isn’t available after the file changed on disk.',
+    );
     expect(editor.undo()).toBe(true);
     expect(notices).toHaveLength(1);
   });

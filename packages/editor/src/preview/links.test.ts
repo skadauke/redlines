@@ -2,6 +2,7 @@
 // ⌘-click on a link opens its address through the host, with a hint on hover (design §5.2).
 
 import { forceParsing } from '@codemirror/language';
+import { showTooltip } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { linkDestination, openableAddress } from './links.ts';
@@ -126,10 +127,26 @@ describe('the addresses that open (design §5.2)', () => {
     }
   });
 
-  it('treats www. as the web, as GitHub’s autolinks do', () => {
-    expect(openableAddress('www.example.org/x')).toBe('http://www.example.org/x');
-    expect(openableAddress('WWW.example.org')).toBe('http://WWW.example.org');
+  it('treats www. as the web over https, the scheme a copy writes for it too', () => {
+    expect(openableAddress('www.example.org/x')).toBe('https://www.example.org/x');
+    expect(openableAddress('WWW.example.org')).toBe('https://WWW.example.org');
     expect(openableAddress('www.')).toBeNull();
+  });
+
+  it('opens an email only as an explicit mailto: in a destination', () => {
+    expect(openableAddress('mailto:a@b.co')).toBe('mailto:a@b.co');
+    expect(openableAddress('logo@2x.png')).toBeNull();
+    expect(openableAddress('ada@example.org')).toBeNull();
+  });
+
+  it('encodes a space after the host, which a <...> destination may hold', () => {
+    expect(openableAddress('https://example.org/a b')).toBe('https://example.org/a%20b');
+    expect(openableAddress('www.example.org/a b?c=d e')).toBe(
+      'https://www.example.org/a%20b?c=d%20e',
+    );
+    // A space in the host is still no address, and no other white space is mended.
+    expect(openableAddress('https://exa mple.org/x')).toBeNull();
+    expect(openableAddress('https://example.org/a\tb')).toBeNull();
   });
 });
 
@@ -176,6 +193,18 @@ describe('the address of a link (design §5.2)', () => {
     expect(at(editor, 'code https')).toBeNull();
   });
 
+  it('is the link’s own for an image inside a link, and still nothing for an image alone', () => {
+    const editor = load(
+      '[![build](badge.svg)](https://ci.example) ![x](https://i.example/p.png) [![r](r.svg)][r]\n\n[r]: https://ref.example/z\n',
+    );
+    expect(at(editor, '![build')).toBe('https://ci.example');
+    expect(at(editor, 'build]')).toBe('https://ci.example');
+    expect(at(editor, 'badge.svg')).toBe('https://ci.example');
+    expect(at(editor, '![r]')).toBe('https://ref.example/z');
+    expect(at(editor, '![x]')).toBeNull();
+    expect(at(editor, 'https://i.example')).toBeNull();
+  });
+
   it('follows the reference whatever the case and the spacing of its label', () => {
     const editor = load('A [text][The  Label] here.\n\n[the label]: https://ref.example.org\n');
     expect(at(editor, 'text')).toBe('https://ref.example.org');
@@ -220,9 +249,40 @@ describe('⌘-click on a link (design §5.2)', () => {
     expect(open.mock.calls.map(([url]) => url)).toEqual([
       'https://auto.example.org/x',
       'https://bare.example.org/y',
-      'http://www.example.org',
+      'https://www.example.org',
       'https://ref.example.org/z',
       'mailto:ada@example.org',
+    ]);
+  });
+
+  it('opens an image link, a bare email and a link with a space in its <...> destination', () => {
+    const open = vi.fn<(address: string) => void>();
+    const editor = load(
+      [
+        '[![build](badge.svg)](https://ci.example) and ada@example.org and <grace@example.org>',
+        'and [spaced](<https://example.org/a b>) and [file](logo@2x.png) and <a@b.co> and',
+        '[mail-me](mailto:a@b.co).',
+        '',
+      ].join('\n'),
+      { openLink: open },
+    );
+    const badge = editor.view.dom.querySelector<HTMLElement>('.rl-image')!;
+    expect(badge.closest('.rl-link')).not.toBeNull();
+    commandClick(badge);
+    commandClick(linkNamed(editor, 'ada@example.org'));
+    commandClick(linkNamed(editor, 'grace@example.org'));
+    commandClick(linkNamed(editor, 'spaced'));
+    // A relative file is left to the editor: nothing opens.
+    commandClick(linkNamed(editor, 'file'));
+    commandClick(linkNamed(editor, 'a@b.co'));
+    commandClick(linkNamed(editor, 'mail-me'));
+    expect(open.mock.calls.map(([url]) => url)).toEqual([
+      'https://ci.example',
+      'mailto:ada@example.org',
+      'mailto:grace@example.org',
+      'https://example.org/a%20b',
+      'mailto:a@b.co',
+      'mailto:a@b.co',
     ]);
   });
 
@@ -343,6 +403,24 @@ describe('the hint on a link (design §5.2)', () => {
     expect(hint()?.getAttribute('aria-hidden')).toBe('true');
     mouse(link, 'mouseleave');
     expect(hint()).toBeNull();
+  });
+
+  it('has a rule for the hint (the notifications’ grays) over CodeMirror’s own tooltip look, and is not clipped at the top of the page', () => {
+    const editor = load(DOC, { openLink: vi.fn() });
+    mouse(linkNamed(editor, 'web link'), 'mousemove', { clientX: 5, clientY: 5 });
+    vi.advanceTimersByTime(400);
+    // The hint is the tooltip's own element, so its rule needs the tooltip's class to win.
+    expect(hint()?.classList.contains('cm-tooltip')).toBe(true);
+    const rules = [...document.querySelectorAll('style')]
+      .map((style) => style.textContent)
+      .join('');
+    const rule = /\.cm-tooltip\.rl-link-hint\s*\{([^}]*)\}/.exec(rules)?.[1] ?? '';
+    expect(rule).toMatch(/background-color:\s*var\(--rl-card\)/);
+    expect(rule).toMatch(/color:\s*var\(--rl-ink\)/);
+    // A link on the first lines of the page still shows its hint (the title bar's room above).
+    const tooltips = editor.view.state.facet(showTooltip).filter((tip) => tip !== null);
+    expect(tooltips).toHaveLength(1);
+    expect(tooltips[0]?.clip).toBe(false);
   });
 
   it('waits for the pause again on another link, and is not for one that does not open', () => {

@@ -5,9 +5,9 @@
 // they can: a row that keeps its place is not rewritten, and the delimiter row follows the first row
 // in every state.
 
-import { lineEnd } from './blocks.ts';
+import { bodyStart, lineEnd, lineStart, nextLineStart } from './blocks.ts';
 import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
-import type { Range, TextChange } from './types.ts';
+import type { Parsed, Range, TextChange } from './types.ts';
 
 /**
  * A row of the table as it is to be: row `src` of the table as written (the header is 0), with the
@@ -68,6 +68,31 @@ function longestRun(values: readonly (number | undefined)[]): Set<number> {
   return kept;
 }
 
+/** The rows of `final` that keep their place, as indexes into `final` and as rows of the table. */
+function keptRows(final: readonly RowItem[]): { keptAt: Set<number>; keepsSrc: Set<number> } {
+  const srcs = final.map((item) => ('src' in item ? item.src : undefined));
+  const keptAt = longestRun(srcs);
+  const keepsSrc = new Set<number>();
+  for (const i of keptAt) {
+    const src = srcs[i];
+    if (src !== undefined) keepsSrc.add(src);
+  }
+  return { keptAt, keepsSrc };
+}
+
+/**
+ * The rows of the table, as indexes, that `arrangeRows` takes out of the text and writes again to give
+ * `final`: the rows that move, and the rows it moves instead of leaving in place (of two rows that
+ * change places it is the same to the text which is written again). What such a row holds is written
+ * again with it.
+ */
+export function rewrittenRows(final: readonly RowItem[]): Set<number> {
+  const { keepsSrc } = keptRows(final);
+  const rewritten = new Set<number>();
+  for (const item of final) if ('src' in item && !keepsSrc.has(item.src)) rewritten.add(item.src);
+  return rewritten;
+}
+
 /**
  * The changes that give a table the rows `final`, in order, the first one the header. Rows that keep
  * their relative order stay where they are; the others are taken out and written again where they
@@ -79,13 +104,7 @@ export function arrangeRows(
   final: readonly RowItem[],
   eol: string,
 ): TextChange[] {
-  const srcs = final.map((item) => ('src' in item ? item.src : undefined));
-  const keptAt = longestRun(srcs);
-  const keepsSrc = new Set<number>();
-  for (const i of keptAt) {
-    const src = srcs[i];
-    if (src !== undefined) keepsSrc.add(src);
-  }
+  const { keptAt, keepsSrc } = keptRows(final);
   // The delimiter row stays when the first row of the table stays the first.
   const first = final[0];
   const delimiterStays = first !== undefined && 'src' in first && first.src === 0 && keptAt.has(0);
@@ -319,4 +338,38 @@ export function joinPoints(changes: readonly TextChange[]): TextChange[] {
   }
   for (const p of points) if (!used.has(p)) result.push(p);
   return result.toSorted((a, b) => a.from - b.from || a.to - b.to);
+}
+
+/** Whether the line that starts at `start` is blank. */
+const blankLine = (text: string, start: number): boolean =>
+  /^[ \t]*$/.test(text.slice(start, lineEnd(text, start)));
+
+/**
+ * What a table's removal takes out as text, with Track Changes off: the table and the blank lines
+ * after it, up to the line of what follows, or when nothing follows, the table and the break before it
+ * (so that the neighbors stay as far apart as they were).
+ */
+export function plainRange(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+): { from: number; to: number } {
+  const stop = parsed.ledgerRange?.from ?? text.length;
+  const first = bodyStart(text);
+  const start = lineStart(text, table.from);
+  // A line of text right above the table (a table can start in a paragraph's next line) is kept apart
+  // from what follows by the blank line after the table, which then stays.
+  const apart = start <= first || blankLine(text, lineStart(text, start - 1));
+  let after = nextLineStart(text, table.to);
+  if (!apart && after < stop) return { from: table.from, to: after };
+  while (after < stop && blankLine(text, after)) after = nextLineStart(text, after);
+  if (after < stop) return { from: table.from, to: after };
+  let above = start;
+  while (above > first) {
+    const line = lineStart(text, above - 1);
+    above = line;
+    if (blankLine(text, line)) continue;
+    return { from: lineEnd(text, line), to: table.to };
+  }
+  return { from: table.from, to: table.to };
 }

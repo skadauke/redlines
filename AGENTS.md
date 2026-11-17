@@ -19,10 +19,13 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
 | `packages/agent-process` | `@redlines/agent-process`: what the agent providers share               |
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
+| `packages/word`         | `@redlines/word`: Word (.docx) export, import and Google Docs' export normalizer; not in the editor bundle |
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `apps/desktop/quicklook` | `@redlines/quicklook`: the Quick Look preview in the app: the renderer (TypeScript, run in JavaScriptCore) and the Swift extension (`swift/`) |
+| `apps/desktop/journeys` | `@redlines/journeys`: Playwright journeys in WebKit against the desktop dev page, screenshot baselines, the look review (not shipped) |
+| `apps/embed-smoke`      | `@redlines/embed-smoke`: the smallest embed of the core and review, which holds the core's size (not shipped) |
 | `apps/website-embed`    | `@redlines/website-embed`: the editor, review and a scripted agent, bundled for the website |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
 | `plugins/agents`        | `@redlines/agents`: the @ picker, the runs a posted mention starts, and Ask |
@@ -34,17 +37,17 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/outline`       | `@redlines/outline`: the outline of the headings, in the left margin      |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
-| `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
+| `plugins/tables`        | `@redlines/tables`: the Table menu and its commands, the grips and the +  |
 | `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
-| `plugins/palette`       | `@redlines/palette`: the formatting palette, from a handle and on right-click |
+| `plugins/toolbar`       | `@redlines/toolbar`: the toolbar, from the title bar's wrench, on right-click and from the keyboard |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |
 | `.claude-plugin/`       | This repository as a Claude Code marketplace (`marketplace.json`)         |
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |
 | `docs/`                 | Design, format spec, research, Word export, images                        |
 
-Workspace members are `packages/*`, `plugins/*`, `apps/*` and `apps/desktop/quicklook`
-(`pnpm-workspace.yaml`). Workspace packages export their TypeScript sources; nothing is compiled
+Workspace members are `packages/*`, `plugins/*`, `apps/*`, `apps/desktop/quicklook` and
+`apps/desktop/journeys` (`pnpm-workspace.yaml`). Workspace packages export their TypeScript sources; nothing is compiled
 before use.
 
 ## Commands
@@ -55,7 +58,7 @@ repo root.
 - `pnpm install` (CI uses `pnpm install --frozen-lockfile`)
 - `pnpm typecheck`: `tsc` at the root, then `pnpm -r typecheck`
 - `pnpm lint`: ESLint (`eslint.config.js`)
-- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
+- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`, the keystroke in a file without indented code in `packages/format/src/indented-code.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it on pushes to main; pull requests skip them until #432), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
   `plugins/*`, next to the code they test, run in Node. A test that needs a DOM starts with a
   `@vitest-environment happy-dom` comment.
 - `pnpm format` / `pnpm format:check`: Prettier
@@ -85,15 +88,47 @@ repo root.
   `not-now`, `return`, `escape` or `close` answers in that window for you, for unattended checks;
   `REDLINES_QUIT_ANSWER` takes the same words for the second question, asked when the Redlines to be
   replaced is open (nothing else ever quits it)
+- Journeys (`apps/desktop/journeys`, [its README](apps/desktop/journeys/README.md)): Playwright in
+  WebKit drives the desktop dev page as a person does (keys, typing in bursts, paste, clicks, drags)
+  and takes screenshots; they are how a change gets looked at, not only tested. Once per machine,
+  `pnpm --filter @redlines/journeys exec playwright install webkit`. `pnpm journeys` runs them (it
+  starts the dev server on `JOURNEYS_PORT`, 1482 unless your lane has its own port; `-g @smoke`, or a
+  spec file, picks some; `JOURNEYS_PROJECTS=all` runs the four looks, light and dark at 100% and
+  200% text). `j.baseline(name)` compares the window with the approved image in
+  `journeys/baselines/` (at most 15 pixels differ; a failed run leaves the picture it got and a
+  diff in `test-results/`), and `pnpm journeys:accept` approves changes on purpose: look at each
+  changed image before you commit it. A bug that's still open is `known(issue, …)`: green while it
+  stands, red when the fix lands, and `JOURNEYS_EVIDENCE=1` shows its failure. `pnpm journeys:look`
+  collects a run's pictures into `journeys/look-review/INDEX.md` for the look review
+  ([look-review.md](apps/desktop/journeys/look-review.md): the checklist, and how a lane uses it);
+  `apps/desktop/scripts/app-windows` screenshots a built `Redlines.app`'s own windows (it needs
+  Screen Recording for the terminal, once). Baselines are drawn by WebKit on macOS, as the app is;
+  a journey is a `tests/*.spec.ts` file in the package (not a vitest test)
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
   over them, their bars and cards, in Redlines and its simple look) and `VITE_PALETTE_CHECK=1 pnpm
-  dev` (the formatting palette's handle, right-click and hints, and Ask's bubble, answered by the
+  dev` (the toolbar's right-click and hints, and Ask's bubble, answered by the
   page's scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its
   results to the console and ends with a `... done <n> passed, <n> failed` line
-  (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`). They
-  read nothing in a release build, and are no part of CI
+  (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`).
+  `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
+  the same, and `VITE_ZOOM_CHECK=1` (the column and the rail at every text size, and the window
+  zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
+  (`src/print-check.ts`) shows that the printed page holds the document and no mark (and, in `pnpm tauri dev` with `REDLINES_EXPORT_PDF=<path>`, writes the PDF there with no panel). They read nothing in a
+  release build, and are no part of CI
+- Crashes (`apps/desktop/src-tauri/src/crash.rs`, `src/crash.ts`): errors in the page, the web content
+  process ending, Rust panics, the last run's macOS crash report and a page that stops answering are
+  written to `crash.log` in the app's log folder (`~/Library/Logs/md.redlines.editor/crash/`, slow
+  timers in `slow.log`), and a gray notification offers **Report…** (a filled-in GitHub issue with the
+  build, system, trace and the document's shape, never its text) and **Reveal Log**; Help has both.
+  In `pnpm tauri dev`, `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')` in
+  the page's console makes each happen
+- Recovery (`apps/desktop/src-tauri/src/recovery.rs`, `src/recovery.ts`): while a document has
+  unsaved edits its window keeps a copy of the text in the app's support folder
+  (`~/Library/Application Support/md.redlines.editor/recovery/`), never next to the file; saving or
+  closing without saving deletes it, and so does a quit that asked about every document. A window
+  that opens the document after a crash puts the edits back and says so in a notification
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
@@ -147,17 +182,57 @@ repo root.
 
 ## CI (`.github/workflows/`)
 
-- `ci.yml`: `check` job (install, typecheck, lint, test, format:check) and `desktop` job (build the
-  `redlines` program and the desktop frontend, then clippy with warnings denied and `cargo test`,
-  for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
-  changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the skill's files, which a
-  test checks.
-- The `quicklook` job of `ci.yml` runs on macOS: it builds the Quick Look extension and checks it
-  (`scripts/build-quicklook --check`), since no other job compiles Swift.
+- **Epics work on an integration branch** (#773). `epic/<issue>` starts from main; lane PRs target
+  it and get the **thin** CI below; one PR from it to main, after the final sweep, gets the full
+  CI and merges as a merge commit. **Thin** is `ci.yml` on a pull request (but the one from `epic/*` to main, which is full) and on
+  a push to `epic/**`: typecheck, lint, format, `vitest run --changed <base>` plus the rule tests,
+  and the Rust, Quick Look and journeys jobs only when their paths change (the journeys on a pull
+  request by the label, as below; a push runs none). A push that makes a branch has no base, so
+  it runs every test. **Full** is a push to main, and the scheduled run.
+  **Which branch the scheduled run tests:** a schedule always runs main's copy of `ci.yml`, and its
+  `changes` job picks the commit: the repository variable `EPIC_BRANCH` when it is set, else the one
+  `epic/*` branch there is (the highest number if several; `epic/collab`, a long-lived branch,
+  never), else main. Every job checks out that commit. `deploy-website.yml` and `release.yml` stay on main.
+- `ci.yml`: a `changes` job (Ubuntu, no install) lists the files a change touches, against the
+  pull request's base or the push's previous commit, and sets flags: `rust` (`apps/desktop/src-tauri`,
+  `apps/desktop/redlines`, `packages/cli`, and on main `packages/format`), `quicklook`
+  (`apps/desktop/quicklook`, `scripts/build-quicklook`, and on main `packages/format`) and `ui` (the desktop's `src` and `journeys`,
+  `plugins`, `packages/editor`, `packages/format`); a change to `.github/workflows/**`, or a diff
+  that can't be made, sets all. Then:
+  - `check` always runs typecheck, lint, format:check and the two size budgets. **On a pull
+    request** its tests are `vitest run --changed <base sha>`: the tests that import, through any
+    chain, a file the PR changed (a package's dependents' among them), and all of them when a
+    config or `package.json` changes, plus the tests that read the source files to hold every change
+    to a rule (refusals, text contrast and sizes, styles, hints, command permissions, the skill). **On main** it runs every test, the timing tests included.
+  - `desktop` (Rust: build the `redlines` program and the frontend, clippy with warnings denied,
+    `cargo test` for the program and `src-tauri`) and `quicklook` (macOS) run only when their flag is
+    set; otherwise the job is skipped, which counts as passing.
+  **A full run** (`schedule`, `23 */2 * * *`, or `workflow_dispatch`, started by
+  `gh workflow run ci.yml --ref <branch>`) sets every flag, runs every test with `REDLINES_COST=check`
+  and calls `journeys.yml` (the middle tier). It has a concurrency group of its own and is never
+  cancelled; a scheduled one is skipped when a finished full run, scheduled or dispatched (not
+  cancelled), already tested main's head, meaning nothing has merged since. The workflow **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the
+  skill's files, which a test checks. The Epic's final sweep runs everything.
+- **The Mac jobs are on** (#900): the Quick Look job and the journeys run as the entries below say,
+  on pull requests and on main.
+- `journeys.yml`: the journeys, on a macOS runner (WebKit there is the app's engine, and the
+  baselines are drawn by it), as a job of its own beside `check`: **pull requests** run it only when
+  someone adds the **`journeys` label** (lanes run their journeys locally and attach screenshots;
+  a push doesn't run them), and then run the smoke
+  journeys and those tagged for the areas their paths touch (`journeys/src/areas.ts`), in the light
+  look; **main** runs every journey in the light look and the smoke journeys in the other
+  three looks from `ci.yml`'s full run every two hours, not on every push (nobody waits on it;
+  a red main goes to the coordinator); **manual dispatch is the
+  sweep**: every journey in all four looks. It skips docs, the website and Markdown, as `ci.yml` does (but for the sample document). Every run uploads
+  `journeys-test-results` (screenshots, and the picture got, the approved one and the diff for a
+  failed comparison) and `look-review` (the pictures in order, with INDEX.md).
+- The `quicklook` job of `ci.yml` runs on macOS, when its flag is set (on a pull request, only for
+  a change to the Quick Look code; on main, also for `packages/format`): it builds the Quick Look
+  extension and checks it (`scripts/build-quicklook --check`), since no other job compiles Swift.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
-  `website/**`, `apps/website-embed/**`, the packages and plugins it bundles, the icon masters,
-  `docs/design.md`, the lockfile or the workflow itself.
+  `website/**`, `apps/website-embed/**`, the icon masters, `docs/design.md`, the lockfile or the
+  workflow itself, and, on main only, to the packages and plugins the embed bundles.
 - `release.yml`: on a published release tagged `v<version>`, builds the universal Mac app, signs,
   notarizes and staples it and its disk image, attaches them with the update and its manifest
   (`latest.json`, written and checked by `apps/desktop/scripts/update-manifest.ts`) to the release,
@@ -171,7 +246,7 @@ repo root.
   touch the site, the embed, the icon masters or the packages the embed bundles; when `release.yml`
   calls it; and by manual dispatch.
 
-`.syrus.yml` mirrors the `check` job as graders.
+`.syrus.yml` mirrors the `check` job as graders (the full test run).
 
 ## Conventions
 

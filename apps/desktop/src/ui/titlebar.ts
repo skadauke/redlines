@@ -1,15 +1,17 @@
-// The title bar (design §5.1): part of the page, with the file name centered and three icons and
-// no labels. Files, next to the window buttons, explains itself on hover; View and Review open
-// their menus on hover, and a click on either does what it does most often: the eye switches
-// between Clean and Redlines, the pen turns Track Changes on and off. Each says what a click will
+// The title bar (design §5.1): part of the page, with the file name centered and four icons and
+// no labels. Files, next to the window buttons, explains itself on hover; the wrench shows and
+// hides the toolbar (#685); View and Review open their menus on hover, and a click on either does
+// what it does most often: the View button, a page that shows the view, switches between Clean and
+// Redlines, the pen turns Track Changes on and off. Each says what a click will
 // do, with its key, in a hint. The file name says how many words the document has, and when it was
 // last saved, on hover, and a double-click on it renames the document. A small document icon beside
 // it drags the file, as a native title bar's proxy icon does.
 
-import { menuViewOf } from '@redlines/editor';
+import { menuViewOf, PLAIN_ONLY_TRACKING, PLAIN_ONLY_VIEWS } from '@redlines/editor';
 import type { MenuView, ViewMode } from '@redlines/editor';
-import { icon } from './icons.ts';
+import { icon, type IconName } from './icons.ts';
 import { createMenu, type Menu } from './menu.ts';
+import { ariaKey, displayKey } from '../shortcuts.ts';
 
 export interface TitleBarState {
   name: string;
@@ -20,16 +22,29 @@ export interface TitleBarState {
    * is shown for it.
    */
   fileDraggable: boolean;
+  /** A Plain-only file (text or code): Plain alone, and no Track Changes. */
+  plainOnly: boolean;
   view: ViewMode;
   tracking: boolean;
   hasRedlines: boolean;
   sidebarOpen: boolean;
   showResolved: boolean;
+  /** Whether the toolbar shows, by any means: the wrench is pressed while it does. */
+  toolbarShown: boolean;
 }
 
 export interface TitleBarActions {
+  /**
+   * The key a row of the menu bar has now (`View/Clean`, in CodeMirror's notation), or null for
+   * none: the hints and the menus show the person's own keys (#551). Without it the fixed keys below.
+   */
+  keyOf?(id: string): string | null;
+  /** Shows the toolbar at the bottom of the window, or puts it away (the wrench). */
+  toggleToolbar(): void;
   /** Shows a view of the View menu: Redlines in the look shown last (`Editor.showView`). */
   setView(view: MenuView): void;
+  /** Turns Redlines' simple look on or off, as a click on a change bar does (`Editor.switchLook`). */
+  switchLook(): void;
   toggleTracking(): void;
   openReview(): void;
   toggleResolved(): void;
@@ -78,11 +93,11 @@ export function documentFactsLine(newestText: string, savedAt: Date | null): str
 
 export const TOOLTIP_MS = 400;
 
-/** The views a click on the View icon switches between: Raw is for the menu. */
+/** The views a click on the View icon switches between: Plain is for the menu. */
 type SwitchView = Exclude<MenuView, 'raw'>;
 
 /** The views' names, and the keys the menu bar gives them (menu-model.ts, which a test compares). */
-const VIEW_NAMES: Record<MenuView, string> = { clean: 'Clean', redlines: 'Redlines', raw: 'Raw' };
+const VIEW_NAMES: Record<MenuView, string> = { clean: 'Clean', redlines: 'Redlines', raw: 'Plain' };
 export const VIEW_KEYS: Record<MenuView, string> = { clean: '⌥⌘1', redlines: '⌥⌘2', raw: '⌥⌘3' };
 /** The same keys as assistive technology names them (`aria-keyshortcuts`). */
 export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
@@ -90,8 +105,21 @@ export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
   redlines: 'Alt+Meta+2',
   raw: 'Alt+Meta+3',
 };
+export const TOOLBAR_KEY = '⇧⌘P';
+export const TOOLBAR_ARIA_KEY = 'Shift+Meta+P';
 export const TRACKING_KEY = '⇧⌘E';
 export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
+export const FILES_KEY = '⌃⌘S';
+
+/** The menu bar rows whose keys the bar shows. */
+const KEY_ROWS = {
+  clean: 'View/Clean',
+  redlines: 'View/Redlines',
+  raw: 'View/Raw',
+  tracking: 'Review/Track Changes',
+  files: 'View/Show Files',
+  toolbar: 'command:toolbar.show',
+} as const;
 
 /**
  * The bar is 52 points tall, and the fade that the text passes into under it ends 64 points down
@@ -100,6 +128,13 @@ export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
  */
 export const BAR_PT = 52;
 export const FADE_PT = 64;
+
+/** The page that the View button draws for each view: the view shows in its icon (#661). */
+const VIEW_ICONS: Record<MenuView, IconName> = {
+  clean: 'viewClean',
+  redlines: 'viewRedlines',
+  raw: 'viewPlain',
+};
 
 /** How far the pointer moves, with the button down, before the document icon's drag starts. */
 const DRAG_START_PX = 4;
@@ -115,6 +150,7 @@ export function createTitleBar(
   actions: TitleBarActions,
 ): {
   update(state: TitleBarState): void;
+  keysChanged(): void;
   beginRename(): void;
   /** Closes the View and Review menus, as a zoom change does: they were placed for the old layout. */
   closeMenus(): void;
@@ -135,11 +171,13 @@ export function createTitleBar(
     name: '',
     dirty: false,
     fileDraggable: false,
+    plainOnly: false,
     view: 'clean',
     tracking: false,
     hasRedlines: false,
     sidebarOpen: false,
     showResolved: false,
+    toolbarShown: false,
   };
 
   const bar = element('header', 'rl-titlebar');
@@ -270,10 +308,30 @@ export function createTitleBar(
     input.setSelectionRange(0, dot > 0 ? dot : state.name.length);
   };
 
+  // The toolbar's wrench: a click shows it or puts it away, and the button is pressed while it shows.
+  const toolbarControl = element('div', 'rl-control');
+  const toolbarButton = iconButton('Toolbar', icon('wrench', 18));
+  toolbarButton.classList.add('rl-wrench-button');
+  // The toolbar's own press handling leaves it to the click (plugins/toolbar).
+  toolbarButton.dataset['toolbarControl'] = '';
+  toolbarButton.setAttribute('aria-keyshortcuts', TOOLBAR_ARIA_KEY);
+  toolbarControl.append(toolbarButton);
+  const toolbarTip = createTip(toolbarControl, toolbarButton, 'rl-wrench-tip', {
+    end: true,
+    beforeShow: () => hideTips(),
+  });
+  // The press leaves the document's caret and selection where they were: the toolbar acts on them.
+  toolbarButton.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbarButton.addEventListener('click', (event) => {
+    actions.toggleToolbar();
+    // The pointer is still there: what the next click will do is said once it has rested.
+    if (event.detail > 0) toolbarTip.arm();
+  });
+
   // View and Review.
   const end = element('div', 'rl-titlebar-end');
   const viewControl = element('div', 'rl-control');
-  const viewButton = iconButton('View', icon('eye', 18));
+  const viewButton = iconButton('View', icon(VIEW_ICONS[menuViewOf(state.view)], 18));
   viewControl.append(viewButton);
   // What a click on each will do, which the hint under it says, and the icon's description is.
   // (A hint is not shown over its own icon's menu, which is open when the pointer has rested.)
@@ -292,8 +350,8 @@ export function createTitleBar(
     beforeShow: () => hideTips(),
   });
   reviewButton.setAttribute('aria-keyshortcuts', TRACKING_ARIA_KEY);
-  end.append(viewControl, reviewControl);
-  const tips = [filesTip, viewTip, reviewTip];
+  end.append(toolbarControl, viewControl, reviewControl);
+  const tips = [filesTip, toolbarTip, viewTip, reviewTip];
   const hideTips = () => {
     for (const tip of tips) tip.hide();
   };
@@ -330,26 +388,44 @@ export function createTitleBar(
 
   /**
    * The one of Clean and Redlines shown last, by any means (the menu, the keys, a click on a change
-   * bar): what a click on the eye goes back to from Raw. Redlines for a window that has shown
+   * bar): what a click on the eye goes back to from Plain. Redlines for a window that has shown
    * neither.
    */
   let lastShown: SwitchView = 'redlines';
-  /** What a click on the eye shows: Clean and Redlines in turn, and from Raw the one shown last. */
+  /** What a click on the eye shows: Clean and Redlines in turn, and from Plain the one shown last. */
   const viewAfterClick = (view: ViewMode): SwitchView => {
     const shownNow = menuViewOf(view);
     if (shownNow === 'raw') return lastShown;
     return shownNow === 'clean' ? 'redlines' : 'clean';
   };
 
-  // All three views are there for any document (design §5.3): Redlines too, with or without
-  // redlines, whether Track Changes is on or off. Redlines is checked in both its looks: Simple is
-  // its simple look, switched by a click on a change bar and by nothing in this menu.
-  const viewItem = (view: MenuView, label: string, shortcut: string) => ({
+  // Redlines is checked in both its looks. The simple look is no row of this menu (it is reached by
+  // a click on a change bar, ⌥⌘4 and the View menu of the menu bar, #499). The menu bar keeps
+  // Redlines there for any document, since a disabled item would take its key away (design §5.3);
+  // this menu has nothing to show in a file with no changes and no ledger, and says so.
+  /** A row's key as the hints draw it: the person's own, else the fixed one; "" for none. */
+  const keyShown = (row: keyof typeof KEY_ROWS, fixed: string): string => {
+    if (!actions.keyOf) return fixed;
+    const key = actions.keyOf(KEY_ROWS[row]);
+    return key ? displayKey(key) : '';
+  };
+  const keyAria = (row: keyof typeof KEY_ROWS, fixed: string): string => {
+    if (!actions.keyOf) return fixed;
+    const key = actions.keyOf(KEY_ROWS[row]);
+    return key ? ariaKey(key) : '';
+  };
+  const setAria = (button: HTMLElement, key: string) => {
+    if (key) button.setAttribute('aria-keyshortcuts', key);
+    else button.removeAttribute('aria-keyshortcuts');
+  };
+  const viewItem = (view: MenuView, label: string, shortcut: string, disabled = false) => ({
     role: 'menuitemradio' as const,
     label,
     icon: view,
     shortcut,
     checked: menuViewOf(state.view) === view,
+    disabled,
+    disabledHint: state.plainOnly && view !== 'raw' ? PLAIN_ONLY_VIEWS : undefined,
     select: () => actions.setView(view),
   });
   const viewMenu: Menu = createMenu({
@@ -358,11 +434,19 @@ export function createTitleBar(
     button: viewButton,
     // The keys are the menu bar's, as in menu-model.ts.
     entries: () => [
-      viewItem('clean', VIEW_NAMES.clean, VIEW_KEYS.clean),
-      viewItem('redlines', VIEW_NAMES.redlines, VIEW_KEYS.redlines),
-      viewItem('raw', VIEW_NAMES.raw, VIEW_KEYS.raw),
+      viewItem('clean', VIEW_NAMES.clean, keyShown('clean', VIEW_KEYS.clean), state.plainOnly),
+      // Not disabled while it is the view shown: the menu opens on the row that is checked, and
+      // a disabled row can't be focused (the keys and VoiceOver would not find the current view).
+      viewItem(
+        'redlines',
+        VIEW_NAMES.redlines,
+        keyShown('redlines', VIEW_KEYS.redlines),
+        state.plainOnly || (!state.hasRedlines && menuViewOf(state.view) !== 'redlines'),
+      ),
+      'divider',
+      viewItem('raw', VIEW_NAMES.raw, keyShown('raw', VIEW_KEYS.raw)),
     ],
-    // A click switches Clean and Redlines; Raw is for the menu.
+    // A click switches Clean and Redlines; Plain is for the menu.
     activate: (event) => {
       actions.setView(viewAfterClick(state.view));
       // The pointer is still there: what the next click will do is said once it has rested.
@@ -378,27 +462,30 @@ export function createTitleBar(
     entries: () => [
       {
         role: 'menuitemcheckbox',
-        label: 'Track changes',
+        label: 'Track Changes',
         icon: 'tracking',
         iconClass: state.tracking ? 'rl-pen-on' : undefined,
-        shortcut: TRACKING_KEY,
+        shortcut: keyShown('tracking', TRACKING_KEY),
         checked: state.tracking,
+        disabled: state.plainOnly,
+        disabledHint: PLAIN_ONLY_TRACKING,
         select: () => actions.toggleTracking(),
       },
       'divider',
       {
         role: 'menuitem',
-        label: 'Review changes',
+        label: 'Review Changes',
         icon: 'list',
-        shortcut: '⌥⌘]',
+        // No key, as in the menu bar: ⌥⌘] is Next Change.
         // Nothing to review in a document without redlines.
-        disabled: !state.hasRedlines,
+        disabled: !state.hasRedlines || state.plainOnly,
+        disabledHint: state.plainOnly ? PLAIN_ONLY_TRACKING : undefined,
         select: () => actions.openReview(),
       },
       'divider',
       {
         role: 'menuitemcheckbox',
-        label: 'Show resolved comments',
+        label: 'Show Resolved Comments',
         icon: 'resolved',
         checked: state.showResolved,
         select: () => actions.toggleResolved(),
@@ -411,7 +498,33 @@ export function createTitleBar(
   });
   menus.push(viewMenu, reviewMenu);
 
+  /** The icons' hints and keys, from the state and the keys now: what a click on each will do. */
+  const drawHints = (next: TitleBarState) => {
+    const filesLabel = next.sidebarOpen ? 'Hide files' : 'Show files';
+    filesButton.setAttribute('aria-label', filesLabel);
+    filesButton.setAttribute('aria-pressed', String(next.sidebarOpen));
+    filesTip.set(filesLabel, keyShown('files', FILES_KEY));
+
+    // What a click on each icon will do, said in its hint and to assistive technology.
+    const shownNow = menuViewOf(next.view);
+    if (shownNow !== 'raw') lastShown = shownNow;
+    const toView = viewAfterClick(next.view);
+    viewTip.set(`Show ${VIEW_NAMES[toView]}`, keyShown(toView, VIEW_KEYS[toView]));
+    setAria(viewButton, keyAria(toView, VIEW_ARIA_KEYS[toView]));
+    toolbarTip.set(
+      next.toolbarShown ? 'Hide Toolbar' : 'Show Toolbar',
+      keyShown('toolbar', TOOLBAR_KEY),
+    );
+    setAria(toolbarButton, keyAria('toolbar', TOOLBAR_ARIA_KEY));
+    reviewTip.set(
+      next.tracking ? 'Turn off Track Changes' : 'Turn on Track Changes',
+      keyShown('tracking', TRACKING_KEY),
+    );
+    setAria(reviewButton, keyAria('tracking', TRACKING_ARIA_KEY));
+  };
+
   let penTracking: boolean | null = null;
+  let shownIcon: MenuView = menuViewOf(state.view);
   const update = (next: TitleBarState) => {
     state = next;
     titleName.textContent = next.name;
@@ -422,18 +535,14 @@ export function createTitleBar(
     // With edits the file is behind: what is handed over is the file as it was last saved.
     docIcon.title = next.dirty ? 'Drag to copy the file as saved' : 'Drag to copy the file';
 
-    const filesLabel = next.sidebarOpen ? 'Hide files' : 'Show files';
-    filesButton.setAttribute('aria-label', filesLabel);
-    filesButton.setAttribute('aria-pressed', String(next.sidebarOpen));
-    filesTip.set(filesLabel, '⌃⌘S');
-
-    // What a click on each icon will do, said in its hint and to assistive technology.
+    drawHints(next);
+    // The button is a page that shows the view: lines of text, a red bar in the margin, or a #.
     const shownNow = menuViewOf(next.view);
-    if (shownNow !== 'raw') lastShown = shownNow;
-    const toView = viewAfterClick(next.view);
-    viewTip.set(`Show ${VIEW_NAMES[toView]}`, VIEW_KEYS[toView]);
-    viewButton.setAttribute('aria-keyshortcuts', VIEW_ARIA_KEYS[toView]);
-    reviewTip.set(next.tracking ? 'Turn off Track Changes' : 'Turn on Track Changes', TRACKING_KEY);
+    if (shownIcon !== shownNow) {
+      shownIcon = shownNow;
+      viewButton.replaceChildren(icon(VIEW_ICONS[shownNow], 18));
+    }
+    toolbarButton.setAttribute('aria-pressed', String(next.toolbarShown));
     reviewButton.setAttribute('aria-pressed', String(next.tracking));
 
     if (penTracking !== next.tracking) {
@@ -446,6 +555,11 @@ export function createTitleBar(
 
   return {
     update,
+    /** A key changed (Preferences, another window): the hints and menus show it from now on. */
+    keysChanged() {
+      drawHints(state);
+      for (const menu of menus) menu.refresh();
+    },
     beginRename,
     closeMenus() {
       hideTips();

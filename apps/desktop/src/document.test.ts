@@ -126,6 +126,15 @@ class FakeHost implements Host {
   print() {
     return Promise.resolve();
   }
+  exportPdf() {
+    return Promise.resolve(null);
+  }
+  openDocx() {
+    return Promise.resolve(null);
+  }
+  exportWord() {
+    return Promise.resolve(null);
+  }
   openDefault() {
     return Promise.resolve();
   }
@@ -134,6 +143,12 @@ class FakeHost implements Host {
   }
   allowImages() {
     return Promise.resolve(false);
+  }
+  imageStamps() {
+    return Promise.resolve([]);
+  }
+  imageSizes() {
+    return Promise.resolve([]);
   }
   imageUrl() {
     return null;
@@ -152,6 +167,18 @@ class FakeHost implements Host {
   askToDiscardDraft() {
     this.draftAsked++;
     return Promise.resolve(this.discardDraft);
+  }
+  askToSaveForImage() {
+    return Promise.resolve(false);
+  }
+  chooseImages() {
+    return Promise.resolve(null);
+  }
+  addImages() {
+    return Promise.resolve({ paths: [], refused: [] });
+  }
+  listenForImageDrops() {
+    return Promise.resolve(() => {});
   }
   listenForFiles() {
     return Promise.resolve();
@@ -172,6 +199,7 @@ function fakeEditor() {
       doc = text;
       onChange(text);
     },
+    setKind: vi.fn(),
     reloadDoc: vi.fn((text: string) => {
       doc = text;
       onChange(text);
@@ -183,6 +211,8 @@ function fakeEditor() {
     }),
     /** Records the view in the file's ledger, which a save asks for: nothing, unless a test says. */
     recordView: vi.fn(() => {}),
+    /** Records Track Changes in the file's ledger, which a save asks for: nothing, unless a test says. */
+    recordTracking: vi.fn(() => {}),
     type: (text: string) => {
       doc = text;
       onChange(text);
@@ -299,13 +329,13 @@ describe('DocumentController', () => {
       '/docs/notes.txt': 'Two\n',
     });
     await controller.open('/docs/plan.md');
-    expect(await controller.rename('notes.ts')).toBe(true);
-    expect(state()?.name).toBe('notes.ts.md');
+    expect(await controller.rename('notes.zig')).toBe(true);
+    expect(state()?.name).toBe('notes.zig.md');
     await controller.open('/docs/notes.txt');
     expect(await controller.rename('v1.2 notes')).toBe(true);
     expect(state()?.name).toBe('v1.2 notes.txt');
     expect(host.renames).toEqual([
-      { from: '/docs/plan.md', to: '/docs/notes.ts.md' },
+      { from: '/docs/plan.md', to: '/docs/notes.zig.md' },
       { from: '/docs/notes.txt', to: '/docs/v1.2 notes.txt' },
     ]);
   });
@@ -903,7 +933,7 @@ describe('DocumentController', () => {
     controller.couldNotOpen('/docs/logo.png', 'Redlines opens Markdown and text files.');
     expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
     // Whatever the reason the app gave: a file that isn't a document is never one to open.
-    controller.couldNotOpen('/docs/main.ts', 'the path can’t be allowed');
+    controller.couldNotOpen('/docs/main.zig', 'the path can’t be allowed');
     expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
     // Nor is a folder, which only the app can tell from a document by its name, and says so.
     controller.couldNotOpen('/docs/notes.md', 'Redlines opens Markdown and text files.');
@@ -918,11 +948,11 @@ describe('DocumentController', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { host, editor, controller, state } = setup({
       '/docs/plan.md': 'One\n',
-      '/docs/main.ts': 'const a = 1;\n',
+      '/docs/main.zig': 'const a = 1;\n',
     });
     await controller.open('/docs/plan.md');
     editor.type('One, edited\n');
-    await controller.open('/docs/main.ts');
+    await controller.open('/docs/main.zig');
     // No question about the edits: there is nothing to open in place of them.
     expect(host.asked).toBe(0);
     expect(editor.getDoc()).toBe('One, edited\n');
@@ -1051,6 +1081,24 @@ describe('the view a save records (format §5.6)', () => {
     expect(state()?.dirty).toBe(true);
   });
 
+  it('goes in with Track Changes, which a save records too and a switch never does', async () => {
+    const { host, editor, controller, state } = recording({ '/docs/plan.md': 'One\n' });
+    editor.recordTracking.mockImplementation(() => {
+      const text = editor.getDoc();
+      if (!text.includes('tracking: everyone\n')) editor.type(`${text}tracking: everyone\n`);
+    });
+    await controller.open('/docs/plan.md');
+    // Nothing is asked of the editor, and nothing is written, until the file is saved.
+    expect(editor.recordTracking).not.toHaveBeenCalled();
+    expect(state()?.dirty).toBe(false);
+    editor.type('Two\n');
+    await controller.save();
+    expect(editor.recordTracking).toHaveBeenCalledTimes(1);
+    expect(host.writes).toEqual([
+      { path: '/docs/plan.md', text: 'Two\ntracking: everyone\nview: clean\n' },
+    ]);
+  });
+
   it('is no part of an agent’s edit written to the file, which is no save', async () => {
     const { host, editor, controller } = recording({ '/docs/plan.md': 'One\n' });
     await controller.open('/docs/plan.md');
@@ -1098,6 +1146,39 @@ describe('a file that asks everyone to track changes', () => {
     host.files.set('/docs/plan.md', `${asking}More\n`);
     await controller.externalChange();
     expect(state()?.notice).toBeNull();
+  });
+
+  it('says why Track Changes is on when the file on disk newly asks everyone to track (#364)', async () => {
+    // The editor turns Track Changes on when it reloads such a file (`reloadDoc`), as when it opens
+    // one, and the notice is the same.
+    const { host, controller, state } = setup({ '/docs/plan.md': 'Plan\n' });
+    await controller.open('/docs/plan.md');
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    expect(state()).toMatchObject({ notice: TRACKING_FOR_EVERYONE, dirty: false });
+  });
+
+  it('says nothing when the file on disk stops asking, or asked already', async () => {
+    const { host, controller, state } = setup({ '/docs/plan.md': asking });
+    await controller.open('/docs/plan.md');
+    controller.dismissNotice();
+    host.files.set('/docs/plan.md', 'Plan\n\n<!-- redlines\nversion: 1\n-->\n');
+    await controller.externalChange();
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    // It asks again: that is news, as it is for a file that newly asks.
+    expect(state()?.notice).toBe(TRACKING_FOR_EVERYONE);
+  });
+
+  it('keeps the edits and says nothing of tracking while there are unsaved edits', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'Plan\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Mine\n');
+    host.files.set('/docs/plan.md', asking);
+    await controller.externalChange();
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
   });
 
   it('is not announced for a file that does not ask, or for a new document', async () => {
@@ -1179,6 +1260,48 @@ describe('asking about unsaved edits', () => {
     await controller.create();
     expect(await controller.confirmDiscard()).toBe(true);
     expect(host.asked).toBe(0);
+  });
+});
+
+describe('edits recovered after a crash (#693)', () => {
+  it('puts the edits back as unsaved ones, over the file as it was saved', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'Saved\n' });
+    await controller.open('/docs/plan.md');
+    expect(controller.restore('/docs/plan.md', 'Saved\nAnd more typed\n')).toBe(true);
+    expect(editor.getDoc()).toBe('Saved\nAnd more typed\n');
+    expect(state()?.dirty).toBe(true);
+    // It is a reload, not an edit, and the file is not written.
+    expect(editor.reloadDoc).toHaveBeenCalledOnce();
+    expect(host.writes).toEqual([]);
+    await controller.save();
+    expect(host.files.get('/docs/plan.md')).toBe('Saved\nAnd more typed\n');
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('restores an untitled document, which was never saved', async () => {
+    const { controller, state } = setup();
+    await controller.create();
+    expect(controller.restore(null, 'Typed, never saved')).toBe(true);
+    expect(state()).toMatchObject({ path: null, dirty: true });
+  });
+
+  it('puts back nothing over what was typed since, for another document, or for the same text', async () => {
+    const { editor, controller } = setup({ '/docs/plan.md': 'Saved\n', '/docs/other.md': 'x' });
+    await controller.open('/docs/plan.md');
+    expect(controller.restore('/docs/other.md', 'Other edits')).toBe(false);
+    expect(controller.restore('/docs/plan.md', 'Saved\n')).toBe(false);
+    editor.type('Typed already\n');
+    expect(controller.restore('/docs/plan.md', 'Old copy')).toBe(false);
+    expect(editor.getDoc()).toBe('Typed already\n');
+  });
+
+  it('shows the saved version in place of the recovered edits', async () => {
+    const { editor, controller, state } = setup({ '/docs/plan.md': 'Saved\n' });
+    await controller.open('/docs/plan.md');
+    controller.restore('/docs/plan.md', 'Recovered\n');
+    await controller.showSavedVersion();
+    expect(editor.getDoc()).toBe('Saved\n');
+    expect(state()?.dirty).toBe(false);
   });
 });
 
@@ -1468,7 +1591,7 @@ describe('Open…, with one document per window', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { host, editor, controller, state } = setup();
     await controller.create();
-    host.picked = { path: '/docs/main.ts', text: 'const a = 1;\n' };
+    host.picked = { path: '/docs/main.zig', text: 'const a = 1;\n' };
     await controller.openWithDialog();
     expect(editor.getDoc()).toBe('');
     expect(host.openedWindows).toEqual([]);
@@ -1927,6 +2050,7 @@ describe('a run, with the live editor and the file', () => {
       author: me,
       document: {
         path: () => doc.state.path,
+        plainOnly: () => false,
         generation: () => doc.generation,
         read: () => editor.getDoc(),
         parsed: () => editor.getParsed(),

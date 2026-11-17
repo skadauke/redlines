@@ -3,6 +3,7 @@
 // at. This is not a Markdown parser: it finds links, images, autolinks, entities, tags, escapes and
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
+import { HTML_STARTS } from './block-read.ts';
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
 import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
 import { isTableRowAt } from './table-rules.ts';
@@ -47,6 +48,9 @@ export interface Paragraph {
 }
 
 const BLANK = /^[ \t>]*$/;
+
+/** The refusal of a marker on a line that is only Markdown syntax: a fence, a rule, a bullet. */
+export const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.';
 
 export function visible(
   text: string,
@@ -266,6 +270,9 @@ function normalizeLabel(label: string): string {
   return label.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** A pandoc attribute block: `{`, no brace, angle bracket or line break, `}` (§3.5). */
+const ATTRIBUTE_BLOCK = /\{[^{}<>\r\n]*\}/y;
+
 /** Everything in the paragraph that takes no marker inside it. `v` is its visible text. */
 export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } {
   const { masked: w, code } = maskCode(v);
@@ -355,11 +362,14 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
       const end = closeParen(w, i + 1);
       if (end === -1) continue;
       if (open > 0 && w[open - 1] === '!' && !isEscaped(w, open - 1)) {
+        // A pandoc attribute block right after it, `{width=50%}`, is part of the image (§3.5).
+        ATTRIBUTE_BLOCK.lastIndex = end + 1;
+        const block = ATTRIBUTE_BLOCK.exec(w)?.[0].length ?? 0;
         hits.push({
           lo: open,
-          hi: end,
+          hi: block === 0 ? end : end + block,
           from: open - 1,
-          to: end + 1,
+          to: end + 1 + block,
           kind: 'image',
           alt: { from: open + 1, to: i },
         });
@@ -489,6 +499,40 @@ function lazyUnder(above: string, line: string): boolean {
 }
 
 /**
+ * Whether a line can be underlined as the text of a setext heading: words, not a blank line nor the
+ * syntax of another block (a heading, a thematic break, a fence, HTML, a table row, a definition).
+ */
+export function textLike(line: string): boolean {
+  const rest = line.replace(/^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*/, '');
+  return (
+    rest !== '' &&
+    !/^(?:#{1,6}(?:[ \t]|$)|(?:[-*_=][ \t]*){2,}$|`{3,}|~{3,}|<|\||\[[^\]]*\]:)/.test(rest)
+  );
+}
+
+/**
+ * Whether `line` is a bullet with nothing after it that reads as the setext underline of the text
+ * in `above`, the line over it: an empty item can't interrupt a paragraph, and an underline is no
+ * lazy line (#143).
+ */
+export function underliningBullet(above: string, line: string): boolean {
+  return /^[ \t>]*-[ \t]*$/.test(line) && textLike(above) && !lazyUnder(above, line);
+}
+
+/**
+ * Whether a split's marker starts on the line of `text` that `position` is on, after a bullet and
+ * the white space after it (`-<marker>` is no item: its dash is text of the paragraph).
+ */
+function splitOnLine(text: string, hidden: readonly Range[], position: number): boolean {
+  const from = lineStart(text, position);
+  const to = lineEnd(text, position);
+  if (!/^[ \t>]*-[ \t]+<!--/.test(text.slice(from, to))) return false;
+  return hidden.some(
+    (range) => range.from >= from && range.from <= to && text.startsWith('<!--split ', range.from),
+  );
+}
+
+/**
  * What the rules of format §3.1 to §3.3 say about a marker at `position` of `text`. `hidden` are the
  * ranges of the markers that are in the text: they are not looked at, and a line made of nothing
  * else is a blank line. `around` gives the characters next to the marker when they are not those
@@ -525,13 +569,24 @@ export function inspectPlace(
   // can be, such as the bullet of the next item (#143).
   const lineAbove = start > 0 ? v.slice(v.lastIndexOf('\n', start - 2) + 1, start - 1) : above;
   const underlines = hasTextAbove && !lazyUnder(lineAbove.replace(/\r$/, ''), lineText);
+  // A bullet that a split's marker stands on is an item in the file, whose first line is the marker,
+  // wherever the view reads the bullet as the underline of the text above it: an empty item can't
+  // interrupt a paragraph. An opener written beside the split's marker, for typed text (the caller
+  // gives the text after it), changes neither reading; a comment or a highlight, which has no text
+  // to write there, would stand on a line that the view reads as an underline, and stays refused
+  // (#143).
+  const ofSplit =
+    around.after !== undefined &&
+    /^[ \t>]*-[ \t]*$/.test(lineText) &&
+    splitOnLine(text, hidden, position);
   // A row of a table whose cells are all dashes is a row, not the delimiter row (format §3.7).
   if (
     !around.joined &&
+    !ofSplit &&
     isSyntaxLine(lineText, underlines && !(first && start === 0)) &&
     !isTableRowAt(text, position)
   ) {
-    return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
+    return { kind: 'refuse', reason: SYNTAX_ONLY };
   }
   const prefix = prefixLength(lineText);
   const heading = /^#{1,6}[ \t]+/.exec(lineText.slice(prefix))?.[0].length ?? 0;
@@ -599,12 +654,48 @@ export function inspectPlace(
   }
 
   // The trailing spaces of a hard break.
-  const trailing = / {2,}$/.exec(lineText);
-  if (trailing && column > trailing.index && newline !== -1) {
+  // The line as the change leaves it: where `around` gives the text typed before a closer, the last
+  // line of it is the head (spaces typed at a line's end are its trailing spaces, though they are
+  // in no file yet); the tail is what the file has after the marker.
+  const headLine =
+    around.before !== undefined
+      ? around.before.slice(around.before.lastIndexOf('\n') + 1)
+      : lineText.slice(0, column);
+  const full = headLine + lineText.slice(column);
+  const spaces = / {2,}$/.exec(full);
+  // Spaces are a hard break only after text: a line that is blank (or only a quote's `>`) has none.
+  const hardBreak = around.before === undefined || /[^ \t>]/.test(full.trimEnd());
+  // A line of a table under the paragraph: the model ends the paragraph there, but without a
+  // delimiter row under it a table row is text of it, and the spaces end its line.
+  const [row = '', under = ''] = text.slice(range.to + 1).split('\n', 2);
+  const loneRow =
+    newline === -1 &&
+    range.to < text.length &&
+    /^\|/.test(row.slice(prefixLength(row)).trimStart()) &&
+    !DELIMITER_ROW.test(under);
+  // An opener in front of text typed there, which starts with spaces that the line's own end
+  // continues (`around.after` is that text and what follows it): the spaces before it and the ones
+  // typed are one run, and the opener stands among them.
+  // A comment or a tag on the next line ends the paragraph: the spaces are no hard break.
+  const next = v.slice(newline + 1).split('\n', 1)[0] ?? '';
+  const ends =
+    newline !== -1 && HTML_STARTS.some(([start]) => start.test(next.slice(prefixLength(next))));
+  const typedRun =
+    around.before === undefined &&
+    / $/.test(headLine) &&
+    /^ +\r?\n/.test(around.after ?? '') &&
+    /[^ \t>]/.test(headLine.trimEnd());
+  if (
+    !ends &&
+    (typedRun ||
+      (spaces && hardBreak && headLine.length > spaces.index && (newline !== -1 || loneRow)))
+  ) {
     return {
       kind: 'refuse',
       reason: 'A marker can not go between a hard break and the line end.',
-      trailing: offsetAt(start + trailing.index),
+      trailing: offsetAt(
+        start + Math.min(spaces?.index ?? column, / *$/.exec(headLine)?.index ?? column),
+      ),
     };
   }
   if (changesFlanking(v, index, around)) return { kind: 'flank' };
@@ -613,7 +704,7 @@ export function inspectPlace(
   if (kind === 'block') return { kind: 'block' };
   if (kind === 'continuation') return { kind: 'continuation' };
   if (kind === 'syntax') {
-    return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
+    return { kind: 'refuse', reason: SYNTAX_ONLY };
   }
   return { kind: 'ok' };
 }

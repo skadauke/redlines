@@ -303,3 +303,25 @@ comments:
     expect(design.handle.getDoc()).toBe(DOCS.design.text);
   });
 });
+
+describe('Ask in the demo', () => {
+  it('answers one canned question in a bubble, citing the first sentence, and writes nothing', async () => {
+    const { handle, root } = mountForTest('design');
+    const before = handle.getDoc();
+    expect(handle.askAboutNote()).toBe(true);
+    write(root, 'Why does it retry?');
+    root
+      .querySelector('textarea')!
+      .dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+    await advance(3000);
+    expect(root.textContent).toContain('This is a scripted answer');
+    expect(root.textContent).toContain('Uploads retry 3 times with backoff, then fail.');
+    expect(handle.getDoc()).toBe(before);
+  });
+
+  it('is offered by the design demo only', () => {
+    expect(mountForTest('plan').handle.askAboutNote()).toBe(false);
+  });
+});

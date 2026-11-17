@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findQuote, parseAnswer, selectionText } from './answer.ts';
+import { findQuote, parseAnswer, quoteFinder, selectionText } from './answer.ts';
 
 describe('parseAnswer', () => {
   it('is all body when there is no Sources line', () => {
@@ -341,5 +341,26 @@ describe('selectionText', () => {
 
   it('is the text itself in a plain document', () => {
     expect(selectionText('Hello world', { from: 6, to: 11 })).toBe('world');
+  });
+});
+
+describe('quoteFinder, in a long document', () => {
+  it('finds a quote through gathered white space and curly quotes, in linear time', () => {
+    const filler = 'word   \n  '.repeat(60_000);
+    const text = `${filler}He said \u201chello\u201d  to  you.\n`;
+    const started = Date.now();
+    const found = findQuote(text, 'said "hello" to you');
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(found).not.toBeNull();
+    expect(text.slice(found?.from, found?.to)).toBe('said \u201chello\u201d  to  you');
+  });
+
+  it('looks a quote up once: the same answer is the same range', () => {
+    const find = quoteFinder('A first lien on  the property.\n');
+    const one = find('first lien on the property', 0);
+    expect(one).not.toBeNull();
+    expect(find('first lien on the property', 0)).toBe(one);
+    expect(find('nothing of the kind', 0)).toBeNull();
+    expect(find('nothing of the kind', 0)).toBeNull();
   });
 });

@@ -14,6 +14,8 @@ export type EditErrorCode =
   | 'no-legal-placement'
   /** The new text holds Redlines markup. */
   | 'markup'
+  /** The range covers no text, and the mark needs some: a highlight has no point form (§2.2). */
+  | 'empty-range'
   /** There is no change or thread with that id. */
   | 'unknown-id'
   /** The change is of a kind v0.1 doesn't decide. */

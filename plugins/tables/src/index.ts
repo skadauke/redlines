@@ -6,17 +6,25 @@
 
 import {
   alignCols,
+  alignReason,
   caretAlign,
   colTitles,
   type Editor,
+  twinAt,
   type EditorCommand,
   deleteCols,
+  deleteColsReason,
   deleteRows,
+  deleteRowsReason,
+  deleteTable,
   headInTable,
   insertCols,
   insertRows,
   moveCols,
+  moveColsReason,
   moveRows,
+  moveRowsReason,
+  NOT_IN_TABLE,
   rowTitles,
   selectRect,
   type TableScope,
@@ -34,12 +42,16 @@ const ALIGNS = [
   { id: 'table.alignDefault', title: 'Default Alignment', align: '' },
 ] as const;
 
+/** Why a command of the Table menu is disabled with the caret outside a table. */
+const inTable = (state: EditorState): string | undefined =>
+  headInTable(state) ? undefined : NOT_IN_TABLE;
+
 /**
  * Registers the Table menu's commands and returns a function that takes them out again. Register
  * before the menu bar is drawn, as every plugin with commands does.
  */
-export function createTables(editor: Editor): () => void {
-  const removeGrips = editor.addExtension(tableGrips());
+export function createTables(editor: Editor, options: { tooltipMs?: number } = {}): () => void {
+  const removeGrips = editor.addExtension(tableGrips(options));
   const select = (
     id: string,
     title: string,
@@ -51,7 +63,7 @@ export function createTables(editor: Editor): () => void {
     ...(shortcut ? { shortcut, keyFallsThrough: true } : {}),
     menu: 'table',
     group: 'select',
-    isEnabled: headInTable,
+    disabledReason: inTable,
     run: (target) => selectRect(target.view, scope),
   });
   /** A command on the rows the selection touches: its title counts them. Outside a table its key is
@@ -62,14 +74,22 @@ export function createTables(editor: Editor): () => void {
     shortcut: string,
     run: (view: EditorView) => boolean,
     group = 'rows',
+    disabledReason: (state: EditorState) => string | undefined = inTable,
   ): EditorCommand => ({
     id,
     title,
     shortcut,
-    keyFallsThrough: true,
+    // A command with more reasons than the caret outside a table (a move at the edge, the last row)
+    // is disabled there, and in a table its key stays the table's, and says why.
+    keyFallsThrough:
+      disabledReason === inTable
+        ? true
+        : (state) =>
+            !headInTable(state) && twinAt(state, state.selection.main.head)?.kind !== 'table',
     menu: 'table',
     group,
-    isEnabled: headInTable,
+    structure: ['table'],
+    disabledReason,
     run: (target) => run(target.view),
   });
   const commands: EditorCommand[] = [
@@ -80,14 +100,29 @@ export function createTables(editor: Editor): () => void {
     row('table.insertRowBelow', rowTitles.insertBelow, 'Alt-Mod-ArrowDown', (view) =>
       insertRows(view, false),
     ),
-    row('table.deleteRow', rowTitles.delete, 'Alt-Mod-Backspace', deleteRows),
-    row('table.moveRowUp', rowTitles.moveUp, 'Alt-ArrowUp', (view) => moveRows(view, true), 'move'),
+    row(
+      'table.deleteRow',
+      rowTitles.delete,
+      'Alt-Mod-Backspace',
+      deleteRows,
+      'rows',
+      deleteRowsReason,
+    ),
+    row(
+      'table.moveRowUp',
+      rowTitles.moveUp,
+      'Alt-ArrowUp',
+      (view) => moveRows(view, true),
+      'move',
+      (state) => moveRowsReason(state, true),
+    ),
     row(
       'table.moveRowDown',
       rowTitles.moveDown,
       'Alt-ArrowDown',
       (view) => moveRows(view, false),
       'move',
+      (state) => moveRowsReason(state, false),
     ),
     row(
       'table.insertColumnLeft',
@@ -103,22 +138,41 @@ export function createTables(editor: Editor): () => void {
       (view) => insertCols(view, false),
       'columns',
     ),
-    row('table.deleteColumn', colTitles.delete, 'Ctrl-Meta-Backspace', deleteCols, 'columns'),
+    row(
+      'table.deleteColumn',
+      colTitles.delete,
+      'Ctrl-Meta-Backspace',
+      deleteCols,
+      'columns',
+      deleteColsReason,
+    ),
+    // The whole table has no default key: ⌫ on a table whose cells are empty is its keyboard path.
+    {
+      id: 'table.deleteTable',
+      title: 'Delete Table',
+      structure: ['table'],
+      menu: 'table',
+      group: 'columns',
+      disabledReason: inTable,
+      run: (target) => deleteTable(target.view),
+    },
     // Moving columns has no default key: Alt with the arrows is the word and the row.
     {
       id: 'table.moveColumnLeft',
       title: colTitles.moveLeft,
+      structure: ['table'],
       menu: 'table',
       group: 'move',
-      isEnabled: headInTable,
+      disabledReason: (state) => moveColsReason(state, true),
       run: (target) => moveCols(target.view, true),
     },
     {
       id: 'table.moveColumnRight',
       title: colTitles.moveRight,
+      structure: ['table'],
       menu: 'table',
       group: 'move',
-      isEnabled: headInTable,
+      disabledReason: (state) => moveColsReason(state, false),
       run: (target) => moveCols(target.view, false),
     },
     // The selected columns' alignment, checked for the caret's column. No default key: Word's keys
@@ -126,9 +180,10 @@ export function createTables(editor: Editor): () => void {
     ...ALIGNS.map(({ id, title, align }): EditorCommand => ({
       id,
       title,
+      structure: ['table'],
       menu: 'table',
       group: 'align',
-      isEnabled: headInTable,
+      disabledReason: (state) => alignReason(state, align),
       isActive: (state) => caretAlign(state) === align,
       run: (target) => alignCols(target.view, align),
     })),
@@ -169,6 +224,7 @@ export const plugin: Plugin = {
           shortcut: 'Alt-Mod-ArrowRight',
         },
         { id: 'table.deleteColumn', title: 'Delete Column', shortcut: 'Ctrl-Meta-Backspace' },
+        { id: 'table.deleteTable', title: 'Delete Table' },
         { id: 'table.moveColumnLeft', title: 'Move Column Left' },
         { id: 'table.moveColumnRight', title: 'Move Column Right' },
         { id: 'table.alignLeft', title: 'Align Left' },

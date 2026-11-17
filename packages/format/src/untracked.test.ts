@@ -490,6 +490,34 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
     );
   });
 
+  it('refuses a backslash typed or left right in front of a marker, which escapes it', () => {
+    // As with Track Changes on: other Markdown readers would show the marker as text (format §3.1).
+    for (const [body, name] of [
+      ['abc<!--ins k3x9-->x<!--/k3x9--> def', "Bo Chen's insertion"],
+      ['abc<!--del k3x9 x--> def', "Bo Chen's deletion"],
+      ['abc<!--cmt k3x9-->x<!--/k3x9--> def', "Bo Chen's comment"],
+      ['| a | b<!--ins k3x9-->x<!--/k3x9--> |\n| - | - |', "Bo Chen's insertion"],
+    ] as const) {
+      const text = file(body, { k3x9: 'bo' }, body.includes('cmt') ? thread('k3x9', 'bo') : []);
+      const at = text.indexOf('<!--');
+      expect(message(text, type(at, '\\'), ada), body).toBe(
+        `A backslash can't stand right in front of the marker of ${name} while Track Changes is off: other Markdown readers would show the marker as text. Decide ${name} first, or turn on Track Changes.`,
+      );
+      expect(refusal(text, type(at, '\\')), body).toBe('no-legal-placement');
+      // Two backslashes escape each other, and another character is no matter.
+      expect(message(text, type(at, '\\\\'), ada), body).toBe('');
+      expect(message(text, type(at, 'q'), ada), body).toBe('');
+    }
+    // The backslash is left in front of the marker by a deletion between them.
+    const between = file('abc\\x<!--ins k3x9-->y<!--/k3x9--> def', { k3x9: 'bo' });
+    expect(
+      message(between, remove(between.indexOf('x<!--'), between.indexOf('x<!--') + 1), ada),
+    ).toMatch(/^A backslash can't stand right in front of the marker of Bo Chen's insertion/);
+    // A backslash that was in front of a marker already is no matter to an edit that leaves it.
+    const damaged = file('abc\\<!--ins k3x9-->y<!--/k3x9--> def', { k3x9: 'bo' });
+    expect(message(damaged, type(0, 'q'), ada)).toBe('');
+  });
+
   it('refuses an edit that would hide other changes in code', () => {
     const text = file('one <!--ins k3x9-->x<!--/k3x9--> two` three', { k3x9: 'bo' });
     expect(refusal(text, type(0, '`'))).toBe('would-hide-marks');
@@ -503,7 +531,7 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
     for (const edit of [type(5, '\n\n'), remove(0, 6)]) {
       expect(refusal(text, edit), JSON.stringify(edit)).toBe('would-hide-marks');
       expect(message(text, edit), JSON.stringify(edit)).toBe(
-        'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw.',
+        'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain.',
       );
     }
     // A line break that leaves no blank line keeps it a line of the paragraph.

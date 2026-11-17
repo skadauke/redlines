@@ -1,4 +1,4 @@
-// The Preferences window: four panes, reached by icons along the top. Every change is saved at once
+// The Preferences window: five panes, reached by icons along the top. Every change is saved at once
 // to the settings every window of the app shares (settings.ts), and the app's windows follow it
 // through the `storage` event, so there is nothing to save and nothing to close for it to apply.
 
@@ -9,6 +9,7 @@ import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { announceAgentsChanged } from '../agent-changes.ts';
+import { askAgainInAllDocuments } from '../untracked-answers.ts';
 import {
   agentSetup,
   agentSkills,
@@ -23,15 +24,22 @@ import { currentIdentity } from '../identity.ts';
 import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
 import { ignorePinch } from '../text-size.ts';
 import { icon } from '../ui/icons.ts';
+import { publishedShortcutEntries } from '../shortcuts-published.ts';
+import { installTitleHints } from '../ui/title-hints.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
-import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from '../zoom.ts';
+import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
+import { startsFilter } from './filter-key.ts';
+import { noRingOnClick } from './tabs.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
 import { createSetupRegistry } from './setup-registry.ts';
+import { forgetShortcutsFilter } from './shortcuts-pane.ts';
 import {
   PANES,
+  buildFilterSections,
+  renderFilter,
+  type FilterSection,
   renderPane,
-  showZoom,
   type CommandLineInstall,
   type CommandLineLink,
   type DefaultApp,
@@ -43,8 +51,11 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import '../zoom.css';
 import './preferences.css';
+import '../ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
+
+installTitleHints();
 
 let settings = loadSettings();
 // The theme, and the window itself in its appearance, as in every window (window-theme.ts). The
@@ -55,8 +66,6 @@ const theme = followTheme(document.documentElement, settings, {
 
 // The window zoom the app handed this page, before anything draws (zoom.ts).
 applyZoom(document.documentElement, initialZoom() ?? 1);
-/** The app's zoom, followed once the first pane is drawn; none in a browser. */
-let zoom: PageZoom | null = null;
 
 const plugins = {
   /** Settings that plugins contribute, kept apart from the app's own. */
@@ -128,13 +137,8 @@ const deps: PaneDeps = {
     theme.show(settings);
     if (settings.rotateIcon !== before.rotateIcon) reportIconRotation(settings.rotateIcon);
   },
-  setZoom: (level) => {
-    // In the app the zoom is the app's: it keeps the level, zooms every window and hears of it
-    // back (zoom.ts). In a browser there is only the setting.
-    if (zoom) void zoom.ask(level);
-    else settings = updateSettings({ zoom: level });
-  },
   gitIdentity: git,
+  askAgain: askAgainInAllDocuments,
   installCommandLine: () => installCommandLine<CommandLineInstall>('install_command_line'),
   installCommandLineAtHome: () =>
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
@@ -151,10 +155,16 @@ const deps: PaneDeps = {
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({
         id: provider.id,
-        name: provider.name,
+        // The card is the program's: what is shown of the agent in a document is its handle.
+        name: provider.id === 'claude' ? 'Claude Code' : provider.name,
+        ...(provider.models ? { models: provider.models } : {}),
         detect: (fresh?: boolean) => {
           if (fresh) detections.delete(provider.id);
-          const kept = detections.get(provider.id) ?? provider.detect();
+          const kept =
+            detections.get(provider.id) ??
+            (!isTauri && import.meta.env.DEV
+              ? import('./dev-detect.ts').then(({ devDetect }) => devDetect(provider.id))
+              : provider.detect());
           detections.set(provider.id, kept);
           // A look the person asked for may have found the agent changed under the documents too.
           if (fresh)
@@ -172,6 +182,8 @@ const deps: PaneDeps = {
               signIn: () => setups.track(provider.id, 'sign-in', agentSetup.signIn(provider.id)),
               signInInTerminal: () => agentSetup.signInInTerminal(provider.id),
               stop: () => agentSetup.stop(provider.id),
+              // The newest version, so that Update shows only when there is one (#527).
+              latest: (fresh?: boolean) => agentSetup.latest(provider.id, fresh),
               running: () => setups.running(provider.id),
               // The skill that teaches the agent Redlines files, in the folder it reads skills
               // from. OpenClaw reads Codex's folder too.
@@ -180,6 +192,15 @@ const deps: PaneDeps = {
                 install: () => agentSkills.install(provider.id),
                 ...(provider.id === 'codex' ? { alsoReadBy: 'OpenClaw' } : {}),
               },
+            }
+          : {}),
+        // A plain page in development says a newer Codex is out, so that Update can be seen.
+        ...(!isTauri && import.meta.env.DEV
+          ? {
+              // Nothing to update here: an update ends well, and changes nothing.
+              update: () => Promise.resolve({ ok: true, message: '' }),
+              latest: () =>
+                import('./dev-detect.ts').then(({ devLatest }) => devLatest(provider.id)),
             }
           : {}),
       })),
@@ -209,6 +230,7 @@ const deps: PaneDeps = {
         await invoke('agent_logs_open');
       },
     }),
+  shortcutEntries: publishedShortcutEntries,
   // No plugin contributes a setting yet; when one does, its values are kept here.
   contributions: [],
   pluginValue: (id) => plugins.read()[id],
@@ -231,8 +253,23 @@ watchSettings((next) => {
   // someone types their name would take the caret away, so what is being edited is left alone, and
   // so is a row that waits for the system's panel to answer, which the redrawn row couldn't hear.
   const active = document.activeElement;
-  const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
-  if (!editing && !pane?.querySelector('[data-waiting]')) show(current);
+  // The Shortcuts pane's own Filter is drawn again with the text and caret it has (shortcuts-pane.ts),
+  // but a key being recorded is left alone: the change would end it.
+  const ownFilter =
+    active instanceof HTMLInputElement && active.classList.contains('rl-pref-kfilter')
+      ? { start: active.selectionStart, end: active.selectionEnd }
+      : null;
+  const editing =
+    (active instanceof HTMLInputElement && !ownFilter) || active instanceof HTMLSelectElement;
+  if (!editing && !pane?.querySelector('[data-waiting], .rl-pref-krec')) {
+    if (filter.hidden) show(current);
+    else showFilter(true);
+    if (ownFilter) {
+      const again = pane?.querySelector<HTMLInputElement>('.rl-pref-kfilter');
+      again?.focus();
+      again?.setSelectionRange(ownFilter.start, ownFilter.end);
+    }
+  }
 });
 
 const tabs = document.querySelector<HTMLElement>('.rl-pref-tabs');
@@ -261,6 +298,7 @@ const ICONS = {
   appearance: 'appearance',
   editor: 'editor',
   agents: 'agents',
+  shortcuts: 'shortcuts',
 } as const;
 for (const { id, label } of PANES) {
   const button = document.createElement('button');
@@ -268,49 +306,119 @@ for (const { id, label } of PANES) {
   button.className = 'rl-pref-tab';
   button.id = `rl-pref-tab-${id}`;
   button.setAttribute('role', 'tab');
-  button.setAttribute('aria-label', label);
-  button.dataset['hint'] = label;
-  button.append(icon(ICONS[id], 20));
-  const hint = document.createElement('span');
-  hint.className = 'rl-pref-hint';
-  hint.setAttribute('aria-hidden', 'true');
-  hint.textContent = label;
-  button.append(hint);
-  button.addEventListener('click', () => show(id));
-  // The arrow keys move between the panes, as in any row of tabs.
+  button.append(icon(ICONS[id], 20), label);
+  noRingOnClick(button);
+  button.addEventListener('click', () => {
+    clearFilter();
+    show(id);
+  });
   button.addEventListener('keydown', (event) => {
     const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
     if (!step) return;
     event.preventDefault();
     const index = (PANES.findIndex((p) => p.id === id) + step + PANES.length) % PANES.length;
     const next = PANES[index]!.id;
+    clearFilter();
     show(next);
     buttons.get(next)?.focus();
   });
   buttons.set(id, button);
   tabs.append(button);
 }
-// A window that asks for a pane (a failed run's line offers Preferences › Agents) is shown it, as
-// it opens and while it is open.
+
+// The filter: not there until a key is typed with nothing to type in; then it holds that key and
+// shows the matching rows of every pane, each under its pane and section. Escape clears it.
+const filter = document.createElement('input');
+filter.type = 'search';
+filter.className = 'rl-pref-filter';
+filter.placeholder = 'Filter';
+filter.setAttribute('aria-label', 'Filter');
+filter.autocomplete = 'off';
+filter.spellcheck = false;
+filter.hidden = true;
+pane.before(filter);
+/** The rows of every pane, built once for a filter, so that a keystroke redraws none of them. */
+let built: FilterSection[] | null = null;
+function showFilter(rebuild = false): void {
+  for (const [id, button] of buttons) {
+    button.setAttribute('aria-selected', 'false');
+    // The tab of the pane the filter was opened from stays in the tab order.
+    button.tabIndex = id === current ? 0 : -1;
+  }
+  tidy();
+  tidy = () => {};
+  if (rebuild || !built) {
+    detections.clear();
+    built = buildFilterSections(deps);
+  }
+  renderFilter(filter.value, pane!, deps, built);
+  pane!.removeAttribute('aria-labelledby');
+}
+function clearFilter(): void {
+  built = null;
+  forgetShortcutsFilter();
+  if (filter.hidden) return;
+  filter.value = '';
+  filter.hidden = true;
+}
+/** Back from the filter to the pane it was opened from, with the focus on its tab. */
+function leaveFilter(): void {
+  clearFilter();
+  show(current);
+  buttons.get(current)?.focus();
+}
+filter.addEventListener('input', () => {
+  if (filter.value === '') leaveFilter();
+  else showFilter();
+});
+filter.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  leaveFilter();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented || event.isComposing) return;
+  // Escape clears the filter from a result's control too.
+  if (event.key === 'Escape' && !filter.hidden) {
+    event.preventDefault();
+    leaveFilter();
+    return;
+  }
+  // A first letter or digit, from anywhere but a field that takes text (filter-key.ts), and not
+  // while the filter is open.
+  if (!filter.hidden || !startsFilter(event)) return;
+  // In the Shortcuts pane the key goes to that pane's own Filter, which narrows its commands.
+  const own =
+    current === 'shortcuts' ? pane.querySelector<HTMLInputElement>('.rl-pref-kfilter') : null;
+  if (own) {
+    event.preventDefault();
+    own.focus();
+    own.value += event.key;
+    own.dispatchEvent(new Event('input'));
+    return;
+  }
+  event.preventDefault();
+  filter.hidden = false;
+  filter.value = event.key;
+  filter.focus();
+  showFilter();
+});
+
 show(takePaneRequest() ?? 'general');
-watchPaneRequests((id) => show(id));
+watchPaneRequests((id) => {
+  clearFilter();
+  show(id);
+});
 
 if (isTauri) {
-  // The app zooms this window (and grows it) as the person's zoom changes anywhere; the stepper
-  // shows the level then.
-  zoom = await followZoom(tauriZoomLink(), {
+  // The app zooms this window (and grows it) as the person's zoom changes anywhere.
+  await followZoom(tauriZoomLink(), {
     root: document.documentElement,
     win: window,
     level: initialZoom() ?? 1,
     settings: () => settings.zoom,
     save: (level) => {
       settings = updateSettings({ zoom: level });
-    },
-    after: () => {
-      // Shown in place: drawing the pane again would take the focus from the button pressed and
-      // replace the live region that says the new level.
-      settings = loadSettings();
-      showZoom(pane, settings.zoom);
     },
   }).catch((error: unknown) => {
     console.error('Could not follow the window zoom', error);

@@ -146,6 +146,19 @@ describe('Redlines', () => {
     expect(lineClasses(single, 3)).toEqual([]);
   });
 
+  it('puts the bar of lines drawn as one on the first of them, though the change is on a later (#654)', () => {
+    // The comment's opener and its text run over two lines, which the view draws as one; the
+    // insertion is only on the second.
+    const doc = withLedger(
+      'a <!--cmt b2b2 hello\nworld--> b <!--ins c3c3-->x<!--/c3c3-->\nnext',
+      { c3c3: 'bo' },
+      'comments:\n  b2b2:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Why?\n',
+    );
+    const editor = load(doc, { view: 'simple' });
+    expect(lineClasses(editor, 2)).toEqual([]);
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
+  });
+
   it('marks a point comment with a pin and leaves resolved comments untinted', () => {
     const thread = (id: string, resolved: boolean) =>
       `  ${id}:\n    by: bo\n    at: 2026-10-31T09:40Z\n` +
@@ -268,7 +281,7 @@ describe('Redlines', () => {
     expect(editor.view.moveByChar(EditorSelection.cursor(from), true).head).toBe(lineEnd);
   });
 
-  it('lets the caret step over markers and the ledger, except in Raw', () => {
+  it('lets the caret step over markers and the ledger, except in Plain', () => {
     const editor = load(fixture);
     const ranges = atomic(editor);
     const parsed = parse(fixture);
@@ -556,7 +569,7 @@ describe('Deleted blocks', () => {
       item.view.contentDOM
         .querySelector<HTMLElement>('.rl-struck')
         ?.style.getPropertyValue('--rl-hang'),
-    ).toBe('2');
+    ).toBe('3'); // a bullet's box is three columns, as a number's is
     const quote = load(
       withLedger('One.\n\n<!--del b2b2 > quoted\\n\\n-->\n\nAfter.', { b2b2: 'bo' }),
     );
@@ -582,7 +595,7 @@ describe('Deleted blocks', () => {
     expect(blocksOf(several).map((block) => block.mark)).toEqual(['b2b2', 'b2b2', 'b2b2']);
   });
 
-  it('draws a table deleted whole as a block of its source, struck', () => {
+  it('draws a table deleted whole as a ghost table, where it was, and not as its source', () => {
     const doc = withLedger(
       'One.\n\n<!--del b2b2 | a | b |\\n| - | - |\\n| 1 | 2 |\\n\\n-->\n\nAfter.',
       {
@@ -590,7 +603,23 @@ describe('Deleted blocks', () => {
       },
     );
     const editor = load(doc);
-    expect(page(editor)).toEqual(['One.', '~| a | b | | - | - | | 1 | 2 |~', 'After.']);
+    // One block, the table's cells, between the lines above and below: no source line of it.
+    expect(page(editor)).toEqual(['One.', '~ab12~', 'After.']);
+    expect(blocksOf(editor)).toEqual([
+      {
+        classes: ['rl-ghost-table', 'rl-bar', 'rl-author-3', 'rl-space-block'],
+        text: 'ab12',
+        mark: 'b2b2',
+      },
+    ]);
+    const rows = [...editor.view.contentDOM.querySelectorAll('.rl-struck [role="row"]')];
+    expect(
+      rows.map((row) => [...row.querySelectorAll('.rl-tc')].map((cell) => cell.textContent)),
+    ).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
+    expect(editor.view.contentDOM.textContent).not.toContain('|');
   });
 
   it('draws a deleted fenced code block as code, its fences hidden', () => {
@@ -1037,8 +1066,8 @@ describe('Simple', () => {
   });
 });
 
-describe('Raw', () => {
-  it('Raw has no replace decorations', () => {
+describe('Plain', () => {
+  it('Plain has no replace decorations', () => {
     const editor = load(fixture);
     editor.setViewMode('raw');
     const { state } = editor.view;
@@ -1056,12 +1085,12 @@ describe('Raw', () => {
     const markers = [...editor.view.contentDOM.querySelectorAll('.rl-tok-comment')];
     expect(markers.map((m) => m.textContent)).toContain('<!--ins k3x9-->');
     expect(getComputedStyle(markers[0]!).color).toBe('#6e6e73');
-    // The other views draw the document, without Raw's highlighting.
+    // The other views draw the document, without Plain's highlighting.
     editor.setViewMode('redlines');
     expect(editor.view.contentDOM.querySelector('[class*="rl-tok-"]')).toBeNull();
   });
 
-  it('moves the caret out of a marker when Raw is left', () => {
+  it('moves the caret out of a marker when Plain is left', () => {
     const editor = load(fixture, { view: 'raw' });
     editor.view.dispatch({ selection: { anchor: fixture.indexOf('k3x9') } });
     editor.setViewMode('redlines');
@@ -1121,6 +1150,7 @@ describe('ui state', () => {
   it('uiState.hasRedlines is true for the fixture and false for a plain file', () => {
     expect(load(fixture).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
     expect(load('# Plain\n\nNo marks.\n').getUiState()).toEqual({
+      kind: 'markdown',
       view: 'clean',
       markupView: 'redlines',
       tracking: false,
@@ -1128,11 +1158,13 @@ describe('ui state', () => {
       changes: [],
       activeCommands: [],
       enabledCommands: [],
+      disabledReasons: {},
       commandTitles: {},
       undo: null,
       redo: null,
       canUndo: false,
       canRedo: false,
+      canAcceptAll: false,
     });
   });
 
@@ -1229,7 +1261,7 @@ describe('loading', () => {
     editor.reloadDoc(fixture);
     expect(reports.at(-1)).toMatchObject({ view: 'redlines', hasRedlines: true });
 
-    // Clean chosen for a document with redlines stays Clean, and Raw stays Raw.
+    // Clean chosen for a document with redlines stays Clean, and Plain stays Plain.
     editor.setViewMode('clean');
     editor.reloadDoc(fixture.replace('April', 'May'));
     expect(editor.getUiState().view).toBe('clean');

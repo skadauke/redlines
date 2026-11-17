@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { localImageUrl } from './images.ts';
+import { localImageUrl, relativeImagePath } from './images.ts';
 
 const url = (path: string) => `asset://${path}`;
 const at = (src: string, document = '/repo/docs/plan.md', project = '/repo') =>
@@ -30,9 +30,36 @@ describe('localImageUrl', () => {
     expect(at('a/../../../x.png')).toBeNull();
   });
 
+  it('takes the whole folder of a document with no folder, as a browser tab’s is', () => {
+    // A tab keeps one folder in memory, whose path is empty: every path in it is inside.
+    const inTab = (src: string, document = 'sample.md') => localImageUrl(src, document, '', url);
+    expect(inTab('images/a.png')).toBe('asset://images/a.png');
+    expect(inTab('a b.png')).toBe('asset://a b.png');
+    expect(inTab('./images/a.png')).toBe('asset://images/a.png');
+    // Nothing above it, and no path that names a place by its own.
+    expect(inTab('../a.png')).toBeNull();
+    expect(inTab('/etc/hosts')).toBeNull();
+    expect(inTab('C:\\a.png')).toBeNull();
+  });
+
   it('reads Windows paths', () => {
     expect(localImageUrl('img\\a.png', 'C:\\work\\doc.md', 'C:\\work', (p) => p)).toBe(
       'C:\\work\\img\\a.png',
     );
+  });
+});
+
+describe('relativeImagePath', () => {
+  it('writes the image as the document reaches it, beside, below or above', () => {
+    expect(relativeImagePath('/p/doc.md', '/p/shot.png')).toBe('shot.png');
+    expect(relativeImagePath('/p/doc.md', '/p/img/shot.png')).toBe('img/shot.png');
+    expect(relativeImagePath('/p/notes/doc.md', '/p/img/a b.png')).toBe('../img/a b.png');
+    expect(relativeImagePath('/p/a/b/doc.md', '/p/shot.png')).toBe('../../shot.png');
+    expect(relativeImagePath('C:\\p\\doc.md', 'C:\\p\\img\\x.png')).toBe('img/x.png');
+  });
+
+  it('has none for a document with no file, or on another drive', () => {
+    expect(relativeImagePath(null, '/p/shot.png')).toBeNull();
+    expect(relativeImagePath('C:\\p\\doc.md', 'D:\\p\\x.png')).toBeNull();
   });
 });

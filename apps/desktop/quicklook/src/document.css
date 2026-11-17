@@ -127,7 +127,22 @@ a {
 
 /* An image the preview doesn't load: its alt text, quietly. */
 .rl-image {
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
+}
+
+/* An image that the extension loaded from beside the document. */
+img.rl-image {
+  max-width: 100%;
+  vertical-align: middle;
+}
+/* A size the document wrote (#629): with both, the height follows the width, in the same shape; with
+   only a height, the height stands. */
+img.rl-image:not([height]),
+img.rl-image[width] {
+  height: auto;
+}
+img.rl-image[height]:not([width]) {
+  width: auto;
 }
 
 code {
@@ -159,7 +174,7 @@ code[data-chunk]::before {
   content: attr(data-chunk);
   display: block;
   margin-bottom: 0.6em;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
 }
 
 /* Front matter is about the document rather than part of it: dimmed, in code's face. */
@@ -177,6 +192,31 @@ blockquote {
   font-style: var(--rl-quote-style);
 }
 blockquote > * + * {
+  margin-top: var(--rl-space-loose);
+}
+
+/* A Quarto callout (divs.ts): a quiet box under its label, in the page's grays, as a quote is. */
+.rl-callout {
+  padding: 8px 14px 10px;
+  border: 1px solid var(--rl-rule);
+  border-left-width: 3px;
+  border-radius: 4px;
+}
+.rl-callout-label {
+  margin: 0;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.rl-callout-body {
+  margin-top: 4px;
+}
+.rl-callout-body > * {
+  margin: 0;
+}
+.rl-callout-body > * + * {
   margin-top: var(--rl-space-loose);
 }
 
@@ -243,7 +283,8 @@ input[type='checkbox']:checked::after {
   transform: rotate(45deg);
 }
 
-/* Tables: a header row and horizontal rules only. */
+/* Tables: a header row, horizontal rules and faint lines between the columns, as the editor draws
+   them (`.rl-tc` in packages/editor/src/preview/theme.ts): the same sizes, the same rule color. */
 .rl-tbl-scroll {
   overflow-x: auto;
 }
@@ -255,6 +296,7 @@ table {
 }
 th,
 td {
+  position: relative;
   padding: 10px 16px 10px 0;
   border-bottom: 1px solid var(--rl-rule);
   text-align: left;
@@ -264,13 +306,24 @@ th:last-child,
 td:last-child {
   padding-right: 0;
 }
+/* Each cell but the first draws a line at its left, halfway across the gap the cell before it keeps.
+   It is drawn, not a border, so that no column's measure changes. */
+th:not(:first-child)::after,
+td:not(:first-child)::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  border-left: 1px solid var(--rl-rule);
+  pointer-events: none;
+}
 th {
   padding-top: 0;
   padding-bottom: 8px;
   border-bottom-color: var(--rl-ink-3);
   color: var(--rl-ink-2);
   font-family: var(--rl-th-font);
-  font-size: var(--rl-th-size);
   font-weight: 700;
   letter-spacing: var(--rl-th-track);
   text-transform: var(--rl-th-case);
@@ -314,4 +367,100 @@ section[data-footnotes] {
   padding: 12px 0 0;
   border-top: 1px solid var(--rl-rule);
   border-bottom: 0;
+}
+
+/* The HTML that GitHub draws (html.ts). The page has no style attribute, so the presentational
+   `align` is read here, as a browser's own sheet reads it. */
+[align='center'] {
+  text-align: center;
+}
+[align='right'] {
+  text-align: right;
+}
+[align='left'] {
+  text-align: left;
+}
+[align='justify'] {
+  text-align: justify;
+}
+table[align='center'] {
+  margin-inline: auto;
+  width: auto;
+}
+table[align='right'] {
+  margin-inline-start: auto;
+  width: auto;
+}
+img[align='center'] {
+  display: block;
+  margin-inline: auto;
+}
+td[valign='middle'],
+th[valign='middle'] {
+  vertical-align: middle;
+}
+td[valign='bottom'],
+th[valign='bottom'] {
+  vertical-align: bottom;
+}
+mark {
+  background: #fff3a8;
+  color: inherit;
+  border-radius: 2px;
+}
+@media (prefers-color-scheme: dark) {
+  mark {
+    background: #5c4f00;
+  }
+}
+kbd {
+  padding: 0.1em 0.4em;
+  border: 1px solid var(--rl-rule);
+  border-radius: 5px;
+  font-family: var(--rl-font-mono);
+  font-size: 0.84em;
+}
+sub {
+  font-size: 0.75em;
+  line-height: 0;
+}
+small {
+  font-size: 0.85em;
+}
+abbr[title] {
+  text-decoration: underline dotted;
+}
+ins {
+  text-decoration: underline;
+}
+figure {
+  margin: 1em 0;
+}
+figcaption {
+  color: var(--rl-ink-2);
+  font-size: 0.9em;
+}
+dt {
+  font-weight: 700;
+}
+dd {
+  margin-inline-start: 1.5em;
+}
+
+/* A section that folds. Closed unless the file says `open`, as on GitHub; WebKit toggles it without
+   script. */
+details > summary {
+  cursor: default;
+}
+details[open] > summary {
+  margin-bottom: 0.5em;
+}
+
+/* An element GitHub drops that has nothing to show: its name, quietly, so that nothing is invisible. */
+.rl-chip {
+  padding: 0.05em 0.5em;
+  border-radius: 999px;
+  background: var(--rl-tint);
+  color: var(--rl-ink-2);
+  font-size: 0.8em;
 }

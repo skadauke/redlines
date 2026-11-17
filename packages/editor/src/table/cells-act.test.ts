@@ -95,24 +95,110 @@ describe('typing over selected cells', () => {
   scriptRows(
     both([
       {
-        name: 'typing clears the cells and types into the first, top-left one',
+        name: 'typing clears the first, top-left cell alone and leaves the others',
         doc: SEL,
         keys: [{ type: 'z' }],
         off: {
-          file: G('| 11 | z |  |', '| 21 |  |  |'),
-          caret: G('| 11 | z‸ |  |', '| 21 |  |  |'),
+          file: G('| 11 | z | 13 |', '| 21 | 22 | 23 |'),
+          caret: G('| 11 | z‸ | 13 |', '| 21 | 22 | 23 |'),
         },
-        on: { newest: G('| 11 | z |  |', '| 21 |  |  |') },
+        on: {
+          newest: G('| 11 | z | 13 |', '| 21 | 22 | 23 |'),
+          original: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |'),
+        },
+      },
+      {
+        name: 'a rectangle starting mid-table: typing writes in its top-left cell alone',
+        doc: G('| 11 | 12 | 13 |', '| 21 | [22 | 23 |', '| 31 | 32 | 33] |'),
+        keys: [{ type: 'z' }],
+        off: { file: G('| 11 | 12 | 13 |', '| 21 | z | 23 |') },
+        on: { newest: G('| 11 | 12 | 13 |', '| 21 | z | 23 |') },
+      },
+      {
+        name: 'a rectangle including the header row: typing replaces the header cell alone',
+        doc: '| [a | b | c |⏎| - | - | - |⏎| 11 | 12] | 13 |⏎| 21 | 22 | 23 |',
+        keys: [{ type: 'z' }],
+        off: { file: '| z | b | c |⏎| - | - | - |⏎| 11 | 12 | 13 |⏎| 21 | 22 | 23 |' },
+        on: { newest: '| z | b | c |⏎| - | - | - |⏎| 11 | 12 | 13 |⏎| 21 | 22 | 23 |' },
+      },
+      {
+        name: 'a top-left cell already empty: typing writes into it, the others stay',
+        doc: G('| 11 | [ | 13 |', '| 21 | 22 | 23] |'),
+        keys: [{ type: 'z' }],
+        off: { file: G('| 11 | z | 13 |', '| 21 | 22 | 23 |') },
+        on: { newest: G('| 11 | z | 13 |', '| 21 | 22 | 23 |') },
       },
       {
         name: 'a typed pipe is written escaped, in the first cell',
         doc: SEL,
         keys: [{ type: 'a|b' }],
-        off: { file: G('| 11 | a\\|b |  |', '| 21 |  |  |') },
-        on: { newest: G('| 11 | a\\|b |  |', '| 21 |  |  |') },
+        off: { file: G('| 11 | a\\|b | 13 |', '| 21 | 22 | 23 |') },
+        on: { newest: G('| 11 | a\\|b | 13 |', '| 21 | 22 | 23 |') },
       },
     ]),
   );
+});
+
+describe('typing over selected cells, in an editor', () => {
+  const open: Editor[] = [];
+  afterEach(() => {
+    for (const editor of open.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+  const doc = '| a | b |\n| - | - |\n| 11 | 12 |\n| 21 | 22 |\n';
+  function mount(text: string, tracking: boolean, from: string, to: string): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: text,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking,
+    });
+    open.push(editor);
+    editor.view.dispatch({
+      selection: { anchor: text.indexOf(from), head: text.indexOf(to) + to.length },
+    });
+    expect(rectOf(editor.view.state)).not.toBeNull();
+    return editor;
+  }
+  const type = (editor: Editor, text: string) =>
+    editor.view.dispatch(editor.view.state.replaceSelection(text), { userEvent: 'input.type' });
+
+  for (const tracking of [false, true]) {
+    const label = `Track Changes ${tracking ? 'on' : 'off'}`;
+    it(`ends with the caret after the typed text, no selection, one Undo, ${label}`, () => {
+      const editor = mount(doc, tracking, '11', '22');
+      const before = editor.getDoc();
+      type(editor, 'z');
+      expect(newestView(editor.getDoc()).text).toBe(
+        '| a | b |\n| - | - |\n| z | 12 |\n| 21 | 22 |\n',
+      );
+      expect(editor.view.state.selection.main.empty).toBe(true);
+      const head = editor.view.state.selection.main.head;
+      expect(editor.getDoc().slice(0, head).endsWith('z')).toBe(true);
+      if (tracking) {
+        // The first cell's text replaced (a substitution: its deletion and the insertion), and no
+        // mark in any other cell.
+        expect(editor.getDoc().match(/<!--(sub|del|ins) /g)).toHaveLength(1);
+      }
+      expect(undo(editor.view)).toBe(true);
+      expect(editor.getDoc()).toBe(before);
+    });
+
+    it(`a top-left cell holding a pending change: typing replaces its newest text, ${label}`, () => {
+      const first = mount(doc, true, '11', '12');
+      type(first, 'x');
+      const text = first.getDoc();
+      expect(text).toContain('<!--sub');
+      const editor = mount(text, tracking, '<!--sub', '22');
+      type(editor, 'z');
+      expect(newestView(editor.getDoc()).text).toBe(
+        '| a | b |\n| - | - |\n| z | 12 |\n| 21 | 22 |\n',
+      );
+      expect(undo(editor.view)).toBe(true);
+      expect(editor.getDoc()).toBe(text);
+    });
+  }
 });
 
 describe('formatting selected cells', () => {
@@ -144,8 +230,15 @@ describe('formatting selected cells', () => {
         name: '⌘K does nothing with cells selected',
         doc: SEL,
         keys: ['Mod-k'],
-        off: { file: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |') },
-        on: { newest: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |') },
+        // Link is disabled with cells selected, and its key says why.
+        off: {
+          file: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |'),
+          refusal: 'Cells selected have no one range to link. Select text in one cell.',
+        },
+        on: {
+          newest: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |'),
+          refusal: 'Cells selected have no one range to link. Select text in one cell.',
+        },
       },
     ]),
   );
@@ -192,7 +285,9 @@ describe('bold over cells decides on and off from all the selected text', () => 
     const first = doc.indexOf('|  |') + 2;
     editor.view.dispatch({ selection: { anchor: first, head: doc.lastIndexOf('|  |') + 2 } });
     expect(editor.commands.run('format.bold')).toBe(false);
-    expect(notices).toEqual(['There is no text in the selected cells to make bold.']);
+    expect(editor.getUiState().disabledReasons['format.bold']).toBe(
+      'There is no text in the selected cells to format.',
+    );
     expect(editor.getDoc()).toBe(doc);
     editor.destroy();
   });
@@ -355,13 +450,13 @@ describe('an input method composing over selected cells', () => {
   for (const tracking of [false, true]) {
     const label = `Track Changes ${tracking ? 'on' : 'off'}`;
 
-    it(`commits into the first cell, escaped, and one Undo gives every cell back, ${label}`, async () => {
+    it(`commits into the first cell, escaped, and the others stay, one Undo gives it back, ${label}`, async () => {
       const editor = mount(tracking);
       const before = editor.getDoc();
       compose(editor, ['¨', 'あ', 'あb'], 'a|b');
       await wait();
       expect(newestView(editor.getDoc()).text).toBe(
-        '| a | b | c |\n| - | - | - |\n| 11 | a\\|b |  |\n| 21 |  |  |\n',
+        '| a | b | c |\n| - | - | - |\n| 11 | a\\|b | 13 |\n| 21 | 22 | 23 |\n',
       );
       expect(undo(editor.view)).toBe(true);
       expect(editor.getDoc()).toBe(before);

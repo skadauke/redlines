@@ -736,7 +736,7 @@ describe('createLiveLines', () => {
       expect(showThread).toHaveBeenCalledWith('c2dk');
     });
 
-    it('tells of a question whose thread has no note, as in Clean or Raw, at once', async () => {
+    it('tells of a question whose thread has no note, as in Clean or Plain, at once', async () => {
       const inView = vi.fn(() => true);
       const s = liveLines({ inView });
       s.set('c2dk', ASKING);
@@ -796,7 +796,7 @@ describe('createLiveLines', () => {
     });
   });
 
-  it('tells of a failure whose thread has no note, as in Raw', async () => {
+  it('tells of a failure whose thread has no note, as in Plain', async () => {
     const inView = vi.fn(() => true);
     const s = liveLines({ inView });
     s.set('c2dk', FAILED);
@@ -842,6 +842,7 @@ function mountRun(
     author: me,
     document: {
       path: () => '/repo/plan.md',
+      plainOnly: () => false,
       generation: () => generation,
       read: () => editor.getDoc(),
       parsed: () => editor.getParsed(),

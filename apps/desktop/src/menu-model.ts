@@ -5,6 +5,7 @@
 
 import { baseTitle, menuViewOf } from '@redlines/editor';
 import type { CommandRegistry, EditorCommand, MenuView, ViewMode } from '@redlines/editor';
+import { commandEntryId } from './shortcuts.ts';
 import { TEXT_LEAST, TEXT_MOST, ZOOM_LEAST, ZOOM_MOST } from './text-size.ts';
 
 export interface MenuCommands {
@@ -22,6 +23,11 @@ export interface MenuCommands {
   rename(): void;
   revealInFinder(): void;
   print(): void;
+  exportPdf(): void;
+  /** Saves the document as a Word file, through a save panel (File › Export to Word…). */
+  exportWord(): void;
+  /** Opens a Word or Google Docs file as a new, unsaved document (File › Open .docx…). */
+  openDocx(): void;
   /** Quits after asking each window about its unsaved edits. */
   quit(): void;
   /** Opens the About Redlines window, or brings it forward. */
@@ -31,8 +37,20 @@ export interface MenuCommands {
    * nothing when it is shown already (`Editor.showView`).
    */
   setView(view: MenuView): void;
+  /**
+   * Turns Redlines' simple look on or off, as a click on a change bar does (`Editor.switchLook`);
+   * only while Redlines shows.
+   */
+  switchLook(): void;
   toggleSidebar(): void;
+  /** Shows the word count in the window's corner, or hides it (Preferences' switch). */
+  toggleWordCount(): void;
   toggleTracking(): void;
+  /**
+   * Accepts the changes in the selection, or with only a caret all of them, and turns Track Changes
+   * off (`Editor.acceptAllAndStopTracking`).
+   */
+  acceptAllAndStopTracking(): void;
   openReview(): void;
   /** Shows resolved comments in the rail, or hides them. */
   toggleResolved(): void;
@@ -62,16 +80,29 @@ export interface MenuCommands {
   openPreferences(): void;
   /** Opens the folder of agent logs in Finder. */
   showAgentLogs(): void;
+  /** Help › Report a Problem…: a filled-in issue to review and send. */
+  reportProblem(): void;
+  /** Help › Reveal Log: the crash log in Finder. */
+  revealCrashLog(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
 export interface MenuState {
+  /**
+   * Whether the document is a Plain-only file (text or code): it has Plain alone, and no Track
+   * Changes or review (`EditorUiState.kind`).
+   */
+  plainOnly: boolean;
   view: ViewMode;
   tracking: boolean;
   hasRedlines: boolean;
+  /** The editor's `EditorUiState.canAcceptAll`: a change in the selection, or in the document. */
+  canAcceptAll: boolean;
   sidebarOpen: boolean;
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
+  /** Whether the word count is shown in the window's corner. */
+  showWordCount: boolean;
   /** The window zoom (zoom.ts), a rung of its ladder (`ZOOM_LADDER`); none until the page follows the app's. */
   zoom: number | null;
   /** The text size, any whole percent from 80 to 400 as a multiple of the theme's own. */
@@ -84,6 +115,8 @@ export interface MenuState {
   activeCommands: readonly string[];
   /** The editor's `EditorUiState.enabledCommands`. */
   enabledCommands: readonly string[];
+  /** The editor's `EditorUiState.disabledReasons`: why each command that can't run can't. */
+  disabledReasons: Readonly<Record<string, string>>;
   /** The editor's `EditorUiState.commandTitles`: the titles that count the selection. */
   commandTitles: Readonly<Record<string, string>>;
   /** The editor's `EditorUiState.undo`: what Undo would take back, or null for nothing or no name. */
@@ -126,6 +159,11 @@ export interface StandardRow {
 
 export interface ActionRow {
   text: string;
+  /**
+   * Which shortcut is the row's (shortcuts.ts): `command:<id>` for a registered command, else the
+   * menu and the text, as in `File/Save`. Set by `appMenuModel`.
+   */
+  id?: string;
   /** In Tauri's notation, such as 'Shift+CmdOrCtrl+E'. */
   accelerator?: string;
   action: () => void;
@@ -198,19 +236,27 @@ export function acceleratorFor(shortcut: string): string {
 /** "Undo Typing": the item's name and what it does, or just the name for no step or no name. */
 const stepTitle = (verb: string, step: string | null) => (step ? `${verb} ${step}` : verb);
 
+const acceleratorOf = (shortcut: string | undefined) =>
+  shortcut ? acceleratorFor(shortcut) : undefined;
+
 const SEPARATOR: StandardRow = { item: 'Separator' };
 
 function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRow {
   const { id } = command;
   return {
+    id: commandEntryId(id),
     text: baseTitle(command),
     ...(typeof command.title === 'function'
       ? { textFor: (state: MenuState) => state.commandTitles[id] ?? baseTitle(command) }
       : {}),
-    accelerator: command.shortcut ? acceleratorFor(command.shortcut) : undefined,
+    // The key the command came with: the person's own are applied by the shortcuts (shortcuts.ts).
+    accelerator: acceleratorOf(
+      command.defaultShortcut === undefined ? command.shortcut : command.defaultShortcut,
+    ),
     action: () => void registry.run(id),
     checked: command.isActive ? (state) => state.activeCommands.includes(id) : undefined,
-    enabled: command.isEnabled ? (state) => state.enabledCommands.includes(id) : undefined,
+    // Every command can be disabled: a Plain-only file disables all but a few (`disabledReasonOf`).
+    enabled: (state) => state.enabledCommands.includes(id),
     keyInMenuOnly: true,
   };
 }
@@ -221,17 +267,19 @@ function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRo
  * console, once for each change.
  */
 export function drawnCommandsCheck(registry: CommandRegistry): () => void {
-  let drawn = registry.list();
+  // By id: the registry lists a command with the key it has now, a new object when that changes.
+  let drawn = registry.list().map(({ id }) => id);
   return () => {
-    const current = registry.list();
+    const current = registry.list().map(({ id }) => id);
     const changed = [
-      ...current.filter((command) => !drawn.includes(command)),
-      ...drawn.filter((command) => !current.includes(command)),
+      ...current.filter((id) => !drawn.includes(id)),
+      ...drawn.filter((id) => !current.includes(id)),
     ];
     if (!changed.length) return;
     drawn = current;
-    const ids = changed.map(({ id }) => id).join(', ');
-    console.error(`The menu bar was drawn without these changes to the commands: ${ids}`);
+    console.error(
+      `The menu bar was drawn without these changes to the commands: ${changed.join(', ')}`,
+    );
   };
 }
 
@@ -250,15 +298,19 @@ export function appMenuModel(
   const withCommands = (
     menu: NonNullable<EditorCommand['menu']>,
     rows: readonly MenuRow[],
+    last: readonly MenuRow[] = [],
   ): MenuRow[] => {
     const registered = registry.list().filter((command) => command.menu === menu);
     const commandRows = registered.flatMap((command, i) => {
       const row = commandRow(command, registry);
       return i > 0 && registered[i - 1]?.group !== command.group ? [SEPARATOR, row] : [row];
     });
-    return rows.length && commandRows.length
-      ? [...rows, SEPARATOR, ...commandRows]
-      : [...rows, ...commandRows];
+    const body =
+      rows.length && commandRows.length
+        ? [...rows, SEPARATOR, ...commandRows]
+        : [...rows, ...commandRows];
+    // The rows that close the menu, as the Mac's Enter Full Screen closes View, come after them.
+    return last.length ? [...body, SEPARATOR, ...last] : body;
   };
   // Redlines is checked in both its looks: Simple is its simple look, no view of its own.
   const viewRow = (view: MenuView, text: string, key: string): ActionRow => ({
@@ -266,6 +318,8 @@ export function appMenuModel(
     accelerator: `Alt+CmdOrCtrl+${key}`,
     action: () => commands.setView(view),
     checked: (state) => menuViewOf(state.view) === view,
+    // A Plain-only file has Plain alone (the title bar's menu says why, in its hint).
+    enabled: view === 'raw' ? undefined : (state) => !state.plainOnly,
   });
   // Reviewing needs a document with redlines. The Redlines view is there for any document
   // (design §5.3), and a disabled item would take its shortcut away.
@@ -341,7 +395,11 @@ export function appMenuModel(
         // Closing asks about unsaved edits through the window's close request.
         { item: 'CloseWindow', text: 'Close' },
         SEPARATOR,
+        { text: 'Open .docx…', action: () => commands.openDocx() },
+        { text: 'Export to Word…', action: () => commands.exportWord() },
+        SEPARATOR,
         { text: 'Print…', accelerator: 'CmdOrCtrl+P', action: () => commands.print() },
+        { text: 'Export as PDF…', action: () => commands.exportPdf() },
       ]),
     },
     {
@@ -377,83 +435,126 @@ export function appMenuModel(
         { item: 'SelectAll' },
       ]),
     },
+    { title: 'Insert', rows: withCommands('insert', []) },
     { title: 'Format', rows: withCommands('format', []) },
     { title: 'Paragraph', rows: withCommands('paragraph', []) },
-    { title: 'Table', rows: withCommands('table', []) },
+    {
+      title: 'Table',
+      rows: withCommands(
+        'table',
+        // The same command as Insert › Table, where Word and Docs have it too; its key is shown
+        // there, once. Without that command (an app with no formatting) the row isn't drawn.
+        registry.list().some(({ id }) => id === 'block.table')
+          ? [
+              {
+                text: 'Insert Table',
+                action: () => void registry.run('block.table'),
+                enabled: (state: MenuState) => state.enabledCommands.includes('block.table'),
+              },
+            ]
+          : [],
+      ),
+    },
     {
       title: 'View',
-      rows: withCommands('view', [
-        // ⌥⌘1 to ⌥⌘3, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
-        // the clash proves real (design §14, open question 6). Simple is Redlines' simple look,
-        // switched by a click on a change bar and by nothing here, so it has no row and no key.
-        viewRow('clean', 'Clean', '1'),
-        viewRow('redlines', 'Redlines', '2'),
-        viewRow('raw', 'Raw', '3'),
-        SEPARATOR,
-        // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
-        // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).
-        {
-          text: 'Actual Size',
-          accelerator: 'CmdOrCtrl+0',
-          action: () => commands.actualSize(),
-          enabled: (state) => state.zoom !== null && state.zoom !== 1,
-          ...zoomKey,
-        },
-        {
-          text: 'Zoom In',
-          accelerator: 'CmdOrCtrl+=',
-          action: () => commands.zoomIn(),
-          enabled: (state) => state.zoom !== null && state.zoom < ZOOM_MOST,
-          ...zoomKey,
-        },
-        {
-          text: 'Zoom Out',
-          accelerator: 'CmdOrCtrl+-',
-          action: () => commands.zoomOut(),
-          enabled: (state) => state.zoom !== null && state.zoom > ZOOM_LEAST,
-          ...zoomKey,
-        },
-        SEPARATOR,
-        // Text Zoom's keys keep the Mac's Ctrl and Cmd off the Mac too, as Show Files' do: a row
-        // has one accelerator for every platform, and Windows and Linux get keys of their own
-        // when they are supported.
-        {
-          text: 'Actual Text Size',
-          accelerator: 'Ctrl+Cmd+0',
-          action: () => commands.actualTextSize(),
-          enabled: (state) => state.textSize !== 1,
-        },
-        {
-          text: 'Larger Text',
-          accelerator: 'Ctrl+Cmd+=',
-          action: () => commands.biggerText(),
-          enabled: (state) => state.textSize < TEXT_MOST,
-        },
-        {
-          text: 'Smaller Text',
-          accelerator: 'Ctrl+Cmd+-',
-          action: () => commands.smallerText(),
-          enabled: (state) => state.textSize > TEXT_LEAST,
-        },
-        SEPARATOR,
-        {
-          text: 'Show Files',
-          accelerator: 'Ctrl+Cmd+S',
-          action: () => commands.toggleSidebar(),
-          textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
-        },
-        // The Mac's own, which says Exit Full Screen while the window is.
-        { item: 'Fullscreen', text: 'Enter Full Screen' },
-      ]),
+      rows: withCommands(
+        'view',
+        [
+          // ⌥⌘1 to ⌥⌘4, in the menu's order: Word for Mac uses ⌥⌘1 to ⌥⌘3 for headings, kept unless
+          // the clash proves real (design §14, open question 6).
+          viewRow('clean', 'Clean', '1'),
+          viewRow('redlines', 'Redlines', '2'),
+          viewRow('raw', 'Plain', '3'),
+          SEPARATOR,
+          // The simple look is no view of its own but a switch of Redlines' (#330, design §5.3): on
+          // while it shows, off in the full markup, and not there to choose in Clean and Plain, which
+          // have no look. It does what a click on a change bar does, for a keyboard and VoiceOver.
+          {
+            text: 'Simple Look',
+            accelerator: 'Alt+CmdOrCtrl+4',
+            action: () => commands.switchLook(),
+            checked: (state) => state.view === 'simple',
+            enabled: (state) => menuViewOf(state.view) === 'redlines',
+          },
+          SEPARATOR,
+          // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
+          // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).
+          {
+            text: 'Actual Size',
+            accelerator: 'CmdOrCtrl+0',
+            action: () => commands.actualSize(),
+            enabled: (state) => state.zoom !== null && state.zoom !== 1,
+            ...zoomKey,
+          },
+          {
+            text: 'Zoom In',
+            accelerator: 'CmdOrCtrl+=',
+            action: () => commands.zoomIn(),
+            enabled: (state) => state.zoom !== null && state.zoom < ZOOM_MOST,
+            ...zoomKey,
+          },
+          {
+            text: 'Zoom Out',
+            accelerator: 'CmdOrCtrl+-',
+            action: () => commands.zoomOut(),
+            enabled: (state) => state.zoom !== null && state.zoom > ZOOM_LEAST,
+            ...zoomKey,
+          },
+          SEPARATOR,
+          // Text Zoom's keys keep the Mac's Ctrl and Cmd off the Mac too, as Show Files' do: a row
+          // has one accelerator for every platform, and Windows and Linux get keys of their own
+          // when they are supported.
+          {
+            text: 'Actual Text Size',
+            accelerator: 'Ctrl+Cmd+0',
+            action: () => commands.actualTextSize(),
+            enabled: (state) => state.textSize !== 1,
+          },
+          {
+            text: 'Larger Text',
+            accelerator: 'Ctrl+Cmd+=',
+            action: () => commands.biggerText(),
+            enabled: (state) => state.textSize < TEXT_MOST,
+          },
+          {
+            text: 'Smaller Text',
+            accelerator: 'Ctrl+Cmd+-',
+            action: () => commands.smallerText(),
+            enabled: (state) => state.textSize > TEXT_LEAST,
+          },
+          SEPARATOR,
+          {
+            text: 'Show Files',
+            accelerator: 'Ctrl+Cmd+S',
+            action: () => commands.toggleSidebar(),
+            textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
+          },
+          {
+            text: 'Show Word Count',
+            action: () => commands.toggleWordCount(),
+            textFor: (state) => (state.showWordCount ? 'Hide Word Count' : 'Show Word Count'),
+          },
+        ],
+        [
+          // The Mac's own, which says Exit Full Screen while the window is. Always the last row.
+          { item: 'Fullscreen', text: 'Enter Full Screen' },
+        ],
+      ),
     },
     {
       title: 'Review',
-      rows: [
+      rows: withCommands('review', [
         {
           text: 'Track Changes',
           accelerator: 'Shift+CmdOrCtrl+E',
           action: () => commands.toggleTracking(),
           checked: (state) => state.tracking,
+          enabled: (state) => !state.plainOnly,
+        },
+        {
+          text: 'Accept All Changes and Stop Tracking',
+          action: () => commands.acceptAllAndStopTracking(),
+          enabled: (state) => state.canAcceptAll,
         },
         SEPARATOR,
         { text: 'Review Changes', action: () => commands.openReview(), enabled: hasRedlines },
@@ -477,7 +578,7 @@ export function appMenuModel(
           action: () => commands.toggleResolved(),
           checked: (state) => state.showResolved,
         },
-      ],
+      ]),
     },
     {
       title: 'Window',
@@ -492,9 +593,25 @@ export function appMenuModel(
     {
       title: 'Help',
       helpMenu: true,
-      rows: [{ text: 'Show Agent Logs', action: () => commands.showAgentLogs() }],
+      rows: [
+        { text: 'Report a Problem…', action: () => commands.reportProblem() },
+        { text: 'Reveal Log', action: () => commands.revealCrashLog() },
+        SEPARATOR,
+        { text: 'Show Agent Logs', action: () => commands.showAgentLogs() },
+      ],
     },
   ];
   // Format, Paragraph and Table hold only commands, and a menu with nothing in it isn't shown.
-  return { menus: menus.filter((menu) => menu.rows.length) };
+  return { menus: menus.filter((menu) => menu.rows.length).map(withIds) };
+}
+
+/** The menu with an id on each action row that has none: the menu's title and the row's text. */
+function withIds(menu: AppMenu): AppMenu {
+  const rows = (list: readonly MenuRow[]): MenuRow[] =>
+    list.map((row) => {
+      if ('rows' in row) return { ...row, rows: rows(row.rows) };
+      if ('action' in row && !row.id) return { ...row, id: `${menu.title}/${row.text}` };
+      return row;
+    });
+  return { ...menu, rows: rows(menu.rows) };
 }

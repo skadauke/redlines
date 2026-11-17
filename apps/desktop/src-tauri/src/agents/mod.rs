@@ -16,6 +16,7 @@ mod acp;
 mod acp_gate;
 mod acp_runs;
 mod allowed;
+mod latest;
 mod log;
 mod process;
 mod question;
@@ -62,6 +63,10 @@ pub fn set_up(app: &AppHandle) {
     app.manage(AcpRuns::default());
     if let Ok(folder) = log_folder(app) {
         std::thread::spawn(move || log::delete_old_logs(&folder, SystemTime::now()));
+    }
+    // A sign-in script that Terminal never opened stays in its folder: it goes after a day.
+    if let Ok(folder) = terminal_folder(app) {
+        std::thread::spawn(move || setup::delete_old_terminal_scripts(&folder, SystemTime::now()));
     }
 }
 
@@ -226,10 +231,9 @@ const SIGN_IN_TIME: Duration = Duration::from_secs(10 * 60);
 
 /// The agent a window named, and the program `which` finds for it. A window names an agent and
 /// nothing more: no program, no argument.
-fn named_agent(app: &AppHandle, name: &str) -> Result<(Agent, String), String> {
+fn named_agent(programs: &Programs, name: &str) -> Result<(Agent, String), String> {
     let agent = Agent::named(name).ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
-    let program = app
-        .state::<Programs>()
+    let program = programs
         .which(name)
         .ok_or_else(|| format!("Redlines can't find {} on this Mac.", agent.title()))?;
     Ok((agent, program))
@@ -259,7 +263,7 @@ pub fn agent_home_access(app: AppHandle) -> Vec<reach::Protected> {
 /// (`capabilities/`).
 #[tauri::command(async)]
 pub fn agent_update(app: AppHandle, agent: String) -> Result<Outcome, String> {
-    let (agent, program) = named_agent(&app, &agent)?;
+    let (agent, program) = named_agent(&app.state::<Programs>(), &agent)?;
     let programs = app.state::<Programs>();
     let line = setup::update_line_for(&programs, agent, &program)?;
     let environment = programs.environment_for(Path::new(&line.program));
@@ -267,12 +271,23 @@ pub fn agent_update(app: AppHandle, agent: String) -> Result<Outcome, String> {
         .run(agent, &line, &environment, UPDATE_TIME)
 }
 
+/// The newest version of an agent's program, for Preferences' Update button: the version npm's
+/// registry lists for its package (`latest.rs`), which is what its own updater installs; `fresh`
+/// skips what was kept from an earlier look. Only
+/// Preferences is granted the command (`capabilities/`).
+#[tauri::command(async)]
+pub fn agent_latest_version(agent: String, fresh: Option<bool>) -> Result<String, String> {
+    let agent =
+        Agent::named(&agent).ok_or_else(|| "Redlines doesn't know that agent.".to_owned())?;
+    latest::latest_version(agent, fresh.unwrap_or(false))
+}
+
 /// Signs an agent in with its own login (`claude auth login`, `codex login`), which opens the
 /// browser; waits for it to end. Redlines never sees what the login stores. Only Preferences is
 /// granted the command (`capabilities/`).
 #[tauri::command(async)]
 pub fn agent_sign_in(app: AppHandle, agent: String) -> Result<Outcome, String> {
-    let (agent, program) = named_agent(&app, &agent)?;
+    let (agent, program) = named_agent(&app.state::<Programs>(), &agent)?;
     let line = setup::sign_in_line(agent, &program);
     let environment = app
         .state::<Programs>()
@@ -292,17 +307,22 @@ pub fn agent_setup_stop(app: AppHandle, agent: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Where the sign-in's scripts for Terminal are written.
+fn terminal_folder(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())?
+        .join("terminal"))
+}
+
 /// Opens Terminal with an agent's own login command, for a login that needs a terminal. Only
 /// Preferences is granted the command (`capabilities/`).
 #[tauri::command(async)]
 pub fn agent_terminal_sign_in(app: AppHandle, agent: String) -> Result<(), String> {
-    let (agent, program) = named_agent(&app, &agent)?;
+    let (agent, program) = named_agent(&app.state::<Programs>(), &agent)?;
     let line = setup::sign_in_line(agent, &program);
-    let folder = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| error.to_string())?
-        .join("terminal");
+    let folder = terminal_folder(&app)?;
     let script = setup::terminal_script(&line, agent.title());
     let path = setup::write_terminal_script(&folder, agent, &script)
         .map_err(|error| format!("Couldn't make what Terminal runs: {error}"))?;
@@ -348,7 +368,7 @@ const FILES_AND_FOLDERS_SETTINGS: &str =
 /// the page's goes in it.
 #[tauri::command(async)]
 pub fn open_files_and_folders_settings() -> Result<(), String> {
-    let status = Command::new("open")
+    let status = Command::new(setup::OPEN)
         .arg(FILES_AND_FOLDERS_SETTINGS)
         .status()
         .map_err(|error| format!("Couldn't open System Settings: {error}"))?;
@@ -365,7 +385,7 @@ pub fn agent_logs_open(app: AppHandle) -> Result<(), String> {
     let folder = log_folder(&app)?;
     log::make_private_folder(&folder).map_err(|error| error.to_string())?;
     let opener = if cfg!(target_os = "macos") {
-        "open"
+        setup::OPEN
     } else {
         "xdg-open"
     };
@@ -442,7 +462,7 @@ pub mod test_support {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::Mutex;
     use std::sync::mpsc;
     use std::time::Duration;
@@ -452,12 +472,15 @@ mod tests {
     use super::test_support::TempFolder;
     use super::*;
 
-    /// Programs with `claude` in a known place, as a link to `target`.
+    /// Programs with `claude` in a known place, as a script that runs `target`. Not a link: a
+    /// multicall binary (uutils' coreutils, on Ubuntu 26.04) picks its utility by the name it was
+    /// started as, and refuses `claude`.
     fn programs_with_claude(temp: &Path, target: &str) -> (Programs, String) {
         let known = temp.join("known");
         std::fs::create_dir_all(&known).unwrap();
         let claude = known.join("claude");
-        symlink(target, &claude).unwrap();
+        std::fs::write(&claude, format!("#!/bin/sh\nexec '{target}' \"$@\"\n")).unwrap();
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
         let environment = vec![(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))];
         let programs = Programs::new(
             vec![known],
@@ -480,6 +503,25 @@ mod tests {
                 version: None,
             },
         }
+    }
+
+    #[test]
+    fn a_window_names_an_agent_and_gets_the_program_which_finds() {
+        let temp = TempFolder::new("agents-named");
+        let (programs, claude) = programs_with_claude(temp.path(), "/bin/echo");
+        assert_eq!(
+            named_agent(&programs, "claude").unwrap(),
+            (Agent::Claude, claude)
+        );
+        // Not an agent Redlines knows, and not a program: nothing a window names but a name.
+        assert_eq!(
+            named_agent(&programs, "/bin/sh").unwrap_err(),
+            "Redlines doesn't know that agent."
+        );
+        assert_eq!(
+            named_agent(&programs, "codex").unwrap_err(),
+            "Redlines can't find Codex on this Mac."
+        );
     }
 
     #[test]

@@ -127,12 +127,18 @@ function commands() {
     rename: vi.fn(),
     revealInFinder: vi.fn(),
     print: vi.fn(),
+    exportPdf: vi.fn(),
+    exportWord: vi.fn(),
+    openDocx: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
+    acceptAllAndStopTracking: vi.fn(),
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
+    toggleWordCount: vi.fn(),
     pastePlain: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -148,6 +154,8 @@ function commands() {
     openAbout: vi.fn(),
     openPreferences: vi.fn(),
     showAgentLogs: vi.fn(),
+    reportProblem: vi.fn(),
+    revealCrashLog: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -170,17 +178,21 @@ const press = (code: string, modifiers: KeyboardEventInit) => {
 };
 
 const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
+  plainOnly: false,
   view: 'clean',
   tracking: false,
   hasRedlines: false,
+  canAcceptAll: false,
   sidebarOpen: false,
   showResolved: false,
+  showWordCount: true,
   zoom: 1,
   textSize: 1,
   hasFile: true,
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  disabledReasons: {},
   commandTitles: {},
   undo: null,
   redo: null,
@@ -216,21 +228,35 @@ describe('the menu bar', () => {
     expect(redlines.checked).toBe(true);
   });
 
-  it('lists Clean, Redlines and Raw, with Redlines checked in its simple look too', async () => {
+  it('lists Clean, Redlines and Plain, with Redlines checked in its simple look too', async () => {
     const menu = await createNativeMenu(modelOf(commands()));
-    const names = ['Clean', 'Simple', 'Redlines', 'Raw'];
+    const names = ['Clean', 'Simple', 'Redlines', 'Plain'];
     const views = made.items.filter(
       (item) => item.kind === 'check' && item.text !== undefined && names.includes(item.text),
     );
     expect(views.map((item) => [item.text, item.accelerator])).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
       ['Redlines', 'Alt+CmdOrCtrl+2'],
-      ['Raw', 'Alt+CmdOrCtrl+3'],
+      ['Plain', 'Alt+CmdOrCtrl+3'],
     ]);
     menu.update(documentState({ hasRedlines: true, view: 'simple' }));
     expect(views.map((item) => item.checked)).toEqual([false, true, false]);
     menu.update(documentState({ hasRedlines: true, view: 'raw' }));
     expect(views.map((item) => item.checked)).toEqual([false, false, true]);
+  });
+
+  it('has a Simple Look switch with ⌥⌘4, on in the simple look and there to choose only in Redlines', async () => {
+    const menu = await createNativeMenu(modelOf(commands()));
+    const look = made.items.find((item) => item.kind === 'check' && item.text === 'Simple Look');
+    expect(look?.accelerator).toBe('Alt+CmdOrCtrl+4');
+    menu.update(documentState({ view: 'redlines' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, true]);
+    menu.update(documentState({ view: 'simple' }));
+    expect([look?.checked, look?.enabled]).toEqual([true, true]);
+    menu.update(documentState({ view: 'clean' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, false]);
+    menu.update(documentState({ view: 'raw' }));
+    expect([look?.checked, look?.enabled]).toEqual([false, false]);
   });
 
   it('keeps reviewing for documents with redlines', async () => {
@@ -344,7 +370,7 @@ describe('the menu bar', () => {
 
   it('sends the menu only what changed', async () => {
     const menu = await createNativeMenu(modelOf(commands()));
-    const raw = itemWith('check', 'Raw');
+    const raw = itemWith('check', 'Plain');
     const setChecked = vi.spyOn(raw as unknown as { setChecked(on: boolean): void }, 'setChecked');
     menu.update(documentState({ view: 'clean' }));
     menu.update(documentState({ view: 'clean', tracking: true }));
@@ -413,7 +439,7 @@ describe('the menu bar', () => {
           group: 'link',
           shortcut: 'Mod-k',
           run: () => true,
-          isEnabled: () => false,
+          disabledReason: () => 'Not here.',
         },
         { id: 'format.clear', title: 'Clear', menu: 'format', group: 'link', run: () => true },
       ]);
@@ -480,17 +506,19 @@ describe('the menu bar', () => {
       expect(link.enabled).toBe(true);
     });
 
-    it('draws a command with nothing to follow as a plain item, under its menu', async () => {
+    it('draws every command as an item that follows enabledCommands, under its menu', async () => {
       const registry = registered();
-      await createNativeMenu(modelOf(commands(), registry));
+      const menu = await createNativeMenu(modelOf(commands(), registry));
       const rows = itemWith('submenu', 'Format').options['items'] as unknown[];
       expect(rows[0]).toBe(itemWith('check', 'Bold'));
       expect(rows[1]).toEqual({ item: 'Separator' });
       expect(rows[2]).toBe(itemWith('item', 'Link…'));
-      const clear = rows[3] as { text: string; action: () => void };
-      expect(clear.text).toBe('Clear');
-      clear.action();
-      expect(registry.run).toHaveBeenCalledWith('format.clear');
+      // A command with no reason of its own is disabled too when the document is a text file's.
+      const clear = itemWith('item', 'Clear');
+      menu.update(documentState({ enabledCommands: [] }));
+      expect(clear.enabled).toBe(false);
+      menu.update(documentState({ enabledCommands: ['format.clear'] }));
+      expect(clear.enabled).toBe(true);
     });
   });
 
@@ -525,8 +553,9 @@ describe('browser shortcuts', () => {
     expect(c.setView).toHaveBeenLastCalledWith('redlines');
     press('Digit1', { metaKey: true, altKey: true, key: '¡' });
     expect(c.setView).toHaveBeenLastCalledWith('clean');
-    // Simple is no view of the menu: no key shows it, and the fourth key is free.
-    expect(press('Digit4', { metaKey: true, altKey: true, key: '¢' })).toBe(false);
+    // The fourth key is Simple Look, which switches the look and shows no view.
+    expect(press('Digit4', { metaKey: true, altKey: true, key: '¢' })).toBe(true);
+    expect(c.switchLook).toHaveBeenCalledOnce();
     expect(c.setView).toHaveBeenCalledTimes(3);
     press('KeyS', { metaKey: true, ctrlKey: true });
     expect(c.toggleSidebar).toHaveBeenCalledOnce();

@@ -34,10 +34,10 @@ const REPO: ProjectRoot = { folder: '/repo', isRepo: true, tooBroad: false };
 
 function repoTree(): Record<string, string[]> {
   return {
-    '/repo': ['package.json', 'src/', 'docs/', 'README.md'],
+    '/repo': ['package.lock', 'src/', 'docs/', 'README.md'],
     '/repo/docs': ['images/', 'format.md', 'design.md'],
     '/repo/docs/images': ['logo.png', 'diagram.pdf', 'scans.zip'],
-    '/repo/src': ['main.ts', 'TODO.md'],
+    '/repo/src': ['main.zig', 'TODO.md'],
   };
 }
 
@@ -86,7 +86,7 @@ const metaClick = (button: HTMLElement) =>
   button.dispatchEvent(new MouseEvent('click', { metaKey: true, bubbles: true }));
 
 describe('sidebar', () => {
-  it('lists documents, then folders, each in natural order, and no other file', () => {
+  it('lists documents, then images, then folders, each in natural order, and no other file', () => {
     const entries = [
       dir('notes'),
       file('plan 10.md'),
@@ -100,9 +100,9 @@ describe('sidebar', () => {
       dir('Archive'),
       file('slides.qmd'),
       file('notes.txt'),
-      file('main.ts'),
+      file('main.zig'),
       file('paper.pdf'),
-      file('package.json'),
+      file('package.lock'),
     ];
     expect(sortEntries(entries).map((entry) => entry.name)).toEqual([
       'Analysis.Rmd',
@@ -111,6 +111,7 @@ describe('sidebar', () => {
       'plan 10.md',
       'slides.qmd',
       'TODO.TXT',
+      'image.png',
       'Archive',
       'notes',
     ]);
@@ -138,6 +139,27 @@ describe('sidebar', () => {
     expect(button('README.md').hasAttribute('aria-current')).toBe(false);
     // Every folder is read within the project.
     for (const [, root] of list.mock.calls) expect(root).toBe('/repo');
+  });
+
+  it('lists text and code files in the secondary ink, and with the preference off only the open one', async () => {
+    let shown = true;
+    const { sidebar, rows, button } = setUp(
+      { '/repo': ['README.md', 'run.py', 'notes.txt', 'app.ts'] },
+      { showPlainOnly: () => shown },
+    );
+    sidebar.setDocument({ path: '/repo/README.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    expect(rows()).toEqual(['app.ts', 'notes.txt', 'README.md', 'run.py']);
+    expect(button('run.py').classList.contains('rl-sidebar-plain')).toBe(true);
+    expect(button('README.md').classList.contains('rl-sidebar-plain')).toBe(false);
+    shown = false;
+    await sidebar.refresh();
+    expect(rows()).toEqual(['README.md']);
+    // The one that is open stays, so that the sidebar shows where it is.
+    sidebar.setDocument({ path: '/repo/run.py', root: REPO });
+    await sidebar.refresh();
+    expect(rows()).toEqual(['README.md', 'run.py']);
   });
 
   it("lists the document's own folder when the root is too broad", async () => {
@@ -224,7 +246,7 @@ describe('sidebar', () => {
     await vi.waitFor(() => expect(list).toHaveBeenCalledWith('/elsewhere', '/elsewhere'));
   });
 
-  it('lists no file it doesn’t open, such as code, data, an image, a PDF or an archive', async () => {
+  it('lists no file it neither opens nor links, such as code, data, a PDF or an archive', async () => {
     const { sidebar, button, rows } = setUp();
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
@@ -232,17 +254,40 @@ describe('sidebar', () => {
     button('images').click();
     button('src').click();
     await vi.waitFor(() => expect(rows()).toContain('  TODO.md'));
-    // The folder of images and PDFs is listed, as every folder is, with nothing in it.
+    // The images are listed, to be dragged into a document; the PDF and the archive are not.
     expect(rows()).toEqual([
       'README.md',
       'docs/',
       '  design.md',
       '  format.md',
       '  images/',
+      '    logo.png',
       'src/',
       '  TODO.md',
     ]);
     expect(button('images').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('drags an image into a document by its path, and never opens it', async () => {
+    const { sidebar, button, openFile, allowDocument } = setUp();
+    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    button('images').click();
+    await vi.waitFor(() => expect(button('logo.png')).toBeTruthy());
+    const logo = button('logo.png');
+    expect(logo.draggable).toBe(true);
+    expect(logo.title).toMatch(/drag/i);
+    const data = new DataTransfer();
+    const event = new Event('dragstart', { bubbles: true });
+    Object.defineProperty(event, 'dataTransfer', { value: data });
+    logo.dispatchEvent(event);
+    expect(data.getData('application/x-redlines-project-image')).toBe('/repo/docs/images/logo.png');
+    logo.click();
+    expect(allowDocument).not.toHaveBeenCalled();
+    expect(openFile).not.toHaveBeenCalled();
+    // A document is no drag.
+    expect(button('design.md').draggable).toBeFalsy();
   });
 
   it('opens Markdown here and a new window with ⌘-click', async () => {

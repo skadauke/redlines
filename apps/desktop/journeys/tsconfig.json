@@ -1,0 +1,13 @@
+{
+  // The journeys run in Node, under Playwright; the code they run in the page is written as strings
+  // or small functions, so the page's types are not needed. The page's own hook is typed loosely
+  // (src/journey.ts), as this package doesn't import the app.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true
+  },
+  "include": ["src", "tests", "scripts", "*.ts"]
+}

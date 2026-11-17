@@ -12,9 +12,12 @@ import { describe, expect, it } from 'vitest';
 import {
   agentOf,
   agentStep,
+  doneDepth,
+  dropStepsEffect,
   followsText,
   history,
   joinsNewestStep,
+  joinsStep,
   redo,
   redoDepth,
   undo,
@@ -402,5 +405,86 @@ describe('a change that joins the newest step', () => {
     typeAt(plain, ' two', 1000);
     plain.apply({ changes: { from: 0, insert: '> ' }, annotations: at(9000) });
     expect(undoDepth(plain.state)).toBe(2);
+  });
+});
+
+describe('a take-back outside the history of a change joined to a step', () => {
+  /**
+   * A step that changes the tail of `body\n\nold`, then a change joined to it (a Return that opens
+   * an empty paragraph), taken back outside the history as leaving the paragraph does, carrying
+   * `dropStepsEffect`. Returns the editor, with `change` taken out and the step left.
+   */
+  function takenBack(
+    extensions: Extension,
+    step: TransactionSpec,
+    change: TransactionSpec,
+  ): ReturnType<typeof start> {
+    const editor = start('body\n\nold', extensions);
+    editor.apply({
+      ...step,
+      userEvent: 'delete.selection',
+      annotations: [at(1000), isolateHistory.of('before')],
+    });
+    const depth = doneDepth(editor.state);
+    editor.apply({
+      ...change,
+      userEvent: 'delete.selection',
+      annotations: [at(1010), joinsStep.of(true), isolateHistory.of('after')],
+    });
+    // Joined: the history holds one step for both.
+    expect(doneDepth(editor.state)).toBe(depth);
+    const made = editor.last;
+    editor.apply({
+      changes: made.changes.invert(made.startState.doc),
+      annotations: Tr.addToHistory.of(false),
+      effects: dropStepsEffect.of({ depth, joined: made.changes }),
+    });
+    return editor;
+  }
+
+  it('leaves the step exactly, where the change replaced the text that the step replaced', () => {
+    // As the tracked layer writes a ledger again that the step wrote: the change's inverse puts
+    // back the text that it replaced, and the step mapped over it inserted its text beside that
+    // one, not over it.
+    const editor = takenBack(
+      [],
+      { changes: { from: 6, to: 9, insert: 'NEW' } },
+      {
+        changes: [
+          { from: 4, insert: '\n\n' },
+          { from: 6, to: 9, insert: 'AGAIN' },
+        ],
+      },
+    );
+    expect(editor.state.doc.toString()).toBe('body\n\nNEW');
+    expect(undoDepth(editor.state)).toBe(1);
+    editor.undo();
+    expect(editor.state.doc.toString()).toBe('body\n\nold');
+    editor.redo();
+    expect(editor.state.doc.toString()).toBe('body\n\nNEW');
+  });
+
+  it('keeps the effects of the step as they were, which are in the text it leaves', () => {
+    // An inverted effect has its positions in the text the step gives back, as the record of a
+    // file's line breaks has. Mapped through the change's inverse, which starts from the text the
+    // change made, a position past the end of that text was out of range (here 9 in a text of 6).
+    const place = StateEffect.define<number>({ map: (pos, mapping) => mapping.mapPos(pos) });
+    const where = StateField.define<number>({
+      create: () => -1,
+      // Of several, the last stands, the record before the first, as a line break's does.
+      update: (value, tr) => tr.effects.findLast((effect) => effect.is(place))?.value ?? value,
+    });
+    const inverse = invertedEffects.of((tr) =>
+      tr.docChanged ? [place.of(tr.startState.doc.length)] : [],
+    );
+    const editor = takenBack(
+      [where, inverse],
+      { changes: { from: 4, to: 9 } },
+      { changes: { from: 4, insert: '\n\n' } },
+    );
+    expect(editor.state.doc.toString()).toBe('body');
+    editor.undo();
+    expect(editor.state.doc.toString()).toBe('body\n\nold');
+    expect(editor.state.field(where)).toBe(9);
   });
 });

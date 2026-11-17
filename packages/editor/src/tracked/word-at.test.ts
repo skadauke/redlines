@@ -117,7 +117,7 @@ describe('Editor.wordAt', () => {
     expect(front.wordAt(11)).toBeNull();
   });
 
-  it('finds nothing in Raw, where the source is shown as it is', () => {
+  it('finds nothing in Plain, where the source is shown as it is', () => {
     const editor = load('Hello wrold', { view: 'raw' });
     expect(editor.wordAt(8)).toBeNull();
   });

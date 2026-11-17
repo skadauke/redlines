@@ -19,22 +19,26 @@ const BASE: TitleBarState = {
   name: 'launch-plan.md',
   dirty: false,
   fileDraggable: true,
+  plainOnly: false,
   view: 'redlines',
   tracking: false,
   hasRedlines: true,
   sidebarOpen: false,
   showResolved: false,
+  toolbarShown: false,
 };
 
 /** The bars the test made, which are taken down after it: an open menu listens on the document. */
 const made: { destroy(): void }[] = [];
 
-function setup(state: Partial<TitleBarState> = {}) {
+function setup(state: Partial<TitleBarState> = {}, keyOf?: (id: string) => string | null) {
   const root = document.createElement('div');
   document.body.append(root);
   const actions = {
     setView: vi.fn(),
+    switchLook: vi.fn(),
     toggleTracking: vi.fn(),
+    toggleToolbar: vi.fn(),
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -43,6 +47,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     dragFile: vi.fn(),
     scrollPage: vi.fn(),
     documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
+    ...(keyOf ? { keyOf } : {}),
   };
   const bar = createTitleBar(root, actions);
   made.push(bar);
@@ -563,34 +568,76 @@ describe('title bar', () => {
     expect(shown(menu('View'))).toBe(false);
   });
 
-  it('offers Redlines whatever the document holds', () => {
+  it('disables Redlines in a file with no changes and no ledger, and enables it once there is something to show (#499)', () => {
     const { actions, bar, button, menu } = setup({ hasRedlines: false, view: 'clean' });
     hover(button('View'));
     const redlines = () => item(menu('View'), 'Redlines');
     expect(shown(redlines())).toBe(true);
-    expect(redlines().disabled).toBe(false);
+    expect(redlines().disabled).toBe(true);
     expect(redlines().textContent).toContain('⌥⌘2');
     redlines().click();
-    expect(actions.setView).toHaveBeenCalledWith('redlines');
-    // With redlines, or with the last one gone while it is the view that is shown.
+    expect(actions.setView).not.toHaveBeenCalled();
+    // Clean and Plain stay open to choose.
+    expect(item(menu('View'), 'Clean').disabled).toBe(false);
+    expect(item(menu('View'), 'Plain').disabled).toBe(false);
     bar.update({ ...BASE, hasRedlines: true });
     expect(shown(redlines()) && !redlines().disabled).toBe(true);
+    redlines().click();
+    expect(actions.setView).toHaveBeenCalledWith('redlines');
+    // The view that is shown stays checked, and enabled, when its last change goes: the menu opens
+    // on the checked row, and a disabled row can't be focused.
     bar.update({ ...BASE, hasRedlines: false, view: 'redlines' });
-    expect(shown(redlines()) && !redlines().disabled).toBe(true);
     expect(redlines().getAttribute('aria-checked')).toBe('true');
+    expect(redlines().disabled).toBe(false);
+    bar.update({ ...BASE, hasRedlines: false, view: 'simple' });
+    expect(redlines().disabled).toBe(false);
+    bar.update({ ...BASE, hasRedlines: false, view: 'raw' });
+    expect(redlines().disabled).toBe(true);
   });
 
-  it('lists Clean, Redlines and Raw in order, with their keys and one check mark', () => {
+  it('disables Clean, Redlines and Track Changes in a text or code file, with the reason as their hint', () => {
+    const { actions, button, menu } = setup({ plainOnly: true, view: 'raw', hasRedlines: false });
+    hover(button('View'));
+    for (const name of ['Clean', 'Redlines']) {
+      const row = item(menu('View'), name);
+      expect(row.disabled, name).toBe(true);
+      expect(row.title).toBe('Only Markdown files have Clean and Redlines views.');
+    }
+    expect(item(menu('View'), 'Plain').disabled).toBe(false);
+    expect(item(menu('View'), 'Plain').getAttribute('aria-checked')).toBe('true');
+    const tracking = item(menu('Review'), 'Track Changes');
+    expect(tracking.disabled).toBe(true);
+    expect(tracking.title).toBe('Only Markdown files have Track Changes and review.');
+    tracking.click();
+    expect(actions.toggleTracking).not.toHaveBeenCalled();
+  });
+
+  it('lists Clean, Redlines and Plain in order, with their keys and one check mark', () => {
     const { actions, menu, button } = setup({ view: 'clean' });
     hover(button('View'));
     const rows = [...menu('View').querySelectorAll('[role="menuitemradio"]')];
-    // Simple is Redlines' simple look, switched by a click on a change bar and by nothing here.
-    expect(rows.map((row) => row.textContent)).toEqual(['Clean⌥⌘1', 'Redlines⌥⌘2', 'Raw⌥⌘3']);
+    // Simple is Redlines' simple look, which has a switch of its own below the three views.
+    expect(rows.map((row) => row.textContent)).toEqual(['Clean⌥⌘1', 'Redlines⌥⌘2', 'Plain⌥⌘3']);
     expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     // Each has an icon of its own.
     expect(rows.every((row) => row.querySelector('svg'))).toBe(true);
     (rows[1] as HTMLElement).click();
     expect(actions.setView).toHaveBeenCalledWith('redlines');
+  });
+
+  it('has no Simple Look row, and Plain sits below a separator (#499)', () => {
+    const { menu, button } = setup({ view: 'redlines' });
+    hover(button('View'));
+    const view = menu('View');
+    expect(() => item(view, 'Simple Look')).toThrow();
+    expect(view.querySelectorAll('[role="menuitemcheckbox"]')).toHaveLength(0);
+    // Clean, Redlines, a separator, Plain: and nothing after Plain.
+    const order = [...view.children]
+      .filter((el) => el.matches('[role^="menuitem"], [role="separator"]'))
+      .map((el) =>
+        el.matches('[role="separator"]') ? '—' : el.querySelector('.rl-menu-label')?.textContent,
+      );
+    expect(order).toEqual(['Clean', 'Redlines', '—', 'Plain']);
   });
 
   it('checks Redlines, and no other view, in its simple look', () => {
@@ -599,24 +646,24 @@ describe('title bar', () => {
     expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
   });
 
-  it('keeps Review changes for documents with redlines', () => {
+  it('keeps Review Changes for documents with redlines', () => {
     const { bar, menu } = setup({ hasRedlines: false, view: 'clean' });
-    expect(item(menu('Review'), 'Review changes').disabled).toBe(true);
+    expect(item(menu('Review'), 'Review Changes').disabled).toBe(true);
     bar.update({ ...BASE, hasRedlines: true });
-    expect(item(menu('Review'), 'Review changes').disabled).toBe(false);
+    expect(item(menu('Review'), 'Review Changes').disabled).toBe(false);
   });
 
   it('tints the current view', () => {
     const { menu } = setup({ view: 'redlines' });
     expect(item(menu('View'), 'Redlines').getAttribute('aria-checked')).toBe('true');
-    expect(item(menu('View'), 'Raw').getAttribute('aria-checked')).toBe('false');
+    expect(item(menu('View'), 'Plain').getAttribute('aria-checked')).toBe('false');
   });
 
-  it('clicking Raw calls setView(raw)', () => {
+  it('clicking Plain calls setView(raw)', () => {
     const { actions, button, menu } = setup();
     enter(button('View'));
     vi.advanceTimersByTime(120);
-    item(menu('View'), 'Raw').click();
+    item(menu('View'), 'Plain').click();
     expect(actions.setView).toHaveBeenCalledWith('raw');
   });
 
@@ -625,7 +672,7 @@ describe('title bar', () => {
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(false);
     bar.update({ ...BASE, tracking: true });
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(true);
-    expect(item(menu('Review'), 'Track changes').getAttribute('aria-checked')).toBe('true');
+    expect(item(menu('Review'), 'Track Changes').getAttribute('aria-checked')).toBe('true');
     bar.update({ ...BASE, tracking: false });
     expect(button('Track Changes').classList.contains('rl-pen-on')).toBe(false);
   });
@@ -634,20 +681,21 @@ describe('title bar', () => {
     const { actions, button, menu } = setup();
     hover(button('Track Changes'));
     const review = menu('Review');
-    expect(item(review, 'Track changes').textContent).toContain('⇧⌘E');
-    expect(item(review, 'Review changes').textContent).toContain('⌥⌘]');
-    item(review, 'Track changes').click();
+    expect(item(review, 'Track Changes').textContent).toContain('⇧⌘E');
+    // ⌥⌘] is Next Change's key; the menu bar's Review Changes has none, and so has this row.
+    expect(item(review, 'Review Changes').textContent).not.toMatch(/[⌘⌥⇧⌃]/);
+    item(review, 'Track Changes').click();
     expect(actions.toggleTracking).toHaveBeenCalledOnce();
-    item(review, 'Review changes').click();
+    item(review, 'Review Changes').click();
     expect(actions.openReview).toHaveBeenCalledOnce();
     expect(shown(review)).toBe(false);
   });
 
-  it('the Review menu checks Show resolved comments, and switches it', () => {
+  it('the Review menu checks Show Resolved Comments, and switches it', () => {
     const { actions, bar, button, menu } = setup();
     hover(button('Track Changes'));
     const review = menu('Review');
-    const row = item(review, 'Show resolved comments');
+    const row = item(review, 'Show Resolved Comments');
     expect(row.getAttribute('role')).toBe('menuitemcheckbox');
     expect(row.getAttribute('aria-checked')).toBe('false');
     // Its own glyph, not the View button's eye.
@@ -655,13 +703,13 @@ describe('title bar', () => {
       button('View').querySelector('svg')?.innerHTML,
     );
     bar.update({ ...BASE, showResolved: true });
-    expect(item(menu('Review'), 'Show resolved comments').getAttribute('aria-checked')).toBe(
+    expect(item(menu('Review'), 'Show Resolved Comments').getAttribute('aria-checked')).toBe(
       'true',
     );
     // Any document can show them: it isn't tied to the document having redlines.
     bar.update({ ...BASE, hasRedlines: false });
-    expect(item(menu('Review'), 'Show resolved comments').disabled).toBe(false);
-    item(menu('Review'), 'Show resolved comments').click();
+    expect(item(menu('Review'), 'Show Resolved Comments').disabled).toBe(false);
+    item(menu('Review'), 'Show Resolved Comments').click();
     expect(actions.toggleResolved).toHaveBeenCalledOnce();
   });
 
@@ -712,7 +760,7 @@ describe('title bar', () => {
   });
 
   it('the arrow keys move between items', () => {
-    const { button, menu } = setup({ hasRedlines: false, view: 'clean' });
+    const { button, menu } = setup({ hasRedlines: true, view: 'clean' });
     press(button('View'), 'ArrowDown');
     const view = menu('View');
     expect(shown(view)).toBe(true);
@@ -720,14 +768,34 @@ describe('title bar', () => {
     press(view, 'ArrowDown');
     expect(document.activeElement).toBe(item(view, 'Redlines'));
     press(view, 'ArrowDown');
-    expect(document.activeElement).toBe(item(view, 'Raw'));
+    expect(document.activeElement).toBe(item(view, 'Plain'));
     press(view, 'ArrowDown');
     expect(document.activeElement).toBe(item(view, 'Clean'));
     press(view, 'ArrowUp');
-    expect(document.activeElement).toBe(item(view, 'Raw'));
+    expect(document.activeElement).toBe(item(view, 'Plain'));
     press(view, 'Escape');
     expect(shown(view)).toBe(false);
     expect(document.activeElement).toBe(button('View'));
+  });
+
+  it('the keys go through the enabled rows, skipping Redlines in a file with no changes', () => {
+    const redlines = setup({ view: 'clean', hasRedlines: false });
+    press(redlines.button('View'), 'ArrowDown');
+    const open = redlines.menu('View');
+    expect(document.activeElement).toBe(item(open, 'Clean'));
+    press(open, 'ArrowDown');
+    expect(document.activeElement).toBe(item(open, 'Plain'));
+    press(open, 'ArrowDown');
+    expect(document.activeElement).toBe(item(open, 'Clean'));
+    press(open, 'ArrowUp');
+    expect(document.activeElement).toBe(item(open, 'Plain'));
+    redlines.bar.destroy();
+    document.body.replaceChildren();
+    const clean = setup({ view: 'clean' });
+    press(clean.button('View'), 'ArrowDown');
+    const view = clean.menu('View');
+    press(view, 'End');
+    expect(document.activeElement).toBe(item(view, 'Plain'));
   });
 
   it('shows the file name, and Edited when there are unsaved edits', () => {
@@ -821,7 +889,7 @@ describe('a click on the View and Review icons', () => {
     expect(actions.setView).toHaveBeenCalledWith('clean');
   });
 
-  it('goes back from Raw to the one of Clean and Redlines that was shown last', () => {
+  it('goes back from Plain to the one of Clean and Redlines that was shown last', () => {
     const { actions, bar, button } = setup({ view: 'clean' });
     bar.update({ ...BASE, view: 'raw' });
     click(button('View'));
@@ -837,7 +905,7 @@ describe('a click on the View and Review icons', () => {
     expect(actions.setView).toHaveBeenLastCalledWith('redlines');
   });
 
-  it('goes to Redlines from a Raw that no other view came before', () => {
+  it('goes to Redlines from a Plain that no other view came before', () => {
     const { actions, button } = setup({ view: 'raw' });
     click(button('View'));
     expect(actions.setView).toHaveBeenCalledWith('redlines');
@@ -864,6 +932,24 @@ describe('a click on the View and Review icons', () => {
     expect(shown(menu('Review'))).toBe(false);
   });
 
+  it('draws the View button as a page that shows the view: lines, a red bar, a # (#661)', () => {
+    const { bar, button } = setup({ view: 'clean' });
+    const glyph = () => button('View').querySelector('svg')!;
+    // Clean: a page of lines, no bar. Redlines (in either look): the bar. Plain: the #, no lines.
+    expect(glyph().querySelector('.rl-view-bar')).toBeNull();
+    expect(glyph().querySelectorAll('path')).toHaveLength(1);
+    bar.update({ ...BASE, view: 'redlines' });
+    expect(glyph().querySelector('.rl-view-bar')).not.toBeNull();
+    bar.update({ ...BASE, view: 'simple' });
+    expect(glyph().querySelector('.rl-view-bar')).not.toBeNull();
+    bar.update({ ...BASE, view: 'raw' });
+    expect(glyph().querySelector('.rl-view-bar')).toBeNull();
+    expect(glyph().querySelector('path')?.getAttribute('d')).toContain('l-.7 5.6');
+    bar.update({ ...BASE, view: 'clean' });
+    expect(glyph().querySelector('.rl-view-bar')).toBeNull();
+    expect(glyph().querySelectorAll('path')).toHaveLength(1);
+  });
+
   it('opens no menu, which hover and the arrow keys do', () => {
     const { button, menu } = setup();
     click(button('View'));
@@ -872,7 +958,7 @@ describe('a click on the View and Review icons', () => {
     expect(shown(menu('Review'))).toBe(false);
     press(button('Track Changes'), 'ArrowDown');
     expect(shown(menu('Review'))).toBe(true);
-    expect(document.activeElement).toBe(item(menu('Review'), 'Track changes'));
+    expect(document.activeElement).toBe(item(menu('Review'), 'Track Changes'));
     press(menu('Review'), 'Escape');
     press(button('View'), 'ArrowUp');
     expect(shown(menu('View'))).toBe(true);
@@ -916,7 +1002,7 @@ describe('a click on the View and Review icons', () => {
   it('leaves the menu’s own items to choose for themselves', () => {
     const { actions, button, menu } = setup({ view: 'redlines' });
     hover(button('View'));
-    item(menu('View'), 'Raw').click();
+    item(menu('View'), 'Plain').click();
     expect(actions.setView).toHaveBeenCalledOnce();
     expect(actions.setView).toHaveBeenCalledWith('raw');
   });
@@ -970,7 +1056,7 @@ describe('the keys the icons name', () => {
     for (const [view, text] of [
       ['clean', 'Clean'],
       ['redlines', 'Redlines'],
-      ['raw', 'Raw'],
+      ['raw', 'Plain'],
     ] as const) {
       expect(VIEW_KEYS[view], view).toBe(mac(accelerator(text)));
       expect(VIEW_ARIA_KEYS[view], view).toBe(aria(accelerator(text)));
@@ -993,7 +1079,7 @@ describe('what a click on the icons will do, said before it is made', () => {
     expect(view?.textContent).toBe('Show Clean⌥⌘1');
     bar.update({ ...BASE, view: 'clean' });
     expect(view?.textContent).toBe('Show Redlines⌥⌘2');
-    // From Raw, the one shown last: Clean, then.
+    // From Plain, the one shown last: Clean, then.
     bar.update({ ...BASE, view: 'raw' });
     expect(view?.textContent).toBe('Show Clean⌥⌘1');
     bar.update({ ...BASE, view: 'redlines' });
@@ -1002,6 +1088,26 @@ describe('what a click on the icons will do, said before it is made', () => {
     bar.update({ ...BASE, view: 'clean' });
     bar.update({ ...BASE, view: 'raw' });
     expect(view?.textContent).toBe('Show Clean⌥⌘1');
+  });
+
+  it('shows the keys the person gave, and none when they took the key away (#551)', () => {
+    const keys: Record<string, string | null> = {
+      'View/Clean': 'Alt-Mod-9',
+      'Review/Track Changes': null,
+      'View/Show Files': 'Mod-k',
+    };
+    const { root, bar, button } = setup({ view: 'redlines' }, (id) => keys[id] ?? null);
+    const { view, review } = tips(root);
+    expect(view?.textContent).toBe('Show Clean⌥⌘9');
+    expect(button('View').getAttribute('aria-keyshortcuts')).toBe('Alt+Meta+9');
+    expect(review?.textContent).toBe('Turn on Track Changes');
+    expect(root.querySelector('#rl-files-tip')?.textContent).toBe('Show files⌘K');
+    // A change made in Preferences reaches a bar that is already drawn.
+    keys['View/Clean'] = 'Ctrl-Mod-9';
+    keys['Review/Track Changes'] = 'Shift-Mod-t';
+    bar.keysChanged();
+    expect(view?.textContent).toBe('Show Clean⌃⌘9');
+    expect(review?.textContent).toBe('Turn on Track Changes⇧⌘T');
   });
 
   it('says on the pen whether a click turns Track Changes on or off, with the key', () => {
@@ -1274,5 +1380,42 @@ describe('documentFactsLine', () => {
     expect(documentFactsLine('a b', new Date(2026, 10, 5, 15, 41))).toMatch(
       /^2 words · Saved 3:41\s?PM$/,
     );
+  });
+});
+
+describe('the wrench', () => {
+  it('is the first of the three icons at the right, left of the view button', () => {
+    const { root } = setup();
+    const labels = [
+      ...root.querySelectorAll('.rl-titlebar-end > .rl-control > .rl-icon-button'),
+    ].map((b) => b.getAttribute('aria-label'));
+    expect(labels).toEqual(['Toolbar', 'View', 'Track Changes']);
+  });
+
+  it('asks for the toolbar on a click, and keeps the text’s focus on the press', () => {
+    const { actions, button } = setup();
+    const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    button('Toolbar').dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    button('Toolbar').click();
+    expect(actions.toggleToolbar).toHaveBeenCalledTimes(1);
+  });
+
+  it('is pressed, and offers to hide, while the toolbar shows', () => {
+    const { bar, button } = setup();
+    expect(button('Toolbar').getAttribute('aria-pressed')).toBe('false');
+    bar.update({ ...BASE, toolbarShown: true });
+    const pressed = button('Toolbar');
+    expect(pressed.getAttribute('aria-pressed')).toBe('true');
+    expect(pressed.getAttribute('aria-keyshortcuts')).toBe('Shift+Meta+P');
+  });
+
+  it('says what a click does, with the key, after the pointer rests', () => {
+    const { button, root } = setup();
+    enter(button('Toolbar'));
+    vi.advanceTimersByTime(400);
+    const tip = root.querySelector<HTMLElement>('#rl-wrench-tip');
+    expect(tip?.hidden).toBe(false);
+    expect(tip?.textContent).toBe('Show Toolbar⇧⌘P');
   });
 });

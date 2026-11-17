@@ -54,15 +54,22 @@ mod project;
 // The images the preview loads: those of the project folders the sidebars show.
 mod images;
 
+// Images added to a document: dropped on its window, chosen in a panel or pasted, saved beside it.
+mod image_files;
+
 // What a window may do with files: read and write those the person opened or saved.
 mod file_scope;
 
 // The app's updates, which no window owns: the checks, the download and the install, whether this
 // copy can update itself, and starting the new version after an update.
+mod crash;
+mod recovery;
 mod updates;
 
 // Renaming a file, showing it in Finder, and printing the window.
 mod files;
+#[cfg(target_os = "macos")]
+mod pdf;
 
 // Dragging the window's file out of it, from the title bar's document icon.
 mod drag;
@@ -262,12 +269,13 @@ fn offer(app: &AppHandle, files: Vec<PathBuf>) {
 
 /// The file a path really is, with every link in it followed. The `redlines` command line follows
 /// links too, so it writes that file, in its folder and under its name, which is where the window
-/// has to look for changes to a file it opened through a link.
+/// has to look for changes to a file it opened through a link. Only for a file the person opened or
+/// saved, and what is inside a project folder a sidebar shows (`file_scope::known_real`).
 #[tauri::command(async)]
-fn real_path(path: String) -> Result<String, String> {
-    std::fs::canonicalize(&path)
+fn real_path(app: AppHandle, path: String) -> Result<String, String> {
+    let shown = app.state::<project::Projects>().folders();
+    file_scope::known_real(&app.fs_scope(), &shown, Path::new(&path))
         .map(|real| real.to_string_lossy().into_owned())
-        .map_err(|error| format!("{path}: {error}"))
 }
 
 /// Opens the Preferences window, or brings it forward: there is only ever one. It is made hidden,
@@ -288,7 +296,7 @@ fn open_preferences(app: AppHandle) -> tauri::Result<()> {
     // It opens at the size the zoom gives it, so that it never resizes in view.
     let (width, height) = zoom::preferences_inner_size(&app);
     let window = tauri::WebviewWindowBuilder::from_config(&app, config)?
-        .initialization_script(zoom::init_script(&app))
+        .initialization_script(zoom::init_script(&app, &config.label))
         .inner_size(width, height)
         .build()?;
     zoom::apply(&window);
@@ -327,7 +335,11 @@ fn open_about(app: AppHandle) -> tauri::Result<()> {
 pub fn run() {
     // Spelling is checked while typing: WebKit reads its switch once, before the first window.
     spelling::register_defaults();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The page's process ends: logged, and the window reloaded (crash.rs). WebKit's own hook.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(crash::terminated);
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         // Reads the clipboard's text for Paste as Plain Text (the menu is not a gesture in the page).
@@ -342,15 +354,21 @@ pub fn run() {
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
         .manage(zoom::Zoom::default())
+        .manage(zoom::WindowZooms::default())
         .manage(project::Projects::default())
+        .manage(image_files::ImageSources::default())
         .manage(watch::Watches::default())
+        .manage(crash::Crashes::default())
         .setup(|app| {
+            // Failures leave a trace first (crash.rs): the panic hook, the watchdog, the last run's reports.
+            crash::set_up(app.handle());
             // The appearance first, light, dark or the system's: every window opens in it.
             appearance::set_up(app.handle());
             // The zoom too, before a window opens: every window starts at it.
             zoom::set_up(app.handle());
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
+            files::set_up(app.handle());
             // The updates are the app's, there before any window asks of them.
             updates::set_up(app.handle());
             // The preview loads the images of the project folders the sidebars show, and no others.
@@ -386,16 +404,28 @@ pub fn run() {
             files::rename_file,
             files::reveal_in_finder,
             files::print_window,
+            files::export_pdf,
             files::folder_exists,
             files::choose_folder,
             drag::start_file_drag,
             about,
             appearance::set_appearance,
             edit_menu::beep,
+            crash::crash_environment,
+            recovery::recovery_write,
+            recovery::recovery_read,
+            recovery::recovery_delete,
+            crash::crash_log_page,
+            crash::crash_slow,
+            crash::crash_heartbeat,
+            crash::crash_pending,
+            crash::crash_log_reveal,
+            crash::crash_simulate,
             spelling::correct_word,
             spelling::spelling_suggestions,
             spelling::spelling_learn,
             edit_menu::undo_in_field,
+            edit_menu::paste_in_field,
             open_preferences,
             open_about,
             dock_icon::app_icon_mark,
@@ -414,7 +444,14 @@ pub fn run() {
             project::open_default,
             links::open_link,
             project::show_images,
+            images::image_for_agent,
+            images::image_for_crop,
+            images::image_stamps,
+            images::image_sizes,
             project::allow_document,
+            image_files::pick_images,
+            image_files::add_images,
+            image_files::add_pasted_image,
             file_scope::forget_documents,
             updates::update_state,
             updates::update_set_automatic,
@@ -450,6 +487,8 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_update,
             #[cfg(unix)]
+            agents::agent_latest_version,
+            #[cfg(unix)]
             agents::agent_sign_in,
             #[cfg(unix)]
             agents::agent_setup_stop,
@@ -480,14 +519,23 @@ pub fn run() {
             // A window's page that loads again, as a reload does, watches what it needs itself.
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 watch::page_loaded(webview.app_handle(), webview.label());
+                crash::page_loaded(webview.app_handle(), webview.label());
             }
         })
         .on_window_event(|window, event| {
+            // A window opened for text can't be asked about it in its first moments: its close waits.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                windows::close_requested(window.app_handle(), window.label(), api);
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
+                zoom::window_closed(window.app_handle(), window.label());
+                crash::window_closed(window.app_handle(), window.label());
                 // A closed window's document is watched for nobody.
                 watch::window_closed(window.app_handle(), window.label());
                 // Its spell document, which the checker kept for the corrections of its Returns.
                 spelling::window_closed(window.label());
+                // The images dropped on it or chosen for it that it never took.
+                image_files::window_closed(window.app_handle(), window.label());
                 // A closed window's runs have nowhere left to report, and no document to act on.
                 #[cfg(unix)]
                 agents::window_closed(window.app_handle(), window.label());
@@ -500,15 +548,19 @@ pub fn run() {
                 windows::on_window_event(app, label, event);
             }
             // A file dropped on a document window opens as one from Finder does, with that window
-            // in front: in it while it is untouched, and otherwise in a window of its own.
+            // in front: in it while it is untouched, and otherwise in a window of its own. Image
+            // files alone, though, are the window's to add to its document, wherever they landed
+            // (image_files.rs), and open nothing.
             if let tauri::RunEvent::WindowEvent {
                 label,
-                event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
+                event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, position }),
                 ..
             } = &event
             {
                 let dropped = dropped_paths(paths.iter().cloned());
-                if drop_is_offered(&app.state::<windows::Windows>(), label, &dropped) {
+                if drop_is_offered(&app.state::<windows::Windows>(), label, &dropped)
+                    && !image_files::dropped(app, label, &dropped, *position)
+                {
                     offer(app, dropped);
                 }
             }
@@ -522,6 +574,11 @@ pub fn run() {
             #[cfg(unix)]
             if matches!(event, tauri::RunEvent::Exit) {
                 agents::quitting(app);
+            }
+            // A quit that asked about every document ends with each saved or given up: no copy of
+            // an unsaved document is kept (recovery.rs).
+            if matches!(event, tauri::RunEvent::Exit) {
+                recovery::quit(app);
             }
             // After an update is installed, the new version starts as this one quits.
             if matches!(event, tauri::RunEvent::Exit) {
@@ -642,34 +699,6 @@ mod tests {
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn real_path_follows_a_link_to_the_file_it_names() {
-        use std::os::unix::fs::symlink;
-
-        let folder =
-            std::env::temp_dir().join(format!("redlines-real-path-{}", std::process::id()));
-        let (notes, work) = (folder.join("notes"), folder.join("work"));
-        std::fs::create_dir_all(&notes).unwrap();
-        std::fs::create_dir_all(&work).unwrap();
-        let real = work.join("real-2026.md");
-        std::fs::write(&real, "# Plan\n").unwrap();
-        let real = std::fs::canonicalize(&real).unwrap();
-        // Links as `ln -s` makes them: one to a file in another folder, one by a relative path.
-        symlink(&real, notes.join("plan.md")).unwrap();
-        symlink("../work/real-2026.md", notes.join("relative.md")).unwrap();
-
-        let real_of = |path: PathBuf| real_path(path.to_string_lossy().into_owned());
-        let expected = Ok(real.to_string_lossy().into_owned());
-        assert_eq!(real_of(notes.join("plan.md")), expected);
-        assert_eq!(real_of(notes.join("relative.md")), expected);
-        // A file that is not a link is itself, as it really is.
-        assert_eq!(real_of(real.clone()), expected);
-        // What isn't there is an error, not the path again.
-        assert!(real_of(notes.join("missing.md")).is_err());
-        std::fs::remove_dir_all(&folder).unwrap();
-    }
-
     #[test]
     fn admit_tells_the_window_of_a_file_it_could_not_allow_and_keeps_the_rest() {
         let (plan, notes) = (
@@ -705,7 +734,7 @@ mod tests {
             "/docs/plan.md",
             "/docs/notes.TXT",
             "/docs/logo.png",
-            "/docs/main.ts",
+            "/docs/main.zig",
             "/docs/Makefile",
         ]
         .map(PathBuf::from)

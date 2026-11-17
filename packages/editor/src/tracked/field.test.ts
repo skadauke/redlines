@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEditor,
   type Editor,
@@ -82,7 +82,7 @@ describe('the markup view', () => {
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
   });
 
-  it('does not change the markup view when Clean or Raw is chosen', () => {
+  it('does not change the markup view when Clean or Plain is chosen', () => {
     const editor = load(marked, { markupView: 'simple' });
     editor.setViewMode('clean');
     expect(editor.getUiState().markupView).toBe('simple');
@@ -92,7 +92,7 @@ describe('the markup view', () => {
 });
 
 // Simple is Redlines' simple look, not a view of its own (#303): a View menu lists Clean, Redlines
-// and Raw, and only a click on a change bar switches the two looks.
+// and Plain, and a click on a change bar or the Simple Look switch switches the two looks.
 describe('the views a View menu lists', () => {
   it('names Simple as Redlines, since it is a look of Redlines', () => {
     expect((['clean', 'simple', 'redlines', 'raw'] as const).map(menuViewOf)).toEqual([
@@ -130,7 +130,7 @@ describe('the views a View menu lists', () => {
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
   });
 
-  it('brings back the look that was shown last, so that a trip through Clean or Raw comes back', () => {
+  it('brings back the look that was shown last, so that a trip through Clean or Plain comes back', () => {
     const editor = load(marked, { markupView: 'simple' });
     // The review bar shows the full markup without choosing it: the simple look stays the one
     // chosen, and what was shown is what comes back.
@@ -189,7 +189,45 @@ describe('the views a View menu lists', () => {
     expect(editor.getUiState().view).toBe('simple');
   });
 
-  it('shows Clean and Raw as they are, and never changes the look', () => {
+  it('turns the simple look on and off while Redlines shows, and chooses the look as a click does (#330)', () => {
+    const editor = load(marked, { markupView: 'redlines' });
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'redlines' });
+    editor.switchLook();
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+    editor.switchLook();
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'redlines' });
+  });
+
+  it('switches the look the review bar showed in the full markup without choosing it', () => {
+    const editor = load(marked, { markupView: 'simple' });
+    editor.view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    // The full markup is shown, the simple look is the one remembered: the switch turns it on.
+    editor.switchLook();
+    expect(editor.getUiState()).toMatchObject({ view: 'simple', markupView: 'simple' });
+  });
+
+  it('does nothing in Clean and Plain, which have no look to switch', () => {
+    const editor = load(marked, { markupView: 'redlines' });
+    const measured = vi.spyOn(editor.view, 'coordsAtPos');
+    for (const view of ['clean', 'raw'] as const) {
+      editor.showView(view);
+      editor.switchLook();
+      expect(editor.getUiState()).toMatchObject({ view, markupView: 'redlines' });
+    }
+    // Nothing to keep in place, so nothing is measured.
+    expect(measured).not.toHaveBeenCalled();
+  });
+
+  it('brings back the look remembered now, when no look was shown since the document opened in Clean', () => {
+    // The look is chosen by a click on a change bar in another window while this one shows Clean.
+    const editor = load(plain, { markupView: 'redlines' });
+    expect(editor.getUiState().view).toBe('clean');
+    editor.setMarkupView('simple');
+    editor.showView('redlines');
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
+  it('shows Clean and Plain as they are, and never changes the look', () => {
     const editor = load(marked, { markupView: 'simple' });
     editor.showView('raw');
     expect(editor.getUiState()).toMatchObject({ view: 'raw', markupView: 'simple' });

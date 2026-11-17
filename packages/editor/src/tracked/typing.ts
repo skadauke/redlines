@@ -2,23 +2,19 @@
 // author's edits through the format's trackedEdit: typing becomes an insertion, deleting a
 // deletion and replacing a substitution, each with the markers and the ledger entry the format
 // writes for it, in one transaction, so one Undo takes it back exactly. A tracked edit made in
-// Clean switches the view to Redlines, and Raw is read-only while Track Changes is on, because
+// Clean switches the view to Redlines, and Plain is read-only while Track Changes is on, because
 // typing there could forge or break markers.
 //
-// With Track Changes off, outside Raw, an edit is an edit of the text itself (format §3.10), which
+// With Track Changes off, outside Plain, an edit is an edit of the text itself (format §3.10), which
 // the format's untrackedEdit writes: what is typed never becomes part of a pending change, and what
 // is deleted is gone for good, with the marks that have no text left. It is one transaction too.
 //
-// With Track Changes on or off, outside Raw, Backspace and Delete never delete a marker: next to
+// With Track Changes on or off, outside Plain, Backspace and Delete never delete a marker: next to
 // hidden text they act on the visible character beyond it, and nothing is typed after the ledger
 // at the end of the file.
 
-import {
-  defaultKeymap,
-  invertedEffects,
-  toggleBlockComment,
-  toggleComment,
-} from '@codemirror/commands';
+import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
+import { syntaxTree } from '@codemirror/language';
 import {
   Annotation,
   ChangeSet,
@@ -43,32 +39,58 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import {
+  acceptMarks,
   applyChanges,
+  changesIn,
   type EditContext,
   EditError,
   type FormatOp,
   idsIn,
+  type MarkRange,
   newId,
+  closerRange,
   openerRange,
   parse,
   type Parsed,
   type Range,
   rangeEdge,
   type TextChange,
+  fineEdit,
+  fineEdits,
+  fineFormat,
   trackedEdit,
   trackedFormat,
+  type UnitKind,
+  unitsOf,
   untrackedEdit,
   untrackedFormat,
+  readsOtherAtBoundary,
+  widenedFirstEdits,
 } from '@redlines/format';
+import type { SyntaxNode } from '@lezer/common';
 import { lineChanges } from '../diff.ts';
+import {
+  annotationsOfTransaction,
+  answeredAlready,
+  heldEditEffect,
+  holdEdit,
+  runOf,
+  untrackedAnswerAnnotation,
+  untrackedAskFacet,
+  untrackedAsking,
+  untrackedRunField,
+  type UntrackedReason,
+  type UntrackedWords,
+} from './ask.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
-import { onlyHidden, pastHidden } from './decorations.ts';
+import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
   bodyEnd,
   holdViewAnnotation,
   markupViewFacet,
   parsedField,
+  plainOnlyFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
@@ -77,24 +99,30 @@ import {
 export const setTrackingEffect = StateEffect.define<boolean>();
 
 /**
+ * Switches Track Changes as part of a step that changes the text too (Accept All Changes and Stop
+ * Tracking): `set` is the new state, and `back` the one that taking the step back, or doing it
+ * again, sets. Its inverse swaps the two, so Undo gives back what the person had, and Redo always
+ * does what the step did, whatever was switched by hand in between.
+ */
+export const trackingStepEffect = StateEffect.define<{ set: boolean; back: boolean }>();
+
+/**
  * Whether the author's edits are tracked (design §5.4). It starts on when the file asks for it
  * (`tracking: everyone`, format §5.6).
  */
 export const trackingField = StateField.define<boolean>({
-  create: (state) => state.field(parsedField).ledger.tracking === 'everyone',
-  update: (on, tr) => tr.effects.findLast((effect) => effect.is(setTrackingEffect))?.value ?? on,
+  create: (state) =>
+    !state.facet(plainOnlyFacet) && state.field(parsedField).ledger.tracking === 'everyone',
+  update(on, tr) {
+    // A Plain-only file is never tracked.
+    if (tr.state.facet(plainOnlyFacet)) return false;
+    for (const effect of tr.effects.toReversed()) {
+      if (effect.is(setTrackingEffect)) return effect.value;
+      if (effect.is(trackingStepEffect)) return effect.value.set;
+    }
+    return on;
+  },
 });
-
-/**
- * Undo and Redo of a switch that was written to the document (`setTracking` with `saveTracking`)
- * bring Track Changes back as it was with the text, so that the setting and the file never differ.
- * A switch that changes no text is a step of no one's, and gets none.
- */
-const trackingInverse = invertedEffects.of((tr) =>
-  tr.docChanged && tr.effects.some((effect) => effect.is(setTrackingEffect))
-    ? [setTrackingEffect.of(tr.startState.field(trackingField))]
-    : [],
-);
 
 /** Comes with an edit that can't be made, such as a tracked change inside code: why, for people. */
 export const refusedEditEffect = StateEffect.define<string>();
@@ -103,12 +131,27 @@ export const refusedEditEffect = StateEffect.define<string>();
  * Changes writes for them share a group, and are decided together (format §3.7). */
 export const editGroupAnnotation = Annotation.define<boolean>();
 
-export const RAW_READ_ONLY =
-  'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+/** A transaction that is made only to learn whether the tracked layer takes it as marks at the grain
+ * of the edit, for a key that has another form to try: it is not written as a replacement of a unit
+ * (format §3.12), which is the last resort of the last form. */
+export const probeAnnotation = Annotation.define<boolean>();
 
-/** Raw shows markers as text, which typing could forge or break while edits are tracked. */
+/** A transaction whose edit a key knows no fine form of reads right, though the format's own check
+ * takes one: it is written as a replacement of its unit at once (format §3.12). */
+export const widenFirstAnnotation = Annotation.define<boolean>();
+
+export const RAW_READ_ONLY =
+  'Plain is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+
+/** Plain shows markers as text, which typing could forge or break while edits are tracked. */
 export function rawIsReadOnly(state: EditorState): boolean {
   return state.field(trackingField) && state.field(viewModeField) === 'raw';
+}
+
+/** Raw while edits are tracked, where the host asks first and the person can make the edit
+ * without tracking (`ask.ts`); without a host that asks, Raw is read-only there. */
+function rawAsks(state: EditorState): boolean {
+  return rawIsReadOnly(state) && state.facet(untrackedAskFacet) !== null;
 }
 
 /** Where tracked edits take their time and the random bytes of new ids from. */
@@ -137,9 +180,17 @@ export function contextFor(state: EditorState): EditContext {
  *
  * @throws EditError when the format refuses it.
  */
-export function blockFormatChanges(state: EditorState, range: Range, op: FormatOp): TextChange[] {
+export function blockFormatChanges(
+  state: EditorState,
+  range: Range,
+  op: FormatOp,
+  widening = false,
+): TextChange[] {
   const text = state.doc.toString();
-  if (state.field(trackingField)) return trackedFormat(text, range, op, contextFor(state)).changes;
+  if (state.field(trackingField)) {
+    const write = widening ? trackedFormat : fineFormat;
+    return write(text, range, op, contextFor(state)).changes;
+  }
   const { random } = state.facet(editSourceFacet);
   const editing = state.facet(authorFacet);
   const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
@@ -205,6 +256,56 @@ function inBody(edits: Edit[], end: number | null): Edit[] {
   });
 }
 
+/**
+ * A deletion of all the text between the markers of an inline format (`**a**`, `~~a~~`, a code
+ * span) takes the markers too, from the outermost format it empties: what is left, `****`, is no
+ * format and no text, and read again it would be something else (#584).
+ */
+function emptiedFormats(state: EditorState, edits: Edit[]): Edit[] {
+  const tree = syntaxTree(state);
+  const widened = edits.map((edit) => {
+    if (edit.insert || edit.from >= edit.to) return edit;
+    let { from, to } = edit;
+    for (let moved = true; moved;) {
+      moved = false;
+      for (let node: SyntaxNode | null = tree.resolveInner(from, 1); node; node = node.parent) {
+        const first = node.firstChild;
+        const last = node.lastChild;
+        if (
+          first &&
+          last &&
+          first !== last &&
+          /Mark$/.test(first.name) &&
+          /Mark$/.test(last.name) &&
+          first.to === from &&
+          last.from === to &&
+          /^(StrongEmphasis|Emphasis|Strikethrough|InlineCode)$/.test(node.name)
+        ) {
+          from = node.from;
+          to = node.to;
+          moved = true;
+          break;
+        }
+      }
+    }
+    return from === edit.from && to === edit.to ? edit : { ...edit, from, to };
+  });
+  // Edits that now overlap (several carets) are one.
+  const merged: Edit[] = [];
+  for (const edit of widened) {
+    const previous = merged.at(-1);
+    if (previous && edit.from < previous.to) {
+      merged[merged.length - 1] = {
+        ...previous,
+        to: Math.max(previous.to, edit.to),
+        insert: previous.insert + edit.insert,
+        main: previous.main || edit.main,
+      };
+    } else merged.push(edit);
+  }
+  return merged;
+}
+
 /** The visible character beside `pos`, past any hidden text, or null at the document's edge. */
 function visibleChar(state: EditorState, pos: number, forward: boolean): Range | null {
   const at = pastHidden(state, pos, forward);
@@ -255,7 +356,7 @@ function markersOf(parsed: Parsed): Range[] {
   for (const { segments } of parsed.marks) {
     for (const segment of segments) {
       ranges.push(openerRange(segment));
-      if (segment.close) ranges.push(segment.close);
+      if (segment.close) ranges.push(closerRange(parsed.text, segment.close));
     }
   }
   return ranges.sort((a, b) => a.from - b.from);
@@ -424,7 +525,51 @@ function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: b
   const below = edit.insert.endsWith('\n') ? hiddenAt(next, offset) : undefined;
   const opensBlock =
     below !== undefined && (below.from === 0 || after.text[below.from - 1] === '\n');
-  const pos = positionAt(next, offset, opensBlock || !(edit.insert || backward) ? 1 : -1);
+  // The new text of a replacement that this edit made (format §3.12) starts after its opener: the
+  // text typed at its start is in it, not in front of it.
+  const hidden = hiddenAt(next, offset);
+  const startsNew =
+    hidden !== undefined &&
+    after.marks.some(
+      (mark) =>
+        mark.kind === 'sub' &&
+        before.ledger.marks[mark.id] === undefined &&
+        mark.segments.some((segment) => {
+          const from = openerRange(segment).from;
+          const line = after.text.slice(after.text.lastIndexOf('\n', from - 1) + 1, from);
+          return (
+            from === hidden.from &&
+            /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(?:\[[ xX]\][ \t]+)?$/.test(line)
+          );
+        }),
+    );
+  const pos = positionAt(
+    next,
+    offset,
+    opensBlock || startsNew || !(edit.insert || backward) ? 1 : -1,
+  );
+  const end = bodyEnd(after);
+  return end === null ? pos : Math.min(pos, end);
+}
+
+/**
+ * Where the caret at `head` goes after `changes`, a replacement of a unit that the format wrote
+ * (format §3.12): in the newest text, which keeps what stands after the caret, the same characters
+ * from its end, in the new text of the replacement and not in the old text it holds.
+ */
+export function caretKeptFromEnd(
+  state: EditorState,
+  changes: readonly TextChange[],
+  head: number,
+): number {
+  const text = state.doc.toString();
+  const before = parse(text);
+  const after = parse(applyChanges(text, changes));
+  const old = newestOf(before);
+  const next = newestOf(after);
+  const kept = old.text.length - newestOffset(old, head);
+  const offset = Math.max(0, Math.min(next.text.length, next.text.length - kept));
+  const pos = positionAt(next, offset, -1);
   const end = bodyEnd(after);
   return end === null ? pos : Math.min(pos, end);
 }
@@ -451,18 +596,79 @@ function trackEdits(
   edits: readonly Edit[],
   backward: boolean,
   grouped: boolean | string = false,
+  widening: boolean | 'first' = false,
 ): Tracked {
   let ctx = contextFor(state);
   // A group of its own for several edits, or the one a caller has made for them.
   if (typeof grouped === 'string') ctx = { ...ctx, group: grouped };
   else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
+  const together = widening === false ? deletedTogether(text, parsed, edits, ctx) : null;
+  if (together) return together;
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
-    if (edit.from !== edit.to) return trackedEdit(doc, edit, ctx);
+    const write =
+      widening === 'first'
+        ? (at: string, change: TextChange, made: typeof ctx) =>
+            widenedFirstEdits(at, [change], made).changes
+        : widening
+          ? trackedEdit
+          : (at: string, change: TextChange, made: typeof ctx) => {
+              const fine = fineEdit(at, change, made);
+              // A fine write that micromark reads otherwise than the newest view is replaced by the
+              // write of the whole unit (#597, #601, #588); where no unit holds it, the fine write
+              // stays, as it was.
+              if (readsOtherAtBoundary(at, [change], fine)) {
+                try {
+                  return trackedEdit(at, change, made);
+                } catch {
+                  return fine;
+                }
+              }
+              return fine;
+            };
+    if (edit.from !== edit.to) return write(doc, edit, ctx);
     const at = rangeEdge(read, edit.from, edit.insert);
-    return trackedEdit(doc, { from: at, to: at, insert: edit.insert }, ctx);
+    return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
   });
+}
+
+/** How many deletions are written together (below it, one at a time, as each is checked). */
+const TOGETHER = 8;
+
+/**
+ * Many deletions with room between them (the text of the cells of a rectangle that ⌫ clears) as
+ * marks, written in one pass: each edit planned and read on its own made a 300-row column take
+ * seconds (#456). `fineEdits` makes the per-cell checks of format §3.7 once, for all of them. Null
+ * when the edits are not that, or the format refuses them together: then each is written in turn.
+ * The caret goes where the last deletion starts; the tracked layer moves it out of hidden text.
+ */
+function deletedTogether(
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  ctx: EditContext,
+): Tracked | null {
+  if (edits.length < TOGETHER) return null;
+  if (
+    edits.some(
+      (edit, i) =>
+        edit.insert !== '' || edit.from >= edit.to || (i > 0 && edit.from <= edits[i - 1]!.to),
+    )
+  ) {
+    return null;
+  }
+  try {
+    const written = fineEdits(text, edits, ctx).changes;
+    const changes = ChangeSet.of(written, text.length);
+    const after = parse(applyChanges(text, written), parsed);
+    if (lineStartMarkers(after) > lineStartMarkers(parsed)) return null;
+    const main = edits.find((edit) => edit.main);
+    return { changes, caret: main ? changes.mapPos(main.from, -1) : null };
+  } catch (error) {
+    if (error instanceof EditError) return null;
+    throw error;
+  }
 }
 
 /**
@@ -599,21 +805,65 @@ export function authoredChanges(
   return untrackEdits(state, text, parsed, made, false).changes;
 }
 
+/** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
+ * question to the person answered Make Edit asks for (`ask.ts`). */
+export function untrackedChanges(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): ChangeSet {
+  return untrackEdits(
+    state,
+    text,
+    parsed,
+    edits.map((edit): Edit => ({ ...edit, main: false })),
+    false,
+  ).changes;
+}
+
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
-function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): TransactionSpec {
+function trackedSpec(
+  tr: Transaction,
+  edits: Edit[],
+  backward: boolean,
+): TransactionSpec | readonly (Transaction | TransactionSpec)[] {
   const start = tr.startState;
   let tracked: Tracked;
-  try {
-    tracked = trackEdits(
+  const track = (widening: boolean | 'first') =>
+    trackEdits(
       start,
       start.doc.toString(),
       start.field(parsedField),
       edits,
       backward,
       tr.annotation(editGroupAnnotation) === true,
+      widening,
     );
+  try {
+    try {
+      tracked = tr.annotation(widenFirstAnnotation) === true ? track('first') : track(false);
+    } catch (error) {
+      // No fine form: the unit that holds the edit is replaced, unless a key has another form to
+      // try first.
+      if (!(error instanceof EditError) || tr.annotation(probeAnnotation) === true) throw error;
+      // (Several edits are composed by position, which a replacement moves: they stay refused.)
+      if (edits.length > 1) throw error;
+      tracked = track(true);
+    }
   } catch (error) {
-    if (error instanceof EditError) return refused(tr, error);
+    if (error instanceof EditError) {
+      // Front matter takes no mark: the person is asked first (design §3.1), where there is a host
+      // to ask. A correction the Mac made on its own is left out unsaid.
+      if (
+        error.code === 'front-matter' &&
+        start.facet(untrackedAskFacet) &&
+        !tr.isUserEvent(AUTOCORRECTION)
+      ) {
+        return askedAbout(tr, edits, backward);
+      }
+      return refused(tr, error);
+    }
     throw error;
   }
   if (tracked.changes.empty) return {};
@@ -624,6 +874,24 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
   return rewritten(tr, tracked.changes, tracked.caret, toRedlines);
 }
 
+/** An edit in front matter: made at once without tracking when the person answered already, and
+ * held for the sheet when not. */
+function askedAbout(
+  tr: Transaction,
+  edits: Edit[],
+  backward: boolean,
+): TransactionSpec | readonly (Transaction | TransactionSpec)[] {
+  const now = Date.now();
+  if (!answeredAlready(tr.startState, 'front-matter', now)) {
+    return holdEdit(tr, 'front-matter', annotationsOfTransaction(tr));
+  }
+  const made = untrackedSpec(tr, edits, backward);
+  const ran = { effects: runOf('front-matter', now), sequential: true };
+  return Array.isArray(made)
+    ? [...(made as readonly (Transaction | TransactionSpec)[]), ran]
+    : [made as TransactionSpec, ran];
+}
+
 /**
  * Whether a tracked edit made in Clean suggests something, which switches the view to the markup view so
  * that suggestions are never invisible to their author (design §5.3): whether the format wrote
@@ -632,6 +900,116 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
 function suggests(state: EditorState, doc: Text, edits: readonly Edit[], tracked: ChangeSet) {
   if (state.field(viewModeField) !== 'clean') return false;
   return !tracked.apply(doc).eq(ChangeSet.of(edits, doc.length).apply(doc));
+}
+
+/** The unit the edits are in, as the sheet names it. */
+const UNIT_WORDS: Record<UnitKind, string> = {
+  block: 'paragraph',
+  code: 'code block',
+  table: 'table',
+  item: 'list item',
+  list: 'list',
+  quote: 'quote',
+};
+
+/** The smallest unit that holds the edits, or the range of the units they reach. */
+function unitAround(
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+): { range: Range; word: string } | null {
+  const from = Math.min(...edits.map((edit) => edit.from));
+  const to = Math.max(...edits.map((edit) => edit.to));
+  let units = unitsOf(text, parsed).filter((unit) => unit.lineFrom <= to && from <= unit.to);
+  if (units.length === 0) return null;
+  while (units.length === 1) {
+    const inside = units[0]!.children.filter((unit) => unit.lineFrom <= to && from <= unit.to);
+    if (inside.length === 0) break;
+    units = inside;
+  }
+  const first = units[0]!;
+  const last = units.at(-1)!;
+  return {
+    range: { from: first.lineFrom, to: last.to },
+    word: units.length === 1 ? UNIT_WORDS[first.kind] : 'selection',
+  };
+}
+
+/** "Bo Chen's and your 2 pending changes": whose changes the edit decides, and how many. */
+function acceptWords(
+  state: EditorState,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  word: string,
+): UntrackedWords {
+  const me = state.facet(authorFacet)?.handle;
+  const others: string[] = [];
+  let mine = false;
+  for (const { entry } of marks) {
+    if (entry.by === me) mine = true;
+    else {
+      const name =
+        entry.by === 'unknown'
+          ? 'an unknown author'
+          : (parsed.ledger.people.find((person) => person.handle === entry.by)?.name ?? entry.by);
+      if (!others.includes(name)) others.push(name);
+    }
+  }
+  const owners = [...others.map((name) => `${name}'s`), ...(mine ? ['your'] : [])];
+  const who =
+    owners.length > 2
+      ? `${owners.slice(0, -1).join(', ')} and ${owners.at(-1)}`
+      : owners.join(' and ');
+  const n = marks.length;
+  const changes = n === 1 ? '1 pending change' : `${n} pending changes`;
+  return {
+    // Changes of one suggestion are decided together, so some may lie outside the unit.
+    title: `This edit can't be made without accepting ${who} ${changes} in this ${word}${
+      marks.some((mark) => mark.entry.group) ? ', with the rest of their suggestion' : ''
+    }. Make the edit?`,
+  };
+}
+
+/**
+ * With Track Changes off, an edit that can't be made beside the pending changes around it is made
+ * after those in its unit are accepted (design §3.4): they are the text that the person sees, and
+ * the edit was made against it. Nothing when there are none to accept, or the edit still can't be
+ * made after them. The changes are one step: the acceptance and the edit, in the offsets of `text`.
+ */
+function acceptPlan(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  backward: boolean,
+): { tracked: Tracked; words: UntrackedWords } | null {
+  const unit = unitAround(text, parsed, edits);
+  if (!unit) return null;
+  const marks = changesIn(parsed, unit.range);
+  if (marks.length === 0) return null;
+  try {
+    const decided = acceptMarks(
+      text,
+      marks.map((mark) => mark.id),
+    );
+    const accept = ChangeSet.of(decided, text.length);
+    const accepted = applyChanges(text, decided);
+    const moved = edits.map((edit) => ({
+      ...edit,
+      from: accept.mapPos(edit.from, 1),
+      to: accept.mapPos(edit.to, -1),
+    }));
+    // An edit inside text that accepting takes away has nowhere to go: not this way.
+    if (moved.some((edit) => edit.from > edit.to)) return null;
+    const made = untrackEdits(state, accepted, parse(accepted), moved, backward);
+    return {
+      tracked: { changes: accept.compose(made.changes), caret: made.caret },
+      words: acceptWords(state, parsed, marks, unit.word),
+    };
+  } catch (error) {
+    if (error instanceof EditError) return null;
+    throw error;
+  }
 }
 
 /**
@@ -648,8 +1026,20 @@ function untrackedSpec(
   try {
     result = untrackEdits(start, start.doc.toString(), start.field(parsedField), edits, backward);
   } catch (error) {
-    if (error instanceof EditError) return refused(tr, error);
-    throw error;
+    if (!(error instanceof EditError)) throw error;
+    // The other people's pending changes around the edit are what it can't be made beside: the
+    // person is asked whether to accept them, and the edit is made after (design §3.4).
+    const plan =
+      !start.field(trackingField) &&
+      start.facet(untrackedAskFacet) &&
+      !tr.isUserEvent(AUTOCORRECTION)
+        ? acceptPlan(start, start.doc.toString(), start.field(parsedField), edits, backward)
+        : null;
+    if (!plan) return refused(tr, error);
+    if (tr.annotation(untrackedAnswerAnnotation) === true) {
+      return rewritten(tr, plan.tracked.changes, plan.tracked.caret);
+    }
+    return holdEdit(tr, 'accept-pending', annotationsOfTransaction(tr), plan.words);
   }
   if (JSON.stringify(result.changes.toJSON()) === JSON.stringify(tr.changes.toJSON())) {
     // Marked so that the caret moves out of hidden text, which the edit can leave it in when it
@@ -659,13 +1049,28 @@ function untrackedSpec(
   return rewritten(tr, result.changes, result.caret);
 }
 
-/** A selection that reaches past the body, onto the line after the hidden ledger, stops at it. */
+/** Closers of marks and nothing else: what ends the body's text, in front of the hidden ledger. */
+const CLOSERS = /^(?:<!--\/[^\n>]*-->)+$/;
+
+/**
+ * A selection that reaches past the body, onto the line after the hidden ledger, stops at it: in
+ * front of the closers that end the body's text when the end is inside them, which are hidden
+ * together with the ledger after them (#393).
+ */
 function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpec[] {
   const end = bodyEnd(tr.startState.field(parsedField));
   const selection = tr.newSelection;
   if (end === null || selection.ranges.every((r) => r.anchor <= end && r.head <= end)) return tr;
+  let stop = end;
+  // The end of the body inside the closers that end its text: in front of them. (Inside only line
+  // breaks that end it, the end is where a new line goes.)
+  if (!tr.docChanged && tr.isUserEvent('select')) {
+    atomsOf(tr.startState).between(end, end, (from, to) => {
+      if (from < end && end < to && CLOSERS.test(tr.startState.sliceDoc(from, end))) stop = from;
+    });
+  }
   const ranges = selection.ranges.map((r) =>
-    EditorSelection.range(Math.min(r.anchor, end), Math.min(r.head, end)),
+    EditorSelection.range(Math.min(r.anchor, stop), Math.min(r.head, stop)),
   );
   return [tr, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
 }
@@ -675,21 +1080,32 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
 export const composedTextFacet =
   Facet.define<(state: EditorState, from: number, text: string) => string>();
 
-/** Text an input method composes outside Raw (see `compositionField`). */
+/** Text an input method composes outside Plain (see `compositionField`). */
 function isDeferred(tr: Transaction): boolean {
   return (
     tr.isUserEvent('input.type.compose') &&
     !tr.annotation(trackedEditAnnotation) &&
-    tr.startState.field(viewModeField) !== 'raw'
+    tr.annotation(untrackedAnswerAnnotation) !== true &&
+    (tr.startState.field(viewModeField) !== 'raw' || rawAsks(tr.startState))
   );
 }
 
 const typingFilter = EditorState.transactionFilter.of((tr) => {
   const start = tr.startState;
+  const answered = tr.annotation(untrackedAnswerAnnotation) === true;
   if (start.field(viewModeField) === 'raw') {
     // Markdown's own Enter and Backspace edit without looking at the read-only setting.
-    const refused = tr.docChanged && isUserEdit(tr) && rawIsReadOnly(start);
-    return refused ? { effects: refusedEditEffect.of(RAW_READ_ONLY) } : tr;
+    if (!(tr.docChanged && isUserEdit(tr) && rawIsReadOnly(start)) || answered) return tr;
+    if (!start.facet(untrackedAskFacet)) return { effects: refusedEditEffect.of(RAW_READ_ONLY) };
+    // A correction the Mac made on its own is left out unsaid, as in front matter.
+    if (tr.isUserEvent(AUTOCORRECTION)) return {};
+    // An input method's composition goes in as it is, and is asked about when it ends.
+    if (isDeferred(tr)) return tr;
+    const now = Date.now();
+    if (answeredAlready(start, 'raw', now)) {
+      return [tr, { effects: runOf('raw', now), sequential: true }];
+    }
+    return holdEdit(tr, 'raw', annotationsOfTransaction(tr));
   }
   if (tr.annotation(trackedEditAnnotation) || tr.annotation(Transaction.remote)) return tr;
   if (!tr.docChanged) return tr.selection ? selectionInBody(tr) : tr;
@@ -701,7 +1117,17 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   if (!block && (backward || tr.isUserEvent('delete.forward'))) {
     edits = pastHiddenText(start, edits, !backward);
   }
-  if (start.field(trackingField)) return trackedSpec(tr, keepingSpaces(tr, edits), backward);
+  // A cut or a drag keeps what it takes as it is: the clipboard holds the text with its markers.
+  if (
+    tr.isUserEvent('delete') &&
+    !tr.isUserEvent('delete.cut') &&
+    !tr.isUserEvent('delete.dragMove')
+  ) {
+    edits = emptiedFormats(start, edits);
+  }
+  if (start.field(trackingField) && !answered) {
+    return trackedSpec(tr, keepingSpaces(tr, edits), backward);
+  }
   return untrackedSpec(tr, edits, backward);
 });
 
@@ -786,20 +1212,74 @@ function finishComposition(view: EditorView): void {
   const effects: StateEffect<unknown>[] = [composedEffect.of(null)];
   let changes = back;
   let selection: SelectionRange | undefined;
+  const inRaw = state.field(viewModeField) === 'raw';
+  const asker = state.facet(untrackedAskFacet);
+  /** The composition taken back, and held for the sheet (design §3.1). */
+  const hold = (reason: UntrackedReason, words?: UntrackedWords) => {
+    const base = back.apply(state.doc);
+    const last = edits.at(-1);
+    view.dispatch({
+      changes: back,
+      effects: [
+        composedEffect.of(null),
+        heldEditEffect.of({
+          reason,
+          ...(words ? { words } : {}),
+          doc: base,
+          changes: ChangeSet.of(
+            edits.map(({ from, to, insert }) => ({ from, to, insert })),
+            base.length,
+          ),
+          selection: last && EditorSelection.single(last.from + last.insert.length),
+          annotations: [Transaction.userEvent.of('input.type')],
+          scrollIntoView: true,
+        }),
+      ],
+      annotations: [
+        trackedEditAnnotation.of(true),
+        untrackedAnswerAnnotation.of(true),
+        Transaction.userEvent.of('input.type.compose'),
+      ],
+    });
+  };
+  if (inRaw && asker) {
+    // Raw while edits are tracked: the text stays as composed when it was answered for already.
+    if (answeredAlready(state, 'raw', Date.now())) {
+      view.dispatch({ effects: [composedEffect.of(null), runOf('raw', Date.now())] });
+    } else hold('raw');
+    return;
+  }
   try {
     const base = back.apply(state.doc);
     const text = base.toString();
     const parsed = parse(text, state.field(parsedField));
     const tracking = state.field(trackingField);
-    const made = (tracking ? trackEdits : untrackEdits)(state, text, parsed, edits, false);
+    let made: Tracked;
+    let kept = !tracking;
+    try {
+      made = (tracking ? trackEdits : untrackEdits)(state, text, parsed, edits, false);
+    } catch (error) {
+      if (error instanceof EditError && asker && !tracking) {
+        // Beside other people's pending changes: asked whether to accept them (design §3.4).
+        const plan = acceptPlan(state, text, parsed, edits, false);
+        if (plan) return hold('accept-pending', plan.words);
+      }
+      if (!(error instanceof EditError && error.code === 'front-matter' && asker && tracking)) {
+        throw error;
+      }
+      if (!answeredAlready(state, 'front-matter', Date.now())) return hold('front-matter');
+      made = untrackEdits(state, text, parsed, edits, false);
+      kept = true;
+      effects.push(runOf('front-matter', Date.now()));
+    }
     // Text composed with Track Changes off that goes in as it was composed needs no step.
-    if (!tracking && made.changes.apply(base).eq(state.doc)) {
-      view.dispatch({ effects: composedEffect.of(null) });
+    if (kept && made.changes.apply(base).eq(state.doc)) {
+      view.dispatch({ effects });
       return;
     }
     changes = back.compose(made.changes);
     if (made.caret !== null) selection = EditorSelection.cursor(made.caret);
-    if (tracking && suggests(state, base, edits, made.changes)) {
+    if (tracking && !kept && suggests(state, base, edits, made.changes)) {
       effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
     }
   } catch (error) {
@@ -848,19 +1328,20 @@ const compositionEnd = ViewPlugin.fromClass(CompositionEnd, {
   },
 });
 
-/** Raw is read-only while Track Changes is on (see `rawIsReadOnly`). */
+/** Plain is read-only while Track Changes is on (see `rawIsReadOnly`). */
 const rawWhileTracking = EditorState.readOnly.compute(
-  [trackingField, viewModeField],
-  rawIsReadOnly,
+  [trackingField, viewModeField, untrackedAskFacet],
+  (state) => rawIsReadOnly(state) && !rawAsks(state),
 );
 
-/** In Raw while it is read-only, says why what the page would edit doesn't go in. */
+/** In Plain while it is read-only, says why what the page would edit doesn't go in. */
 function sayReadOnly(view: EditorView): void {
-  if (rawIsReadOnly(view.state)) view.dispatch({ effects: refusedEditEffect.of(RAW_READ_ONLY) });
+  if (rawIsReadOnly(view.state) && !rawAsks(view.state))
+    view.dispatch({ effects: refusedEditEffect.of(RAW_READ_ONLY) });
 }
 
 /**
- * Typing, deleting, pasting, cutting and dropping in Raw while it is read-only, which the editor
+ * Typing, deleting, pasting, cutting and dropping in Plain while it is read-only, which the editor
  * takes no change from. Undo and Redo say why themselves.
  */
 const rawEditsRefused = EditorView.domEventObservers({
@@ -876,12 +1357,13 @@ const rawEditsRefused = EditorView.domEventObservers({
 export function trackedTyping(): Extension {
   return [
     trackingField,
-    trackingInverse,
     compositionField,
     typingFilter,
     compositionEnd,
     rawWhileTracking,
     rawEditsRefused,
+    untrackedRunField,
+    untrackedAsking,
     systemCorrections(),
   ];
 }

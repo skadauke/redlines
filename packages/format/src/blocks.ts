@@ -46,9 +46,72 @@ export function markerEnd(text: string, from: number): number {
   return text.indexOf('-->', from) + 3;
 }
 
-/** Where the line that holds `position` starts. */
-export function lineStart(text: string, position: number): number {
-  return position === 0 ? 0 : text.lastIndexOf('\n', position - 1) + 1;
+/** How far back `lineStart` looks for a line break before it asks an index of them. */
+const NEAR = 256;
+
+/**
+ * The line breaks of one text, found once, for a reader that asks where a line starts for many
+ * positions of a very long line (the old text of a large deletion is one, its line breaks written as
+ * escapes): a search back from each costs the line's length.
+ */
+export class LineIndex {
+  private breaks: number[] | null = null;
+  readonly text: string;
+
+  constructor(text: string) {
+    this.text = text;
+  }
+
+  /** Where the line that holds `position` starts. */
+  start(position: number): number {
+    if (!this.breaks) {
+      const breaks: number[] = [];
+      const { text } = this;
+      for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) breaks.push(at);
+      this.breaks = breaks;
+    }
+    const { breaks } = this;
+    let low = 0;
+    let high = breaks.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (breaks[middle]! < position) low = middle + 1;
+      else high = middle;
+    }
+    return low === 0 ? 0 : breaks[low - 1]! + 1;
+  }
+}
+
+/** Where the line that holds `position` starts (by `index` when the line is long). */
+export function lineStart(text: string, position: number, index?: LineIndex): number {
+  if (position === 0) return 0;
+  const near = Math.max(0, position - NEAR);
+  for (let at = position - 1; at >= near; at--) if (text.charCodeAt(at) === 10) return at + 1;
+  if (near === 0) return 0;
+  return index ? index.start(position) : text.lastIndexOf('\n', position - 1) + 1;
+}
+
+/** What may stand before a marker on its line, as a character (`CONTAINER_PREFIX`'s own). */
+const PREFIX_CHAR = /[ \t>\-*+0-9.)[\]xX]/;
+
+/**
+ * Whether the text from `start` to `from`, without its markers, can be a container prefix at all:
+ * false at the first character outside the markers that no prefix holds, which on a long line
+ * of text is the first, so that no marker on it reads the line before it again.
+ */
+function mayBePrefix(text: string, start: number, from: number): boolean {
+  for (let at = start; at < from;) {
+    if (text.startsWith('<!--', at)) {
+      const close = text.indexOf('-->', at + 4);
+      if (close !== -1 && close + 3 <= from) {
+        at = close + 3;
+        continue;
+      }
+    }
+    if (!PREFIX_CHAR.test(text[at]!)) return false;
+    at++;
+  }
+  return true;
 }
 
 /** Where the line after the one that holds `position` starts, past its line break (`\r\n` too), or
@@ -76,7 +139,19 @@ export function prefixLength(line: string): number {
  * column. A checkbox belongs to the text, not to the indentation.
  */
 export function continuationPrefix(prefix: string): string {
-  return prefix.replace(LIST_MARKER, (marker) => ' '.repeat(marker.length)).replace(CHECKBOX, '');
+  // A marker's width is the columns it spans, where a tab goes on to the next tab stop of four
+  // (CommonMark): `-\t` has its content at column 4, not 2.
+  const columns = (text: string, from = 0) => {
+    let column = from;
+    for (const c of text) column = c === '\t' ? column + 4 - (column % 4) : column + 1;
+    return column;
+  };
+  return prefix
+    .replace(LIST_MARKER, (marker, offset: number) => {
+      const start = columns(prefix.slice(0, offset));
+      return ' '.repeat(columns(marker, start) - start);
+    })
+    .replace(CHECKBOX, '');
 }
 
 /**
@@ -103,8 +178,9 @@ function isBlank(line: string): boolean {
  * the opener has no carrier: there is text after it on its line, or text before it other than
  * markers, or no block follows.
  */
-export function carrierEnd(text: string, from: number, to: number): number {
-  const start = lineStart(text, from);
+export function carrierEnd(text: string, from: number, to: number, index?: LineIndex): number {
+  const start = lineStart(text, from, index);
+  if (!mayBePrefix(text, start, from)) return to;
   // Markers may stand in front of the opener on its line: where the mark of one ends and another
   // starts a block, the closer of the first is in front of the opener of the second.
   const before = text.slice(start, from).replace(/<!--.*?-->/g, '');
@@ -131,20 +207,44 @@ export function carrierEnd(text: string, from: number, to: number): number {
 const UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
 
 /**
- * Past the setext underline that the line at `position` of `rest` is, with its line break, when it
+ * The line break that ends the setext underline that the line at `position` of `rest` is, when it
  * is one in the container of the line before (`linePrefix`) and a blank line follows it: the break
  * of a split at the end of a setext heading's text holds the underline that the first half of the
- * heading gets (format §3.4). Otherwise `position`.
+ * heading gets (format §3.4). Undefined where the line is no such underline.
  */
-function pastUnderline(linePrefix: string, rest: string, position: number): number {
+function underlineBreak(linePrefix: string, rest: string, position: number): number | undefined {
   const end = rest.indexOf('\n', position);
-  if (end === -1) return position;
+  if (end === -1) return undefined;
   const line = rest.slice(position, end).replace(/\r$/, '');
   const container = continuationPrefix(linePrefix);
-  if (!line.startsWith(container) || !UNDERLINE.test(line.slice(container.length))) return position;
+  if (!line.startsWith(container) || !UNDERLINE.test(line.slice(container.length))) {
+    return undefined;
+  }
   const after = rest.indexOf('\n', end + 1);
-  if (after === -1 || !isBlank(rest.slice(end + 1, after).replace(/\r$/, ''))) return position;
-  return end + 1;
+  if (after === -1 || !isBlank(rest.slice(end + 1, after).replace(/\r$/, ''))) return undefined;
+  return end;
+}
+
+/** Past the setext underline that the line at `position` of `rest` is, with its line break, when
+ * the break holds it (`underlineBreak`). Otherwise `position`. */
+function pastUnderline(linePrefix: string, rest: string, position: number): number {
+  const end = underlineBreak(linePrefix, rest, position);
+  return end === undefined ? position : end + 1;
+}
+
+/**
+ * Where the setext underline that the break at `start` holds ends, before its line break, or
+ * undefined where the break holds none (`breakLength`). The break is what stands between two
+ * blocks, and a block after the heading is deleted with it (format §3.4), but the underline is the
+ * heading's own, and no marker may stand behind it (format §3.1): a deletion that took it into the
+ * break would make a paragraph of the heading.
+ */
+export function underlineOfBreak(text: string, start: number): number | undefined {
+  const rest = text.slice(start, Math.min(start + 4096, text.length));
+  const first = /^[ \t]*\r?\n/.exec(rest);
+  if (!first) return undefined;
+  const end = underlineBreak(linePrefixAt(text, start), rest, first[0].length);
+  return end === undefined ? undefined : start + end - (rest[end - 1] === '\r' ? 1 : 0);
 }
 
 /**
@@ -1322,4 +1422,27 @@ export function viewBreaks(text: string, mark: MarkRange, newest: DocView): numb
     }
   }
   return breaks;
+}
+
+/** The seventh start of an HTML block: one whole open or closing tag of another name, alone on its line. */
+export const HTML_START_7 =
+  /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
+
+/**
+ * The range that a closer takes away with it. A closer alone on the line after a whole tag that
+ * stands alone on its line (after a blank line, or at the start of the file, with no container
+ * prefix) has the line break in front of it as its syntax (format §3.3): the tag is an HTML block
+ * that the closer can't share a line with, and no view reads the break as text. Any other closer
+ * is its own range.
+ */
+export function closerRange(text: string, close: Range): Range {
+  if (close.from === 0 || text[close.from - 1] !== '\n') return close;
+  const next = text.indexOf('\n', close.to);
+  if (text.slice(close.to, next === -1 ? text.length : next).trim() !== '') return close;
+  const eol = text[close.from - 2] === '\r' ? 2 : 1;
+  const lineEndAt = close.from - eol;
+  const start = text.lastIndexOf('\n', lineEndAt - 1) + 1;
+  if (!HTML_START_7.test(text.slice(start, lineEndAt))) return close;
+  const above = start === 0 ? '' : text.slice(text.lastIndexOf('\n', start - 2) + 1, start - 1);
+  return start === 0 || above.trim() === '' ? { from: close.from - eol, to: close.to } : close;
 }

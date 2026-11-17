@@ -4,14 +4,15 @@
 // gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
 // changes; block format changes, table marks and moves are kept as they are.
 
-import { breakEnd, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
+import { breakEnd, closerRange, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
   commitEdit,
   eolOf,
-  inEol,
+  hiddenError,
   markerRanges,
   paragraphBreaks,
+  restoredPayload,
   spliceRepairs,
   workingLedger,
 } from './edit-support.ts';
@@ -22,15 +23,29 @@ import type { FormatReader } from './format-reader.ts';
 import {
   decidesFormat,
   formatDecision,
+  rejectionError,
   rejectionWorks,
   underscoreRewrites,
 } from './format-undo.ts';
 import { parse } from './parse.ts';
+import { scanPayload } from './scan.ts';
+import { encodePayload, encodePayloadText } from './payload.ts';
+import {
+  findInPayload,
+  intact,
+  ledgerForSite,
+  payloadFile,
+  payloadIdsOf,
+  payloadOfFile,
+  prefixesOf,
+} from './payload-marks.ts';
+import type { PayloadFound } from './payload-marks.ts';
 import { tablesOfText } from './table.ts';
 import { colMarkIds, decideCols } from './table-cols.ts';
-import { isAlignMark } from './table-align.ts';
-import { decideRows, rowMarkIds } from './table-ops.ts';
-import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
+import { isAlignMark, isAlignPoint } from './table-align.ts';
+import { wholeTableDeleted } from './table-bare.ts';
+import { decideRows, originalRowText, rowMarkIds } from './table-ops.ts';
+import type { MarkRange, Parsed, PayloadMarks, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalView, syntaxOnly } from './views.ts';
 
 type Action = 'accept' | 'reject';
@@ -73,16 +88,52 @@ const isColMark = (mark: MarkRange) =>
  * accepted, or go with the insertion that holds it. Other refusals say what to decide first.
  */
 export function canReject(parsed: Parsed, mark: MarkRange): boolean {
-  if (mark.kind === 'split') return !beforeFence(parsed.text, mark);
-  if (mark.kind !== 'fmt') return true;
+  return rejectReason(parsed, mark) === undefined;
+}
+
+/** What Reject's hint says where a change can only be accepted (design §4.1). */
+const ONLY_ACCEPT = 'This change can only be accepted: ';
+
+/**
+ * Why a person can't be offered to reject the mark, in a sentence that says what to do: "This change
+ * can only be accepted: its block no longer has that syntax." (a hint for the grayed Reject), or
+ * undefined where it can be. `canReject` is whether this says nothing.
+ */
+export function rejectReason(parsed: Parsed, mark: MarkRange): string | undefined {
+  if (mark.kind === 'split') {
+    return beforeFence(parsed.text, mark)
+      ? `${ONLY_ACCEPT}rejecting it would join the line after it to the text in front, which opens a code fence.`
+      : undefined;
+  }
+  if (mark.kind !== 'fmt') return undefined;
   const { text } = parsed;
   if (mark.segments.some((s) => s.close && text.slice(s.open.to, s.close.from).includes('<!--'))) {
-    return true;
+    return undefined;
   }
   // Nothing is left for the change to have formatted: `****`, two backticks, `[](url)`.
   const ranges = mark.segments.filter((segment) => segment.close);
-  if (ranges.length > 0 && ranges.every((segment) => syntaxOnly(text, mark, segment))) return false;
-  return rejectionWorks(formatReader(text, parsed), mark);
+  if (ranges.length > 0 && ranges.every((segment) => syntaxOnly(text, mark, segment))) {
+    return `${ONLY_ACCEPT}its text no longer has that formatting.`;
+  }
+  const error = rejectionError(formatReader(text, parsed), mark);
+  if (error === null) return undefined;
+  return `${ONLY_ACCEPT}${whyLost(error.message)}`;
+}
+
+/** What is lost, in the words of the hint, from what the format said when it could not restore. */
+function whyLost(message: string): string {
+  if (/alert no longer has a type/.test(message)) {
+    return 'its alert no longer has a type on its first line.';
+  }
+  if (/table no longer has the columns/.test(message)) {
+    return 'the table no longer has the columns it had.';
+  }
+  if (/block no longer has that syntax/.test(message))
+    return 'its block no longer has that syntax.';
+  if (/text no longer has that formatting/.test(message)) {
+    return 'its text no longer has that formatting.';
+  }
+  return "its old text can't be restored.";
 }
 
 /** Whether the break of a split is followed by a line that opens a fenced code block. */
@@ -140,10 +191,11 @@ function decisionChanges(
   action: Action,
   eol: Eol,
   reader: FormatReader | undefined,
+  parsed: Parsed,
 ): TextChange[] {
   const changes: TextChange[] = [];
   const remove = (range: Range) => changes.push({ from: range.from, to: range.to, insert: '' });
-  for (const segment of mark.segments) {
+  for (const [index, segment] of mark.segments.entries()) {
     if (mark.kind === 'fmt' && reader) {
       changes.push(...formatDecision(reader, mark, segment, action));
       continue;
@@ -152,24 +204,56 @@ function decisionChanges(
     const open = openerRange(segment);
     const { close, payload } = segment;
     const whole = { from: open.from, to: (close ?? open).to };
-    const restored = inEol(payload ?? '', eol);
+    const restored = restoredPayload(payload ?? '', eol);
     if (mark.kind === 'split') {
       // Rejecting it takes the break with it, or the deletion of the break that someone recorded.
       const to = action === 'accept' ? open.to : splitEnd(text, segment.open, deletions, limit);
       changes.push({ from: open.from, to, insert: '' });
     } else if (mark.kind === 'del') {
-      changes.push({ from: open.from, to: open.to, insert: action === 'accept' ? '' : restored });
+      if (action === 'accept') changes.push(...acceptedOpener(parsed, mark, index, segment));
+      else changes.push({ from: open.from, to: open.to, insert: restored });
     } else if (action === 'reject' && mark.kind === 'ins') {
       changes.push({ ...whole, insert: '' });
     } else if (action === 'reject' && mark.kind === 'sub') {
       changes.push({ ...whole, insert: restored });
+    } else if (action === 'accept' && mark.kind === 'sub') {
+      // Accepting keeps the new text and drops the markers, the old text and the marks in it, but a
+      // comment in it stays, as a point comment where the new text starts (format §3.12).
+      changes.push(...acceptedOpener(parsed, mark, index, segment));
+      if (close) remove(closerRange(text, close));
     } else {
       // Accepting keeps the text and drops the markers; a highlight is dismissed either way.
       remove(open);
-      if (close) remove(close);
+      if (close) remove(closerRange(text, close));
     }
   }
   return changes;
+}
+
+/**
+ * What accepting a replacement does to its opener: it goes with its carrier, and the old text with
+ * it. A comment in the old text stays, as a point comment where the new text starts (format §3.12,
+ * the rule of a deleted block): the markers of the comments are written in place of the opener, one
+ * after the other, and the carrier, if the opener has one, stays after them, so that they stand as
+ * a block's opener does.
+ */
+function acceptedOpener(
+  parsed: Parsed,
+  mark: MarkRange,
+  index: number,
+  segment: Segment,
+): TextChange[] {
+  const ids: string[] = [];
+  const walk = (held: PayloadMarks) => {
+    for (const inner of held.marks) if (inner.kind === 'cmt') ids.push(inner.id);
+    for (const deeper of held.payloads) walk(deeper);
+  };
+  for (const site of parsed.payloads) {
+    if (site.owner === mark.id && site.segment === index) walk(site);
+  }
+  if (ids.length === 0) return [{ ...openerRange(segment), insert: '' }];
+  const insert = [...new Set(ids)].map((id) => `<!--cmt ${id}-->`).join('');
+  return [{ from: segment.open.from, to: segment.open.to, insert }];
 }
 
 /** Changes that do not overlap: where one lies inside another, the outer one wins. Text written
@@ -290,14 +374,33 @@ function emptiedAnnotations(
     // the first of them (format §4). A highlight has no point form and goes.
     const [point] = live.length === 0 && mark.kind === 'cmt' ? emptied : [];
     for (const segment of emptied) {
-      if (segment === point && segment.close) remove(segment.close);
+      if (segment === point && segment.close) remove(closerRange(text, segment.close));
       else {
         remove(openerRange(segment));
-        if (segment.close) remove(segment.close);
+        if (segment.close) remove(closerRange(text, segment.close));
       }
     }
   }
   return extra;
+}
+
+/** The ids of every marker in the payloads of `marks`, however deep: those that are read, and those
+ * that a payload too deep to read holds as text until the replacement is rejected. */
+function deepIds(marks: readonly MarkRange[]): string[] {
+  const ids: string[] = [];
+  const walk = (payload: string, depth: number) => {
+    if (depth > 8 || !payload.includes('<!--')) return;
+    for (const marker of scanPayload(payload).markers) {
+      if (marker.type !== 'open') continue;
+      ids.push(marker.id);
+      if (marker.payload !== undefined) walk(marker.payload, depth + 1);
+    }
+  };
+  for (const mark of marks) {
+    if (mark.kind !== 'sub' && mark.kind !== 'del') continue;
+    for (const segment of mark.segments) walk(segment.payload ?? '', 0);
+  }
+  return ids;
 }
 
 /** Whether a mark is a half of a move of a row. */
@@ -310,6 +413,70 @@ const isRowMove = (mark: MarkRange) => isRowMark(mark) && mark.entry.move !== un
  * pending in it decided already, which a decision over the same lines could not do together.
  */
 function decide(
+  text: string,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  action: Action,
+): TextChange[] {
+  // Rejecting every inserted column of a table whose original column is a pending deletion (#477).
+  const bare =
+    action === 'reject' && parsed.marks.some((mark) => mark.kind === 'del' && isColMark(mark))
+      ? wholeTableDeleted(text, parsed, marks, (all) => decideTiers(text, parsed, all, 'reject'))
+      : undefined;
+  const changes = bare ?? decideTiers(text, parsed, marks, action);
+  if (action !== 'accept' || changes.length === 0) return changes;
+  if (!parsed.marks.some((mark) => isRowMove(mark) && mark.kind === 'ins')) return changes;
+  return resyncMoves(text, changes);
+}
+
+/**
+ * A decision that accepts a change inside a row that a pending move wrote is a change of the row, and
+ * the row goes back with it when the move is rejected (format §3.7, #475): the kept copy, which the
+ * original view reads at the old place, is written again as the row now reads with its pending changes
+ * rejected, so that the original view is what rejecting the move gives and every order of the decisions
+ * reads alike.
+ */
+function resyncMoves(text: string, changes: TextChange[]): TextChange[] {
+  const after = applyChanges(text, changes);
+  const read = parse(after);
+  const step: TextChange[] = [];
+  for (const table of tablesOfText(after, read)) {
+    table.rows.forEach((row, index) => {
+      const copy = row.insertion;
+      if (!copy || copy.entry.move === undefined || copy.payload !== 'row') return;
+      const twin = table.deletions.find((d) => d.mark.id === copy.entry.move);
+      const open = twin?.mark.segments[0]?.open;
+      const payload = twin?.mark.payload;
+      if (!twin || !open || payload === undefined) return;
+      try {
+        const moved = applyChanges(after, decide(after, read, [copy], 'accept'));
+        const readMoved = parse(moved);
+        const mine = tablesOfText(moved, readMoved).find((t) => t.from === table.from);
+        const placed = mine?.rows[index];
+        if (!placed) return;
+        const prefix = /^(?:row|col)=\d+ ?/.exec(payload)?.[0] ?? '';
+        const wanted = prefix + originalRowText(moved, readMoved, placed);
+        if (wanted === payload) return;
+        step.push({
+          from: open.from,
+          to: open.to,
+          insert: `<!--del ${twin.mark.id} ${encodePayload(wanted)}-->`,
+        });
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+    });
+  }
+  if (step.length === 0) return changes;
+  return spliceRepairs(
+    text,
+    changes,
+    after,
+    step.sort((a, b) => a.from - b.from),
+  );
+}
+
+function decideTiers(
   text: string,
   parsed: Parsed,
   marks: readonly MarkRange[],
@@ -393,7 +560,7 @@ function decideNow(
   const travelling = new Set<string>();
   const raw = marks
     .filter((mark) => !isRowMark(mark) && !isColMark(mark))
-    .flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol, reader));
+    .flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol, reader, parsed));
   if (rowMarks.length > 0) {
     // The rows of a table are decided together, a move's two halves with each other.
     const wanted = new Set(rowMarks.map((mark) => mark.id));
@@ -409,6 +576,7 @@ function decideNow(
         decidedIds.add(id);
       }
       for (const id of done.anchored) decidedIds.add(id);
+      for (const id of done.travelling) travelling.add(id);
     }
     if (rowMarks.some((mark) => !found.has(mark.id))) {
       throw new EditError(NOT_SUPPORTED, 'not-supported');
@@ -454,8 +622,27 @@ function decideNow(
   for (const id of decidedIds) delete ledger.marks[id];
   // A highlight is no change: neither view is different once it is dismissed.
   const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
+  // The alignment changes that this decision leaves pending are read after it: a column that comes back carries the
+  // mark of the change to the end of the cell that is the header's last, where a backtick or the half of a comment
+  // in the column that returns and another in the table could pair across the cells and hide it. The mark is written
+  // again by the decision, which `commitEdit` takes for a removal and does not look at, and its entry would be lost
+  // with it, and nothing said.
+  const pointed = parsed.marks.filter((mark) => isAlignPoint(mark) && !decidedIds.has(mark.id));
   try {
-    const done = commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
+    const done = commitEdit(text, changes, ledger, {
+      parsed,
+      removes: true,
+      keeps,
+      ...(pointed.length > 0
+        ? {
+            verify: (_after: string, read: Parsed) => {
+              if (pointed.some((mark) => !read.marks.some((other) => other.id === mark.id))) {
+                throw hiddenError(true);
+              }
+            },
+          }
+        : {}),
+    });
     if (keeps !== 'both' && !marks.some((mark) => isRowMove(mark) || isColMark(mark))) {
       assertMovesKept(text, parsed, done, keeps);
     }
@@ -470,6 +657,83 @@ function decideNow(
 }
 
 /**
+ * Decides a mark that the old text of a replacement holds (format §3.12): the old text is a file of
+ * its own for the length of the decision, so that the mark is decided there by the code that decides
+ * it in a file, and is refused when it would be refused there. The decided old text is written
+ * again, encoded, in the opener of the replacement; the new text is not touched, and nor is the
+ * newest view. Rejecting the replacement afterwards gives what deciding the mark in the file before
+ * the edit would have left.
+ */
+function decideInPayload(
+  text: string,
+  parsed: Parsed,
+  found: PayloadFound,
+  action: Action,
+): TextChange[] {
+  const { mark, chain } = found;
+  const leaf = chain.at(-1);
+  const top = chain[0];
+  if (!leaf || !top)
+    throw new EditError(`There is no change with the id ${mark.id}.`, 'unknown-id');
+  // The payload is a file of its own, with the prefix its first line has in the file (`> `, `- `),
+  // and with the entries of the marks it holds.
+  const prefix = prefixesOf(text, parsed, chain).at(-1) ?? '';
+  const proxy = payloadFile(prefix + leaf.text, ledgerForSite(parsed, leaf));
+  // An old text that ends inside a comment or a fence that it never closes takes the ledger into it.
+  if (!intact(proxy, prefix + leaf.text)) {
+    throw new EditError(
+      "This change is in text that ends inside a comment or a code block that is never closed, so it can't be decided there. Decide the change that holds it first.",
+      'no-legal-placement',
+    );
+  }
+  const read = parse(proxy);
+  const inside = markToDecide(read, mark.id);
+  const changes = decide(proxy, read, [inside], action);
+  const made = applyChanges(proxy, changes);
+  let written = payloadOfFile(made, parse(made));
+  if (!written.startsWith(prefix)) throw new EditError(UNFINISHED, 'no-legal-placement');
+  written = written.slice(prefix.length);
+  // The decided text goes back into the opener that holds it, one payload at a time, inward out.
+  for (let depth = chain.length - 1; depth >= 1; depth--) {
+    const site = chain[depth];
+    const outer = chain[depth - 1];
+    const owner = outer?.marks.find((held) => held.id === site?.owner);
+    const segment = owner?.segments[site?.segment ?? -1];
+    if (!outer || !owner || !segment) throw new EditError(UNFINISHED, 'no-legal-placement');
+    written = `${outer.text.slice(0, segment.open.from)}<!--${owner.kind} ${owner.id} ${encodePayloadText(
+      written,
+    )}-->${outer.text.slice(segment.open.to)}`;
+  }
+  const holder = parsed.marks.find((held) => held.id === top.owner);
+  const opener = holder?.segments[top.segment]?.open;
+  if (!holder || !opener) throw new EditError(UNFINISHED, 'no-legal-placement');
+  const change: TextChange = {
+    from: opener.from,
+    to: opener.to,
+    insert: `<!--${holder.kind} ${holder.id} ${encodePayloadText(written)}-->`,
+  };
+  const keeps = inside.kind === 'hl' ? 'both' : action === 'accept' ? 'newest' : 'original';
+  return commitEdit(text, [change], workingLedger(parsed.ledger), {
+    parsed,
+    removes: true,
+    keeps,
+  });
+}
+
+/** The mark with this id in the body, or one the old text of a replacement holds: decided in the
+ * body, or in that old text. */
+function decideById(text: string, parsed: Parsed, id: string, action: Action): TextChange[] {
+  if (!parsed.marks.some((mark) => mark.id === id)) {
+    const found = findInPayload(parsed, id);
+    if (found) {
+      if (found.mark.kind === 'cmt') markToDecide({ ...parsed, marks: [found.mark] }, id);
+      return decideInPayload(text, parsed, found, action);
+    }
+  }
+  return decide(text, parsed, [markToDecide(parsed, id)], action);
+}
+
+/**
  * Accepts a change: the markers go and the new text stays, so a deleted text is gone for good. An
  * insertion that holds other people's changes leaves them pending. A highlight is dismissed.
  *
@@ -478,7 +742,7 @@ function decideNow(
  */
 export function accept(text: string, id: string): TextChange[] {
   const parsed = parse(text);
-  return decide(text, parsed, [markToDecide(parsed, id)], 'accept');
+  return decideById(text, parsed, id, 'accept');
 }
 
 /**
@@ -491,7 +755,7 @@ export function accept(text: string, id: string): TextChange[] {
  */
 export function reject(text: string, id: string): TextChange[] {
   const parsed = parse(text);
-  return decide(text, parsed, [markToDecide(parsed, id)], 'reject');
+  return decideById(text, parsed, id, 'reject');
 }
 
 /**
@@ -553,6 +817,46 @@ function selected(parsed: Parsed, filter?: (mark: MarkRange) => boolean): MarkRa
   );
 }
 
+/** Where a mark is: from its first opener to the end of its last segment. */
+function extentOf(mark: MarkRange): Range {
+  return {
+    from: Math.min(...mark.segments.map((segment) => segment.open.from)),
+    to: Math.max(...mark.segments.map((segment) => (segment.close ?? segment.content).to)),
+  };
+}
+
+/**
+ * The changes `acceptAll` would decide that `range` touches, with the other marks of their
+ * suggestions (marks of one `group` are decided together), or all of them without a range. A
+ * range touches a change when it has some of its text (a caret or an edge alone does not). A
+ * deleted row or column, which is kept below its table, and an inserted column, which stands in
+ * the header, are touched by a range that touches the table, deletions included; an inserted
+ * row, by one that touches the row.
+ */
+export function changesIn(parsed: Parsed, range?: Range): MarkRange[] {
+  const all = selected(parsed);
+  if (!range) return all;
+  const extents = new Map<string, Range>();
+  if (all.some((mark) => isRowMark(mark) || isColMark(mark))) {
+    for (const table of tablesOfText(parsed.text, parsed)) {
+      const whole = {
+        from: table.from,
+        to: Math.max(table.to, ...table.deletions.map(({ mark }) => extentOf(mark).to)),
+      };
+      for (const id of rowMarkIds(table)) extents.set(id, whole);
+      for (const id of colMarkIds(table)) extents.set(id, whole);
+      for (const row of table.rows) if (row.insertion) extents.set(row.insertion.id, row);
+    }
+  }
+  const touched = all.filter((mark) => {
+    const { from, to } = extents.get(mark.id) ?? extentOf(mark);
+    return range.from < to && from < range.to;
+  });
+  const groups = new Set(touched.flatMap((mark) => (mark.entry.group ? [mark.entry.group] : [])));
+  const ids = new Set(touched.map((mark) => mark.id));
+  return all.filter((mark) => ids.has(mark.id) || groups.has(mark.entry.group ?? ''));
+}
+
 /**
  * Rejects `marks` in one list of changes: format changes after the others, because rejecting a
  * deletion can bring back the syntax that a format change undoes. A format change that can't be
@@ -605,5 +909,22 @@ export function acceptAll(text: string, filter?: (mark: MarkRange) => boolean): 
  * change that can't be undone stays pending. */
 export function rejectAll(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
   const parsed = parse(text);
-  return rejectTogether(text, parsed, selected(parsed, filter));
+  const marks = selected(parsed, filter);
+  let changes = rejectTogether(text, parsed, marks);
+  if (parsed.payloads.length === 0) return changes;
+  // The marks in the old text of a replacement that is rejected are pending again, and are
+  // rejected with it: nothing is left pending but what the filter keeps (format §3.12).
+  const wanted = new Set(marks.flatMap((mark) => payloadIdsOf(parsed, mark)));
+  // Marks that were text in a payload too deep to read come back as marks, and go with it.
+  for (const id of deepIds(marks)) wanted.add(id);
+  let current = applyChanges(text, changes);
+  for (let round = 0; wanted.size > 0 && round <= wanted.size; round++) {
+    const read = parse(current);
+    const again = selected(read, filter).filter((mark) => wanted.has(mark.id));
+    if (again.length === 0) break;
+    const step = rejectTogether(current, read, again);
+    changes = spliceRepairs(text, changes, current, step);
+    current = applyChanges(current, step);
+  }
+  return changes;
 }

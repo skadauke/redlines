@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redlines: connecting an OpenClaw agent (mockups)</title>
+<!--
+  Mockups for docs/research/openclaw-connection.md. Open the file to see every screen, or add a
+  frame's id as the hash (#f1 … #f8) to see one; add ?dark to see the dark look. The colors and
+  sizes are the Default theme's tokens (plugins/themes/src/tokens.css), copied; nothing here is
+  the app's code. Failures are gray, as the app's notifications are (red is the pen's).
+-->
+<style>
+/*FONTS*/
+:root, :root[data-rl-appearance='light'] {
+  color-scheme: light;
+  --rl-font-ui: 'Carlito', -apple-system, sans-serif;
+  --rl-font-mono: 'Cousine', ui-monospace, monospace;
+  --rl-size-ui: 14px; --rl-size-ui-small: 13px;
+  --rl-ctl-h: 26px; --rl-ctl-radius: 7px; --rl-radius-card: 12px; --rl-radius-menu: 10px;
+  --rl-page: #ffffff; --rl-ink: #1d1d1f; --rl-ink-2: #6a6a6f; --rl-ink-3: #828285;
+  --rl-rule: #e5e5ea; --rl-tint: #f3f3f5; --rl-card: #ffffff; --rl-pressed: #ececef;
+  --rl-shadow: 0 1px 2px rgba(0,0,0,.04), 0 10px 30px -10px rgba(0,0,0,.18);
+  --rl-red: #d42a1e; --rl-on: #8e8e93; --rl-on-fg: #ffffff; --rl-off: #d1d1d6; --rl-seg-on: #ffffff;
+  --rl-author-1: #d42a1e; --rl-author-2: #7442d8; --rl-author-4: #0a5fd6;
+  --rl-author-4-tint: rgb(10 95 214 / .17);
+  --desk: #e9e9ec;
+}
+:root[data-rl-appearance='dark'] {
+  color-scheme: dark;
+  --rl-page: #1e1e1f; --rl-ink: #f2f2f5; --rl-ink-2: #a1a1a8; --rl-ink-3: #818187;
+  --rl-rule: #38383b; --rl-tint: #2a2a2d; --rl-card: #2a2a2c; --rl-pressed: #333336;
+  --rl-shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -10px rgba(0,0,0,.6);
+  --rl-red: #ff6a5c; --rl-on: #a1a1a8; --rl-on-fg: #1e1e1f; --rl-off: #48484c; --rl-seg-on: #4a4a4f;
+  --rl-author-1: #ff6a5c; --rl-author-2: #b89dff; --rl-author-4: #7d8bff;
+  --rl-author-4-tint: rgb(125 139 255 / .17);
+  --desk: #121213;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--desk); color: var(--rl-ink); font: var(--rl-size-ui)/18px var(--rl-font-ui);
+  -webkit-font-smoothing: antialiased; padding: 28px; display: flex; flex-direction: column; gap: 40px; align-items: center; }
+.frame { display: none; width: 760px; }
+body.all .frame, body.one .frame.on { display: block; }
+.cap { font-size: var(--rl-size-ui-small); color: var(--rl-ink-2); margin: 0 0 8px 4px; }
+.win { background: var(--rl-page); border: 1px solid var(--rl-rule); border-radius: 12px; box-shadow: var(--rl-shadow); overflow: hidden; }
+.bar { display: flex; align-items: center; justify-content: center; position: relative; min-height: 68px; border-bottom: 1px solid var(--rl-rule); gap: 4px; }
+.dots { position: absolute; left: 14px; top: 14px; display: flex; gap: 8px; }
+.dots i { width: 12px; height: 12px; border-radius: 50%; background: var(--rl-off); display: block; }
+.tab { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 72px; height: 54px; justify-content: center; border-radius: 7px; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); }
+.tab.on { background: var(--rl-pressed); color: var(--rl-ink); }
+.body { padding: 22px 28px 20px; min-height: 430px; position: relative; }
+h1 { font-size: 20px; line-height: 24px; margin: 0 0 4px; font-weight: 700; }
+h2 { font-size: var(--rl-size-ui); margin: 0 0 6px; font-weight: 700; }
+p { margin: 0 0 10px; } .sub { color: var(--rl-ink-2); } .small { font-size: var(--rl-size-ui-small); color: var(--rl-ink-2); }
+.steps { font-size: var(--rl-size-ui-small); color: var(--rl-ink-2); margin-bottom: 14px; display: flex; gap: 6px; align-items: center; }
+.steps b { color: var(--rl-ink); font-weight: 700; }
+.pips { display: flex; gap: 4px; margin-left: 8px; } .pips i { width: 18px; height: 3px; border-radius: 2px; background: var(--rl-off); display: block; } .pips i.d { background: var(--rl-on); }
+.row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid var(--rl-rule); border-radius: var(--rl-radius-card); background: var(--rl-card); }
+.row + .row { margin-top: 8px; } .row .t { flex: 1; min-width: 0; } .row .t b { display: block; font-weight: 700; }
+.row.sel { border-color: var(--rl-ink-2); box-shadow: inset 0 0 0 1px var(--rl-ink-2); }
+.radio { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--rl-on); flex: none; display: grid; place-items: center; }
+.radio.on::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--rl-ink); }
+.ico { width: 30px; height: 30px; border-radius: 8px; background: var(--rl-tint); display: grid; place-items: center; flex: none; color: var(--rl-ink-2); }
+.ico svg { width: 18px; height: 18px; }
+.mark { width: 20px; height: 20px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.mark.ok { background: var(--rl-ink); color: var(--rl-page); } .mark.wait { border: 1.5px dashed var(--rl-on); color: var(--rl-ink-3); }
+.mark.no { border: 1.5px solid var(--rl-ink-2); color: var(--rl-ink-2); }
+.btn { display: inline-flex; align-items: center; height: var(--rl-ctl-h); padding: 0 12px; border-radius: var(--rl-ctl-radius); border: 1px solid var(--rl-rule); background: var(--rl-card); color: var(--rl-ink); font: inherit; font-size: var(--rl-size-ui-small); white-space: nowrap; }
+.btn.pri { background: var(--rl-ink); color: var(--rl-page); border-color: var(--rl-ink); }
+.btn.off { color: var(--rl-ink-3); background: var(--rl-tint); }
+.foot { position: absolute; left: 28px; right: 28px; bottom: 18px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.foot .r { display: flex; gap: 8px; }
+.field { height: 30px; border: 1px solid var(--rl-rule); border-radius: var(--rl-ctl-radius); background: var(--rl-card); padding: 0 10px; display: flex; align-items: center; font-size: var(--rl-size-ui); color: var(--rl-ink-3); }
+.field.mono { font-family: var(--rl-font-mono); color: var(--rl-ink); letter-spacing: .08em; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rl-ink); display: inline-block; flex: none; } .dot.off { background: transparent; border: 1.5px solid var(--rl-on); }
+.pre { font-family: var(--rl-font-mono); font-size: var(--rl-size-ui-small); line-height: 17px; background: var(--rl-tint); border: 1px solid var(--rl-rule); border-radius: var(--rl-radius-menu); padding: 12px 14px; white-space: pre-wrap; height: 190px; overflow: hidden; position: relative; color: var(--rl-ink); }
+.pre::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 36px; background: linear-gradient(transparent, var(--rl-tint)); }
+.note { display: flex; gap: 10px; align-items: flex-start; background: var(--rl-tint); border-radius: var(--rl-radius-menu); padding: 10px 12px; font-size: var(--rl-size-ui-small); color: var(--rl-ink-2); }
+.note b { color: var(--rl-ink); }
+.bubble { background: var(--rl-tint); border-radius: 14px 14px 14px 4px; padding: 10px 14px; max-width: 520px; }
+.who { font-size: var(--rl-size-ui-small); font-weight: 700; color: var(--rl-author-4); margin-bottom: 2px; }
+.ins { background: var(--rl-author-4-tint); color: var(--rl-author-4); text-decoration: underline; text-underline-offset: 2px; }
+.del { background: var(--rl-author-4-tint); color: var(--rl-author-4); text-decoration: line-through; }
+.doc { font-size: 17.5px; line-height: 1.55; padding: 12px 16px; border: 1px solid var(--rl-rule); border-radius: var(--rl-radius-menu); }
+.seg { display: inline-flex; background: var(--rl-tint); border-radius: 8px; padding: 2px; gap: 2px; }
+.seg span { padding: 0 12px; height: 22px; display: grid; place-items: center; border-radius: 6px; font-size: var(--rl-size-ui-small); color: var(--rl-ink-2); }
+.seg span.on { background: var(--rl-seg-on); color: var(--rl-ink); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 12px; background: var(--rl-tint); font-size: var(--rl-size-ui-small); color: var(--rl-ink-2); }
+.menu { background: var(--rl-card); border: 1px solid var(--rl-rule); border-radius: var(--rl-radius-menu); box-shadow: var(--rl-shadow); padding: 6px; width: 250px; }
+.menu .it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; } .menu .it.on { background: var(--rl-pressed); }
+.av { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; flex: none; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fail { border: 1px solid var(--rl-rule); border-radius: var(--rl-radius-card); background: var(--rl-card); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.fail b { font-weight: 700; } .fail p { margin: 0; font-size: var(--rl-size-ui-small); color: var(--rl-ink-2); flex: 1; }
+.fail .k { font-size: 12px; color: var(--rl-ink-3); }
+.split { display: grid; grid-template-columns: 1fr 270px; gap: 20px; }
+.sect { border-top: 1px solid var(--rl-rule); padding-top: 12px; margin-top: 12px; }
+.dim { opacity: .55; }
+.l { display: flex; gap: 10px; align-items: center; width: 100%; } .l .n { width: 70px; font-size: var(--rl-size-ui-small); color: var(--rl-ink-2); }
+</style>
+</head>
+<body class="all">
+<script>
+  const q = new URLSearchParams(location.search);
+  document.documentElement.dataset.rlAppearance = q.has('dark') ? 'dark' : 'light';
+  const id = location.hash.slice(1);
+  if (id) { document.body.className = 'one'; addEventListener('DOMContentLoaded', () => document.getElementById(id)?.classList.add('on')); }
+</script>
+
+<div class="frame" id="f1"><p class="cap">1. Start: Preferences › Agents › Add OpenClaw</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab">General</div><div class="tab on">Agents</div><div class="tab">Shortcuts</div></div>
+<div class="body">
+<h1>Add an OpenClaw agent</h1>
+<p class="sub">Your agent writes in your documents as tracked changes, in its own name. You decide which folders it may touch.</p>
+<div style="height:10px"></div>
+<div class="row sel"><span class="radio on"></span><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="4" width="15" height="10" rx="1.5"/><path d="M7 17h6"/></svg></span><div class="t"><b>On this Mac</b><span class="small">OpenClaw is installed here. Redlines will find it.</span></div></div>
+<div class="row"><span class="radio"></span><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="4" width="10" height="7" rx="1.2"/><rect x="9" y="9" width="9.5" height="7" rx="1.2"/></svg></span><div class="t"><b>On another computer</b><span class="small">A Mac, a Linux machine or a server. Redlines reaches it privately, over Tailscale.</span></div></div>
+<p class="small" style="margin-top:14px">Not sure? If you talk to your agent in Telegram, Slack or the OpenClaw app, and it runs on a different machine than this one, choose “On another computer”.</p>
+<div class="foot"><span class="small">About 5 minutes. You can stop at any step.</span><div class="r"><span class="btn">Cancel</span><span class="btn pri">Continue</span></div></div>
+</div></div></div>
+
+<div class="frame" id="f2a"><p class="cap">2a. Check this Mac: Tailscale not installed</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab on">Agents</div></div>
+<div class="body">
+<div class="steps"><b>Step 1 of 5</b> This Mac <span class="pips"><i class="d"></i><i></i><i></i><i></i><i></i></span></div>
+<h1>Redlines reaches your other computer over Tailscale</h1>
+<p class="sub">Tailscale makes a private network between your own computers. Nothing is opened to the internet, and the free plan is enough.</p>
+<div style="height:6px"></div>
+<div class="row"><span class="mark no">–</span><div class="t"><b>Tailscale is not on this Mac</b><span class="small">Redlines looked in Applications and for the tailscale command.</span></div><span class="btn pri">Download Tailscale</span></div>
+<div class="row dim"><span class="mark wait"></span><div class="t"><b>Signed in</b></div></div>
+<div class="row dim"><span class="mark wait"></span><div class="t"><b>Can see your other computers</b></div></div>
+<div class="note" style="margin-top:14px"><span>&#9432;</span><span><b>What to do:</b> download the app from tailscale.com, open it, and sign in with the same account as your other computer. Come back here; Redlines notices by itself.</span></div>
+<div class="foot"><span class="small">Already reach it another way? <u>Enter an address instead</u></span><div class="r"><span class="btn">Back</span><span class="btn off">Continue</span></div></div>
+</div></div></div>
+
+<div class="frame" id="f2b"><p class="cap">2b. Check this Mac: ready</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab on">Agents</div></div>
+<div class="body">
+<div class="steps"><b>Step 1 of 5</b> This Mac <span class="pips"><i class="d"></i><i></i><i></i><i></i><i></i></span></div>
+<h1>This Mac is on your Tailscale network</h1>
+<p class="sub">Redlines can see your other computers. It never changes Tailscale’s settings.</p>
+<div style="height:6px"></div>
+<div class="row"><span class="mark ok">&#10003;</span><div class="t"><b>Tailscale is installed</b><span class="small">The Tailscale app</span></div></div>
+<div class="row"><span class="mark ok">&#10003;</span><div class="t"><b>Signed in</b><span class="small">ada@example.com, on the network yak-bebop.ts.net</span></div></div>
+<div class="row"><span class="mark ok">&#10003;</span><div class="t"><b>Can see 3 other computers</b><span class="small">2 are on now</span></div></div>
+<div class="foot"><span class="small">Checked just now · <u>Check again</u></span><div class="r"><span class="btn">Back</span><span class="btn pri">Continue</span></div></div>
+</div></div></div>
+
+<div class="frame" id="f3"><p class="cap">3. Choose the computer</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab on">Agents</div></div>
+<div class="body">
+<div class="steps"><b>Step 2 of 5</b> The computer <span class="pips"><i class="d"></i><i class="d"></i><i></i><i></i><i></i></span></div>
+<h1>Which computer runs your agent?</h1>
+<div style="height:6px"></div>
+<div class="row sel"><span class="radio on"></span><span class="dot"></span><div class="t"><b>studio-mini</b><span class="small">studio-mini.yak-bebop.ts.net · Mac · on now</span></div></div>
+<div class="row"><span class="radio"></span><span class="dot"></span><div class="t"><b>home-server</b><span class="small">home-server.yak-bebop.ts.net · Linux · on now</span></div></div>
+<div class="row dim"><span class="radio"></span><span class="dot off"></span><div class="t"><b>old-laptop</b><span class="small">Windows · last seen 3 weeks ago</span></div></div>
+<p class="small" style="margin:10px 0 6px">Not listed? Type its Tailscale name or address</p>
+<div class="field" style="width:340px">name.yak-bebop.ts.net</div>
+<div class="note" style="margin-top:14px"><span class="mark ok" style="margin-top:1px">&#10003;</span><span><b>Found an OpenClaw Gateway on studio-mini.</b> It answers over Tailscale and asks for a login, which the next steps set up. Redlines only said hello; nothing was sent to it.</span></div>
+<div class="foot"><span class="small">Redlines asks only the computer you pick.</span><div class="r"><span class="btn">Back</span><span class="btn pri">Continue</span></div></div>
+</div></div></div>
+
+<div class="frame" id="f4"><p class="cap">4. The other computer’s side</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab on">Agents</div></div>
+<div class="body" style="min-height:570px">
+<div class="steps"><b>Step 3 of 5</b> Your agent <span class="pips"><i class="d"></i><i class="d"></i><i class="d"></i><i></i><i></i></span></div>
+<h1>Ask your agent to set up its side</h1>
+<p class="sub">Send this to your OpenClaw in the chat you usually use. It does the work on studio-mini and answers with a short code.</p>
+<div class="pre">I’m connecting the Redlines editor on my Mac (“Ada’s MacBook”,
+ada-mbp.yak-bebop.ts.net) to you, so that you can suggest edits in
+my documents. Please set up your side. Tell me before you change
+anything that opens access, and never send me a password or token
+in the chat, except the setup code in step 4.
+
+1. Check that Tailscale is running here, on the same network.
+2. Keep the Gateway on loopback and use Tailscale Serve
+   (gateway.tailscale.mode: serve). Not Funnel. Keep auth on.
+3. Allow the node command mcp.tools.call.v1 and nothing else
+   for Redlines. Never approve system.run for it.
+4. Make a setup code (openclaw qr --remote --setup-code-only)…</div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 0"><span class="small">Nothing changes until your agent does it.</span><span class="btn">Copy prompt</span></div>
+<div class="sect"><h2>When your agent answers with a setup code, paste it here</h2>
+<div style="display:flex;gap:8px;align-items:center"><div class="field mono" style="flex:1">&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;</div><span class="btn">Paste</span></div>
+<p class="small" style="margin:6px 0 0">Works once, for about 10 minutes. Redlines keeps what it gets in a private file and never shows it again.</p></div>
+<div class="foot"><span class="small">Your agent says nothing needs bringing back? <u>Skip</u></span><div class="r"><span class="btn">Back</span><span class="btn pri">Connect</span></div></div>
+</div></div></div>
+
+<div class="frame" id="f5"><p class="cap">5. Approval</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab on">Agents</div></div>
+<div class="body">
+<div class="steps"><b>Step 4 of 5</b> Approve <span class="pips"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i></i></span></div>
+<h1>Waiting for your agent to approve this Mac</h1>
+<p class="sub">Your agent sees a request from “Redlines on Ada’s MacBook”. It should show you the code below. If the codes match, tell it yes.</p>
+<div style="display:flex;justify-content:center;margin:14px 0"><div style="font:700 34px/1 var(--rl-font-mono);letter-spacing:.14em;border:1px solid var(--rl-rule);border-radius:12px;padding:16px 26px;background:var(--rl-tint)">7QF2-K9</div></div>
+<div class="row"><span class="mark ok">&#10003;</span><div class="t"><b>This Mac reached the Gateway</b></div></div>
+<div class="row"><span class="mark wait">&middot;</span><div class="t"><b>Approve this Mac</b><span class="small">Asked 40 seconds ago. The request lasts 5 minutes.</span></div></div>
+<div class="row dim"><span class="mark wait"></span><div class="t"><b>Approve the Redlines tools</b><span class="small">One kind of tool: read, and suggest changes in, your documents</span></div></div>
+<div class="foot"><span class="small">Nothing to type here. Waiting…</span><div class="r"><span class="btn">Cancel</span><span class="btn">Ask again</span></div></div>
+</div></div></div>
+
+<div class="frame" id="f6"><p class="cap">6. Test: a small round trip</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab on">Agents</div></div>
+<div class="body">
+<div class="steps"><b>Step 5 of 5</b> Test <span class="pips"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></span></div>
+<h1>Moby is connected. One quick test.</h1>
+<p class="sub">Redlines made a practice note and asked Moby to fix one typo in it. That uses the road your real requests will use.</p>
+<div class="doc" style="margin:10px 0">Please send me <span class="del">teh</span><span class="ins">the</span> agenda before Tuesday.</div>
+<div class="who">Moby · suggested 3 seconds ago</div>
+<div class="bubble">Fixed the typo (“teh” to “the”). I’m on studio-mini; it’s Tuesday here. Nothing else in the note needed changing.</div>
+<div style="height:12px"></div>
+<div class="row"><span class="mark ok">&#10003;</span><div class="t"><b>Moby answered</b></div></div>
+<div class="row"><span class="mark ok">&#10003;</span><div class="t"><b>Moby used the Redlines tools</b><span class="small">Suggested one change, as a tracked change in its name</span></div></div>
+<div class="foot"><span class="small">The practice note is deleted when you finish.</span><div class="r"><span class="btn">Run again</span><span class="btn pri">Finish</span></div></div>
+</div></div></div>
+
+<div class="frame" id="f7"><p class="cap">7. Done: the agent in Preferences and in the @ picker</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab on">Agents</div></div>
+<div class="body"><div class="split"><div>
+<h2>OpenClaw agents</h2>
+<div class="row" style="align-items:flex-start;flex-direction:column;gap:10px">
+<div class="l"><span class="av" style="background:var(--rl-author-4)">M</span><div class="t"><b style="display:inline">Moby</b> <span class="small">on studio-mini, over Tailscale</span></div><span class="small">Connected</span></div>
+<div class="l"><span class="n">Writes as</span><span class="chip">moby-ada</span></div>
+<div class="l"><span class="n">Level</span><span class="seg"><span>Read</span><span class="on">Suggest</span><span>Edit</span></span></div>
+<div class="l"><span class="n">Folders</span><span class="chip">Documents/Work</span><span class="chip">Notes</span><span class="btn">Add…</span></div>
+<div class="l"><span class="n">Last used</span><span class="small">Test, just now</span><span style="flex:1"></span><span class="btn">Test again</span><span class="btn">Remove…</span></div>
+</div>
+<p class="small" style="margin-top:10px">Redlines limits what Moby does in your documents, not what Moby does elsewhere.</p>
+</div>
+<div><div style="height:28px"></div>
+<div class="doc" style="font-size:15px;line-height:1.5;padding:10px 12px;margin-bottom:8px">@mo</div>
+<div class="menu"><div class="it on"><span class="av" style="background:var(--rl-author-4)">M</span><span><b>Moby</b> <span class="small">OpenClaw</span></span></div><div class="it"><span class="av" style="background:var(--rl-author-1)">C</span><span>Claude</span></div><div class="it"><span class="av" style="background:var(--rl-author-2)">X</span><span>Codex</span></div></div></div>
+</div></div></div></div>
+
+<div class="frame" id="f8"><p class="cap">8. Every failure: what is said, and the one thing that fixes it</p>
+<div class="win"><div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="tab on">Agents</div></div>
+<div class="body" style="min-height:0"><div class="grid">
+<div class="fail"><b>Tailscale is turned off on this Mac</b><p>Redlines can’t see your other computers until it is on.</p><span class="k">Step 1</span><span class="btn pri">Open Tailscale</span></div>
+<div class="fail"><b>studio-mini isn’t answering</b><p>It may be asleep, or off your Tailscale network. Wake it, then check again.</p><span class="k">Step 2</span><span class="btn pri">Check again</span></div>
+<div class="fail"><b>No OpenClaw found on studio-mini</b><p>The computer is there, but no Gateway answered. Your agent can switch on remote access.</p><span class="k">Step 2</span><span class="btn pri">Copy a prompt for your agent</span></div>
+<div class="fail"><b>This network blocks Tailscale</b><p>Redlines can’t reach the other computer from here. Try another network, such as a phone’s hotspot.</p><span class="k">Step 2</span><span class="btn pri">Try again</span></div>
+<div class="fail"><b>That setup code has been used or has run out</b><p>A code works once, for about 10 minutes. Ask your agent for a new one.</p><span class="k">Step 3</span><span class="btn pri">Copy the request for a new code</span></div>
+<div class="fail"><b>Nobody approved this Mac in 5 minutes</b><p>Your agent may not have seen the request. Ask again and send it the code.</p><span class="k">Step 4</span><span class="btn pri">Ask again</span></div>
+<div class="fail"><b>Connected, but Moby can’t use the Redlines tools</b><p>The Gateway may have node tools turned off, or the tools weren’t approved. Your agent can fix both.</p><span class="k">Step 5</span><span class="btn pri">Copy a prompt for your agent</span></div>
+<div class="fail"><b>Moby didn’t answer in a minute</b><p>The connection works, but the agent is busy or its model is unavailable. Nothing was changed.</p><span class="k">Step 5</span><span class="btn pri">Try again</span></div>
+</div></div></div></div>
+
+</body>
+</html>

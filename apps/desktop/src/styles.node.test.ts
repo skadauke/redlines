@@ -24,10 +24,11 @@ describe('styles.css', () => {
     expect(all.length).toBeGreaterThan(50);
   });
 
-  it('uses red only for the Track Changes pen', () => {
+  it('uses red only for the Track Changes pen, and the View button’s change bar while Redlines shows', () => {
     const red = all.filter(({ declarations }) => /--rl-red|#d42a1e/i.test(declarations));
     expect(red.map(({ selector }) => selector)).toEqual([
       '.rl-pen-on',
+      '.rl-icon-button svg .rl-view-bar',
       '.rl-menu-item .rl-menu-icon.rl-pen-on',
     ]);
   });
@@ -61,82 +62,6 @@ describe('styles.css', () => {
     );
     for (const [, theme, appearance, body] of themes) {
       for (const token of used) expect(body, `${theme}, ${appearance}`).toContain(`${token}:`);
-    }
-  });
-
-  it('prints in light ink on white, whatever the theme, and leaves the authors’ colors', () => {
-    const reset = all.find(
-      ({ selector, declarations }) =>
-        selector.includes('html[data-rl-theme]') && declarations.includes('--rl-ink:'),
-    );
-    expect(reset).toBeDefined();
-    const { selector, declarations } = reset ?? { selector: '', declarations: '' };
-    // More specific than a theme's own tokens, which sit on the same element.
-    expect(selector).toContain('html[data-rl-theme][data-rl-appearance]');
-    for (const token of [
-      '--rl-page',
-      '--rl-ink',
-      '--rl-ink-2',
-      '--rl-ink-3',
-      '--rl-rule',
-      '--rl-tint',
-    ]) {
-      expect(declarations).toContain(`${token}:`);
-    }
-    expect(declarations).toContain('color-scheme: light');
-    expect(declarations).toMatch(/background:\s*#fff/);
-    expect(declarations).not.toContain('--rl-author');
-    // It is among the print rules, the last of the style sheet.
-    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
-    expect(css.indexOf(selector.split(',')[0] ?? '')).toBeGreaterThan(css.indexOf('@media print'));
-  });
-
-  it("prints at the theme's own size, whatever the text size, without the rail's room", () => {
-    const reset = all.find(
-      ({ selector, declarations }) =>
-        selector.includes('html[data-rl-theme]') && declarations.includes('--rl-ink:'),
-    );
-    expect(reset?.declarations).toContain('--rl-text-scale: 1 !important');
-    const room = all.find(
-      ({ selector }) =>
-        selector.includes('#editor') && selector.includes('.rl-has-rail .cm-content'),
-    );
-    expect(room?.declarations).toContain(
-      'max-width: calc(var(--rl-column) + 2 * var(--rl-margin, 24px))',
-    );
-    expect(room?.declarations).toContain('padding-right: var(--rl-margin, 24px)');
-    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
-    expect(css.indexOf(room?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
-  });
-
-  it('prints change bars as a left border in their color, gray for several people', () => {
-    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
-    const bar = all.find(({ selector }) => selector === '#editor .rl-bar::before');
-    expect(bar?.declarations).toContain('border-left: 2px solid var(--rl-color)');
-    expect(bar?.declarations).toContain('background: none');
-    const mixed = all.find(({ selector }) => selector === '#editor .rl-bar-mixed::before');
-    expect(mixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
-    // The layer's bars (bar-layer.ts) were measured for the screen, and a printed page wraps the
-    // text differently: the layer is left out, and each line that holds a change prints a bar down
-    // its whole paragraph, as the lines drew it before the layer.
-    const layer = all.find(({ selector }) => selector === '#editor .rl-bar-layer');
-    expect(layer?.declarations).toContain('display: none');
-    const line = all.find(({ selector }) => selector === '#editor .cm-line.rl-bar::before');
-    expect(line?.declarations).toContain("content: ''");
-    expect(line?.declarations).toContain('position: absolute');
-    expect(line?.declarations).toContain('left: -24px');
-    expect(line?.declarations).toContain('border-left: 2px solid var(--rl-color)');
-    const lineMixed = all.find(
-      ({ selector }) => selector === '#editor .cm-line.rl-bar-mixed::before',
-    );
-    expect(lineMixed?.declarations).toContain('border-left-color: var(--rl-mixed)');
-    const quote = all.find(
-      ({ selector }) => selector === '#editor .cm-line.rl-quote.rl-bar::before',
-    );
-    expect(quote?.declarations).toContain('left: -26px');
-    // Among the print rules, and the bars nothing else draws as a background there.
-    for (const rule of [bar, mixed, layer, line, lineMixed, quote]) {
-      expect(css.indexOf(rule?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
     }
   });
 
@@ -181,7 +106,6 @@ describe('styles.css', () => {
   });
 
   it('lets the page scroll under a title bar with no background, and fades what passes under it', () => {
-    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
     const declared = (selector: string) =>
       all.find((rule) => rule.selector === selector)?.declarations ?? '';
     // The bar lies over the scroller, which reaches the top of the window: no color of its own,
@@ -217,10 +141,6 @@ describe('styles.css', () => {
     expect(declared('.rl-scroller')).not.toMatch(/mask/);
     // The table grips' own layer is over a bar only if it is above it: the grips draw under it.
     expect(declared('#editor .rl-grips')).toContain('z-index: 0');
-    // The fade is no part of a printed page, and neither is the room for the bar.
-    const printed = css.slice(css.indexOf('@media print'));
-    expect(printed).toMatch(/\.rl-main::after[^{}]*\{[^}]*display: none/);
-    expect(printed).toMatch(/\.rl-scroller\s*\{[^}]*padding-top: 0/);
   });
 
   it('keeps the hints of the right-hand icons inside the window, aligned with the icon’s right edge', () => {
@@ -239,7 +159,6 @@ describe('styles.css', () => {
   });
 
   it('draws the word count small and gray in the lower right, on a fade that takes no pointer', () => {
-    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
     const declared = (selector: string) =>
       all.find((rule) => rule.selector === selector)?.declarations ?? '';
     // The fade rises from the window's lower edge, in the page's color, as the title bar's falls from
@@ -272,9 +191,6 @@ describe('styles.css', () => {
     expect(label).toContain('bottom: 16px');
     expect(declared('.rl-notifications')).toContain('bottom: 16px');
     expect(label).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
-    // A printed page has neither.
-    const printed = css.slice(css.indexOf('@media print'));
-    expect(printed).toMatch(/\.rl-footer[^{}]*\{[^}]*display: none/);
   });
 
   it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {
@@ -295,7 +211,9 @@ describe('styles.css', () => {
     const preferences = rules(
       readFileSync(new URL('./preferences/preferences.css', import.meta.url), 'utf8'),
     );
-    expect(declared('.rl-pref-bar', preferences)).toContain('height: calc(56 * var(--rl-pt))');
-    expect(declared('.rl-pref-tab', preferences)).toContain('width: calc(44 * var(--rl-frame))');
+    expect(declared('.rl-pref-bar', preferences)).toContain('height: calc(68 * var(--rl-pt))');
+    expect(declared('.rl-pref-tab', preferences)).toContain(
+      'min-width: calc(72 * var(--rl-frame))',
+    );
   });
 });

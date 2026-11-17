@@ -9,12 +9,18 @@
 // that the keys of other kinds of block (code, tables) can be tried beside it.
 
 import { type ChangeSpec, EditorSelection, type EditorState } from '@codemirror/state';
-import { EditError, type FormatOp } from '@redlines/format';
-import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
+import { EditError, type FormatOp, widenedFirstEdits } from '@redlines/format';
+import {
+  blockFormatChanges,
+  caretKeptFromEnd,
+  contextFor,
+  trackingField,
+} from '../tracked/typing.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
 import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
 import { type Item, itemsAround, type KeyEdit, nothing } from './edits.ts';
 import { openBlock, recordField } from './open.ts';
+import { readsWorse } from './read-check.ts';
 import { type Block, blockAt } from './structure.ts';
 
 /** The innermost list item that a paragraph block is in, with the text position that stands for it. */
@@ -35,8 +41,10 @@ function itemOf(state: EditorState, block: Block, pos: number) {
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 const THEIR_SPLIT =
   "Another person's pending change made this item. Accept or reject it before indenting or outdenting it.";
-const NOT_UNDER_TEXT =
-  "An empty item can't be indented under a line of text in Markdown. Type in it first.";
+const NOT_UNDER_TEXT = "An empty item can't go under a line of text. Type in the item first.";
+const NOT_ITEM = 'Only a list item can be indented or outdented.';
+const NO_PARENT =
+  "This item isn't under another item. Backspace at its start takes the bullet away.";
 
 /**
  * A plain edit of an empty item's line, with the caret kept in place. With Track Changes on the
@@ -65,14 +73,41 @@ function planned(
           mark.segments.some((g) => g.open.to === state.doc.line(item.line.number - 1).to),
       );
   if (theirs) return { ...nothing(state), userEvent: 'indent', refusal: THEIR_SPLIT };
-  return {
+  const plain: KeyEdit = {
     changes,
     selection: EditorSelection.single(state.changes(changes).mapPos(head, 1)),
     userEvent: 'indent',
     caretAt: head,
-    ...(state.field(trackingField, false) ? { final: true } : {}),
     ...more,
   };
+  if (!state.field(trackingField, false)) return plain;
+  // The edit is final, as it stands, only where the format's check finds that the file reads as it
+  // did, in every order of decisions (#465); otherwise the list that holds the item is replaced.
+  const text = state.doc.toString();
+  if (!readsWorse(text, state.changes(changes).apply(state.doc).toString())) {
+    return { ...plain, final: true };
+  }
+  const edits = changes.map((change) => {
+    const {
+      from,
+      to = from,
+      insert = '',
+    } = change as { from: number; to?: number; insert?: string };
+    return { from, to, insert: String(insert) };
+  });
+  try {
+    const widened = widenedFirstEdits(text, edits, contextFor(state));
+    return {
+      ...plain,
+      caretAt: undefined,
+      changes: widened.changes,
+      selection: EditorSelection.single(caretKeptFromEnd(state, widened.changes, head)),
+      final: true,
+    };
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+    return { ...nothing(state), userEvent: 'indent', refusal: error.message };
+  }
 }
 
 /**
@@ -154,14 +189,31 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
   const op: FormatOp = { kind: 'indent', by: outdent ? -1 : 1 };
   const range = { from: Math.min(first.at, from), to: Math.max(last.at, to) };
   let changes;
+  let widened = false;
   try {
-    changes = blockFormatChanges(state, range, op);
+    try {
+      changes = blockFormatChanges(state, range, op);
+    } catch (error) {
+      // No fine form: the item or the list is replaced (format §3.12).
+      if (!(error instanceof EditError)) throw error;
+      changes = blockFormatChanges(state, range, op, true);
+      widened = true;
+    }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
     return { ...nothing(state), userEvent: 'indent', refusal: error.message };
   }
   if (!changes.length) return { ...nothing(state), userEvent: 'indent' };
   const kept = from === to ? { caretAt: head } : { range: { anchor, head } };
+  if (widened && from === to) {
+    // The caret stays in the new text of the replacement, not in the old text it holds.
+    return {
+      changes,
+      selection: EditorSelection.single(caretKeptFromEnd(state, changes, head)),
+      userEvent: 'indent',
+      final: true,
+    };
+  }
   return {
     changes,
     selection: EditorSelection.single(head),
@@ -169,4 +221,37 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
     final: true,
     ...kept,
   };
+}
+
+/**
+ * Why Indent or Outdent (⌘] and ⌘[, Tab and Shift-Tab) can't act where the selection is, or
+ * undefined: not in a list item, the first item of a list (nothing to go under), a top-level item
+ * (nothing to come out of), or an empty item that would follow a line of text. It reads the shape of
+ * the list only: what the format refuses beyond that (pending changes in the way) is widened, not
+ * said here.
+ */
+export function indentReason(state: EditorState, outdent: boolean): string | undefined {
+  const { selection } = state;
+  if (selection.ranges.length > 1) return undefined;
+  const { from } = selection.main;
+  let { to } = selection.main;
+  // A selection that ends at the start of a line (a triple-click) doesn't take that line.
+  if (to > from && state.doc.lineAt(to).from === to) to = state.doc.lineAt(to).from - 1;
+  const start = blockAt(state, from);
+  const end = from === to ? start : blockAt(state, to);
+  const first = start && itemOf(state, start, from);
+  const last = end && itemOf(state, end, to);
+  if (!start || !end || !first || !last) return NOT_ITEM;
+  if (outdent) return !nested(state, start) && !nested(state, end) ? NO_PARENT : undefined;
+  if (first.item.node !== last.item.node) return undefined;
+  const empty =
+    from === to && start.text.from >= start.text.to && start.lines.from === first.item.line.from;
+  if (empty) {
+    // An empty item's line is edited, and the plan says what is in its way.
+    const { refusal } = planEmptyItem(state, first.item, false);
+    return refusal === FIRST_ITEM || refusal === NOT_UNDER_TEXT ? refusal : undefined;
+  }
+  let before = first.item.node.prevSibling;
+  while (before && before.name !== 'ListItem') before = before.prevSibling;
+  return before ? undefined : FIRST_ITEM;
 }

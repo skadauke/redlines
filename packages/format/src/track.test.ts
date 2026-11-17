@@ -35,7 +35,7 @@ import {
   squash,
   thread,
 } from './test-helpers.ts';
-import { SELF_CHECK, trackedEdit, trackedEdits } from './track.ts';
+import { SELF_CHECK, fineEdit as trackedEdit, fineEdits as trackedEdits } from './track.ts';
 import type { EditContext, Person, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -1507,6 +1507,28 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // Most edits go through, and most decisions have a form for their markers.
     expect(edits).toBeGreaterThan(refused);
     expect(undecided).toBeLessThanOrEqual(Math.ceil(edits / 20));
+  });
+
+  it('writes a prefix edit of a blank quote line between two paragraphs as it was typed (#358)', () => {
+    // A quote of two paragraphs, with a pending deletion at the end of the first and pending changes
+    // at the start of the second. Ada types a space after the `>` of the blank line, an edit of that
+    // line's prefix. It was written as a substitution whose new text was only `> `, and the last
+    // check could not see the two line breaks that were lost: the lines left held no letters. The
+    // random documents draw such quotes now (an alert of two paragraphs, `randomDocument`).
+    const text = file(
+      '> Folded <!--del xqm3 42-->\n>\n> 42 <!--ins hf3q--><!--del w443 café--><!--/hf3q-->',
+      { xqm3: 'bo', hf3q: 'bo', w443: 'ada' },
+    );
+    const view = newestView(text);
+    const at = view.text.indexOf('\n>\n') + 1;
+    const typed = applyChanges(view.text, [{ from: at, to: at + 1, insert: '> ' }]);
+    const edit = {
+      from: view.map.toSource(at, 1),
+      to: view.map.toSource(at + 1, -1),
+      insert: '> ',
+    };
+    const after = track(text, edit, ada, ['m2bd']);
+    expect(newestView(after).text.replace(/\n+$/, '')).toBe(typed.replace(/\n+$/, ''));
   });
 
   it('reads a line break next to a pending one the same in every decision order (stacked splits)', () => {

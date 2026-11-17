@@ -72,6 +72,25 @@ describe('notifications', () => {
     expect(texts()).toEqual(['Worded']);
   });
 
+  it('can offer a second choice before the action: Allow Once, then Allow Always (#529)', () => {
+    const { notifications, cards } = setup();
+    const once = vi.fn();
+    notifications.show({
+      text: 'Claude wants to use the web.',
+      dismissLabel: 'Don’t Allow',
+      secondaryAction: { label: 'Allow Once', run: once },
+      action: { label: 'Allow Always', run: vi.fn() },
+    });
+    const buttons = [...(cards()[0]?.querySelectorAll('button') ?? [])];
+    expect(buttons.map((b) => b.textContent)).toEqual([
+      'Don’t Allow',
+      'Allow Once',
+      'Allow Always',
+    ]);
+    buttons[1]?.click();
+    expect(once).toHaveBeenCalledOnce();
+  });
+
   it('put the action last, where the Mac puts the default button', () => {
     const { notifications, cards } = setup();
     notifications.show({
@@ -182,5 +201,24 @@ describe('notifications', () => {
     vi.advanceTimersByTime(PASSING_MS);
     notifications.destroy();
     expect(stack.bind(null)).toThrow();
+  });
+});
+
+describe('a second action', () => {
+  it('sits before the action and runs on its own', () => {
+    const { notifications, cards } = setup();
+    const first = vi.fn();
+    const second = vi.fn();
+    notifications.show({
+      text: 'Problem',
+      dismissLabel: 'Dismiss',
+      secondaryAction: { label: 'Reveal Log', run: second },
+      action: { label: 'Report…', run: first },
+    });
+    const labels = [...(cards()[0]?.querySelectorAll('button') ?? [])].map((b) => b.textContent);
+    expect(labels).toEqual(['Dismiss', 'Reveal Log', 'Report…']);
+    button(cards()[0], 'Reveal Log').click();
+    expect(second).toHaveBeenCalledOnce();
+    expect(first).not.toHaveBeenCalled();
   });
 });

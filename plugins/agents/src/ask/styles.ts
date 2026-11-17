@@ -13,6 +13,9 @@ const px = (n: number) => `calc(${n}px * var(--rl-note-scale, 1))`;
 /** The width of the rail's notes, which the bubble has too, at the theme's own size. */
 export const BUBBLE_WIDTH = 248;
 
+/** The class of the bubble while the rail lays it out among its notes (`AskOptions.pinToRail`). */
+export const RAILED = 'rl-qa-railed';
+
 export const ASK_STYLE = `
 .rl-qa {
   position: absolute;
@@ -30,6 +33,14 @@ export const ASK_STYLE = `
   line-height: 1.38;
   cursor: default;
 }
+/*
+ * Laid out among the rail's notes, which make room for it, the bubble covers none and needs no
+ * z-index to be over them. It keeps its page color: the notes it pushed aside slide for a moment
+ * (180 ms), and show through a bubble that has none.
+ */
+.rl-qa.${RAILED} {
+  z-index: auto;
+}
 .rl-qa-question {
   margin: ${px(2)} 0 ${px(4)};
   color: var(--rl-ink-2);
@@ -37,6 +48,11 @@ export const ASK_STYLE = `
   white-space: pre-wrap;
 }
 .rl-qa-turn + .rl-qa-turn { margin-top: ${px(8)}; padding-top: ${px(6)}; border-top: 1px solid var(--rl-rule); }
+.rl-qa-web {
+  margin-top: ${px(4)};
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small-scaled);
+}
 .rl-qa-answer p { margin: 0 0 ${px(6)}; overflow-wrap: anywhere; }
 .rl-qa-answer ul, .rl-qa-answer ol { margin: 0 0 ${px(6)}; overflow-wrap: anywhere; }
 .rl-qa-answer ul { padding-left: ${px(16)}; }
@@ -87,6 +103,11 @@ export const ASK_STYLE = `
 .rl-qa-actions .rl-note-icon { flex: none; }
 .rl-qa-live { margin-top: ${px(2)}; }
 .rl-qa-composer[hidden] { display: none; }
+.rl-qa-who { display: flex; align-items: center; gap: ${px(4)}; margin-right: auto; min-width: 0; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small-scaled); }
+.rl-qa-who[hidden], .rl-qa-model[hidden] { display: none; }
+.rl-qa-who-name { white-space: nowrap; }
+.rl-qa-model { min-width: 0; max-width: ${px(96)}; border: 1px solid transparent; border-radius: ${px(4)}; background: transparent; color: inherit; font: inherit; }
+.rl-qa-model:hover, .rl-qa-model:focus { border-color: var(--rl-rule); }
 .rl-qa-composer textarea { min-height: ${px(24)}; }
 .rl-qa-composer-follow { margin-top: ${px(6)}; }
 @media print { .rl-qa { display: none !important; } }

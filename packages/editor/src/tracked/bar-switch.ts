@@ -1,7 +1,8 @@
-// A click on a change bar switches Redlines' two looks, the simple look and the full markup, and is
-// the only thing that does (design: A click in the margin). The core owns the click, and it never
-// moves the text under the pointer, the caret, the selection or the focus: the press is taken
-// whole, the release switches, and the line that was under the pointer is put back where it was.
+// A click on a change bar switches Redlines' two looks, the simple look and the full markup, as the
+// View menu's Simple Look switch does (`switchLookAt`, shared; design: A click in the margin). The
+// core owns the click, and it never moves the text under the pointer, the caret, the selection or
+// the focus: the press is taken whole, the release switches, and the line that was under the
+// pointer is put back where it was.
 
 import { type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
@@ -176,7 +177,99 @@ function targetAt(
   return Math.abs(x - center) <= REACH ? found : null;
 }
 
+/**
+ * Switches Redlines' two looks, the simple look to the full markup and back, with the line at `pos`
+ * where it was: its distance from the top of the screen is noted now and put back once the new view
+ * is measured. A line the new view doesn't draw has the top of the one after it, which `lineTop`
+ * gives for its position. `before` is the line's top when it isn't a line's (a struck block's own),
+ * and `row` keeps the row that holds `pos` (its coordinates) in place instead of its line's top:
+ * the caret's row, in a paragraph that wraps. Nothing in Clean or Plain, which have no look. It
+ * chooses the look, as the click on a bar does.
+ */
+export function switchLookAt(
+  view: EditorView,
+  pos: number,
+  geometry: BarGeometry = pageGeometry,
+  before?: number,
+  row = false,
+): void {
+  const mode = view.state.field(viewModeField);
+  if (mode !== 'simple' && mode !== 'redlines') return;
+  const top = () => {
+    const at = Math.min(pos, view.state.doc.length);
+    return (row ? view.coordsAtPos(at)?.top : undefined) ?? geometry.lineTop(view, at);
+  };
+  const start = before ?? top();
+  const keep = (after: number) => {
+    // Chosen now, after the switch: a document that fits the window in Simple has no scrolling
+    // ancestor until Redlines makes the page taller.
+    if (Math.abs(after - start) >= 0.5) scrollerOf(view).scrollTop += after - start;
+  };
+  view.dispatch({ effects: chooseViewEffects(mode === 'simple' ? 'redlines' : 'simple') });
+  // At once, from the page as it is drawn, and again once CodeMirror has measured it, which can
+  // move lines (an image that loads, a height it learns).
+  keep(top());
+  view.requestMeasure({ read: top, write: keep });
+}
+
+/**
+ * What a switch that has no pointer to say keeps in place, as the app keeps the reading place
+ * across a zoom (`readingPlace`): the caret's own row while the caret is wholly on the screen, else
+ * the line at the top of what the screen shows. The screen's top is the scroller's, less the room
+ * the host keeps clear above it (`EditorView.scrollMargins`): the title bar floats over it, and
+ * what is under the bar is not in sight.
+ */
+export function lookedAt(view: EditorView): { pos: number; row: boolean } {
+  const rect = scrollerOf(view).getBoundingClientRect();
+  let inset = 0;
+  for (const margins of view.state.facet(EditorView.scrollMargins)) {
+    inset = Math.max(inset, margins(view)?.top ?? 0);
+  }
+  const top = rect.top + inset;
+  const head = view.state.selection.main.head;
+  const caret = view.coordsAtPos(head);
+  if (caret && caret.top >= top && caret.bottom <= rect.bottom) return { pos: head, row: true };
+  return { pos: view.lineBlockAtHeight(Math.max(0, top - view.documentTop)).from, row: false };
+}
+
 const setHover = StateEffect.define<number | null>();
+
+const setBarsHot = StateEffect.define<boolean>();
+
+const BARS_HOT: Record<string, string> = { class: 'rl-bars-hot' };
+const BARS_COOL: Record<string, string> = {};
+
+/**
+ * Whether the pointer is over a bar's target, in Simple or Redlines. The editor says so by a class
+ * (`rl-bars-hot`), and the theme draws every bar a little wider and the pointer a hand: the
+ * element under the pointer sets the cursor, not the scroller (which `hover` also gives it), and
+ * what is under the pointer in the margin is the content or a line. CodeMirror keeps the
+ * attributes of its editor and takes away a class set by hand at its next update.
+ */
+export const barsHot = StateField.define<boolean>({
+  create: () => false,
+  update(value, tr) {
+    const set = tr.effects.findLast((effect) => effect.is(setBarsHot));
+    if (set) return set.value;
+    // The text moved, or a switch made it wrong.
+    return tr.docChanged || tr.startState.field(viewModeField) !== tr.state.field(viewModeField)
+      ? false
+      : value;
+  },
+  provide: (field) =>
+    EditorView.editorAttributes.from(field, (hot) => (hot ? BARS_HOT : BARS_COOL)),
+});
+
+const barsHotTheme = EditorView.baseTheme({
+  // Every bar is wider (3 px instead of 2) while the pointer is over any one: they can be clicked.
+  '&.rl-bars-hot .rl-bar-seg': { width: '3px' },
+  '&.rl-bars-hot .rl-bar:not(.cm-line)::before': { width: '3px' },
+  '&.rl-bars-hot .rl-trow.rl-bar > .rl-tc:first-child::before': { width: '3px' },
+  // The hand: whatever is under the pointer in the margin.
+  '&.rl-bars-hot .cm-scroller, &.rl-bars-hot .cm-content, &.rl-bars-hot .cm-line': {
+    cursor: 'pointer',
+  },
+});
 
 const hotLine = Decoration.line({ class: 'rl-bar-hot' });
 
@@ -204,7 +297,7 @@ const hoverField = StateField.define<number | null>({
 /**
  * The click on a change bar: Redlines' simple look to its full markup and back, with the line
  * under the pointer where it was. The bar under the pointer draws wider, and the pointer is a hand
- * over it. Nothing in Clean or Raw.
+ * over it. Nothing in Clean or Plain.
  */
 export function barSwitch(options: BarSwitchOptions = {}): Extension {
   const geometry = options.geometry ?? pageGeometry;
@@ -267,10 +360,13 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
 
       private readonly move = (event: MouseEvent) => {
         if (this.press) return;
+        // A drag that began elsewhere (a selection) crossing the margin is no hover over a bar.
+        if (event.buttons) return this.unhover();
         const target = targetAt(this.view, geometry, event.clientX, event.clientY);
         if (!target) return this.unhover();
         if (this.hot?.element === target.element && this.hot.from === target.from) return;
-        this.unhover();
+        // From one bar to another the editor stays marked: one transaction, with no flicker.
+        this.unhover(true);
         this.hover(target);
       };
 
@@ -280,17 +376,19 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         const { view } = this;
         this.hot = target;
         view.scrollDOM.style.cursor = 'pointer';
+        const effects: StateEffect<unknown>[] = [setBarsHot.of(true)];
         if (target.from !== undefined) {
           // The bar of a line of text, which the layer draws wider.
-          view.dispatch({ effects: setHotBar.of({ from: target.from }) });
+          effects.push(setHotBar.of({ from: target.from }));
         } else if (target.element.classList.contains('cm-line')) {
           // A table's row, whose first cell draws its bar: its line is the hot one.
-          view.dispatch({ effects: setHover.of(target.pos) });
+          effects.push(setHover.of(target.pos));
         } else {
           // A struck block or a ghost row, which draw their own.
           this.cell = target.element;
           this.cell.classList.add('rl-bar-hot');
         }
+        view.dispatch({ effects });
       }
 
       /** Lets go of the hover without a transaction: the state has dropped it. */
@@ -301,11 +399,12 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         this.view.scrollDOM.style.cursor = '';
       }
 
-      private unhover(): void {
+      private unhover(keepMarked = false): void {
         if (!this.hot) return;
         this.release();
         const { state } = this.view;
         const effects = [
+          ...(!keepMarked && state.field(barsHot, false) ? [setBarsHot.of(false)] : []),
           ...(state.field(hotBar, false) ? [setHotBar.of(null)] : []),
           ...(state.field(hoverField) !== null ? [setHover.of(null)] : []),
         ];
@@ -320,28 +419,18 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         for (const handler of view.state.facet(barClickHandlers)) {
           if (handler(view, target.pos, target.mark, target.span)) return;
         }
-        // The line under the pointer keeps its place: its distance from the top of the screen is
-        // noted now and put back once the new view is measured. A line the new view doesn't draw
-        // has the top of the one after it, which `lineTop` gives for its position.
-        // A struck block is no line: it is its own top, and Simple, which doesn't draw it, gives its
-        // place to the block after it (`target.pos` is where that begins).
+        // The line under the pointer keeps its place. A struck block is no line: it is its own top,
+        // and Simple, which doesn't draw it, gives its place to the block after it (`target.pos`
+        // is where that begins).
         const struck = target.element.classList.contains('rl-struck') && target.element.isConnected;
-        const before = struck
-          ? target.element.getBoundingClientRect().top
-          : geometry.lineTop(view, target.pos);
-        const top = () => geometry.lineTop(view, Math.min(target.pos, view.state.doc.length));
-        const keep = (after: number) => {
-          // Chosen now, after the switch: a document that fits the window in Simple has no
-          // scrolling ancestor until Redlines makes the page taller.
-          if (Math.abs(after - before) >= 0.5) scrollerOf(view).scrollTop += after - before;
-        };
-        view.dispatch({ effects: chooseViewEffects(mode === 'simple' ? 'redlines' : 'simple') });
-        // At once, from the page as it is drawn, and again once CodeMirror has measured it, which
-        // can move lines (an image that loads, a height it learns).
-        keep(top());
-        view.requestMeasure({ read: top, write: keep });
+        switchLookAt(
+          view,
+          target.pos,
+          geometry,
+          struck ? target.element.getBoundingClientRect().top : undefined,
+        );
       }
     },
   );
-  return [plugin, hoverField];
+  return [plugin, hoverField, barsHot, barsHotTheme];
 }

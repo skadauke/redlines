@@ -1,10 +1,15 @@
+// @vitest-environment happy-dom
 import { markdown } from '@codemirror/lang-markdown';
-import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { EditorState, type ChangeSpec } from '@codemirror/state';
+import { ensureSyntaxTree, forceParsing, syntaxTree } from '@codemirror/language';
+import { EditorSelection, EditorState, type ChangeSpec } from '@codemirror/state';
 import { parse as parseFormat, readTables } from '@redlines/format';
+import { runScopeHandlers } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createEditor, type Editor } from '../index.ts';
 import { buildTables, cellAt, type Table, tablesField, tablesOf } from './model.ts';
+import { atomsOfState, isStop } from './stops.ts';
+import { shownText } from './widths.ts';
 
 const make = (doc: string) =>
   EditorState.create({ doc, extensions: [markdown({ extensions: GFM }), tablesField] });
@@ -59,6 +64,131 @@ describe('the tables of a state', () => {
   it('keeps a ragged row as written', () => {
     const [table] = tablesOf(make('| a | b |\n| - | - |\n| c |\n| d | e | f |\n'));
     expect(table?.rows.map((r) => r.cells.length)).toEqual([2, 1, 3]);
+  });
+});
+
+describe('a position where one cell’s mark ends and the next begins', () => {
+  // A cell's mark runs from the pipe in front of it to the next pipe, so the position in front of that
+  // pipe ends one mark and starts the next. It is the end of the first cell's text when that has no
+  // padding after it (an empty cell with one space or none, `| |` and `||`; text such as `| y|` and
+  // `|a|b|`), and then it is that cell's last stop, never the next cell's: its first stop is after its
+  // own pipe. Any other position there is the next cell's, as a position in a pipe is.
+  const doc = (row: string) => `| a | b | c |\n| - | - | - |\n${row}`;
+  const colsAt = (row: string) => {
+    const state = make(doc(row));
+    const start = doc(row).indexOf(row);
+    return (pos: number) => {
+      const found = cellAt(state, start + pos);
+      return found && [found.row.index, found.cell.col];
+    };
+  };
+
+  it('belongs to the empty cell with one space of padding, or none, whose text ends there', () => {
+    const at = colsAt('| 1 | | x |');
+    expect([at(4), at(5), at(6)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 1],
+    ]);
+    // After the next cell's pipe it is the next cell's.
+    expect([at(7), at(8)]).toEqual([
+      [1, 2],
+      [1, 2],
+    ]);
+    const none = colsAt('| 1 || x |');
+    expect([none(4), none(5), none(6)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 2],
+    ]);
+    expect(colsAt('| | 1 | x |')(2)).toEqual([1, 0]);
+    expect(colsAt('| | | x |')(2)).toEqual([1, 0]);
+    expect(colsAt('| | | x |')(4)).toEqual([1, 1]);
+  });
+
+  it('belongs to a cell whose text has no padding after it', () => {
+    const at = colsAt('|a|b|c|');
+    expect([at(1), at(2), at(3), at(4), at(5), at(6)]).toEqual([
+      [1, 0],
+      [1, 0],
+      [1, 1],
+      [1, 1],
+      [1, 2],
+      [1, 2],
+    ]);
+    // What typing one letter into `| |` writes: the cell ends where its text does.
+    const typed = colsAt('| 1 | y| x |');
+    expect([typed(6), typed(7), typed(8)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 2],
+    ]);
+  });
+
+  it('is still the next cell’s where the text before it ends earlier, as a pipe and padding are', () => {
+    const at = colsAt('| 1 | x |');
+    // The end of `1`'s text is its own; the pipe after its padding starts `x`'s mark.
+    expect([at(3), at(4), at(5), at(6)]).toEqual([
+      [1, 0],
+      [1, 1],
+      [1, 1],
+      [1, 1],
+    ]);
+    const two = colsAt('| 1 |  | x |');
+    expect([two(4), two(5), two(6), two(7), two(8)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 2],
+      [1, 2],
+    ]);
+  });
+
+  it('is the empty cell’s in a row with no outer pipes', () => {
+    const at = colsAt('1 | | x');
+    expect([at(2), at(3), at(4), at(5)]).toEqual([
+      [1, 1],
+      [1, 1],
+      [1, 1],
+      [1, 2],
+    ]);
+  });
+
+  it('is no stop of two cells, in every row of cells of every padding, with or without outer pipes', () => {
+    // Every cell content of up to two spaces and one letter, in rows with a pipe at each end, at one
+    // end and at neither: the places where a cell's text stands never overlap, and `cellAt` gives each
+    // position that is one of them to the cell that has it.
+    const contents = ['', ' ', '  ', 'a', ' a', 'a ', ' a ', 'ab'];
+    let rows = 0;
+    for (const lead of [true, false]) {
+      for (const trail of [true, false]) {
+        for (const x of contents) {
+          for (const y of contents) {
+            for (const z of contents) {
+              const cells = [x, y, z];
+              // A cell that is empty and first in a row with no leading pipe is no cell the text can make.
+              const row = `${lead ? '|' : ''}${cells.join('|')}${trail ? '|' : ''}`;
+              const state = make(doc(row));
+              const [table] = tablesOf(state);
+              const body = table?.rows[1];
+              if (!table || !body) continue;
+              rows++;
+              for (let pos = body.from; pos <= body.to; pos++) {
+                const claimants = body.cells.filter((c) => c.textFrom <= pos && pos <= c.textTo);
+                expect(
+                  claimants.length,
+                  `${JSON.stringify(row)} at ${pos - body.from}`,
+                ).toBeLessThanOrEqual(1);
+                const found = cellAt(state, pos);
+                expect(found?.row, `${JSON.stringify(row)} at ${pos - body.from}`).toBe(body);
+                if (claimants[0]) expect(found?.cell, JSON.stringify(row)).toBe(claimants[0]);
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(rows).toBeGreaterThan(1000);
   });
 });
 
@@ -261,5 +391,115 @@ describe('the tables of a state against the format reader (#290)', () => {
       );
       expect(mine, JSON.stringify(doc)).toEqual(format);
     }
+  });
+});
+
+describe('the header’s last cell, with the mark of an alignment change at the end of its text', () => {
+  // The point form (format §3.7): the mark has no closer, and ends the text of the header's last cell.
+  const MARK = '<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|-->';
+  const LEDGER =
+    '\n<!-- redlines\nversion: 1\nmarks:\n  k3x9: {by: bo, at: 2026-11-01T10:00Z}\n-->\n';
+  const PLAIN = '| Fruit | Count |\n| ----- | :---: |\n| Apples | 3 |\n';
+  const POINT = `${PLAIN.replace('Count', `Count${MARK}`)}${LEDGER}`;
+  /** Where the text of the last header cell ends, in both: the mark stands there. */
+  const END = PLAIN.indexOf('Count') + 'Count'.length;
+
+  const open: Editor[] = [];
+  afterEach(() => {
+    for (const editor of open.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+
+  function mount(doc: string, tracking = false): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking,
+    });
+    open.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    return editor;
+  }
+  const header = (editor: Editor) => tablesOf(editor.view.state)[0]!.rows[0]!;
+  const lastCell = (editor: Editor) => header(editor).cells.at(-1)!;
+
+  it('has its text in front of the mark, and the table as it reads without one', () => {
+    const state = make(POINT);
+    const [table] = tablesOf(state);
+    const [head, ...body] = table?.rows ?? [];
+    const text = (cell: { textFrom: number; textTo: number }) =>
+      state.sliceDoc(cell.textFrom, cell.textTo);
+    expect(head?.cells.map(text)).toEqual(['Fruit', 'Count']);
+    expect(head?.cells[1]?.textTo).toBe(END);
+    expect(state.sliceDoc(END, END + MARK.length)).toBe(MARK);
+    expect(body.map((row) => row.cells.map(text))).toEqual([['Apples', '3']]);
+    expect([table?.columns, table?.aligns]).toEqual([2, ['', 'center']]);
+  });
+
+  it('adds no caret stop and no atom to the table: the caret steps over the mark with the pipe', () => {
+    const marked = mount(POINT);
+    const plain = mount(PLAIN);
+    const stops = (editor: Editor) => {
+      const { from, to } = header(editor);
+      const found: number[] = [];
+      for (let pos = from; pos <= to; pos++) {
+        if (isStop(editor.view.state, pos)) found.push(pos - from);
+      }
+      return found;
+    };
+    expect(stops(marked)).toEqual(stops(plain));
+    expect(stops(marked)).toContain(END);
+    const atoms = (editor: Editor) => {
+      const found: [number, number][] = [];
+      for (const it = atomsOfState(editor.view.state).iter(); it.value; it.next()) {
+        found.push([it.from, it.to]);
+      }
+      return found;
+    };
+    // What is after the mark is the mark's length further on, and every atom is what it was.
+    const shifted = (pos: number) => (pos > END ? pos + MARK.length : pos);
+    expect(atoms(marked)).toEqual(atoms(plain).map(([from, to]) => [shifted(from), shifted(to)]));
+    // So → at the end of the text goes to the first cell below, and ← comes back.
+    const press = (key: string) =>
+      runScopeHandlers(marked.view, new KeyboardEvent('keydown', { key }), 'editor');
+    marked.view.dispatch({ selection: { anchor: END } });
+    press('ArrowRight');
+    expect(marked.view.state.selection.main.head).toBe(POINT.indexOf('Apples'));
+    press('ArrowLeft');
+    expect(marked.view.state.selection.main.head).toBe(END);
+  });
+
+  it('takes a tracked keystroke at the end of its text in front of the mark', () => {
+    const editor = mount(POINT, true);
+    const { view } = editor;
+    const type = (text: string) => {
+      const at = view.state.selection.main.head;
+      view.dispatch({
+        changes: { from: at, insert: text },
+        selection: EditorSelection.cursor(at + text.length),
+        userEvent: 'input.type',
+      });
+    };
+    view.dispatch({ selection: EditorSelection.cursor(lastCell(editor).textTo) });
+    type('x');
+    expect(view.state.doc.toString()).toMatch(
+      /\| Fruit \| Count<!--ins (\w{4})-->x<!--\/\1--><!--fmt k3x9 align=/,
+    );
+    const cell = lastCell(editor);
+    // The cell's text is what it was and the insertion: the mark is no part of it.
+    expect(view.state.sliceDoc(cell.textFrom, cell.textTo)).toMatch(
+      /^Count<!--ins \w{4}-->x<!--\/\w{4}-->$/,
+    );
+    expect(shownText(view.state, cell)).toBe('Countx');
+    expect(view.state.sliceDoc(cell.textTo, cell.textTo + '<!--fmt '.length)).toBe('<!--fmt ');
+    expect(isStop(view.state, view.state.selection.main.head)).toBe(true);
+    // Another letter goes on in the same place.
+    type('y');
+    expect(view.state.doc.toString()).toMatch(
+      /\| Fruit \| Count<!--ins (\w{4})-->xy<!--\/\1--><!--fmt k3x9 align=/,
+    );
+    expect(shownText(view.state, lastCell(editor))).toBe('Countxy');
   });
 });

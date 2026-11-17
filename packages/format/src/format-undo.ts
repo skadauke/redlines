@@ -36,7 +36,7 @@ export { decidesFormat } from './format-ops.ts';
 export const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
 
 export const LOST_SYNTAX =
-  "This format change can't be rejected, because its text no longer has that formatting. Accept it, or change the text in Raw with Track Changes off.";
+  "This format change can't be rejected, because its text no longer has that formatting. Accept it, or change the text in Plain with Track Changes off.";
 
 const DECIDE_INSIDE =
   "This format change can't be rejected until the changes inside it are decided. Accept or reject them first.";
@@ -201,15 +201,20 @@ export function formatDecision(
   return segmentChanges(reader, mark, segment, ops);
 }
 
-/** Whether rejecting the mark can be worked out now: whether its text has what it undoes. */
-export function rejectionWorks(reader: FormatReader, mark: MarkRange): boolean {
+/** Why rejecting the mark can't be worked out now: what the format says, or null when it can. */
+export function rejectionError(reader: FormatReader, mark: MarkRange): EditError | null {
   try {
     for (const segment of mark.segments) formatDecision(reader, mark, segment, 'reject');
-    return true;
+    return null;
   } catch (error) {
-    if (error instanceof EditError) return false;
+    if (error instanceof EditError) return error;
     throw error;
   }
+}
+
+/** Whether rejecting the mark can be worked out now: whether its text has what it undoes. */
+export function rejectionWorks(reader: FormatReader, mark: MarkRange): boolean {
+  return rejectionError(reader, mark) === null;
 }
 
 /**

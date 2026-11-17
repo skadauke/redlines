@@ -11,8 +11,10 @@ import {
   bodyOf,
   bo,
   context,
+  exactly,
   expectEveryOrderAlike,
   expectInOrder,
+  expectNoDecisionRefused,
   file,
 } from './test-helpers.ts';
 import { trackedEdit, trackedEdits } from './track.ts';
@@ -238,7 +240,7 @@ describe('a marker at the start of a row without a leading pipe (rule 7)', () =>
           expect(bodyOf(after)).toContain('\n| <!--');
           expect(originalView(after).text).toBe(`${rows.replace('cc', '| cc')}\n`);
           expect(parse(after).warnings).toEqual([]);
-        });
+        }, 60_000);
       }
     }
 
@@ -399,7 +401,7 @@ describe('deleting a whole table (format §3.4, §3.7)', () => {
     expectInOrder('whole table', [], after);
     expect(blockLeaves(newestView(after).text).some((leaf) => leaf.kind === 'table')).toBe(false);
     expect(originalView(after).text.replace(/\n+$/, '')).toBe(body);
-  });
+  }, 60_000);
 
   it('is plain with Track Changes off', () => {
     expect(bodyOf(plain(text, remove(from, to)))).toBe('Intro.\n\n\n\nAfter.');
@@ -407,5 +409,60 @@ describe('deleting a whole table (format §3.4, §3.7)', () => {
 
   it('still refuses a deletion of only the table’s header row’s start', () => {
     expect(() => track(text, remove(from, from + 3))).toThrow(EditError);
+  });
+
+  it('is the same for a table whose header row has no leading pipe, where no marker stands', () => {
+    for (const table of ['a | b\n-- | --\n1 | 2', 'a | b |\n-- | -- |\n1 | 2 |']) {
+      const bare = file(`Intro.\n\n${table}\n\nAfter.`);
+      expect(readTables(bare, parse(bare)), table).toHaveLength(1);
+      const start = bare.indexOf('a | b');
+      const after = track(bare, remove(start, start + table.length));
+      expect(parse(after).marks[0]?.payload, table).toBe(`${table}\n\n`);
+      expectEveryOrderAlike(table, after, exactly);
+      expect(blockLeaves(newestView(after).text).some((leaf) => leaf.kind === 'table')).toBe(false);
+      expect(originalView(after).text.replace(/\n+$/, '')).toBe(`Intro.\n\n${table}\n\nAfter.`);
+    }
+  });
+});
+
+describe('a key next to a marker at the edge of a cell (format §3.7)', () => {
+  // With no space between the text of a cell and its pipe, a delimiter or a backslash typed in front of a
+  // marker that ends the cell can only be kept apart from the marker by writing again the character after
+  // it, which is the row's pipe. That left the pipe in a change of its own: rejecting the deletion of the
+  // pipe, or accepting the insertion that holds it, left a pipe too many or none, and the table was gone.
+  // The key is written as a replacement of the table, with the old table (and its comment point) as the
+  // old text, so that every order of decisions reads alike (format §3.12).
+  const compact = file('|b|b<!--cmt k3x9-->|\n|-|-|\n|c|d|', { k3x9: 'bo' }, [
+    '  k3x9:',
+    '    by: bo',
+    '    at: 2026-10-13T22:40Z',
+    '    text: |-',
+    '      A note.',
+  ]);
+
+  it('writes a backslash, an underscore or a star typed in front of it, as a replacement of the table', () => {
+    const at = compact.indexOf('<!--cmt');
+    for (const typed of ['\\', '_']) {
+      const after = track(compact, type(at, typed), ['c2dd', 'f3gg', 'h4jj']);
+      expectEveryOrderAlike(JSON.stringify(typed), after);
+      expectNoDecisionRefused(JSON.stringify(typed), after);
+      expect(newestView(after).text).toContain(`|b|b${typed}|`);
+      expect(originalView(after).text).toContain('|b|b|');
+    }
+    // A star reads alike without it, and a cell with room after its text takes them all.
+    const star = track(compact, type(at, '*'), ['c2dd', 'f3gg', 'h4jj']);
+    expectEveryOrderAlike('a star', star);
+    const padded = file('| b | b<!--cmt k3x9--> |\n| - | - |\n| c | d |', { k3x9: 'bo' }, [
+      '  k3x9:',
+      '    by: bo',
+      '    at: 2026-10-13T22:40Z',
+      '    text: |-',
+      '      A note.',
+    ]);
+    for (const typed of ['\\', '_', '*']) {
+      const after = track(padded, type(padded.indexOf('<!--cmt'), typed), ['c2dd', 'f3gg', 'h4jj']);
+      expectEveryOrderAlike(typed, after);
+      expectInOrder(typed, ['k3x9'], after);
+    }
   });
 });

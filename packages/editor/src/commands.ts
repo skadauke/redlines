@@ -7,12 +7,56 @@
 // bar, whose item would run the command again (a Mac's webview sees a key before the menu bar does),
 // or to WebKit, which would make the text bold itself.
 
-import { EditorState, Prec } from '@codemirror/state';
+import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
-import type { CommandRegistry, Editor, EditorCommand } from './api.ts';
+import type { CommandKeys, CommandRegistry, Editor, EditorCommand } from './api.ts';
+import { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
+import { plainOnlyFacet } from './tracked/field.ts';
+import { trackingField } from './tracked/typing.ts';
+
+/**
+ * The commands that work in a Plain-only file, by the start of their id: Edit's, find and replace,
+ * and the outline. Every other command makes or reads marks or Markdown, which such a file has
+ * none of.
+ */
+const PLAIN_ONLY_COMMANDS = ['edit.', 'find.', 'outline.'];
+
+/** Why a command that makes or reads Markdown can't run in a Plain-only file. */
+function plainOnlyReason(id: string): string {
+  if (id.startsWith('ask.') || id.startsWith('comment.') || id.startsWith('highlight.')) {
+    return 'Only Markdown files have comments, highlights and Ask.';
+  }
+  return 'Only Markdown files have formatting.';
+}
+
+const ACCEPT_FIRST =
+  "This HTML must be changed to Markdown first, and with Track Changes on that is a pending change that this can't build on. Turn Track Changes off to make this change.";
+
+/** Why `command` can't run in `state`, or undefined when it can. */
+export const disabledReasonOf = (
+  command: EditorCommand,
+  state: EditorState,
+): string | undefined => {
+  if (state.facet(plainOnlyFacet) && !PLAIN_ONLY_COMMANDS.some((id) => command.id.startsWith(id))) {
+    return plainOnlyReason(command.id);
+  }
+  // In HTML that has a Markdown twin the command converts it first; in HTML that has none it can't.
+  if (command.structure) {
+    const reason = twinReason(state, command.structure);
+    if (reason !== undefined) return reason;
+    if (inTwin(state, command.structure)) {
+      // A pending conversion can't be acted on: a command that can't write its result into the
+      // conversion waits for it to be accepted, and is disabled until then.
+      const twin = twinAt(state, state.selection.main.head)?.twin;
+      const folds = twin && command.twinAs?.(twin) != null;
+      return state.field(trackingField) && !folds ? ACCEPT_FIRST : undefined;
+    }
+  }
+  return command.disabledReason?.(state);
+};
 
 const isEnabled = (command: EditorCommand, state: EditorState) =>
-  command.isEnabled?.(state) ?? true;
+  disabledReasonOf(command, state) === undefined;
 
 /** The ids of the commands that are active in `state`. */
 export const activeCommands = (commands: readonly EditorCommand[], state: EditorState) =>
@@ -21,6 +65,19 @@ export const activeCommands = (commands: readonly EditorCommand[], state: Editor
 /** The ids of the commands that can run in `state`. */
 export const enabledCommands = (commands: readonly EditorCommand[], state: EditorState) =>
   commands.filter((command) => isEnabled(command, state)).map(({ id }) => id);
+
+/** The reason of each registered command that can't run in `state`, by id. */
+export function disabledReasons(
+  commands: readonly EditorCommand[],
+  state: EditorState,
+): Record<string, string> {
+  const reasons: Record<string, string> = {};
+  for (const command of commands) {
+    const reason = disabledReasonOf(command, state);
+    if (reason !== undefined) reasons[command.id] = reason;
+  }
+  return reasons;
+}
 
 /** A command's title in `state`. */
 export const titleOf = (command: EditorCommand, state: EditorState): string =>
@@ -82,24 +139,102 @@ function focusInOtherField(view: EditorView): boolean {
 
 /**
  * Makes the registry of an editor that doesn't exist yet: `editor` is asked for it when a command
- * is registered or run. `changed` is told when the list of commands has changed.
+ * is registered or run. `changed` is told when the list of commands has changed. `notice` says why a
+ * key does nothing: the key of a disabled command says its reason (`EditorCommand.disabledReason`),
+ * unless the key goes on to the core's binding. `keys` has the person's own keys: a command's key is
+ * what it says, which is the command's own until they change it, and the keys follow a change.
  */
-export function createCommandRegistry(editor: () => Editor, changed: () => void): CommandRegistry {
+export function createCommandRegistry(
+  editor: () => Editor,
+  changed: () => void,
+  notice: (message: string) => void = () => {},
+  keys?: CommandKeys,
+  /**
+   * Puts the commands' keymap in the editor ahead of every other (`Editor.addExtension` adds after
+   * the others, and a keymap of the same precedence that came first wins); replaces its last one.
+   */
+  install?: (keymap: Extension) => void,
+): CommandRegistry {
   let commands: readonly EditorCommand[] = [];
+  /** The commands as listed: each with the key it has now, and the one it came with. */
+  let listed: readonly EditorCommand[] = [];
+  const keyOf = (command: EditorCommand) =>
+    keys ? keys.keyOf(command.id, command.shortcut) : command.shortcut;
+  const relist = () => {
+    listed = commands.map((command) => {
+      const shortcut = keyOf(command);
+      return shortcut === command.shortcut
+        ? command
+        : { ...command, shortcut, defaultShortcut: command.shortcut ?? '' };
+    });
+  };
 
-  const run = (command: EditorCommand) =>
-    isEnabled(command, editor().view.state) && command.run(editor());
+  /** Runs a command, or says why it can't be run: a disabled command (its key, or a click that got
+   * past a grayed menu item or button) is told, since a command that does nothing and says nothing
+   * is a bug. */
+  const run = (command: EditorCommand) => {
+    const reason = disabledReasonOf(command, editor().view.state);
+    if (reason !== undefined) {
+      notice(reason);
+      return false;
+    }
+    if (command.structure && inTwin(editor().view.state, command.structure)) {
+      const { view } = editor();
+      const twin = twinAt(view.state, view.state.selection.main.head)?.twin;
+      // A pending conversion can't be acted on: a command that knows its result writes it in one.
+      const as = twin && view.state.field(trackingField) ? command.twinAs?.(twin) : null;
+      const converted = convertTwin(view, as ?? undefined);
+      if (converted !== true) {
+        notice(converted);
+        return false;
+      }
+      if (as != null) return true;
+      return command.run(editor());
+    }
+    return command.run(editor());
+  };
 
   /** Keeps the key whatever the command does, unless the command lets it go on. */
   const binding = (command: EditorCommand, key: string): KeyBinding => ({
     key,
-    run: () => run(command) || !command.keyFallsThrough,
+    run: () => {
+      const state = editor().view.state;
+      const falls = command.keyFallsThrough;
+      const goesOn = typeof falls === 'function' ? falls(state) : falls;
+      // A key that goes on to the core's binding when its command can't run says nothing.
+      if (goesOn && disabledReasonOf(command, state) !== undefined) return false;
+      return run(command) || !goesOn;
+    },
   });
-  const bindings = (added: readonly EditorCommand[]) =>
-    added.flatMap((command) => (command.shortcut ? [binding(command, command.shortcut)] : []));
+  const bindings = () =>
+    commands.flatMap((command) => {
+      const key = keyOf(command);
+      return key ? [binding(command, key)] : [];
+    });
+  let removeKeys = () => {};
+  const bind = (extension: Extension) => {
+    if (install) {
+      install(extension);
+      return () => {};
+    }
+    return editor().addExtension(extension);
+  };
+  /**
+   * Binds every command's key again, in one keymap that comes before every other, so that a key the
+   * person chose beats a binding of the editor's or a plugin's own, added earlier or later (#551).
+   */
+  const bindAll = () => {
+    removeKeys();
+    relist();
+    removeKeys = bind(Prec.highest(keymap.of(bindings())));
+  };
+  keys?.subscribe(() => {
+    if (commands.length) bindAll();
+    changed();
+  });
 
   return {
-    list: () => commands,
+    list: () => listed,
     register(added) {
       const ids = new Set(commands.map(({ id }) => id));
       for (const command of added) {
@@ -108,14 +243,14 @@ export function createCommandRegistry(editor: () => Editor, changed: () => void)
         checkShortcut(command);
       }
       commands = [...commands, ...added];
-      const removeKeys = editor().addExtension(Prec.high(keymap.of(bindings(added))));
+      bindAll();
       changed();
       let removed = false;
       return () => {
         if (removed) return;
         removed = true;
         commands = commands.filter((command) => !added.includes(command));
-        removeKeys();
+        bindAll();
         changed();
       };
     },

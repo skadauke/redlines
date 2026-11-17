@@ -10,7 +10,7 @@ import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, listDocument, randomDocument, seeded } from './random-docs.ts';
 import { claudeAda, expectInOrder } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import type { EditContext } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -342,7 +342,7 @@ describe('the joining rule on random documents', { timeout: 1_200_000 }, () => {
     checkCase(11867, severalBlocksCase(11867, true), zero());
   });
 
-  it('refuses the edit that leaves an insertion unrejectable (seed 12198, #246)', () => {
+  it('leaves no insertion stuck: written so that it can be decided, or refused (seed 12198, #246, #251)', () => {
     // The agent's split in a pending insertion (the agent's own px36, which the edit extends in
     // place) leaves it unrejectable in the word form, as it did when this seed was pinned as "as
     // decidable as today's form". Since #246 the edit is refused and writes nothing; the word
@@ -350,9 +350,26 @@ describe('the joining rule on random documents', { timeout: 1_200_000 }, () => {
     const found = severalBlocksCase(12198, true);
     if (!found) throw new Error('the seed no longer makes a case');
     const [first, second] = twice(12198);
-    expect(() => suggestReplace(found.doc, found.oldStr, found.newStr, second)).toThrow(
-      /could no longer be rejected/,
-    );
+    let written: string | undefined;
+    try {
+      written = applyChanges(
+        found.doc,
+        suggestReplace(found.doc, found.oldStr, found.newStr, second).changes,
+      );
+    } catch (error) {
+      expect((error as Error).message).toMatch(/could no longer be decided/);
+    }
+    // Since #251 the edit may be written wider, where every change stays decidable and every
+    // order of decisions reads alike; it is never written so that the insertion is stuck.
+    if (written !== undefined) {
+      for (const mark of parse(written).marks) {
+        if (mark.kind !== 'ins' && mark.kind !== 'sub') continue;
+        expect(
+          decides(written, mark.id, accept) || decides(written, mark.id, reject),
+          mark.id,
+        ).toBe(true);
+      }
+    }
     const today = wordForm(found.doc, found.oldStr, found.newStr, first);
     expect(today).toBeDefined();
     checkCase(12198, found, zero());

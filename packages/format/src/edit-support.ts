@@ -1,7 +1,8 @@
 // What the editing functions share (format §3.6, §4, §5): where the markers are, moving a position
 // out of one, the file's line breaks, and writing the ledger once the body has changed.
 
-import { applyChanges } from './changes.ts';
+import { assertPointsRead } from './align-point.ts';
+import { applyChanges, eolOf } from './changes.ts';
 import { EditError } from './errors.ts';
 import {
   htmlOpenAt,
@@ -12,17 +13,18 @@ import {
   readsAlike,
 } from './indented-code.ts';
 import { normalizeLedger } from './ledger-order.ts';
-import { setLedger } from './ledger-write.ts';
+import { assertLedgerVisible, keepsLedger, setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { bodyStart, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
+import { assertPointHolds } from './table-align.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import type { Ledger, MarkKind, MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
 // The file's line breaks, which views need without the rest of this.
-export { eolOf, inEol } from './changes.ts';
+export { eolOf, inEol, plainPayload, restoredPayload } from './changes.ts';
 export type { Eol } from './changes.ts';
 
 // The markers of a file, which views and the reading of formats need without the rest of this.
@@ -109,7 +111,7 @@ export function assertNoMarkup(text: string): void {
   const found = scan(text);
   if (found.markers.length > 0 || found.ledgers.length > 0) {
     throw new EditError(
-      "This text holds Redlines markup, such as <!--ins …-->, which can't be added as a change. Edit it in the raw view.",
+      "This text holds Redlines markup, such as <!--ins …-->, which can't be added as a change. Edit it in the Plain view.",
       'markup',
     );
   }
@@ -129,6 +131,24 @@ function singleChange(before: string, after: string): TextChange[] {
     end++;
   }
   return [{ from: start, to: before.length - end, insert: after.slice(start, after.length - end) }];
+}
+
+/**
+ * The changes between two texts, in offsets of `before`: the body and the ledger each as one change of
+ * what differs. For an operation that works out the text it makes (a table's deletion, an agent's edit
+ * of a table) and gives back what changed, which stays near the table and the ledger.
+ */
+export function changesBetween(before: string, after: string): TextChange[] {
+  const stop = (text: string) => parse(text).ledgerRange?.from ?? text.length;
+  const [a, b] = [stop(before), stop(after)];
+  return [
+    ...singleChange(before.slice(0, a), after.slice(0, b)),
+    ...singleChange(before.slice(a), after.slice(b)).map((change) => ({
+      ...change,
+      from: change.from + a,
+      to: change.to + a,
+    })),
+  ];
 }
 
 /** Where a position of the changed text was in the original, or null when it lay inside text that
@@ -185,9 +205,9 @@ function joinChanges(
 }
 
 /** The refusal of a change that would hide other changes in code or an HTML comment: in the words
- * of a decision, or of an edit, which can be made in Raw instead. A decision that would hide the
+ * of a decision, or of an edit, which can be made in Plain instead. A decision that would hide the
  * markers of a comment, which no decision takes away, says to delete the comment (`comment`). */
-function hiddenError(removing: boolean, comment = false): EditError {
+export function hiddenError(removing: boolean, comment = false): EditError {
   if (removing && comment) {
     return new EditError(
       'This decision would bring the markers of the comment next to it into code, where they would no longer be read. Delete that comment first.',
@@ -197,9 +217,34 @@ function hiddenError(removing: boolean, comment = false): EditError {
   return new EditError(
     removing
       ? 'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.'
-      : 'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.',
+      : 'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain with Track Changes off.',
     'would-hide-marks',
   );
+}
+
+/**
+ * Whether a marker that a change cuts out and writes again, as a column operation does with the
+ * cells that move, is read where it is written again: false when the changes write the marker's text
+ * and the scan reads it at none of the places where it stands. A marker no change writes again
+ * is gone, and counts as read.
+ */
+function carriedRead(
+  text: string,
+  range: Range,
+  changes: readonly TextChange[],
+  read: ReadonlySet<number>,
+): boolean {
+  const marker = text.slice(range.from, range.to);
+  let delta = 0;
+  let found = false;
+  for (const change of changes) {
+    for (let i = change.insert.indexOf(marker); i >= 0; i = change.insert.indexOf(marker, i + 1)) {
+      found = true;
+      if (read.has(change.from + delta + i)) return true;
+    }
+    delta += change.insert.length - (change.to - change.from);
+  }
+  return !found;
 }
 
 /**
@@ -232,7 +277,10 @@ function assertMarksKept(
       const { close } = segment;
       const opener = openerRange(segment);
       for (const range of close ? [opener, close] : [opener]) {
-        if (removed(range)) continue;
+        if (removed(range)) {
+          if (!carriedRead(before.text, range, changes, read)) hidden();
+          continue;
+        }
         const at = forward(changes, range.from);
         if (at === null || !read.has(at)) hidden();
       }
@@ -635,9 +683,30 @@ export function commitEdit(
   ledger: Ledger,
   options: CommitOptions = {},
 ): TextChange[] {
-  const sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
+  let sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
+  // A `<!--` that nothing closes covers the ledger and the marks after it: nothing is read, and
+  // a write of marks would add a second ledger or none. A plain edit writes no mark and no ledger.
+  if (sorted.length > 0 && (options.created !== undefined || options.removes === true))
+    assertLedgerVisible(text);
   const before = sorted.length > 0 ? (options.parsed ?? parse(text)) : undefined;
   const removing = options.removes === true;
+  // A decision that gives back a code block that is never closed would leave the ledger inside it.
+  // Where the ledger stays (other marks, a comment, a setting), the code gets a closing fence, the
+  // same code to every reader; with no mark left, the ledger goes and the block comes back as it
+  // was.
+  let fenced = false;
+  const range = before?.ledgerRange;
+  if (range && removing && !options.keepLedger) {
+    const bare = applyChanges(text, sorted);
+    if (parse(bare).ledgerRange === null) {
+      const keeps = keepsLedger(normalizeLedger(bare, ledger));
+      const fix = keeps
+        ? closingFenceFor(text, sorted, bare, range.from)
+        : { from: range.from, to: range.to, insert: '' };
+      if (fix) sorted = [...sorted, fix].sort((a, b) => a.from - b.from || a.to - b.to);
+      fenced = keeps;
+    }
+  }
   const changes = before
     ? withPlacement(
         text,
@@ -655,7 +724,9 @@ export function commitEdit(
   let ledgerChanges: TextChange[] | EditError | undefined;
   if (!options.keepLedger) {
     try {
-      ledgerChanges = setLedger(after, normalizeLedger(after, ledger));
+      ledgerChanges = setLedger(after, normalizeLedger(after, ledger), {
+        eol: eolOf(text, before?.ledgerRange),
+      });
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
       ledgerChanges = error;
@@ -664,9 +735,13 @@ export function commitEdit(
   if (before) {
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter, changes);
+    // An alignment change at the end of its cell is read where it stands after the edit as it was before it.
+    if (!removing) assertPointsRead(text, before, after, parsedAfter, changes);
     assertOutOfIndentedCode(text, before, after, parsedAfter, ledgerChanges, changes, options);
     assertMarksKept(before, parsedAfter, sorted, changes, removing);
-    if (options.keeps) assertViewsKept(text, after, options.keeps);
+    if (options.keeps && !(fenced && options.keeps === 'original')) {
+      assertViewsKept(text, after, options.keeps);
+    }
     assertPlaced(
       before,
       parsedAfter,
@@ -675,7 +750,49 @@ export function commitEdit(
       options.exempt ?? [],
     );
   }
-  if (ledgerChanges === undefined) return changes;
   if (ledgerChanges instanceof EditError) throw ledgerChanges;
-  return joinChanges(text, changes, after, ledgerChanges);
+  const done =
+    ledgerChanges === undefined ? changes : joinChanges(text, changes, after, ledgerChanges);
+  // An edit in the cell that a pending alignment change ends is held to every order of decisions of the changes
+  // in it, as the writer of the change was (#466). It looks at the file the edit makes, ledger and all.
+  if (before && !removing) assertPointHolds(text, before, done);
+  return done;
+}
+
+/**
+ * The closing fence that a decision writes after an unclosed code block it gives back, where the
+ * ledger stays after it: the opening fence's character and length, after the container's prefix,
+ * at the end of the last change before the ledger. Undefined when the new text doesn't end in one.
+ */
+function closingFenceFor(
+  text: string,
+  changes: readonly TextChange[],
+  after: string,
+  ledgerFrom: number,
+): TextChange | undefined {
+  const open = scan(after).verbatim.findLast((range) => range.kind === 'fence');
+  const last = changes.filter((change) => change.to <= ledgerFrom).at(-1);
+  const found = open && /^([ \t>]*)(`{3,}|~{3,})/.exec(after.slice(open.from, open.from + 99));
+  // Only where nothing but white space stands between it and the ledger: the block ends the body.
+  if (!found || !last || open.to < after.length || /\S/.test(text.slice(last.to, ledgerFrom))) {
+    return undefined;
+  }
+  const end = after.length - text.length + last.to;
+  const eol = after.slice(end - 1, end) === '\n' ? '' : text.includes('\r\n') ? '\r\n' : '\n';
+  return { from: last.to, to: last.to, insert: eol + found[1] + found[2] };
+}
+
+/** How many markers of a file's body stand right after an unescaped backslash, which escapes them
+ * (format §3.1). */
+export function escapedMarkers(text: string, parsed: Parsed): number {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
+}
+
+/** Where the last marker of a file's body that an unescaped backslash escapes starts. */
+export function escapedMarkerAt(text: string, parsed: Parsed): number | undefined {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  let at: number | undefined;
+  for (const m of body.matchAll(/(?:^|[^\\])(?:\\\\)*\\(?=<!--)/g)) at = m.index + m[0].length;
+  return at;
 }

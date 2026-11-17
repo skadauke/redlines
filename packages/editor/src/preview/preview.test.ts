@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
+import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
+import { openBlock } from '../blocks/open.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from './decorations.ts';
 
@@ -171,7 +173,31 @@ describe('markdownPreview', () => {
     expect(marks.map((mark) => mark.textContent)).toEqual(['1.', '◦', '▪', '▪']);
   });
 
-  it('hides blank lines between blocks, but not in code or Raw', () => {
+  it('indents a level the same for bullets and numbers, whatever their source says (#511)', () => {
+    const box = (doc: string) => {
+      const editor = editorAt(doc, doc.length);
+      const hangs = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-hang')].map(
+        (line) => line.style.getPropertyValue('--rl-hang'),
+      );
+      const sizes = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-indent')].map(
+        (span) => span.style.fontSize,
+      );
+      const cols = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-list-mark')].map(
+        (mark) => mark.style.getPropertyValue('--rl-cols'),
+      );
+      return { hangs, sizes, cols };
+    };
+    const bullets = box('- a\n  - b\n    - c\n\nEnd');
+    const numbers = box('1. a\n   1. b\n      1. c\n\nEnd');
+    expect(bullets.hangs).toEqual(['3', '6', '9']);
+    expect(numbers.hangs).toEqual(bullets.hangs);
+    expect(numbers.cols).toEqual(bullets.cols);
+    // The source's whitespace (two columns a level, or three) is drawn three columns a level.
+    expect(bullets.sizes).toEqual(['1.5em', '1.5em']);
+    expect(numbers.sizes).toEqual(['', '']); // already as wide as drawn
+  });
+
+  it('hides blank lines between blocks, but not in code or Plain', () => {
     const doc = 'One.\n\nTwo.\n  \n```\na\n\nb\n```\n\nEnd';
     const editor = editorAt(doc, doc.length);
     const lines = () =>
@@ -186,7 +212,9 @@ describe('markdownPreview', () => {
     /** The spacing classes of the lines that start with `text`, in order. */
     const spaceOf = (doc: string, text: string) => {
       const editor = editorAt(doc, 0);
-      const line = editor.view.state.doc.lineAt(doc.indexOf(text));
+      // A text that starts with a line break names the last line that matches (an empty one).
+      const at = text.startsWith('\n') ? doc.lastIndexOf(text) + 1 : doc.indexOf(text);
+      const line = editor.view.state.doc.lineAt(at);
       return decorations(editor)
         .filter((d) => d.kind === 'line' && d.from === line.from)
         .flatMap((d) => d.className.split(' '))
@@ -211,10 +239,43 @@ describe('markdownPreview', () => {
       ['between a nested item and its parent, loose', '- a\n\n  - b', '  - b', 'rl-space-loose'],
       ['between the items of a loose list', '- a\n\n- b', '- b', 'rl-space-loose'],
       ['between the paragraphs of an item', '- p1\n\n  p2', '  p2', 'rl-space-loose'],
+      // An empty item takes the space above it as it has once text is typed in it (#509): the item
+      // would jump down a few pixels on the first letter.
+      ['above an empty item of a tight list', '- a\n- b\n- ', '\n- ', 'rl-space-item'],
+      ['above an empty item nested under its parent', '- a\n  - ', '\n  - ', 'rl-space-item'],
+      ['above an empty numbered item', '1. a\n2. ', '\n2. ', 'rl-space-item'],
+      ['above an empty item of a loose list', '- a\n\n- b\n\n- ', '\n- ', 'rl-space-loose'],
       ['between the paragraphs of a quote', '> One.\n>\n> Two.', '> Two.', 'rl-space-loose'],
       ['under a quote', '> One.\n\nTwo.', 'Two.', 'rl-space-block'],
     ])('is drawn by kind %s', (_, doc, line, spacing) => {
       expect(spaceOf(doc, line)).toEqual([spacing]);
+    });
+
+    it('keeps the space above an empty item while an empty paragraph is open (#509)', () => {
+      const doc = 'Intro\n\n- a\n- \n- b\n\nOutro';
+      const editor = editorAt(doc, 5);
+      const lineOf = () => editor.view.state.doc.line(4);
+      const classes = () =>
+        decorations(editor)
+          .filter((d) => d.kind === 'line' && d.from === lineOf().from)
+          .flatMap((d) => d.className.split(' '))
+          .filter((c) => c.startsWith('rl-space-'));
+      expect(classes()).toEqual(['rl-space-item']);
+      // Return at the end of "Intro" opens an empty paragraph, which reads as if it held a letter.
+      runScopeHandlers(
+        editor.view,
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+        'editor',
+      );
+      expect(openBlock(editor.view.state)).not.toBeNull();
+      const line = editor.view.state.doc.line(editor.view.state.doc.lines - 3);
+      expect(line.text).toBe('- ');
+      expect(
+        decorations(editor)
+          .filter((d) => d.kind === 'line' && d.from === line.from)
+          .flatMap((d) => d.className.split(' '))
+          .filter((c) => c.startsWith('rl-space-')),
+      ).toEqual(['rl-space-item']);
     });
 
     it('goes below the line above code or a table, whose first line is tinted or a widget', () => {
@@ -264,6 +325,36 @@ describe('markdownPreview', () => {
     const editor = editorAt('- one\n- two', 0);
     expect(replaced(editor)).toEqual([[6, 8]]);
     expect(classed(editor, 'rl-syntax')).toEqual([[0, 1]]);
+  });
+
+  it('draws bullets, numbers and boxes the same with a selection over them (#668)', () => {
+    const doc = '- one\n- two\n\n1. first\n2. second\n\n- [ ] a\n- [x] b\n\nEnd';
+    const drawn = (editor: Editor) => ({
+      marks: [...editor.view.contentDOM.querySelectorAll('.rl-list-mark')].map(
+        (m) => m.textContent,
+      ),
+      boxes: editor.view.contentDOM.querySelectorAll('.rl-box').length,
+      source: editor.view.contentDOM.querySelectorAll('.rl-list-source').length,
+      replaced: replaced(editor),
+    });
+    const apart = editorAt(doc, doc.length);
+    const before = drawn(apart);
+    expect(before.marks).toEqual(['•', '•', '1.', '2.', '', '']);
+    expect(before.boxes).toBe(2);
+    expect(before.source).toBe(0);
+    // A selection from inside the first item to the end of the second box item, and one that
+    // starts in a marker's own text.
+    for (const [from, to] of [
+      [2, doc.length - 4],
+      [0, doc.length - 4],
+      [doc.indexOf('2.') + 1, doc.indexOf('- [x]') + 1],
+    ] as const) {
+      const selected = editorAt(doc, doc.length);
+      selected.view.dispatch({ selection: { anchor: from, head: to } });
+      expect(drawn(selected), `selection ${from}-${to}`).toEqual(before);
+    }
+    // A caret on a marker still shows its source.
+    expect(drawn(editorAt(doc, 0)).source).toBe(1);
   });
 
   it('hides blockquote marks and code fences off their lines', () => {

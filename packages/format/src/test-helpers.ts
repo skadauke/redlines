@@ -10,18 +10,23 @@ import {
 import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
 import { gfmTable, gfmTableHtml } from 'micromark-extension-gfm-table';
 import { expect } from 'vitest';
-import { bodyStart, frontMatterEnd, prefixLength } from './blocks.ts';
+import { bodyStart, frontMatterEnd, openerRange, prefixLength } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
+import { opsOf } from './format-ops.ts';
 import type { FormatOp } from './format-ops.ts';
 import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts';
+import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
+import { payloadMarksOf } from './payload-marks.ts';
 import { randomDocument, seeded } from './random-docs.ts';
 import { scan } from './scan.ts';
 import type { Marker } from './scan.ts';
-import { trackedEdit } from './track.ts';
+import { isAlignPoint } from './table-align.ts';
+import { alignPointIn, readLine, readTables } from './table.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import type { EditContext, Parsed, Person, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -514,6 +519,37 @@ export function expectInOrder(label: string, threads: string[], after: string): 
   return parsed;
 }
 
+/** Every marker of the mark `id` ends before the ledger, and nothing follows the ledger but the
+ * file's last line break: the editor writes no text after it (format §5.1). */
+export function expectMarkersBeforeLedger(label: string, text: string, id: string): void {
+  const parsed = parse(text);
+  const mark = parsed.marks.find((m) => m.id === id);
+  expect(mark, `${label}: no mark ${id}`).toBeDefined();
+  const ledger = parsed.ledgerRange;
+  if (!ledger) return;
+  for (const segment of mark?.segments ?? []) {
+    expect(openerRange(segment).to, `${label}: an opener ends in the ledger`).toBeLessThanOrEqual(
+      ledger.from,
+    );
+    expect(segment.close?.to ?? 0, `${label}: a closer ends in the ledger`).toBeLessThanOrEqual(
+      ledger.from,
+    );
+  }
+  expect(text.slice(ledger.to), `${label}: text after the ledger`).toMatch(/^(?:\r\n|\n|\r)?$/);
+}
+
+/**
+ * Whether an anchor on a range of `text` that ends at `to` has no place for its closer, by design
+ * (format §4): the range reaches the end of the body, and the body ends in the closing `_` of
+ * emphasis, whose flanking a marker would change (§3.1, rule 5), so that the next place is after the
+ * ledger, where nothing is written. The random tests leave these refusals out of the ones they
+ * count as a construct that has no place for its marker.
+ */
+export function endsInClosingUnderscore(text: string, to: number): boolean {
+  const end = parse(text).ledgerRange?.from ?? text.length;
+  return to >= end && /[\p{L}\p{N}]_+$/u.test(newestView(text).text.trimEnd());
+}
+
 /** The body of a file, ending in one line break: a ledger leaves a blank line in front of it. */
 const bodyEnd = (text: string) => `${bodyOf(text).replace(/[\r\n]+$/, '')}\n`;
 
@@ -845,10 +881,12 @@ export function everyOrder(
     const key = `${current}|${decided.toSorted().join(' ')}`;
     if (seen.has(key)) return;
     seen.add(key);
+    const now = parse(current);
+    // The marks in the old text of a replacement are decided too, by id (format §3.12).
     const left = [
       ...new Set(
-        parse(current)
-          .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
+        [...now.marks, ...payloadMarksOf(now).map((found) => found.mark)]
+          .filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
           .map((mark) => mark.id),
       ),
     ];
@@ -932,10 +970,12 @@ export function expectNoDecisionRefused(
   const walk = (current: string, path: string[]) => {
     if (seen.has(current)) return;
     seen.add(current);
+    const now = parse(current);
+    // The marks in the old text of a replacement are decided too, by id (format §3.12).
     const left = [
       ...new Set(
-        parse(current)
-          .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
+        [...now.marks, ...payloadMarksOf(now).map((found) => found.mark)]
+          .filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
           .map((mark) => mark.id),
       ),
     ];
@@ -979,4 +1019,116 @@ export function expectNoDecisionRefused(
   };
   walk(text, []);
   return seen.size;
+}
+
+/**
+ * The point alignment change that a file has pending (format §3.7, #281), as a test holds it: its id, whether its mark ends
+ * the header's last cell (`alignPointIn` on that cell's content finds it where the mark is), and the old delimiter row
+ * that it holds. Undefined where the file has no such change, or its table has no header.
+ */
+export function pendingPoint(
+  text: string,
+): { id: string; ends: boolean; spec: string } | undefined {
+  const parsed = parse(text);
+  const mark = parsed.marks.find(isAlignPoint);
+  const segment = mark?.segments[0];
+  const header = readTables(text, parsed)[0]?.rows[0];
+  if (!mark || !segment || !header) return undefined;
+  const cell = readLine(text, header.from, header.to).cells.at(-1);
+  const found = cell ? alignPointIn(text, cell.contentFrom, cell.contentTo) : null;
+  const spec = opsOf(mark, segment).find((op) => op.value !== undefined)?.value ?? '';
+  return { id: mark.id, ends: found !== null && found.from === segment.open.from, spec };
+}
+
+/**
+ * While an alignment change is pending its mark is read once, with its entry in the ledger, and ends the header's last
+ * cell, and the original view has its old delimiter row (the table as it was, whatever has been done to its columns and
+ * rows since: a plain operation keeps the old row in step with the table). A file with none pending has nothing to hold.
+ * `original` is false for a merge, where a column change that is pending, once decided, leaves the old row, which is
+ * positional and never rewritten, with other columns than the original view's.
+ */
+export function expectPointHolds(label: string, text: string, original = true): void {
+  const held = pendingPoint(text);
+  if (!held) return;
+  const parsed = parse(text);
+  expect(
+    parsed.marks.filter((mark) => mark.id === held.id),
+    `${label}: the mark is read once`,
+  ).toHaveLength(1);
+  expect(parsed.ledger.marks[held.id], `${label}: the mark has its entry`).toBeDefined();
+  expect(held.ends, `${label}: the mark ends the header's last cell`).toBe(true);
+  if (!original) return;
+  expect(
+    originalView(text).text.split(/\r?\n/),
+    `${label}: the original view has the old delimiter row`,
+  ).toContain(held.spec);
+}
+
+/** The file with its point alignment marks cut out, and their entries in the ledger: the control of a file that an
+ * alignment change is suspected of making unsound (what is older than the change fails without it as well). */
+export function withoutPoints(text: string): string {
+  const cut = text.replace(/<!--fmt \w{4} align=[^\r\n]*?-->/g, '');
+  return applyChanges(cut, setLedger(cut, normalizeLedger(cut, parse(cut).ledger)));
+}
+
+/** How many markers the body of a file has as text that the scan does not read: a half of a code span or of a raw
+ * comment pairs with another across the cells and the rows of a table, and hides the markers between them. */
+export function unreadMarkers(state: string): number {
+  const raw =
+    bodyOf(state).match(
+      /<!--\/?(?:(?:ins|del|sub|fmt|hl|cmt|split) )?[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz23456789]{3}[ -]/g,
+    )?.length ?? 0;
+  return raw - scan(state).markers.length;
+}
+
+/** How many ledgers the scan reads in a file. A half of a comment hides a ledger that stands below it, and writes the
+ * next one after it; when the half goes with a column the first comes back into view as a ledger of its own. */
+export function ledgersRead(state: string): number {
+  return scan(state).ledgers.length;
+}
+
+/**
+ * A check of a random suite that failed, with the name it is known by. A file that fails a check is older than its
+ * alignment change only where the same file with the change cut out fails the same check first (`failsFirstWithout`),
+ * as the alignment suite holds it (`found.failed[0] === found.checks[0]`): a control that passes, or that fails another
+ * check first, is no excuse.
+ */
+export class CheckFailed extends Error {
+  /** The name of the check, the same for the same check of any file. */
+  check: string;
+
+  constructor(check: string, cause: unknown) {
+    super(`${check}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'CheckFailed';
+    this.check = check;
+  }
+}
+
+/** Runs `run` as the check `check`: what it throws is a `CheckFailed` of that name, with what it threw as its cause. */
+export function named<T>(check: string, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    throw error instanceof CheckFailed ? error : new CheckFailed(check, error);
+  }
+}
+
+/**
+ * Whether `failed`, what a file `state` threw in `run` (a sequence of named checks, which stops at the first to fail),
+ * is older than the file's alignment change: the same file with its point alignment marks cut out (`withoutPoints`)
+ * fails the same check first. A failure that is no `CheckFailed` has no name to compare and is never excused, nor is
+ * one that the control does not fail, or fails after another check.
+ */
+export function failsFirstWithout(
+  failed: unknown,
+  state: string,
+  run: (state: string) => void,
+): boolean {
+  if (!(failed instanceof CheckFailed)) return false;
+  try {
+    run(withoutPoints(state));
+  } catch (error) {
+    return error instanceof CheckFailed && error.check === failed.check;
+  }
+  return false;
 }

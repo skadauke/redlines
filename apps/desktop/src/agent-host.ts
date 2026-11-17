@@ -15,7 +15,13 @@ import type {
 } from '@redlines/plugin-api';
 import { findProgram, runProgram } from './agent-programs.ts';
 
-export { acpAgents, commandLine, homeAccess, type AcpAgent } from './agent-programs.ts';
+export {
+  acpAgents,
+  commandLine,
+  homeAccess,
+  listedAcpAgents,
+  type AcpAgent,
+} from './agent-programs.ts';
 
 /** What the Rust side says about a run (`RunMessage` in agents/process.rs). */
 type RunMessage =

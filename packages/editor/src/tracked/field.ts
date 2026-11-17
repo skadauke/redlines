@@ -3,8 +3,31 @@
 // offsets are CodeMirror positions.
 
 import { Annotation, Compartment, Facet, StateEffect, StateField } from '@codemirror/state';
-import { isDecidable, type MarkRange, type Parsed, parse } from '@redlines/format';
+import {
+  isDecidable,
+  type MarkRange,
+  type Parsed,
+  type ParseChange,
+  parse,
+} from '@redlines/format';
 import type { Author, MarkupView, MenuView, MetPerson, ViewMode } from '../api.ts';
+
+/**
+ * Whether the document is a Plain-only file (`DocumentKind`): text and code, which is never read
+ * for marks or a ledger, and shows in Plain alone.
+ */
+export const plainOnlyFacet = Facet.define<boolean, boolean>({
+  combine: (values) => values.some(Boolean),
+});
+
+/** Why a Plain-only file has no Clean or Redlines view, no Track Changes and no review. */
+export const PLAIN_ONLY_VIEWS = 'Only Markdown files have Clean and Redlines views.';
+
+/** Why a Plain-only file has no Track Changes and no review. */
+export const PLAIN_ONLY_TRACKING = 'Only Markdown files have Track Changes and review.';
+
+/** The parse of a Plain-only file: its text, and no mark, ledger or warning. */
+const plainParsed = (text: string): Parsed => ({ ...parse(''), text });
 
 /**
  * Marks a transaction the tracked layer has dealt with: an edit of the author's, tracked or plain,
@@ -73,8 +96,23 @@ export function chooseViewEffects(mode: ViewMode): StateEffect<unknown>[] {
  * text didn't change isn't read again on every keystroke.
  */
 export const parsedField = StateField.define<Parsed>({
-  create: (state) => parse(state.doc.toString()),
-  update: (parsed, tr) => (tr.docChanged ? parse(tr.newDoc.toString(), parsed) : parsed),
+  create: (state) =>
+    state.facet(plainOnlyFacet) ? plainParsed(state.doc.toString()) : parse(state.doc.toString()),
+  update: (parsed, tr) => {
+    // A file that becomes Markdown, or Plain-only, by its name (a rename, Save As) is read again.
+    const kindChanged = tr.startState.facet(plainOnlyFacet) !== tr.state.facet(plainOnlyFacet);
+    if (!tr.docChanged && !kindChanged) return parsed;
+    if (tr.state.facet(plainOnlyFacet)) return plainParsed(tr.newDoc.toString());
+    if (kindChanged) return parse(tr.newDoc.toString());
+    // Where the text changed, as one stretch: the parse reads the marks again only there (#700).
+    let change: ParseChange | undefined;
+    tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+      change = change
+        ? { from: change.from, oldTo: toA, newTo: toB }
+        : { from: fromA, oldTo: toA, newTo: toB };
+    });
+    return parse(tr.newDoc.toString(), parsed, change);
+  },
 });
 
 /**
@@ -165,20 +203,26 @@ export const setViewModeEffect = StateEffect.define<ViewMode>();
 export const holdViewAnnotation = Annotation.define<boolean>();
 
 /**
- * How the document is shown. It starts in the view its ledger says it was saved in (`view`, format
- * §5.6), or else in Redlines, in the look chosen last (the markup view), when the document has
- * redlines and in Clean when it doesn't (design §5.3), and after that it stays as chosen: Redlines
+ * How the document is shown. A document with no redlines, a new one or a plain Markdown file, starts
+ * in Clean, whatever view was used last and whatever its ledger says (format §5.6, design §5.3). One
+ * that has redlines starts in the view its ledger says it was saved in (`view`), or else in
+ * Redlines, in the look chosen last (the markup view), and after that it stays as chosen: Redlines
  * is available whatever the document holds, so one whose last redline goes stays in it. The one
  * exception is a document that gains redlines while it is shown Clean, as when an agent's
  * suggestions arrive, which switches to Redlines in that look, so suggestions are never invisible.
  */
 export const viewModeField = StateField.define<ViewMode>({
   create: (state) => {
+    if (state.facet(plainOnlyFacet)) return 'raw';
     const parsed = state.field(parsedField);
-    if (parsed.ledger.view) return parsed.ledger.view;
-    return hasRedlines(parsed) ? state.facet(markupViewFacet) : 'clean';
+    // Nothing to show, nothing to be left in: a ledger that only says how the file was left
+    // doesn't open it in Redlines.
+    if (!hasRedlines(parsed)) return 'clean';
+    return parsed.ledger.view ?? state.facet(markupViewFacet);
   },
   update(mode, tr) {
+    // A Plain-only file has no other view, however one is asked for.
+    if (tr.state.facet(plainOnlyFacet)) return 'raw';
     const chosen = tr.effects.findLast((effect) => effect.is(setViewModeEffect));
     if (chosen) return chosen.value;
     if (!tr.docChanged || mode !== 'clean' || tr.annotation(holdViewAnnotation)) return mode;

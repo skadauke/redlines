@@ -8,6 +8,8 @@ export default defineConfig({
       '{apps,packages,plugins}/*/src/**/*.test.ts',
       // The Quick Look renderer, a package inside the desktop app (apps/desktop/quicklook).
       'apps/desktop/quicklook/src/**/*.test.ts',
+      // Which journeys a pull request runs (apps/desktop/journeys).
+      'apps/desktop/journeys/src/**/*.test.ts',
     ],
     // A stylesheet imported as text (`file.css?raw`, as the Quick Look renderer does) is its text.
     // Vitest otherwise blanks every stylesheet.

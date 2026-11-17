@@ -1,10 +1,16 @@
 // @vitest-environment happy-dom
 import { EditorSelection } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
-import { afterEach, describe, expect, it } from 'vitest';
+import { EditorView } from '@codemirror/view';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { barMeasure, type BarMeasure, hotBar } from './bar-layer.ts';
-import { type BarGeometry, barClickHandlers, barSwitch } from './bar-switch.ts';
+import {
+  type BarGeometry,
+  barClickHandlers,
+  barSwitch,
+  lookedAt,
+  switchLookAt,
+} from './bar-switch.ts';
 import { viewModeField } from './field.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -103,6 +109,110 @@ describe('the click on a change bar', () => {
     expect(scrollDOM.scrollTop).toBe(17);
   });
 
+  it('switches the looks for a command as for a click, keeping the line it is given where it was (#330)', async () => {
+    const editor = load({ view: 'simple' });
+    const { scrollDOM } = editor.view;
+    scrollDOM.scrollTop = 7;
+    const line = editor.view.state.doc.line(2).from;
+    const before = layout.lineTop(editor.view, line);
+    switchLookAt(editor.view, line, layout);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(viewOf(editor)).toBe('redlines');
+    expect(editor.getUiState().markupView).toBe('redlines');
+    expect(layout.lineTop(editor.view, line)).toBeCloseTo(before, 0);
+    expect(scrollDOM.scrollTop).toBe(17);
+    // And back, the line where it was again.
+    switchLookAt(editor.view, line, layout);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(viewOf(editor)).toBe('simple');
+    expect(layout.lineTop(editor.view, line)).toBeCloseTo(before, 0);
+    expect(scrollDOM.scrollTop).toBe(7);
+  });
+
+  describe('what a switch with no pointer keeps in place (#330)', () => {
+    const rect = (top: number, bottom: number) => ({
+      top,
+      bottom,
+      left: 0,
+      right: 600,
+      width: 600,
+      height: bottom - top,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    });
+    /** An editor whose scroller shows 0 to 100 px, under `inset` px of title bar, and a caret in its second line. */
+    function looking(inset = 0) {
+      const editor = load({
+        view: 'simple',
+        extensions: [
+          barSwitch({ geometry: layout }),
+          EditorView.scrollMargins.of(() => ({ top: inset })),
+        ],
+      });
+      const { view } = editor;
+      const second = view.state.doc.line(2).from;
+      view.dispatch({ selection: { anchor: second + 3 } });
+      vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue(rect(0, 100));
+      const caretAt = (top: number | null) =>
+        vi
+          .spyOn(view, 'coordsAtPos')
+          .mockReturnValue(top === null ? null : { left: 0, right: 5, top, bottom: top + 20 });
+      const topLine = vi.spyOn(view, 'lineBlockAtHeight').mockReturnValue({ from: 7 } as never);
+      return { editor, view, second, caretAt, topLine };
+    }
+
+    it('is the caret’s own row, not its line, while the caret is wholly on the screen', () => {
+      const { view, second, caretAt } = looking();
+      caretAt(40);
+      expect(lookedAt(view)).toEqual({ pos: second + 3, row: true });
+    });
+
+    it('is the line at the top of the screen when the caret is below, above or partly off it, or has no place', () => {
+      const { view, caretAt, topLine } = looking();
+      for (const top of [300, -50, 90, null]) {
+        caretAt(top);
+        expect(lookedAt(view), String(top)).toEqual({ pos: 7, row: false });
+      }
+      expect(topLine).toHaveBeenCalledTimes(4);
+    });
+
+    it('does not count a caret under the title bar, nor the part of the screen it covers', () => {
+      // The bar floats over the top 52 px of the scroller: a caret at 30 is under it, and the top
+      // of what is shown is the first line below it.
+      const { view, caretAt, topLine } = looking(52);
+      caretAt(30);
+      expect(lookedAt(view)).toEqual({ pos: 7, row: false });
+      expect(topLine).toHaveBeenLastCalledWith(52);
+      caretAt(60);
+      expect(lookedAt(view).row).toBe(true);
+    });
+
+    it('keeps the caret’s row where it was, not the top of its line', async () => {
+      // The caret's row is 100 px down in Simple and 160 in Redlines, the lines above it having
+      // grown: the page scrolls 60 px, as the row's own coordinates say.
+      const { editor, view, second } = looking();
+      view.scrollDOM.scrollTop = 7;
+      vi.spyOn(view, 'coordsAtPos').mockImplementation(() => {
+        // Where the row is on the screen: its place in the page, less how far the page is scrolled.
+        const top = (viewOf(editor) === 'simple' ? 100 : 160) - (view.scrollDOM.scrollTop - 7);
+        return { left: 0, right: 5, top, bottom: top + 20 };
+      });
+      switchLookAt(view, second + 3, layout, undefined, true);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      expect(viewOf(editor)).toBe('redlines');
+      expect(view.scrollDOM.scrollTop).toBe(67);
+    });
+  });
+
+  it('switches nothing in Clean or Plain', () => {
+    for (const view of ['clean', 'raw'] as const) {
+      const editor = load({ view });
+      switchLookAt(editor.view, 0, layout);
+      expect(viewOf(editor)).toBe(view);
+    }
+  });
+
   it('moves no selection, caret or focus', () => {
     for (const focused of [true, false]) {
       const editor = load({ view: 'simple' });
@@ -124,7 +234,7 @@ describe('the click on a change bar', () => {
     }
   });
 
-  it('does nothing for a press that moves 5 px, and for a press in Clean or Raw', () => {
+  it('does nothing for a press that moves 5 px, and for a press in Clean or Plain', () => {
     const editor = load({ view: 'simple' });
     click(editor, ON_BAR, {}, { x: ON_BAR.x + 5, y: ON_BAR.y });
     expect(viewOf(editor)).toBe('simple');
@@ -193,6 +303,46 @@ describe('the click on a change bar', () => {
     // A move off the target.
     scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT + 50, y: 35 }));
     expect(hot()).toBeNull();
+  });
+
+  it('marks the whole editor while the pointer is over any bar, so that every bar is wider and the hand shows (#501)', () => {
+    const editor = load({ view: 'simple' });
+    const { scrollDOM, dom } = editor.view;
+    const marked = () => dom.classList.contains('rl-bars-hot');
+    expect(marked()).toBe(false);
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
+    // Off the target, and out of the editor, the bars are as they were.
+    scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT + 50, y: 35 }));
+    expect(marked()).toBe(false);
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    scrollDOM.dispatchEvent(mouse('mouseleave', ON_BAR));
+    expect(marked()).toBe(false);
+    // A press on the bar takes it away.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    scrollDOM.dispatchEvent(mouse('mousedown', ON_BAR));
+    expect(marked()).toBe(false);
+    // (Its release is the click, which switches the look.)
+    document.dispatchEvent(mouse('mouseup', ON_BAR));
+    editor.setViewMode('simple');
+    scrollDOM.scrollTop = 0;
+    // A switch of the look takes it away, and so does the text's changing.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
+    editor.setViewMode('redlines');
+    expect(marked()).toBe(false);
+    editor.setViewMode('simple');
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(true);
+    editor.view.dispatch({ changes: { from: 0, insert: 'x' }, annotations: [] });
+    expect(marked(), 'an edit').toBe(false);
+    // A drag from elsewhere that crosses the margin is no hover.
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR, { buttons: 1 }));
+    expect(marked()).toBe(false);
+    // In Clean there is no bar to be over.
+    editor.setViewMode('clean');
+    scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    expect(marked()).toBe(false);
   });
 
   it('shows no hint, however long the pointer rests on a bar', async () => {

@@ -14,6 +14,7 @@ import {
   createClaudeProvider,
   INSTALL_COMMAND,
   newClaudeState,
+  parseClaudeEvents,
   parseClaudeLine,
   plugin,
   SIGNED_OUT_HELP,
@@ -131,6 +132,17 @@ describe('claudeArgs at This folder and my home folder', () => {
   };
   const args = claudeArgs(wide, endpoint);
 
+  it('passes a listed model on, and leaves an unlisted one to Claude Code (#530)', () => {
+    const at = (model?: string) => {
+      const line = claudeArgs({ ...wide, ...(model ? { model } : {}) }, endpoint);
+      return line.indexOf('--model') < 0 ? null : line[line.indexOf('--model') + 1];
+    };
+    expect(at('opus')).toBe('opus');
+    expect(at('haiku')).toBe('haiku');
+    expect(at('--dangerously-skip-permissions')).toBeNull();
+    expect(at()).toBeNull();
+  });
+
   it('grants each folder the host lists, after --restricted and before anything else', () => {
     const at = args.indexOf('--restricted');
     expect(args.slice(at, at + 1 + roots.length * 2 + 1)).toEqual([
@@ -150,7 +162,7 @@ describe('claudeArgs at This folder and my home folder', () => {
     const without = (line: string[]) =>
       line.filter((arg, i) => arg !== '--add-dir' && line[i - 1] !== '--add-dir');
     // The same line but for the grants, the skills flag and the settings.
-    expect(valueOf(args, '--tools')).toBe('Read,Grep,Glob');
+    expect(valueOf(args, '--tools')).toBe('Read,Grep,Glob,WebSearch,WebFetch');
     expect(valueOf(args, '--allowedTools')).toBe(valueOf(folder, '--allowedTools'));
     expect(valueOf(args, '--allowedTools')).not.toMatch(/(^|,)(Read|Grep|Glob|Bash)(,|$)/);
     expect(valueOf(args, '--permission-mode')).toBe('dontAsk');
@@ -236,7 +248,7 @@ describe('claudeArgs', () => {
     );
     expect(valueOf(args, '--output-format')).toBe('stream-json');
     expect(valueOf(args, '--permission-mode')).toBe('dontAsk');
-    expect(valueOf(args, '--tools')).toBe('Read,Grep,Glob');
+    expect(valueOf(args, '--tools')).toBe('Read,Grep,Glob,WebSearch,WebFetch');
     expect(valueOf(args, '--settings')).toBe('{"disableAllHooks":true}');
     expect(args).not.toContain('--bare');
     expect(args).not.toContain('--setting-sources');
@@ -253,12 +265,12 @@ describe('claudeArgs', () => {
     });
   });
 
-  it('allows the six toolbox tools and nothing else', () => {
+  it('allows the six toolbox tools and the picture of an Alt Text request, and nothing else', () => {
     const allowed = (valueOf(claudeArgs(folderRequest, endpoint), '--allowedTools') ?? '').split(
       ',',
     );
     expect(allowed).toEqual(
-      ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'].map(
+      ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status', 'view_image'].map(
         (tool) => `mcp__redlines__${tool}`,
       ),
     );
@@ -270,8 +282,53 @@ describe('claudeArgs', () => {
     );
   });
 
-  it('gives no read tools at This document', () => {
-    expect(valueOf(claudeArgs(documentRequest, endpoint), '--tools')).toBe('');
+  it('gives no read tools at This document, and only the web tools to reach for', () => {
+    expect(valueOf(claudeArgs(documentRequest, endpoint), '--tools')).toBe('WebSearch,WebFetch');
+  });
+
+  // #529: the web tools are always on the list, so that an agent can reach for one, and they are
+  // allowed only when the run may use the web; `dontAsk` refuses them otherwise.
+  it('allows the web tools only for a run that may use the web', () => {
+    const off = (valueOf(claudeArgs(folderRequest, endpoint), '--allowedTools') ?? '').split(',');
+    expect(off).not.toContain('WebSearch');
+    expect(off).not.toContain('WebFetch');
+    const on = valueOf(claudeArgs({ ...folderRequest, web: true }, endpoint), '--allowedTools');
+    expect(on?.split(',')).toEqual([...off, 'WebSearch', 'WebFetch']);
+    expect(valueOf(claudeArgs({ ...folderRequest, web: true }, endpoint), '--tools')).toBe(
+      'Read,Grep,Glob,WebSearch,WebFetch',
+    );
+  });
+});
+
+describe('the web (#529)', () => {
+  const call = (name: string) =>
+    JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'u1', name, input: {} }] },
+    });
+  const result = JSON.stringify({ type: 'result', subtype: 'success', result: 'Done.' });
+
+  it('says an agent reached for the web when the run may not use it', () => {
+    const state = newClaudeState();
+    expect(parseClaudeLine(call('WebSearch'), state)).toEqual({
+      type: 'web',
+      allowed: false,
+      text: 'Searching the web',
+    });
+    expect(parseClaudeLine(call('WebFetch'), state)).toEqual({
+      type: 'web',
+      allowed: false,
+      text: 'Reading a web page',
+    });
+    expect(parseClaudeLine(result, state)).toEqual({ type: 'done', finalText: 'Done.' });
+  });
+
+  it('says the web was used, and marks the answer, when the run may use it', () => {
+    const state = newClaudeState(undefined, true);
+    expect(parseClaudeLine(call('WebSearch'), state)).toEqual(
+      expect.objectContaining({ type: 'web', allowed: true }),
+    );
+    expect(parseClaudeLine(result, state)).toEqual({ type: 'done', finalText: 'Done.', web: true });
   });
 });
 
@@ -313,7 +370,7 @@ describe('parseClaudeLine', () => {
   it('turns the stream of a successful run into statuses and one done', () => {
     const events = eventsOf(fixture('scripted-toolbox-only.jsonl'));
     expect(events.at(-1)).toEqual({ type: 'done', finalText: 'Done.' });
-    expect(events.filter((event) => event.type !== 'status')).toHaveLength(1);
+    expect(events.filter((event) => !['status', 'web'].includes(event.type))).toHaveLength(1);
   });
 
   it('reads a real folder run', () => {
@@ -433,6 +490,45 @@ describe('a read the agent could not make', () => {
         text: 'Couldn’t read plan.md',
         blocked: { path: '/Users/ada/Documents/plan.md', cause: 'privacy', place: 'Documents' },
       },
+    ]);
+  });
+
+  it('reports every refused read of a message, not the first only', () => {
+    const calls = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'a',
+            name: 'Read',
+            input: { file_path: '/Users/ada/Documents/one.md' },
+          },
+          {
+            type: 'tool_use',
+            id: 'b',
+            name: 'Read',
+            input: { file_path: '/Users/ada/Documents/two.md' },
+          },
+        ],
+      },
+    });
+    const results = JSON.stringify({
+      type: 'user',
+      message: {
+        content: ['a', 'b'].map((id) => ({
+          type: 'tool_result',
+          tool_use_id: id,
+          is_error: true,
+          content: 'EPERM: operation not permitted',
+        })),
+      },
+    });
+    const state = newClaudeState(home);
+    parseClaudeEvents(calls, state);
+    expect(parseClaudeEvents(results, state)).toMatchObject([
+      { blocked: { path: '/Users/ada/Documents/one.md' } },
+      { blocked: { path: '/Users/ada/Documents/two.md' } },
     ]);
   });
 
@@ -627,7 +723,7 @@ describe('run', () => {
     await collect(provider.run(noFolder, endpoint, new AbortController().signal));
     expect(fake.specs[0]?.cwd).toBe('/tmp/empty-1');
     const args = fake.specs[0]?.args ?? [];
-    expect(args[args.indexOf('--tools') + 1]).toBe('');
+    expect(args[args.indexOf('--tools') + 1]).toBe('WebSearch,WebFetch');
   });
 
   it('stops a run whose toolbox did not start, though the program goes on', async () => {

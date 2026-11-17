@@ -1,40 +1,21 @@
 // Comments (format §4): a thread is anchored in the body and stored in the ledger under the same
 // id. Adding a thread writes its anchor and its entry; replying, resolving and reopening change
-// only the ledger; deleting a thread removes both.
-//
-// In v0.1 a range is written as one segment, even across blocks. Its ends are moved to where
-// format §3.1 to §3.3 allow a marker, which changes what the comment covers by whitespace or by a
-// whole construct but never by text: out of a link destination or an image, off a delimiter whose
-// flanking a marker would change, back over the line break in front of a wrapped line, back from
-// the start of the next block to the end of the last, and on from a blank line to the text of the
-// block after it. An opener that starts a block gets its own line.
+// only the ledger; deleting a thread removes both. Where the anchor's markers go is the same for a
+// highlight (anchors.ts).
 
-import {
-  breakStart,
-  frontMatterEnd,
-  lineEnd,
-  lineStart,
-  nextLineStart,
-  openerRange,
-  prefixLength,
-} from './blocks.ts';
+import { closerRange, openerRange } from './blocks.ts';
+import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
-import {
-  addPerson,
-  commitEdit,
-  markerRanges,
-  snapOut,
-  visibleText,
-  workingLedger,
-} from './edit-support.ts';
+import { addPerson, commitEdit, markerRanges, visibleText, workingLedger } from './edit-support.ts';
 import type { MarkerRange } from './edit-support.ts';
+import { anchorRange, assertRange, checkAnchor } from './anchors.ts';
+import type { AnchorWords } from './anchors.ts';
 import { idsIn, newId } from './ids.ts';
-import { inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import { commentAcrossRows } from './table-rules.ts';
+import { commentAcrossRows, inPendingRow, pastRowMark, rowWidenings } from './table-rules.ts';
+import type { TableRead } from './table.ts';
 import { applyChanges } from './changes.ts';
-import { scan } from './scan.ts';
 import type { EditContext, Ledger, Parsed, Range, TextChange, Thread } from './types.ts';
 
 /** The thread with this id. When there is none, a ledger that can't be read is the reason to give
@@ -55,139 +36,41 @@ function replaceThread(ledger: Ledger, thread: Thread): void {
 const IN_CODE =
   "A comment can't be anchored inside code or an HTML comment, where its markers would not be read. Anchor it on the whole code span or comment instead.";
 
-/** Throws when the anchor of a new comment would not be read: its markers are in code or in an
- * HTML comment. A comment anchor that isn't in the ledger yet is not a mark to `parse`, so the
- * scan of the new text is asked. */
-function checkAnchor(after: string, id: string, range: boolean): void {
-  const markers = scan(after).markers.filter((marker) => marker.id === id);
-  const opens = markers.some((marker) => marker.type === 'open');
-  const closes = !range || markers.some((marker) => marker.type === 'close');
-  if (!opens || !closes) throw new EditError(IN_CODE, 'inside-code');
-}
-
-/** Where the text of the line that holds `position` starts: after the prefix of its block (`- `,
- * `> `) and the `#`s of a heading. */
-function lineTextStart(text: string, position: number): number {
-  const start = lineStart(text, position);
-  const line = text.slice(start, lineEnd(text, start));
-  const prefix = prefixLength(line);
-  const heading = /^#{1,6}[ \t]+/.exec(line.slice(prefix))?.[0].length ?? 0;
-  return start + prefix + heading;
-}
-
-/** Whether the line that holds `position` has nothing on it but its container prefix: spaces, tabs
- * and quote markers, which a blank line of a quote or a list item has. */
-function onBlankLine(text: string, position: number): boolean {
-  return /^[ \t>]*$/.test(text.slice(lineStart(text, position), lineEnd(text, position)));
-}
-
-/**
- * Where the text of the block after the blank lines that `position` is on starts, before `end`, or
- * `position` when no block comes. An opener alone on a blank line in front of a block would take
- * the line break after it for its carrier, and the blank line would go from the views (format
- * §3.3): at the start of the body, where no line with text comes before it (§3.8), or under another
- * blank line.
- */
-function pastBlankLines(text: string, position: number, end: number): number {
-  for (let line = lineStart(text, position); line < end; line = nextLineStart(text, line)) {
-    if (!onBlankLine(text, line)) return lineTextStart(text, line);
-  }
-  return position;
-}
-
-/** The range of a comment, moved to where its markers may stand (see the head of this file).
- * `end` is where the body ends. */
-function placeAnchor(
-  text: string,
-  markers: readonly MarkerRange[],
-  frontEnd: number,
-  range: Range,
-  end: number,
-): Range {
-  let { from, to } = range;
-  const refuse = (reason: string): never => {
-    throw new EditError(reason, 'no-legal-placement');
-  };
-  // A range of whole blocks starts at the first column of the first and ends at the first column
-  // of the block after the last. That is in front of a prefix, where no marker goes: it starts at
-  // the text of the block, and ends where the block before the line ends.
-  if (from < lineTextStart(text, from)) from = lineTextStart(text, from);
-  if (from < to && to < lineTextStart(text, to)) {
-    const line = lineStart(text, to);
-    to = line === 0 ? from : Math.max(from, breakStart(text, line));
-  }
-  if (to < from) to = from;
-  for (let attempt = 0; attempt < 24; attempt++) {
-    const state = `${from} ${to}`;
-    const open = inspectPlace(text, markers, from);
-    if (open.kind === 'refuse') refuse(open.reason);
-    else if (open.kind === 'construct') {
-      from = open.from;
-      to = Math.max(to, from === to ? from : to);
-    } else if (open.kind === 'flank') from = stepLeft(text, markers, from);
-    else if (open.kind === 'continuation') from = snapOut(markers, breakStart(text, from), false);
-    // On a blank line in front of a block, the range starts at the block's text.
-    else if (open.kind === 'block' && onBlankLine(text, from)) {
-      from = pastBlankLines(text, from, end);
-    }
-    if (frontEnd >= 0 && from <= frontEnd) {
-      throw new EditError("A comment can't be anchored in front matter yet.", 'front-matter');
-    }
-    if (to < from) to = from;
-    if (to > from) {
-      const close = inspectPlace(text, markers, to);
-      if (close.kind === 'refuse') refuse(close.reason);
-      else if (close.kind === 'construct') to = close.to;
-      else if (close.kind === 'flank') to = stepRight(text, markers, to);
-      // The closer must not start the next block or line: the range ends where the last ends.
-      else if (close.kind === 'block' || close.kind === 'continuation') {
-        // Not inside the opener of a mark that starts the block, or between it and its carrier.
-        to = Math.max(from, snapOut(markers, breakStart(text, to), false));
-      }
-    }
-    if (state === `${from} ${to}`) return { from, to };
-  }
-  return refuse('There is no place for the markers of this comment.');
-}
+/** What a refused comment says (see `AnchorWords`). */
+const COMMENT_WORDS: AnchorWords = {
+  frontMatter: "A comment can't be anchored in front matter yet.",
+  noPlace: 'There is no place for the markers of this comment.',
+  inCode: IN_CODE,
+};
 
 /**
  * Adds a comment thread by `ctx.author` on a range of the file, which is written as
  * `<!--cmt ID-->text<!--/ID-->`, or on a point when the range is empty: `<!--cmt ID-->`. An end of
- * the range that falls inside a marker is moved out of it, so the comment covers the marker. The
- * thread records the text it covers as it reads in the newest view (`quote`), so that the comment
- * can say what it was about when the text is gone (format §4).
+ * the range that falls inside a marker is moved out of it, so the comment covers the marker, and a
+ * range that reaches into the ledger ends where the body does. The thread records the text it
+ * covers as it reads in the newest view (`quote`), so that the comment can say what it was about
+ * when the text is gone (format §4).
  *
  * @returns the changes, in offsets of `text`, and the id of the thread.
  * @throws RangeError when the range lies outside the text.
- * @throws EditError when the anchor would be inside code or an HTML comment, or when the ledger
- *   can't be read.
+ * @throws EditError when the anchor would be inside code or an HTML comment, or where no place keeps
+ *   the text as it reads, or when the ledger can't be read.
  */
 export function addComment(
   text: string,
   range: Range,
   body: string,
   ctx: EditContext,
+  rowsWidened = false,
 ): { changes: TextChange[]; id: string } {
-  if (range.from < 0 || range.to < range.from || range.to > text.length) {
-    throw new RangeError(
-      `The range ${range.from}-${range.to} is out of order or outside the text (${text.length} characters)`,
-    );
-  }
+  const recorded = recordIds(ctx);
+  if (!rowsWidened) ctx = recorded.ctx;
+  assertRange(text, range);
   const parsed = parse(text);
   const markers = markerRanges(parsed);
-  const frontEnd = frontMatterEnd(text);
-  if (frontEnd >= 0 && range.from <= frontEnd) {
-    throw new EditError("A comment can't be anchored in front matter yet.", 'front-matter');
-  }
-  const wanted = range.from === range.to;
-  const start = snapOut(markers, range.from, false);
-  const { from, to } = placeAnchor(
-    text,
-    markers,
-    frontEnd,
-    { from: start, to: wanted ? start : snapOut(markers, range.to, true) },
-    parsed.ledgerRange?.from ?? text.length,
-  );
+  let placed = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
+  placed = pastPendingRowMarks(text, parsed, markers, placed);
+  const { from, to } = placed;
   const point = from === to;
 
   const id = newId(idsIn(text), ctx.random);
@@ -210,11 +93,50 @@ export function addComment(
   const changes = commitEdit(text, anchors, ledger, {
     parsed,
     created: [id],
-    verify: (after) => checkAnchor(after, id, !point),
+    verify: (after) => checkAnchor(after, id, !point, IN_CODE),
     inCode: IN_CODE,
   });
-  refuseAcrossMovedRows(applyChanges(text, changes), id);
-  return { changes, id };
+  const after = applyChanges(text, changes);
+  const across = acrossMovedRows(after, id, rowsWidened);
+  if (!across) return { changes, id };
+  // A comment that runs from one row into another while a move is pending can't be left as a point
+  // when the move is decided: its ends are taken to rows that are not pending (format §3.12).
+  if (rowsWidened) throw across.error;
+  const table = readTables(text, parsed).find(
+    (read) => range.from <= read.to && read.from <= range.to,
+  );
+  for (const candidate of table ? rowWidenings(table, text, range) : []) {
+    try {
+      return addComment(text, candidate, body, recorded.replay(), true);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+  }
+  throw across.error;
+}
+
+/**
+ * `placed`, with an end that would stand in front of the mark of an inserted or moved row, at the
+ * start of its first cell, or between the mark and its space, moved past the mark and its space:
+ * there it hides the mark from the table, and the row could not be decided. The comment then
+ * covers the mark, which is no text, and the row stays decidable in every order.
+ */
+function pastPendingRowMarks(
+  text: string,
+  parsed: Parsed,
+  markers: readonly MarkerRange[],
+  placed: Range,
+): Range {
+  if (!text.includes(' row-->')) return placed;
+  let { from, to } = placed;
+  for (const table of readTables(text, parsed)) {
+    from = pastRowMark(table, text, from);
+    to = pastRowMark(table, text, to);
+  }
+  if (from === placed.from && to === placed.to) return placed;
+  // Where the ends are now, the rules of every anchor hold again.
+  const range = { from, to: Math.max(from, to) };
+  return anchorRange(text, parsed, markers, range, COMMENT_WORDS);
 }
 
 /**
@@ -223,21 +145,39 @@ export function addComment(
  * at its start can't begin with a marker, so a comment on its first word starts at the end of the
  * row above.) The words name the person who moved the rows.
  */
-function refuseAcrossMovedRows(after: string, id: string): void {
-  if (!after.includes(' row-->')) return;
+function acrossMovedRows(
+  after: string,
+  id: string,
+  widened: boolean,
+): { error: EditError; table: TableRead } | undefined {
+  if (!after.includes(' row-->')) return undefined;
   const parsed = parse(after);
   for (const table of readTables(after, parsed)) {
     const moved = table.rows.find((row) => row.insertion?.entry.move !== undefined);
     if (!moved?.insertion) continue;
     const across = commentAcrossRows(table, parsed);
     if (across?.mark.id !== id) continue;
+    // Widened to rows that are not pending, no decision of a row takes an end away.
+    const segment = across.mark.segments[0];
+    if (
+      widened &&
+      segment?.close &&
+      !inPendingRow(table, after, segment.open.from) &&
+      !inPendingRow(table, after, segment.close.from)
+    ) {
+      continue;
+    }
     const by = moved.insertion.entry.by;
     const name = parsed.ledger.people.find((p) => p.handle === by)?.name ?? by;
-    throw new EditError(
-      `${name}'s move of rows in this table is pending, and this comment would run from one row into the next. Decide the move first, or comment inside one row.`,
-      'no-legal-placement',
-    );
+    return {
+      error: new EditError(
+        `${name}'s move of rows in this table is pending, and this comment would run from one row into the next. Decide the move first, or comment inside one row.`,
+        'no-legal-placement',
+      ),
+      table,
+    };
   }
+  return undefined;
 }
 
 /**
@@ -312,7 +252,7 @@ export function deleteThread(text: string, threadId: string): TextChange[] {
   const removals: TextChange[] = [];
   for (const segment of anchor?.segments ?? []) {
     removals.push({ ...openerRange(segment), insert: '' });
-    if (segment.close) removals.push({ ...segment.close, insert: '' });
+    if (segment.close) removals.push({ ...closerRange(text, segment.close), insert: '' });
   }
   return commitEdit(text, removals, ledger, { parsed, removes: true, keeps: 'both' });
 }

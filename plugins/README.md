@@ -12,9 +12,9 @@ ship with the app; each one can be turned off. These are written:
 | `find` ([`@redlines/find`](find))       | Find and replace, in the Edit menu                                |
 | `outline` ([`@redlines/outline`](outline)) | The outline of the headings, in the left margin                |
 | `formatting` ([`@redlines/formatting`](formatting)) | The Format and Paragraph menus and their shortcuts |
-| `tables` ([`@redlines/tables`](tables)) | The Table menu and its commands |
+| `tables` ([`@redlines/tables`](tables)) | The Table menu and its commands, the grips and the + |
 | `emoji` ([`@redlines/emoji`](emoji)) | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon |
-| `palette` ([`@redlines/palette`](palette)) | The formatting palette: from a handle at the bottom center, and on right-click |
+| `toolbar` ([`@redlines/toolbar`](toolbar)) | The toolbar: the title bar's wrench, right-click and the keyboard |
 | `agents` ([`@redlines/agents`](agents)) | The @ picker in the comment box, the runs a posted mention starts, and Ask: a question about a selection, answered in a bubble |
 | `agent-claude` ([`@redlines/agent-claude`](agent-claude)) | The Claude provider: starts the person's own Claude Code |
 | `agent-codex` ([`@redlines/agent-codex`](agent-codex)) | The Codex provider: starts the person's own Codex |
@@ -27,7 +27,7 @@ The others are planned:
 | `math`       | Math formulas                                             |
 | `diagrams`   | Mermaid diagrams                                          |
 | `paste`      | Paste handlers                                            |
-| `word`       | Copy for Word, and `.docx` import and export              |
+| `word`       | Copy for Word, and the menu commands for `.docx` (the code is `packages/word`) |
 | `print`      | Printing and PDF export                                   |
 | `export`     | Export to HTML, clean Markdown and the review view        |
 | `workspace`  | The folder sidebar, Quick Open and folder search; desktop |

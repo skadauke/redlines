@@ -7,7 +7,7 @@ import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
 import { parseFormatOps } from './format-ops.ts';
-import { trackedFormat, untrackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { ada, bodyOf, context, file } from './test-helpers.ts';
 import type { Range } from './types.ts';

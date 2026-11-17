@@ -5,6 +5,7 @@
 import { markdown } from '@codemirror/lang-markdown';
 import { ensureSyntaxTree, forceParsing } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
+import { encodePayload } from '@redlines/format';
 import { GFM } from '@lezer/markdown';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
@@ -19,8 +20,10 @@ import {
   type WidthEnvironment,
   shownText,
   widthsOf,
+  WIDTHS_PAUSE,
 } from './widths.ts';
 import { tablesField, tablesOf } from './model.ts';
+import { deleteCols, insertCols } from './ops.ts';
 
 /** Ten pixels a character. */
 const tenPx = (text: string): Measured => ({
@@ -241,7 +244,7 @@ describe('the widths of a table in an editor', () => {
     expect(widthsOf(editor.view.state).map((w) => w.id)).toEqual(tables.map((t) => t.id));
   });
 
-  it('holds the widths while the caret is in the table, and finds them again when it leaves', async () => {
+  it('holds the widths on each keystroke, and finds them again when the caret leaves', async () => {
     const editor = await load();
     editor.view.dispatch({ selection: { anchor: at('one', 1) } });
     await settle(editor);
@@ -264,6 +267,50 @@ describe('the widths of a table in an editor', () => {
     const found = widthsOf(editor.view.state);
     expect(found).not.toBe(held);
     expect(found[0]!.columns[0]!).toBeGreaterThan(held[0]!.columns[0]!);
+  });
+
+  it('finds them again after a pause in typing, never on each keystroke', async () => {
+    const editor = await load();
+    editor.view.dispatch({ selection: { anchor: at('one', 1) } });
+    await settle(editor);
+    const held = widthsOf(editor.view.state);
+    vi.useFakeTimers();
+    try {
+      const type = (n: number) =>
+        editor.view.dispatch({
+          changes: { from: at('one', 1) + n, insert: 'x' },
+          selection: { anchor: at('one', 1) + n + 1 },
+          userEvent: 'input.type',
+        });
+      // Keystrokes 200 ms apart: the pause never reaches 300 ms, so nothing moves.
+      for (let n = 0; n < 5; n++) {
+        type(n);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(widthsOf(editor.view.state)).toBe(held);
+      }
+      // The typing stops: after the pause the widths follow the text.
+      await vi.advanceTimersByTimeAsync(WIDTHS_PAUSE + 100);
+      const found = widthsOf(editor.view.state);
+      expect(found).not.toBe(held);
+      expect(found[0]!.columns[0]!).toBeGreaterThan(held[0]!.columns[0]!);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('finds them again at once when the caret leaves, and drops the pause', async () => {
+    const editor = await load();
+    editor.view.dispatch({ selection: { anchor: at('one', 1) } });
+    await settle(editor);
+    const held = widthsOf(editor.view.state);
+    editor.view.dispatch({
+      changes: { from: at('one', 1), insert: 'xxxxxxxxxxxxxxxxxxxxxxxxx' },
+      selection: { anchor: at('one', 1) + 25 },
+      userEvent: 'input.type',
+    });
+    editor.view.dispatch({ selection: { anchor: 2 } });
+    await settle(editor);
+    expect(widthsOf(editor.view.state)).not.toBe(held);
   });
 
   it('finds them again after a paste, with the caret in the table', async () => {
@@ -358,9 +405,94 @@ describe('the widths of a table in an editor', () => {
     expect(widthsOf(editor.view.state)).toHaveLength(1);
   });
 
+  // #520: a column added or deleted gives the widths a fresh load of the resulting text gives.
+  const SHAPES: Record<string, { doc: string; room: number }> = {
+    'two columns': { doc: '| a | b |\n| - | - |\n| one | two |', room: 200 },
+    'five columns, long and short cells': {
+      doc: '| Name | Role | City | Note | Id |\n| - | - | - | - | - |\n| Ada | Mathematician and programmer | London | x | 1 |\n| Bo | y | Paris | A long note with many words that wants a lot of room | 22 |',
+      room: 400,
+    },
+    'a table as wide as the page': {
+      doc: `| a | b | c |\n| - | - | - |\n| ${'word '.repeat(12)}| ${'text '.repeat(12)}| ${'more '.repeat(12)}|`,
+      room: 300,
+    },
+  };
+  for (const [name, shape] of Object.entries(SHAPES)) {
+    for (const edit of ['insert right', 'insert left', 'delete'] as const) {
+      it(`gives the widths of a fresh load after a column is changed: ${name}, ${edit}`, async () => {
+        room = shape.room;
+        const editor = await load(shape.doc);
+        const first = shape.doc.indexOf('|') + 2;
+        editor.view.dispatch({ selection: { anchor: first } });
+        await settle(editor);
+        if (edit === 'delete') expect(deleteCols(editor.view)).toBe(true);
+        else expect(insertCols(editor.view, edit === 'insert left')).toBe(true);
+        await settle(editor);
+        const text = editor.view.state.doc.toString();
+        expect(text).not.toBe(shape.doc);
+        const edited = widthsOf(editor.view.state);
+        const fresh = widthsOf((await load(text)).view.state);
+        expect(edited).toHaveLength(1);
+        expect(edited[0]!.columns).toEqual(fresh[0]!.columns);
+        expect(edited[0]!.scrolls).toBe(fresh[0]!.scrolls);
+        expect(edited[0]!.columns).toHaveLength(tablesOf(editor.view.state)[0]!.columns);
+      }, 60_000);
+    }
+  }
+
   it('measures nothing where nothing is laid out', async () => {
     room = 0;
     const editor = await load();
     expect(widthsOf(editor.view.state)).toHaveLength(0);
+  });
+});
+
+describe('the font a table is measured in', () => {
+  const open: Editor[] = [];
+  afterEach(() => {
+    for (const editor of open.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+
+  const REAL = '| a | b |\n| - | - |\n| one | two |';
+  /** A table of one column deleted whole, which Redlines draws above where it was: its cells are cells
+   * of a ghost table, not of any table of the document. */
+  const GHOST = '| H |\n| - |\n| x |';
+  const withGhost = (before: string) =>
+    `${before}${REAL}\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: bo, at: 2026-10-31T09:30Z}\n-->\n`;
+  const ghostFirst = withGhost(`<!--del b2b2 ${encodePayload(`${GHOST}\n\n`)}-->\n\n`);
+
+  /** What a cell measures in the page, for `aa` in a body cell and in a header cell: happy-dom has no
+   * canvas, so a character is 8 px, and what is added to it is the padding of the cell that is read. */
+  function measured(doc: string): { word: number; header: number; ghosts: number } {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      view: 'redlines',
+    });
+    open.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    // The theme's lengths are `calc` to happy-dom, which the probe can't read: give the cells the px
+    // that the theme's rule does, 16 on the right but for the last cell of a row, which has none.
+    for (const cell of editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tc')) {
+      cell.style.paddingRight = cell.matches(':last-child') ? '0px' : '16px';
+    }
+    const measure = editor.view.state.facet(widthEnvironment).measure(editor.view);
+    return {
+      word: measure('aa', 1).longestWord,
+      header: measure('aa', 0).longestWord,
+      ghosts: editor.view.contentDOM.querySelectorAll('.rl-ghost-table').length,
+    };
+  }
+
+  it('is the font of a table of the document, never of a deleted table drawn above it', () => {
+    const alone = measured(withGhost(''));
+    // Two characters of 8 px, and the 16 px of padding a cell that is not the last of its row has.
+    expect(alone).toEqual({ word: 32, header: 32, ghosts: 0 });
+    // The ghost's cells are the only cell of their row, which has no padding: were its font the
+    // table's, the columns of the table below it would be measured too narrow.
+    expect(measured(ghostFirst)).toEqual({ word: 32, header: 32, ghosts: 1 });
   });
 });

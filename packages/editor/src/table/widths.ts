@@ -7,9 +7,11 @@
 // widths as an effect; the field keeps them, and the plugin writes them as `--w0`, `--w1`… in a style
 // rule for each table's `data-table` id.
 //
-// Widths hold while the caret is in the table, and are found again when it leaves, after a row or a
-// column changes, a paste, a change of the text size or the window's size, and when fonts load: a
-// column that widened with each keystroke would move every other column under the person's eyes.
+// While the caret is in the table, a change of text finds the widths again after a short pause in
+// typing (`WIDTHS_PAUSE`), never on each keystroke: a column that widened with each letter would
+// move every other column under the person's eyes. They are found again at once when the caret
+// leaves, after a row or a column changes, a paste, a change of the text size or the window's size,
+// and when fonts load.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -115,6 +117,8 @@ function hiddenSyntax(state: EditorState, from: number, to: number): Span[] {
         case 'StrikethroughMark':
         case 'SubscriptMark':
         case 'SuperscriptMark':
+        case 'HtmlTagMark':
+        case 'HtmlDropped':
           hide(node.from, node.to);
           break;
         case 'Link':
@@ -232,8 +236,11 @@ function canvasMeasure(view: EditorView): (text: string, row: number) => Measure
     const shown = font.upper ? text.toUpperCase() : text;
     return context.measureText(shown).width + shown.length * font.spacing;
   };
-  return cachedMeasure((text, row) => {
+  return cachedMeasure((written, row) => {
     const font = row === 0 ? header : body;
+    // An empty header cell draws its placeholder (the theme's `.rl-th .rl-tc-fill::before`): the
+    // column is as wide as it.
+    const text = row === 0 && !written.trim() ? 'Header' : written;
     let longestWord = 0;
     let longestLine = 0;
     let bold = false;
@@ -289,10 +296,13 @@ interface CellFont {
   padding: number;
 }
 
-/** The font of a cell of the table: found from a cell on the page, or worked out from the editor's. */
+/** The font of a cell of the table: found from a cell on the page, or worked out from the editor's. A
+ * cell of a table of the document (`.rl-tbl`): a table deleted whole is drawn above where it was as a
+ * table too, of cells of its own, whose padding is another (the only cell of a row has none on its
+ * right) and would put the columns of the table below it too narrow. */
 function fontOf(view: EditorView, header: boolean): CellFont {
   const cell = view.contentDOM.querySelector<HTMLElement>(
-    header ? '.rl-th .rl-tc' : '.rl-trow:not(.rl-th) .rl-tc',
+    header ? '.rl-tbl .rl-th .rl-tc' : '.rl-tbl .rl-trow:not(.rl-th) .rl-tc',
   );
   const style = getComputedStyle(cell ?? view.contentDOM);
   const size = Number.parseFloat(style.fontSize) || 16;
@@ -385,7 +395,11 @@ function rulesFor(widths: readonly TableWidths[]): string {
     .join('\n');
 }
 
+/** How long typing in a table pauses before its widths are found again, in milliseconds. */
+export const WIDTHS_PAUSE = 300;
+
 class WidthPlugin {
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private measured = false;
   private destroyed = false;
   private signature = '';
@@ -429,8 +443,22 @@ class WidthPlugin {
     const mode =
       update.startState.field(viewModeField, false) !== update.state.field(viewModeField, false);
     const pasted = update.transactions.some(isPaste);
-    if (!this.measured || structure || ghosts || leaves || mode || pasted) this.measure();
+    const immediate = !this.measured || structure || ghosts || leaves || mode || pasted;
+    if (immediate) this.measure();
     else if (update.geometryChanged) this.checkEnvironment();
+    // Typing in a table: after a pause, not on each keystroke. Not when it was just measured.
+    if (!immediate && update.docChanged && tableOfCaret(update.state) >= 0 && !this.destroyed) {
+      this.cancelPause();
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.measure();
+      }, WIDTHS_PAUSE);
+    }
+  }
+
+  private cancelPause(): void {
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
   }
 
   /** A change of the text size or of the room, which geometry changes show. */
@@ -448,6 +476,7 @@ class WidthPlugin {
   /** Measures every table, after this update, and keeps what it finds. */
   measure(): void {
     if (this.destroyed) return;
+    this.cancelPause();
     this.view.requestMeasure({
       key: this,
       read: (view) => {
@@ -483,13 +512,14 @@ class WidthPlugin {
 
   destroy(): void {
     this.destroyed = true;
+    this.cancelPause();
     window.removeEventListener('resize', this.onResize);
     document.fonts?.removeEventListener?.('loadingdone', this.onFonts);
     this.style.remove();
   }
 }
 
-/** Column widths, computed from every row and held while the caret is in the table. */
+/** Column widths, computed from every row, found again after a pause in typing. */
 export function tableWidths() {
   return [widthsField, ViewPlugin.define((view) => new WidthPlugin(view))];
 }

@@ -157,7 +157,8 @@ interface RunCommon<S> {
   /** The version `detect` found, for the run's log. A run can start before anything has asked. */
   version?: string;
   newState(): S;
-  parse(line: string, state: S): AgentEvent | null;
+  /** One line can hold several events (a message with two refused reads): they come in order. */
+  parse(line: string, state: S): AgentEvent | AgentEvent[] | null;
   /** True when the line just parsed was a retry: its error is held back, not ended on. */
   held?(state: S): boolean;
   /** The reason a run is failing, once the stream has said so. */
@@ -350,12 +351,19 @@ async function* follow<S>(
         break;
       }
       if (got.done) break;
-      const event = spec.parse(got.value, state);
+      const parsed = spec.parse(got.value, state);
       // A retry may still work: it is held back, and reported only if the run then fails.
-      if (event === null || spec.held?.(state) === true) continue;
-      yield flagged(event);
-      if (event.type === 'error') stop();
-      if (event.type !== 'status') return;
+      if (parsed === null || spec.held?.(state) === true) continue;
+      let final = false;
+      for (const event of Array.isArray(parsed) ? parsed : [parsed]) {
+        yield flagged(event);
+        if (event.type === 'error') stop();
+        if (event.type !== 'status' && event.type !== 'web') {
+          final = true;
+          break;
+        }
+      }
+      if (final) return;
     }
     const end = await ended;
     const failure = spec.failure?.(state);

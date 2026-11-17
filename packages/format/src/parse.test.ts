@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { openerRange } from './blocks.ts';
 import { parse } from './parse.ts';
-import type { MarkRange, Parsed } from './types.ts';
+import { problemsOf } from './test-helpers.ts';
+import type { MarkRange, Parsed, Segment } from './types.ts';
 
 const fixture = readFileSync(new URL('./fixtures/launch-plan.md', import.meta.url), 'utf8');
 
@@ -498,6 +499,140 @@ describe('the carrier of an opener that starts a block (format §3.3)', () => {
   it('does not take a marker that starts a line with text for one that stands alone', () => {
     const parsed = parse(withLedger('<!--ins k3x9-->start<!--/k3x9-->', entries('k3x9')));
     expect(codes(parsed)).toEqual(['line-start-marker']);
+  });
+});
+
+// An alignment change is a point mark in the header row, `<!--fmt ID align=SPEC-->` with no closer
+// (format §3.7, #281); the span form that other tools wrote, with a closer, is read as before.
+describe('a point mark of an alignment change', () => {
+  const SPEC = '\\|\\x20:-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-:\\x20\\|';
+  const TABLE =
+    '| Fruit  | Count | Price |\n| :----- | :---: | ----: |\n| Apples | 3     | 1.20  |';
+  const entry = ['k3x9: {by: ada, at: 2026-10-13T22:30Z}'];
+  const MARK = `<!--fmt k3x9 align=${SPEC}-->`;
+
+  /** The first segment of the first mark. */
+  const first = (parsed: Parsed): Segment => {
+    const segment = parsed.marks[0]?.segments[0];
+    if (!segment) throw new Error('The file has no mark');
+    return segment;
+  };
+
+  it('reads an align= format change with no closer as a point mark', () => {
+    const body = TABLE.replace('Price |', `Price${MARK} |`);
+    const parsed = parse(withLedger(body, entry));
+    expect(problemsOf(parsed)).toEqual([]);
+    expect(codes(parsed)).toEqual([]);
+    expect(parsed.marks.map((m) => [m.id, m.kind, m.segments.length])).toEqual([
+      ['k3x9', 'fmt', 1],
+    ]);
+    const segment = first(parsed);
+    expect(segment.close).toBeUndefined();
+    expect(segment.carrier).toBeUndefined();
+    expect(segment.payload).toBe(`align=${SPEC}`);
+    expect(parsed.marks[0]?.payload).toBe(`align=${SPEC}`);
+    expect(parsed.text.slice(segment.open.from, segment.open.to)).toBe(MARK);
+    // Like any point mark, its content is empty, at the end of its opener.
+    expect(segment.content).toEqual({ from: segment.open.to, to: segment.open.to });
+    expect(parsed.marks[0]?.entry.by).toBe('ada');
+  });
+
+  it('still reads the span form: a closer makes a range with a carrier', () => {
+    const parsed = parse(withLedger(`${MARK}\n\n${TABLE}\n\n<!--/k3x9-->`, entry));
+    expect(problemsOf(parsed)).toEqual([]);
+    expect(codes(parsed)).toEqual([]);
+    expect(parsed.marks).toHaveLength(1);
+    const segment = first(parsed);
+    expect(parsed.text.slice(segment.close?.from, segment.close?.to)).toBe('<!--/k3x9-->');
+    expect(segment.carrier).toEqual({ from: segment.open.to, to: segment.open.to + 2 });
+    expect(segment.payload).toBe(`align=${SPEC}`);
+  });
+
+  it('keeps a span whose opener is written twice before its closer as it was read', () => {
+    const parsed = parse(withLedger(`${MARK}\n\n${TABLE}\n\n${MARK}\n\n<!--/k3x9-->`, entry));
+    expect(codes(parsed)).toEqual(['duplicate-id']);
+    expect(parsed.marks[0]?.segments).toHaveLength(1);
+    expect(first(parsed).close).toBeDefined();
+  });
+
+  it('leaves an unclosed +bold opener unread, with its warning', () => {
+    for (const payload of ['+bold', '-italic', 'was=h2', '+link', '@width=10']) {
+      const parsed = parse(`Some <!--fmt k3x9 ${payload}-->words\n`);
+      expect(parsed.marks, payload).toEqual([]);
+      expect(codes(parsed), payload).toEqual(['unclosed-mark']);
+    }
+    // Only a payload that starts with `align=` is a point.
+    const mixed = parse(`Some <!--fmt k3x9 +bold align=${SPEC}-->words\n`);
+    expect(mixed.marks).toEqual([]);
+    expect(codes(mixed)).toEqual(['unclosed-mark']);
+  });
+
+  it('leaves an align= opener whose value is no delimiter row unread, with its warning', () => {
+    // The value of an alignment change is the old delimiter row: dashes, colons and pipes, in cells.
+    for (const payload of [
+      'align=nonsense',
+      'align=',
+      `align=${SPEC} +bold`,
+      `align=${SPEC} align=${SPEC}`,
+      'align=\\|\\x20x\\x20\\|',
+      'align=\\|\\x20:\\x20\\|',
+      'align=\\|\\x20-\\x20\\|\\x20x',
+      'align=\\|\\x20-\\x20<!--y',
+    ]) {
+      const parsed = parse(TABLE.replace('Price |', `Price<!--fmt k3x9 ${payload}--> |`));
+      expect(parsed.marks, payload).toEqual([]);
+      expect(codes(parsed), payload).toEqual(['unclosed-mark']);
+    }
+    // The same opener with a delimiter row for its value is a mark.
+    const read = parse(TABLE.replace('Price |', `Price<!--fmt k3x9 align=\\|\\x20-\\x20\\|--> |`));
+    expect(read.marks.map((m) => m.id)).toEqual(['k3x9']);
+  });
+
+  it('leaves two openers of one id and no closer as they were read, not as one point', () => {
+    // The first is never closed, and the second opens the id again: no mark, as before the point form.
+    const parsed = parse(TABLE.replace('Price |', `Price${MARK} |`).replace('1.20', `1.20${MARK}`));
+    expect(parsed.marks).toEqual([]);
+    expect(codes(parsed).toSorted()).toEqual(['duplicate-id', 'unclosed-mark']);
+    // The same with three.
+    const three = parse(`a${MARK}b${MARK}c${MARK}d`);
+    expect(three.marks).toEqual([]);
+    expect(codes(three).toSorted()).toEqual(['duplicate-id', 'duplicate-id', 'unclosed-mark']);
+  });
+
+  it('reads an align= opener alone on its line with no closer as a point, with no carrier', () => {
+    // A span whose closer is gone: its opener is read as a point, which no table holds.
+    const parsed = parse(withLedger(`${MARK}\n\n${TABLE}`, entry));
+    expect(problemsOf(parsed)).toEqual([]);
+    expect(codes(parsed)).toEqual([]);
+    expect(parsed.marks).toHaveLength(1);
+    const segment = first(parsed);
+    expect(segment.close).toBeUndefined();
+    expect(segment.carrier).toBeUndefined();
+    // Deciding it takes the opener alone, not the blank line after it.
+    expect(openerRange(segment)).toEqual(segment.open);
+  });
+
+  it('leaves an id that has a closer as it was read: a second opener is unclosed', () => {
+    const body = `${MARK}\n\n${TABLE}\n\n<!--/k3x9-->\n\n| a |\n| - |\n| b${MARK} |`;
+    const parsed = parse(withLedger(body, entry));
+    expect(codes(parsed)).toEqual(['unclosed-mark']);
+    expect(parsed.marks[0]?.segments).toHaveLength(1);
+    expect(first(parsed).close).toBeDefined();
+  });
+
+  it('reads a point in each of two tables as two marks', () => {
+    const other = `<!--fmt w8nn align=\\|\\x20-\\x20\\|\\x20-\\x20\\|-->`;
+    const body = [
+      TABLE.replace('Price |', `Price${MARK} |`),
+      '',
+      `| a | b${other} |\n| - | :-: |\n| c | d |`,
+    ].join('\n');
+    const parsed = parse(withLedger(body, [...entry, 'w8nn: {by: ada, at: 2026-10-13T22:30Z}']));
+    expect(problemsOf(parsed)).toEqual([]);
+    expect(parsed.marks.map((m) => [m.id, m.segments[0]?.close])).toEqual([
+      ['k3x9', undefined],
+      ['w8nn', undefined],
+    ]);
   });
 });
 

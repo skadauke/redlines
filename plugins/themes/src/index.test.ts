@@ -183,7 +183,7 @@ describe('themes', () => {
           const color = declared.get(`--rl-code-${kind}`)!;
           const label = `${name} ${appearance} ${kind}`;
           expect(color, label).toMatch(/^#[0-9a-f]{6}$/);
-          for (const ground of ['--rl-page', '--rl-tint']) {
+          for (const ground of ['--rl-page', '--rl-tint', '--rl-card']) {
             expect(
               contrast(color, declared.get(ground)!),
               `${label} on ${ground}`,
@@ -245,5 +245,107 @@ describe('themes', () => {
         }
       }
     }
+  });
+});
+
+type Rgb = [number, number, number];
+
+/** A `#rrggbb` or `rgb(r g b / a)` color, composited over `ground` when it has an alpha. */
+function resolve(value: string, ground?: Rgb): Rgb {
+  const hex = /^#([0-9a-f]{6})$/.exec(value);
+  if (hex) return [0, 2, 4].map((at) => parseInt(hex[1]!.slice(at, at + 2), 16)) as Rgb;
+  const fn = /^rgb\((\d+) (\d+) (\d+)(?: \/ (\d*\.?\d+))?\)$/.exec(value);
+  if (!fn) throw new Error(`not a color the contrast test reads: ${value}`);
+  const [r, g, b] = [Number(fn[1]), Number(fn[2]), Number(fn[3])];
+  const alpha = fn[4] === undefined ? 1 : Number(fn[4]);
+  if (alpha === 1) return [r, g, b];
+  if (!ground) throw new Error(`a color with an alpha needs a ground: ${value}`);
+  return [r, g, b].map((c, i) => c * alpha + ground[i]! * (1 - alpha)) as Rgb;
+}
+
+function ratio(text: Rgb, ground: Rgb): number {
+  const lum = ([r, g, b]: Rgb) => {
+    const f = (c: number) =>
+      c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const [hi, lo] = [lum(text), lum(ground)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+describe('text contrast on the grounds', () => {
+  // The tokens text is drawn in: the inks, the brand red, the eight author colors and the code
+  // colors. --rl-ink-3 is the tertiary gray of disabled controls, grips and rules, which WCAG leaves
+  // out when a control is inactive, so it is not held here; text a person has to read (hints,
+  // placeholders, captions, timestamps, empty states) is --rl-ink-2 or darker, and
+  // apps/desktop/src/text-contrast.node.test.ts fails when --rl-ink-3 colors any other text.
+  const TEXT = [
+    '--rl-ink',
+    '--rl-ink-2',
+    '--rl-red',
+    ...Array.from({ length: 8 }, (_, i) => `--rl-author-${i + 1}`),
+    ...CODE_KINDS.map((kind) => `--rl-code-${kind}`),
+  ];
+
+  it('every text color keeps 4.5:1 on the page, the tint and the card, in every theme', () => {
+    const failing: string[] = [];
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        for (const ground of ['--rl-page', '--rl-tint', '--rl-card']) {
+          const under = resolve(declared.get(ground)!);
+          for (const token of TEXT) {
+            const text = resolve(declared.get(token)!, under);
+            const value = ratio(text, under);
+            if (value < 4.5) {
+              failing.push(`${name} ${appearance} ${token} on ${ground}: ${value.toFixed(2)}:1`);
+            }
+          }
+        }
+      }
+    }
+    expect(failing, `below 4.5:1:\n${failing.join('\n')}`).toEqual([]);
+  });
+
+  // The tertiary gray draws shapes: the focus rings, the checkboxes' outlines, a field's border when
+  // it is focused (WCAG 1.4.11 asks 3:1 of them), and the text of disabled controls, which is
+  // exempt and stays dimmer than --rl-ink-2 (#653).
+  it('--rl-ink-3 keeps 3:1 on every ground a ring sits on, and stays dimmer than --rl-ink-2', () => {
+    const failing: string[] = [];
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        const ink3 = resolve(declared.get('--rl-ink-3')!);
+        // A ring is on the page, on a tint or a card, and on a row the pointer is over or that is
+        // pressed or current, which is --rl-pressed, or --rl-rule.
+        for (const ground of ['--rl-page', '--rl-tint', '--rl-card', '--rl-pressed', '--rl-rule']) {
+          const value = ratio(ink3, resolve(declared.get(ground)!));
+          if (value < 3)
+            failing.push(`${name} ${appearance} ink-3 on ${ground}: ${value.toFixed(2)}:1`);
+        }
+        const page = resolve(declared.get('--rl-page')!);
+        expect(
+          ratio(resolve(declared.get('--rl-ink-2')!), page),
+          `${name} ${appearance}: ink-3 is the dimmer`,
+        ).toBeGreaterThan(ratio(ink3, page));
+      }
+    }
+    expect(failing, `below 3:1:\n${failing.join('\n')}`).toEqual([]);
+  });
+
+  // Text is drawn on a row the pointer is over: the pressed background (#653).
+  it('--rl-ink and --rl-ink-2 keep 4.5:1 on the pressed background, in every theme', () => {
+    const failing: string[] = [];
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        const pressed = resolve(declared.get('--rl-pressed')!);
+        for (const token of ['--rl-ink', '--rl-ink-2']) {
+          const value = ratio(resolve(declared.get(token)!), pressed);
+          if (value < 4.5) failing.push(`${name} ${appearance} ${token}: ${value.toFixed(2)}:1`);
+        }
+      }
+    }
+    expect(failing, `below 4.5:1:\n${failing.join('\n')}`).toEqual([]);
   });
 });

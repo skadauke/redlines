@@ -1,7 +1,9 @@
 # Importing Word (.docx) into Redlines
 
-Status: scope and plan, 2026-10-14. Nothing is implemented yet. The importer
-is planned together with the [exporter](README.md).
+Status: scope and plan, 2026-10-14. The reader (step 1 of the plan) is written, in
+`packages/word/src/import/`, and so is the mapper to Markdown (`map.ts`, entered through
+`importDocx(bytes)` in `import.ts`). The importer is planned together with the [exporter](README.md), which is written too; File › Export
+to Word… calls the exporter and File › Open .docx… the importer (#881).
 
 ## What it is for
 
@@ -17,7 +19,7 @@ it. Case 2 has to cope with anything Word can express.
 
 ## Approach
 
-Write the importer in TypeScript, in the same `packages/docx` package as the
+Write the importer in TypeScript, in the same `packages/word` package as the
 exporter, so both run in the editor, the desktop app and the Syrus plugin.
 
 No existing library gives us what we need:
@@ -31,7 +33,8 @@ No existing library gives us what we need:
   Haskell, drops reply threads and resolved state, and loses Word's revision
   ids. It stays a test oracle, as for the exporter.
 
-So the importer reads the OOXML itself with JSZip and an XML parser:
+So the importer reads the OOXML itself, with `fflate` for the zip and a small XML reader of its
+own (`xml.ts`, which resolves namespaces, so the code never depends on a file's prefixes):
 
 ```text
 .docx ──unzip──▶ document.xml, styles.xml, numbering.xml,
@@ -93,7 +96,25 @@ Both behaviors are standard Word practice. Word for Mac keeps both through a
 tracked edit and a save, and after Accept All only the bookmark of a deleted
 paragraph is gone
 ([Word lab](../research/word.md#export-and-round-trip-checks)). Word for the
-web is still untested.
+web is still untested. Google Docs keeps the `_rl_` bookmarks and `commentsExtended` (paragraph ids renumbered, `done` lost) but replaces the custom part with its own, drops `commentsIds`, `commentsExtensible`, `w16du:dateUtc` and resolved threads. So a file saved by Docs has no source to restore from, and the importer converts everything (case 2). Text typed at the end of a block lands after its `bookmarkEnd`.
+
+What the exporter writes (`packages/word/src/carriers/`):
+
+- `customXml/redlines-source.xml`, root `rl:source` in the namespace `urn:redlines:source:1`, with
+  `rl:markdown` (the file as it was, every character, with a base64 form for the few characters XML
+  cannot hold), `rl:ledger` (the ledger as JSON) and `rl:blocks`: one `rl:block` for each block the
+  exporter wrote (`id`, `type`, and `from` and `to`, the block's offsets in the Markdown). Its
+  `itemProps` part and relationship are written too, as Word's own custom parts have them. Word may
+  rename the part (`item1.xml`), so a reader finds it by its root element, which `readSource` does.
+- A bookmark `_rl_b1`, `_rl_b2`, … around each block, in the order of `rl:blocks`. A table's
+  bookmark starts in its first cell and ends in its last. `survivingBlocks` lists the ones a file
+  still has.
+- `commentsExtended.xml` (threads and `done`, for every file with comments: `docx` leaves out a
+  lone resolved thread), `commentsIds.xml` and `commentsExtensible.xml`, which carry the same
+  durable id (derived from the Redlines id) and, in the last, `w16cex:dateUtc`.
+- `w16du:dateUtc` next to every `w:date` in the document, with `w16du` in `mc:Ignorable`.
+
+`exportDocx(text, { carriers: false })` writes none of these.
 
 On import, every block whose bookmark survives and that has no revisions is
 copied from the original Markdown byte for byte. Only blocks with revisions or
@@ -140,11 +161,49 @@ gives it:
    such a comment as a [point comment](../format.md#4-comments).
 8. **Whole-block substitution** as the fallback for tangled edits.
 
+## How the mapper writes it
+
+`mapDocx(model)` writes Markdown, marks and a ledger, and an `ImportReport`; `importDocx(bytes)`
+adds the Google Docs normalizer (`normalizeGoogleBytes`) and the source part.
+
+- Ids are new, and a handle comes from the name (`ada-lovelace`, `-2` on a clash). A person the
+  source part's ledger knows keeps the handle, email and organization it had there. Word's
+  `presenceInfo` becomes `accounts`.
+- Text with revisions: `w:ins` is `ins`, `w:del` is `del` with the old text as its payload, a `w:del`
+  followed by a `w:ins` by the same person is `sub`. A moved pair is a deletion and an insertion
+  with `move:` in the ledger. Text that one person added and another deleted is left out (the
+  report says so).
+- Paragraph marks follow Word's meaning: an inserted mark is a `split`, or, when the next paragraph
+  is all the same person's insertion, one `ins` that holds the break and the paragraph; a deleted
+  mark is a join (`del` of `\n\n` and the next block's prefix), and a paragraph deleted whole,
+  mark and text, is one `del` at the end of the block before it.
+- A mark that would start a block goes on a line of its own (format §3.3).
+- A run's changed format is `fmt` with `+bold`, `-italic` and so on; a paragraph that changed
+  between body and heading is a block `fmt was=`. Any other property change keeps the new form and
+  is listed.
+- A table with a changed row, cell or property is a substitution of the whole table (format
+  §3.12), the old table in the payload. Merged cells are split, and the report says so.
+- A comment thread is one ledger entry, anchored to its range (a range across paragraphs is one
+  segment in each); a comment with no anchor is a point at the end. Resolved is kept; likes are not
+  read yet.
+- Restore: a paragraph whose `_rl_<id>` bookmark survived, with no revision or comment in it, and
+  whose words (letters and digits) are those of the source block, is written as the source had it,
+  with its list marker or quote mark. A file Google Docs saved has no source part, so it is
+  converted whole, and the report says so.
+
 ## Plan
 
-1. Reader: unzip and parse into the block/run model with revisions and
-   comments. Test against the exporter's own output and the sample in
-   [`samples/`](samples/).
+1. Reader (done): `readDocx(bytes)` unzips and parses into `DocxModel`
+   (`packages/word/src/import/model.ts`): blocks (paragraphs and tables) of inlines (runs, images,
+   note references, links, comment and bookmark markers). Revisions sit where Word puts them: on
+   runs (`inserted`, `deleted`, `moved`, `formatChange`), on paragraph marks (`mark`,
+   `propsChange`), and on rows and cells (`inserted`, `deleted`). Comments come with threads
+   (`commentsExtended.xml`), the resolved state, people, durable ids and the best time
+   (`dateUtc` first). Tested against the exporter's own output, the sample in
+   [`samples/`](samples/) and a file Google Docs wrote. It reads an `rPrChange` or `pPrChange` as a
+   change only when it changes something (Google Docs writes an empty one on every suggestion),
+   and a `HYPERLINK` field as a link. It drops what it can't hold, and lists a text box, an
+   equation or a shape in `report`. It doesn't yet read likes.
 2. Mapping for text, headings, lists, emphasis, code, links, images and GFM
    tables, with the import report.
 3. Revisions and comment threads as in the table above.
@@ -155,3 +214,19 @@ gives it:
    text, rows and columns, moves, formatting, replies, resolve, like). These
    become the regression suite, checked against pandoc where pandoc can read
    them.
+
+## Google Docs' own .docx
+
+Docs' export reads as a Word file with these differences (`packages/word/src/google/`; fixture
+`packages/word/fixtures/docs-suggestions-and-comment.docx`, from the study):
+
+- Suggestions are `w:ins` and `w:del` by the person's name. Docs' `w:date` is real UTC; Word's is
+  local time with a false `Z`. Docs has no `w16du:dateUtc`.
+- Every inserted run carries an `rPrChange` with empty old properties. It is noise inside a `w:ins`
+  and is dropped. Outside one it is a suggested formatting change, and stays.
+- Every `rsid*` is zeros; runs carry `w:rtl w:val="0"`, fonts and sizes, a heading's runs repeat its
+  bold, and paragraphs end in an empty run. `normalizeGoogleDocx` takes all of it out.
+- Comment ids are a space of their own (an insertion and a comment may both be 0).
+- Resolved comments and every reply are missing from the file. A file Docs wrote says so in its
+  report, and `docsRoundTripNotes(text)` tells a person exporting to Docs how many replies and
+  resolved threads will not come back.

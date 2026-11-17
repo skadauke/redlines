@@ -8,21 +8,35 @@
 
 import { syntaxTree } from '@codemirror/language';
 import {
-  type EditorState,
+  EditorSelection,
+  EditorState,
   type Extension,
+  Prec,
   type Line,
   type Range,
   StateField,
+  type Transaction,
 } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
-import { parsedField, viewModeField } from '../tracked/field.ts';
+import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
-import { imageDecoration, refreshImagesEffect } from './image.ts';
+import { dialectFacet, imageOfNode } from '../image-size.ts';
+import { htmlBreak, htmlChip, htmlElement, htmlHeading, htmlWbr } from './html-draw.ts';
+import { htmlBlock, htmlBlocks, openedField } from './html-block.ts';
+import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
+import {
+  inWindow,
+  replaceIn,
+  selectionMoved,
+  selectionPlaces,
+  windowsOf,
+  type Window,
+} from '../restyle.ts';
 import { emojiDecoration, emojiLookup } from './emoji.ts';
-import { entityDecoration, pendingBox, TaskBoxWidget } from './task.ts';
+import { entityDecoration, pendingBox, roomDecoration, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
@@ -40,6 +54,12 @@ const UNCHECKED_TEXT = Decoration.mark({ attributes: UNCHECKED });
 
 /** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
 export const BULLETS = ['•', '◦', '▪'] as const;
+
+/** Whether a node is in a table. */
+function inTable(node: SyntaxNode): boolean {
+  for (let up = node.parent; up; up = up.parent) if (up.name === 'Table') return true;
+  return false;
+}
 
 /** How many lists hold a list item, its own included. */
 function listDepth(node: SyntaxNode): number {
@@ -70,6 +90,16 @@ const URL_OWNERS = new Set(['Link', 'Image', 'Autolink', 'LinkReference']);
 /** Whether any selection range touches `from`–`to`, ends included. */
 function touches(state: EditorState, from: number, to: number): boolean {
   return state.selection.ranges.some((range) => range.from <= to && range.to >= from);
+}
+
+/**
+ * Whether a caret is at `from`–`to`, ends included. A selection over text is no caret: a list
+ * item's marker and box are drawn the same with a selection over them (#668).
+ */
+function caretTouches(state: EditorState, from: number, to: number): boolean {
+  return state.selection.ranges.some(
+    (range) => range.empty && range.from <= to && range.to >= from,
+  );
 }
 
 function onLine(state: EditorState, line: Line): boolean {
@@ -132,14 +162,22 @@ interface LineStyle {
   classes: Set<string>;
   /** Monospace columns at which wrapped lines hang. */
   hang?: number;
+  /** The monospace columns the line's leading whitespace is drawn as wide as, if it is indented. */
+  indent?: number;
 }
+
+/**
+ * How far each level of a list is indented, in monospace columns, whatever its markers are in the
+ * source: a bullet, a number and a task at the same level start at the same place, and so does
+ * their text (a bullet's marker is two columns of source and a number's three).
+ */
+export const LEVEL_COLS = 3;
 
 /** Collects decorations; line classes are merged so each line gets one line decoration. */
 class Builder {
   readonly state: EditorState;
   private readonly ranges: Range<Decoration>[] = [];
   private readonly lines = new Map<number, LineStyle>();
-  private readonly indented = new Set<number>();
   /** The first lines of the alerts, whose syntax their title stands for: their quote mark is none. */
   readonly titled = new Set<number>();
 
@@ -198,16 +236,29 @@ class Builder {
    * A line inside a list item: its leading whitespace is set in the monospace font, so nesting
    * shows, and its wrapped lines hang at `hang` monospace columns, where its text starts.
    */
-  indent(line: Line, hang: number): void {
-    this.style(line).hang = hang;
-    if (this.indented.has(line.from)) return;
-    this.indented.add(line.from);
-    this.mark(line.from, spaceAfter(line, line.from), 'rl-indent');
+  indent(line: Line, hang: number, indent: number = hang): void {
+    const style = this.style(line);
+    style.hang = hang;
+    style.indent = indent;
+  }
+
+  /**
+   * The leading whitespace of a list line, in the monospace font, drawn `cols` columns wide: its
+   * source's width is scaled to it (the font size of a space is its width).
+   */
+  private drawIndent(line: Line, cols: number): void {
+    const to = spaceAfter(line, line.from);
+    const source = columns(line, line.from, to);
+    if (to <= line.from) return;
+    const attributes: Record<string, string> =
+      source === cols ? {} : { style: `font-size: ${cols / source}em` };
+    this.push(Decoration.mark({ class: 'rl-indent', attributes }).range(line.from, to));
   }
 
   finish(): DecorationSet {
-    for (const [from, { classes, hang }] of this.lines) {
+    for (const [from, { classes, hang, indent }] of this.lines) {
       if (hang) classes.add('rl-hang');
+      if (indent !== undefined) this.drawIndent(this.state.doc.lineAt(from), indent);
       if (!classes.size) continue;
       const spec = { class: [...classes].join(' ') };
       const attributes: Record<string, string> = hang ? { style: `--rl-hang: ${hang}` } : {};
@@ -228,12 +279,26 @@ class Builder {
  * (design: block editing, "Typed syntax"). Until then the line is drawn as body text, so that it
  * does not change kind with each character.
  */
-function loneMark(state: EditorState, node: SyntaxNode, mark: string): boolean {
+function loneMark(state: Source, node: SyntaxNode, mark: string): boolean {
   const first = node.getChild(mark);
   if (!first) return false;
   const line = state.doc.lineAt(first.from);
   const rest = state.sliceDoc(first.to, line.to).replace(/<!--[^]*?-->/g, '');
   return rest === '' && node.to <= line.to;
+}
+
+/** The text that a node is read from: a state, or the reading of one. */
+type Source = Pick<EditorState, 'doc' | 'sliceDoc'>;
+
+/** The marker of a list item with nothing after it, which has no block to take the space above. */
+function emptyItemMark(state: Source, node: SyntaxNode): SyntaxNode | null {
+  const mark = node.getChild('ListMark');
+  if (!mark || loneMark(state, node, 'ListMark')) return null;
+  const line = state.doc.lineAt(mark.from);
+  if (node.to > line.to || node.getChild('Task')) return null;
+  return /^[ \t]*$/.test(state.sliceDoc(mark.to, line.to).replace(/<!--[^]*?-->/g, ''))
+    ? mark
+    : null;
 }
 
 function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
@@ -255,6 +320,20 @@ function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
       b.syntax(Math.max(hiddenTo, spaceBefore(line, mark.from)), mark.to, false);
     }
   }
+}
+
+/** Whether an entity is the whole text of its paragraph and is `&nbsp;`: a line of room. */
+function isRoom(state: EditorState, node: SyntaxNode): boolean {
+  const paragraph = node.parent;
+  return (
+    state.sliceDoc(node.from, node.to) === '&nbsp;' &&
+    paragraph?.name === 'Paragraph' &&
+    paragraph.parent?.name === 'Document' &&
+    state
+      .sliceDoc(paragraph.from, paragraph.to)
+      .replace(/<!--[^]*?-->/g, '')
+      .trim() === '&nbsp;'
+  );
 }
 
 /** A hard line break: its syntax is hidden (the line break itself is drawn as the break). */
@@ -343,16 +422,27 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
   if (!mark) return;
   const line = state.doc.lineAt(mark.from);
   const content = spaceAfter(line, mark.to);
-  const cols = columns(line, mark.from, content);
   const marker = node.getChild('Task')?.getChild('TaskMarker') ?? null;
   const boxEnd = marker ? spaceAfter(line, marker.to) : content;
+  const text = state.sliceDoc(mark.from, mark.to);
+  const bullet = BULLETS[Math.min(listDepth(node), BULLETS.length) - 1] ?? BULLETS[0];
+  // A number as Markdown counts it; its source shows with the caret on it (below).
+  const drawn = /^[-+*]$/.test(text) ? bullet : (numbers.get(mark.from) ?? text);
+  // The marker's box is as wide for a bullet as for a number, and the item starts where its
+  // level does, whatever its source says: a task's box is wider, a long number a column more.
+  const cols = marker ? columns(line, mark.from, boxEnd) : Math.max(LEVEL_COLS, drawn.length + 1);
+  const start = (listDepth(node) - 1) * LEVEL_COLS;
+  const hang = start + cols;
+  const textCol = columns(line, line.from, content);
   b.lineClass(line, 'rl-li');
-  if (/^[ \t]*$/.test(line.text.slice(0, mark.from - line.from))) {
+  const plain = /^[ \t]*$/.test(line.text.slice(0, mark.from - line.from));
+  if (plain) {
     // A task's text starts after its box, so its wrapped lines hang there.
-    b.indent(line, columns(line, line.from, boxEnd));
+    b.indent(line, hang, start);
   }
-  // A task's source shows while the selection is on its marker, as a list marker's does.
-  const shown = touches(state, mark.from, marker ? marker.to : mark.to);
+  // A task's source shows while the caret is on its marker, as a list marker's does; a selection
+  // over it leaves the bullet, the number and the box as they are drawn (#668).
+  const shown = caretTouches(state, mark.from, marker ? marker.to : mark.to);
   // A box is drawn, empty or not (an item with no text yet is an empty box at its indent), unless
   // a pending change we can't draw as a box covers its marker: then it stays source. A box with a
   // pending change of its own is drawn in its new state, in its author's color.
@@ -360,8 +450,18 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
   const box = marker && pending !== 'source' ? marker : null;
   if (shown) {
     b.syntax(mark.from, mark.to, true);
-    // The box's source is monospace too, so showing it doesn't move the item's text.
-    b.mark(mark.from, boxEnd, 'rl-list-source');
+    // The box's source is monospace too, so showing it doesn't move the item's text: a marker's
+    // source is as wide as its drawn box, which a bullet's two columns are not.
+    if (marker) b.mark(mark.from, boxEnd, 'rl-list-source');
+    else {
+      const style = `display: inline-block; text-indent: 0; width: calc(${cols} * 0.6em)`;
+      b.push(
+        Decoration.mark({ class: 'rl-list-source', attributes: { style } }).range(
+          mark.from,
+          content,
+        ),
+      );
+    }
   } else if (box) {
     const checked = /\[[xX]\]/.test(state.sliceDoc(box.from, box.to));
     const widget = new TaskBoxWidget(
@@ -371,16 +471,16 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
     );
     b.push(Decoration.replace({ widget }).range(mark.from, boxEnd));
   } else {
-    const text = state.sliceDoc(mark.from, mark.to);
-    const bullet = BULLETS[Math.min(listDepth(node), BULLETS.length) - 1] ?? BULLETS[0];
-    // A number as Markdown counts it; its source shows with the caret on it (above).
-    const drawn = /^[-+*]$/.test(text) ? bullet : (numbers.get(mark.from) ?? text);
     const widget = new ListMarkWidget(drawn, cols);
     b.push(Decoration.replace({ widget }).range(mark.from, content));
   }
   // Continuation lines hang at their own indentation; nested items set their own below.
   b.eachLine(node.from, node.to, (next, first) => {
-    if (!first) b.indent(next, columns(next, next.from, spaceAfter(next, next.from)));
+    if (first) return;
+    // A continuation line keeps its place relative to the item's text.
+    const at = columns(next, next.from, spaceAfter(next, next.from));
+    // A lazy one, at the margin, stays there.
+    b.indent(next, plain && at > 0 ? Math.max(0, hang + at - textCol) : at);
   });
 }
 
@@ -436,7 +536,12 @@ function autolink(b: Builder, node: SyntaxNode): void {
 
 /** An image drawn in place of its syntax, while the selection is elsewhere. */
 function image(b: Builder, node: SyntaxNode): void {
-  if (touches(b.state, node.from, node.to)) {
+  // A tag that is no image, or a block that holds more than one, stays source.
+  const element = imageOfNode(b.state, node);
+  if (!element) return;
+  // The image stays drawn while it is selected or the caret is beside it (a click selects it, #675);
+  // only a selection with an end inside its syntax shows the source.
+  if (selectionInside(b.state, element.from, element.to)) {
     // Its source shows, and the spell check leaves the path alone.
     const url = node.getChild('URL');
     if (url) b.unchecked(url.from, url.to);
@@ -444,9 +549,9 @@ function image(b: Builder, node: SyntaxNode): void {
   }
   // The ledger is hidden, and what it holds is never fetched.
   const ledger = b.state.field(parsedField).ledgerRange;
-  if (ledger && node.from < ledger.to && node.to > ledger.from) return;
+  if (ledger && element.from < ledger.to && element.to > ledger.from) return;
   const decoration = imageDecoration(b.state, node);
-  if (decoration) b.push(decoration.range(node.from, node.to));
+  if (decoration) b.push(decoration.range(element.from, element.to));
 }
 
 /**
@@ -467,10 +572,10 @@ function frontMatter(b: Builder, node: SyntaxNode): void {
 }
 
 /**
- * The preview's decorations for a state. Exported for tests; the editor caches them. The Raw view
+ * The preview's decorations for a state. Exported for tests; the editor caches them. The Plain view
  * shows the source as written, without them.
  */
-export function previewDecorations(state: EditorState): DecorationSet {
+export function previewDecorations(state: EditorState, window?: Window): DecorationSet {
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const b = new Builder(state);
   /** The leaf blocks, in document order, for the space between them. */
@@ -480,20 +585,33 @@ export function previewDecorations(state: EditorState): DecorationSet {
   // paragraph open, as if it held a character.
   const read = readTree(state);
   const live = read.tree === syntaxTree(state);
+  // A window is read only from a live tree (the field draws all of it again while a block is open).
+  const bounds = window && live ? { from: window.context, to: window.reach } : {};
   if (!live) {
     read.tree.iterate({
       enter: (ref) => {
         if (leafKind(ref.name)) leaves.push(ref.node);
-        else if (ref.name === 'OrderedList')
+        else if (ref.name === 'ListItem') {
+          // An empty item keeps the space above it while an empty paragraph is open too.
+          const mark = emptyItemMark(read.reading, ref.node);
+          if (mark) leaves.push(mark);
+        } else if (ref.name === 'OrderedList')
           countedNumbers(read.reading, ref.node, numbers, read.back);
       },
     });
   }
   syntaxTree(state).iterate({
+    ...bounds,
     enter: (ref) => {
       const node = ref.node;
       const name = ref.name;
       if (live && leafKind(name)) leaves.push(node);
+      // An empty item has no block of its own: its marker stands for it, so that the space above
+      // it is the item's from the first, not from the first letter typed in it (#509).
+      else if (live && name === 'ListItem') {
+        const mark = emptyItemMark(state, node);
+        if (mark) leaves.push(mark);
+      }
       const inlineSpec = INLINE[name];
       if (inlineSpec) {
         inline(b, node, inlineSpec.className, inlineSpec.mark, inlineSpec.unchecked);
@@ -514,9 +632,25 @@ export function previewDecorations(state: EditorState): DecorationSet {
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
       else if (name === 'HardBreak') hardBreak(b, node);
-      else if (name === 'Image') {
-        image(b, node);
-        return false;
+      else if (name === 'HtmlElement') htmlElement(b, node);
+      // A `<br>` in a table cell is drawn by the table (table/layout.ts).
+      else if (name === 'HtmlBreak' || name === 'HtmlWbr') {
+        if (!inTable(node)) {
+          const decoration = name === 'HtmlBreak' ? htmlBreak() : htmlWbr();
+          b.push(decoration.range(node.from, node.to));
+        }
+      } else if (name === 'HtmlDropped')
+        b.syntax(node.from, node.to, touches(state, node.from, node.to));
+      else if (name === 'HtmlChip') htmlChip(b, node);
+      else if (name === 'HTMLBlock' && htmlHeading(b, node.node)) return false;
+      else if (name === 'HTMLBlock' && htmlBlock(b, node.node)) return false;
+      else if (name === 'Image' || name === 'HTMLTag' || name === 'HTMLBlock') {
+        // An `<img>` tag is an image too (#526: it is what an image with a size is written as).
+        if (imageOfNode(state, node.node)) {
+          image(b, node.node);
+          return false;
+        }
+        return true;
       } else if (name === 'URL') {
         // A URL is never spell checked: a bare one is drawn as a link, the one of an autolink is
         // drawn by `autolink`, and the others show only as syntax around the caret.
@@ -527,6 +661,11 @@ export function previewDecorations(state: EditorState): DecorationSet {
         b.syntax(node.from, node.from + 1, touches(state, node.from, node.to));
       // Entities in table cells are drawn by the table widget, not here (out of scope for now).
       else if (name === 'Entity') {
+        // A paragraph of `&nbsp;` alone is a line of room: an empty line, with the caret in it too.
+        if (isRoom(state, node)) {
+          b.push(roomDecoration().range(node.from, node.to));
+          return true;
+        }
         const decoration = touches(state, node.from, node.to)
           ? null
           : entityDecoration(state, node.from, node.to);
@@ -547,47 +686,149 @@ export function previewDecorations(state: EditorState): DecorationSet {
       return true;
     },
   });
-  for (const { line, spacing, below } of spacings(read.reading, leaves)) {
-    b.lineClass(state.doc.line(line), `rl-space-${spacing}${below ? '-below' : ''}`);
+  for (const { line, spacing, below, apart, clip } of spacings(read.reading, leaves)) {
+    const kind = below ? '-below' : apart ? '-apart' : clip ? '-clip' : '';
+    b.lineClass(state.doc.line(line), `rl-space-${spacing}${kind}`);
   }
   return b.finish();
 }
 
-const previewField = StateField.define<DecorationSet>({
-  create: previewDecorations,
-  update(decorations, tr) {
-    const changed =
-      tr.docChanged ||
-      tr.selection ||
-      tr.effects.some((effect) => effect.is(refreshImagesEffect)) ||
-      syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
-      openBlock(tr.state) !== openBlock(tr.startState) ||
-      tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false) ||
-      // The names of emoji that a host gave, or took away, after the text was drawn.
-      tr.state.facet(emojiLookup) !== tr.startState.facet(emojiLookup);
-    return changed ? previewDecorations(tr.state) : decorations;
-  },
+/** What the preview field holds: the decorations, and the hard breaks and images among them. */
+interface Preview {
+  decorations: DecorationSet;
+  /** The hard breaks' syntax and the images, as what the caret steps over. */
+  breaks: DecorationSet;
+}
+
+const isBreak = (value: Decoration) => {
+  const spec = value.spec as { hardBreak?: true; imageAtom?: true };
+  return spec.hardBreak === true || spec.imageAtom === true;
+};
+
+function previewOf(decorations: DecorationSet, breaks?: DecorationSet): Preview {
+  return {
+    decorations,
+    breaks: breaks ?? decorations.update({ filter: (_from, _to, value) => isBreak(value) }),
+  };
+}
+
+/**
+ * The preview's decorations after a transaction. A change of the text, the selection or the parse
+ * redraws only the blocks it can touch (`windowsOf`), and keeps and maps the rest; what no window
+ * can hold (a switch of view, an open block, the images drawn again) redraws all of it.
+ */
+function updatePreview(value: Preview, tr: Transaction): Preview {
+  const state = tr.state;
+  const everything =
+    tr.effects.some((effect) => effect.is(refreshImagesEffect)) ||
+    openBlock(state) !== null ||
+    // The HTML blocks whose source is open, or held open by a match of Find.
+    state.field(openedField, false) !== tr.startState.field(openedField, false) ||
+    openBlock(tr.startState) !== null ||
+    state.field(viewModeField, false) !== tr.startState.field(viewModeField, false) ||
+    // The names of emoji that a host gave, or took away, after the text was drawn.
+    state.facet(emojiLookup) !== tr.startState.facet(emojiLookup) ||
+    // A rename to another dialect reads an image's attribute block, or stops reading it.
+    state.facet(dialectFacet) !== tr.startState.facet(dialectFacet);
+  const tree = syntaxTree(state);
+  // A selection set, even to where it was, ends what a paste has just added (`freshlyAdded`).
+  const moved = selectionMoved(tr) || tr.selection !== undefined;
+  if (!everything && !tr.docChanged && !moved && tree === syntaxTree(tr.startState)) return value;
+  // Another tree of the same length (a language set again) has no window to name.
+  const replaced =
+    !tr.docChanged &&
+    tree !== syntaxTree(tr.startState) &&
+    tree.length === syntaxTree(tr.startState).length;
+  const extra = moved ? selectionPlaces(tr) : [];
+  // The ledger is never drawn: where it is, and where it was, may change what is.
+  const ledger = state.field(parsedField).ledgerRange;
+  const was = tr.startState.field(parsedField).ledgerRange;
+  const sameLedger = ledger
+    ? !!was &&
+      tr.changes.mapPos(was.from, 1) === ledger.from &&
+      tr.changes.mapPos(was.to, -1) === ledger.to
+    : !was;
+  if (!sameLedger) {
+    for (const range of [ledger, was]) if (range) extra.push([range.from, range.to]);
+  }
+  const windows = everything || replaced ? null : windowsOf(tr, extra);
+  if (!windows) return previewOf(previewDecorations(state));
+  let decorations = tr.docChanged ? value.decorations.map(tr.changes) : value.decorations;
+  let breaks = tr.docChanged ? value.breaks.map(tr.changes) : value.breaks;
+  for (const window of windows) {
+    const fresh = previewDecorations(state, window);
+    decorations = replaceIn(decorations, window, inWindow(fresh, window));
+    breaks = replaceIn(
+      breaks,
+      window,
+      inWindow(fresh, window).filter((range) => isBreak(range.value)),
+    );
+  }
+  return { decorations, breaks };
+}
+
+/** The decorations the preview field holds, for tests: the editor keeps them as edits go. */
+export function keptPreviewDecorations(state: EditorState): DecorationSet {
+  return state.field(previewField).decorations;
+}
+
+const previewField = StateField.define<Preview>({
+  create: (state) => previewOf(previewDecorations(state)),
+  update: updatePreview,
   // From a state field rather than a view plugin, because it draws block decorations.
   provide: (field) => [
-    EditorView.decorations.from(field),
-    EditorView.atomicRanges.of((view) => hardBreaksOf(view.state.field(field))),
+    EditorView.decorations.from(field, (value) => value.decorations),
+    EditorView.atomicRanges.of((view) => view.state.field(field).breaks),
   ],
 });
 
-/** The hard breaks' syntax among a set of decorations, as what the caret steps over. */
-const stepped = new WeakMap<DecorationSet, DecorationSet>();
-function hardBreaksOf(decorations: DecorationSet): DecorationSet {
-  let found = stepped.get(decorations);
-  if (!found) {
-    found = decorations.update({
-      filter: (_from, _to, value) => (value.spec as { hardBreak?: true }).hardBreak === true,
-    });
-    stepped.set(decorations, found);
-  }
-  return found;
+/** The hard breaks' hidden spaces and the images in `state`, which the caret steps over (none without a preview). */
+export function hardBreakAtoms(state: EditorState): DecorationSet {
+  return state.field(previewField, false)?.breaks ?? Decoration.none;
 }
+
+/**
+ * The caret never rests between the spaces of a hard break (#608): they are one unit that it steps
+ * over, hidden. A space typed in front of them makes the run longer, and the caret mapped through
+ * the typing lands inside it; it goes to the nearer edge (in front of them when typing at their
+ * start), where it can be seen, and a selection's ends go outward.
+ */
+const hardBreakCaret = Prec.highest(
+  EditorState.transactionFilter.of((tr) => {
+    // A change, a selection, or a switch of the view (Plain has no atoms: a caret between the spaces
+    // that Plain allowed goes out when the spaces hide).
+    if (!tr.docChanged && !tr.selection && !tr.effects.some((e) => e.is(setViewModeEffect))) {
+      return tr;
+    }
+    if (tr.state.field(viewModeField, false) === 'raw') return tr;
+    const decorations = tr.state.field(previewField).decorations;
+    const outside = (pos: number, side: -1 | 0 | 1) => {
+      let moved = pos;
+      decorations.between(pos, pos, (from, to, value) => {
+        if ((value.spec as { hardBreak?: true }).hardBreak === true && from < pos && pos < to) {
+          moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
+        }
+      });
+      return moved;
+    };
+    const { newSelection } = tr;
+    let changed = false;
+    const ranges = newSelection.ranges.map((range) => {
+      const anchor = outside(range.anchor, range.empty ? 0 : range.anchor < range.head ? -1 : 1);
+      const head = outside(range.head, range.empty ? 0 : range.head < range.anchor ? -1 : 1);
+      if (anchor === range.anchor && head === range.head) return range;
+      changed = true;
+      return range.empty ? EditorSelection.cursor(head) : EditorSelection.range(anchor, head);
+    });
+    if (!changed) return tr;
+    return [
+      tr,
+      { selection: EditorSelection.create(ranges, newSelection.mainIndex), sequential: true },
+    ];
+  }),
+);
 
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
-  return [previewField];
+  return [previewField, hardBreakCaret, htmlBlocks()];
 }

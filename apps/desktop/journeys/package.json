@@ -1,0 +1,17 @@
+{
+  "name": "@redlines/journeys",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Playwright journeys in WebKit: the desktop app's page driven as a person drives it, with screenshots. Not shipped.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc",
+    "accept": "playwright test --update-snapshots=changed",
+    "look": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/look-review.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0"
+  }
+}

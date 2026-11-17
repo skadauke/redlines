@@ -6,12 +6,22 @@
 
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, acceptAll, rejectAll } from './decide.ts';
+import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
+import { expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
 import { decodePayload } from './payload.ts';
-import { ada, bo, bodyOf, context, expectEveryOrderAlike, file } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import {
+  ada,
+  bo,
+  bodyOf,
+  context,
+  expectEveryOrderAlike,
+  expectNoDecisionRefused,
+  file,
+  thread,
+} from './test-helpers.ts';
+import { fineEdits, trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 import type { Person } from './types.ts';
 
@@ -57,6 +67,40 @@ function attempt(
     if (!(error instanceof EditError)) throw error;
     return { error: error.message, ...(error.code ? { code: error.code } : {}) };
   }
+}
+
+/** An edit that the fine rules refuse (lane R5: the code's scope), written as a replacement of the
+ * block that holds it: it reads alike in every order of decisions and rejects back. */
+function widened(
+  text: string,
+  from: number,
+  to: number,
+  insert: string,
+  who: Person = ada,
+  own = 'ada',
+): string {
+  const edit = { from, to, insert };
+  expect(() => fineEdits(text, [edit], context(who, ['m2bd', 'n8fx'])), 'a fine write').toThrow(
+    EditError,
+  );
+  const result = trackedEdits(text, [edit], context(who, ['m2bd', 'n8fx']));
+  return expectWidened(JSON.stringify(edit), text, result.changes, own);
+}
+
+/** Like `widened`, but an edit that no unit holds soundly (the alert's, format §3.13) is refused as
+ * it was, and writes nothing: returns the file after it, or undefined when it asks. */
+function widenedOrAsked(
+  text: string,
+  from: number,
+  to: number,
+  insert: string,
+): string | undefined {
+  const asked = attempt(text, from, to, insert);
+  if (asked.after === undefined) {
+    expect(asked.code, insert).toBe('no-legal-placement');
+    return undefined;
+  }
+  return widened(text, from, to, insert);
 }
 
 /** The body once every change is rejected: the original text, without the line breaks that end it. */
@@ -185,23 +229,22 @@ describe('a fenced code block changed with Track Changes on (format §3.5)', () 
     expect(views(inList).original).toBe(originalView(file(list)).text);
   });
 
-  it('refuses a line that would end the block, and the first and last lines, as they are', () => {
+  it('widens the first and last lines, and asks about a line that would end the block', () => {
     const text = file(BODY);
     const mid = afterOne(BODY);
-    expect(attempt(text, mid, mid, '\n```').code).toBe('no-legal-placement');
-    expect(attempt(text, mid, mid, '\n````').error).toContain('end the code block');
+    // No unit holds a block that ends where it is typed in and leaves a fence open after it: the
+    // edit is not written (it is the alert's, format §3.13), and the file is as it was.
+    for (const insert of ['\n```', '\n````']) {
+      const refused = attempt(text, mid, mid, insert);
+      expect(refused.code, insert).toBe('no-legal-placement');
+      expect(refused.after, insert).toBeUndefined();
+    }
     // A fence is Markdown syntax, not code.
     const fence = text.indexOf('```js') + 5;
-    expect(attempt(text, fence, fence, 'x').code).toBeDefined();
+    widened(text, fence, fence, 'x');
+    // A letter inside the closing fence leaves the block open to the end of the file: asked.
     const closing = text.indexOf('\n```\n') + 2;
-    expect(attempt(text, closing, closing, 'x').code).toBeDefined();
-  });
-
-  it('keeps the file as it was when it refuses', () => {
-    const text = file(BODY);
-    const mid = afterOne(BODY);
-    const refused = attempt(text, mid, mid, '\n```');
-    expect(refused.after).toBeUndefined();
+    expect(widenedOrAsked(text, closing, closing, 'x')).toBeUndefined();
   });
 
   it('uses the file’s own line breaks', () => {
@@ -245,11 +288,12 @@ describe('indented code, display math and raw text', () => {
     expect(parse(second).marks).toHaveLength(1);
   });
 
-  it('refuses indented code that a typed line would end', () => {
+  it('widens indented code that a typed line would end', () => {
     const body = 'Intro.\n\n    line one\n    line two\n\nAfter.';
     const text = file(body);
     const at = text.indexOf('one') + 3;
-    expect(attempt(text, at, at, '\ntext').code).toBe('no-legal-placement');
+    const after = widened(text, at, at, '\ntext');
+    expect(parse(after).marks.map((mark) => mark.kind)).toEqual(['sub']);
   });
 
   it('replaces display math whole', () => {
@@ -259,7 +303,7 @@ describe('indented code, display math and raw text', () => {
     expect(bodyOf(text)).toContain('$$\nx = oneX\ny\n$$\n<!--/m2bd-->');
     expect(back(text)).toBe(body);
     const at = file(body).indexOf('one') + 3;
-    expect(attempt(file(body), at, at, '\n$$').code).toBe('no-legal-placement');
+    widenedOrAsked(file(body), at, at, '\n$$');
   });
 
   it('replaces the raw-text elements whole', () => {
@@ -269,7 +313,7 @@ describe('indented code, display math and raw text', () => {
       expect(parse(text).marks[0]?.kind, tag).toBe('sub');
       expect(back(text), tag).toBe(body);
       const at = file(body).indexOf('one') + 3;
-      expect(attempt(file(body), at, at, `\n</${tag}>`).code, tag).toBe('no-legal-placement');
+      widenedOrAsked(file(body), at, at, `\n</${tag}>`);
     }
   });
 });
@@ -284,7 +328,7 @@ describe('a block that a pending change holds, and front matter', () => {
     expect(back(text).replace(/\n{3,}/g, '\n\n')).toBe('Intro.\n\nAfter.');
   });
 
-  it('is refused, naming the person, when another person’s change holds it', () => {
+  it('keeps main’s refusal when another person’s change holds the block (#808)', () => {
     const insertion =
       'Intro.\n\n<!--ins m3bd-->\n\n```js\nline one\nline two\n```\n<!--/m3bd-->\n\nAfter.';
     const text = file(insertion, { m3bd: 'bo' });
@@ -296,13 +340,11 @@ describe('a block that a pending change holds, and front matter', () => {
     expect(refused.code).toBe('no-legal-placement');
   });
 
-  it('is refused for another person in a block that your substitution holds', () => {
+  it('is refused for another person in a block that your substitution holds (#808)', () => {
     const mine = typeIn(BODY, ['X'], afterOne);
     const at = mine.indexOf('oneX') + 4;
-    const refused = attempt(mine, at, at, 'Y', bo);
-    expect(refused.error).toBe(
-      "This would change how Ada Lovelace's replacement reads. Decide it first, or turn off Track Changes.",
-    );
+    // A replacement that would hold Ada's pending change keeps the refusal (#808).
+    expect(attempt(mine, at, at, 'Y', bo).code).toBe('no-legal-placement');
     // Deciding it first frees the code.
     const decided = applyChanges(mine, accept(mine, 'm2bd'));
     const free = decided.indexOf('oneX') + 4;
@@ -372,7 +414,7 @@ describe('display math in a paragraph', () => {
     expect(back(text)).toBe(body);
     // A `$$` typed in it would end it.
     const inside = file(body).indexOf('1');
-    expect(attempt(file(body), inside, inside, '$$').code).toBe('no-legal-placement');
+    widenedOrAsked(file(body), inside, inside, '$$');
   });
 });
 
@@ -392,21 +434,22 @@ describe('a block whose range holds a marker, and its edges (fix round 1)', () =
     const inMath = math.indexOf('1');
     expect(attempt(math, inMath, inMath, 'x').error).toContain("Bo Chen's pending change");
     const mine = file(PRE, { k3x9: 'ada' });
-    expect(attempt(mine, mine.indexOf('one') + 3, mine.indexOf('one') + 3, 'x').error).toContain(
-      'Your pending change is in this code block',
-    );
+    // (your own marks are widened over, whole, where another person's are not)
+    const own = attempt(mine, mine.indexOf('one') + 3, mine.indexOf('one') + 3, 'x');
+    if (own.error !== undefined)
+      expect(own.error).toContain('Your pending change is in this code block');
+    else expect(own.after).toBeDefined();
   });
 
-  it('never writes a marker inside code, math or raw text: an edit at an edge is refused', () => {
+  it('never writes a marker inside code, math or raw text: an edit at an edge is widened', () => {
     for (const [body, at, insert] of [
       ['Intro.\n\n$$\nx = 1\n$$\n\nAfter.', (t: string) => t.indexOf('\n$$\n\nAfter') + 1, 'x'],
       ['Intro.\n\n<pre>\none\n</pre>\n\nAfter.', (t: string) => t.indexOf('</pre>') + 5, ' '],
       ['Intro.\n\n```js\none\n```\n\nAfter.', (t: string) => t.indexOf('```js') + 5, 'x'],
     ] as const) {
       const text = file(body);
-      const result = attempt(text, at(text), at(text), insert);
-      expect(result.error, body).toBeDefined();
-      expect(result.after, body).toBeUndefined();
+      const after = widenedOrAsked(text, at(text), at(text), insert);
+      if (after !== undefined) expect(parse(after).warnings, body).toEqual([]);
     }
   });
 
@@ -436,24 +479,19 @@ describe('a block whose range holds a marker, and its edges (fix round 1)', () =
     expect(parse(open).warnings).toEqual([]);
   });
 
-  it('says what is not built, naming the code, and leaves the file', () => {
-    for (const [body, words] of [
-      [
-        '- ```js\n  one\n  ```\n\nAfter.',
-        "A tracked change can't go in code that starts a list item yet. Turn off Track Changes to edit it.",
-      ],
-      [
-        '- Item.\n\n      one\n      two\n\n  After.',
-        "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.",
-      ],
-      [
-        '> Para.\n>\n>     one\n>     two',
-        "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.",
-      ],
-    ] as const) {
+  it('widens code in a list item or a quote, and code that starts a list item', () => {
+    for (const body of [
+      '- ```js\n  one\n  ```\n\nAfter.',
+      '- Item.\n\n      one\n      two\n\n  After.',
+      '> Para.\n>\n>     one\n>     two',
+    ]) {
       const text = file(body);
       const at = text.indexOf('one') + 1;
-      expect(attempt(text, at, at, 'x'), body).toMatchObject({ error: words, code: 'inside-code' });
+      const after = widened(text, at, at, 'x');
+      expect(
+        parse(after).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['sub']);
     }
   });
 });
@@ -526,15 +564,15 @@ describe('a marker above indented code (fix round 2)', () => {
 });
 
 describe('the exact start and end of display math (fix round 2)', () => {
-  it('refuses text typed against the `$$`, writes no marker beside it, and leaves line breaks alone', () => {
+  it('widens text typed against the `$$`, writes no marker beside it, and leaves line breaks alone', () => {
     for (const body of ['Intro.\n\n$$\nx = 1\n$$\n\nAfter.', 'Intro.\n\n$$x = 1$$\n\nAfter.']) {
       const text = file(body);
       const start = text.indexOf('$$');
       const end = text.indexOf('\n\nAfter');
       for (const at of [start, end]) {
-        const typed = attempt(text, at, at, 'x');
-        expect(typed.error, `${body} ${at}`).toBeDefined();
-        expect(typed.after, `${body} ${at}`).toBeUndefined();
+        // Written as a replacement of the block (the blocks' scope or the code's), else asked.
+        const typed = widenedOrAsked(text, at, at, 'x');
+        if (typed !== undefined) expect(parse(typed).warnings, `${body} ${at}`).toEqual([]);
         // A line break there is the text around the block, written as it is.
         const broken = attempt(text, at, at, '\n');
         expect(broken.error, `${body} ${at} break`).toBeUndefined();
@@ -595,7 +633,7 @@ describe('CRLF files (fix round 3)', () => {
 });
 
 describe('Return at the edges of display math in a quote (fix round 3)', () => {
-  it('writes a line break with the quote’s prefixes against the `$$`, and still refuses text', () => {
+  it('writes a line break with the quote’s prefixes against the `$$`, and widens text', () => {
     for (const [body, prefix] of [
       ['> $$\n> x = 1\n> $$\n>\n> After.', '> '],
       ['> > $$\n> > x = 1\n> > $$\n> >\n> > After.', '> > '],
@@ -606,7 +644,7 @@ describe('Return at the edges of display math in a quote (fix round 3)', () => {
       const broken = attempt(text, end, end, `\n${bar}\n${prefix}`);
       expect(broken.error, body).toBeUndefined();
       expect(parse(broken.after ?? '').marks, body).toEqual([]);
-      expect(attempt(text, end, end, 'x').error, body).toBeDefined();
+      widenedOrAsked(text, end, end, 'x');
       // Before the opening `$$`, after the quote's markers.
       const start = text.indexOf('$$');
       expect(attempt(text, start, start, `\n${bar}\n${prefix}`).error, body).toBeUndefined();
@@ -628,7 +666,9 @@ describe('the marks that refuse a key in indented code (fix round 3)', () => {
     expect(type(far, far.indexOf('one') + 1).error).toBeUndefined();
     // Bo's deletion of the break is at it.
     const at = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'bo' });
-    expect(type(at, at.indexOf('one') + 1).error).toContain("Bo Chen's pending change");
+    const held = at.indexOf('one') + 1;
+    // The refusal stays: a widened replacement would not read alike in every order (#808, #107).
+    expect(type(at, held).code).toBe('no-legal-placement');
     const own2 = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'ada' });
     expect(type(own2, own2.indexOf('one') + 1).error).toBeUndefined();
   });
@@ -641,5 +681,98 @@ describe('the marks that refuse a key in indented code (fix round 3)', () => {
       const text = file(body, { k3x9: 'bo' });
       expect(type(text, text.indexOf('more') + 1).error, body).toBeUndefined();
     }
+  });
+});
+
+describe('a fenced code block that is never closed, changed with Track Changes on (#570)', () => {
+  const open = 'Intro.\n\n```js\nlet x = 1';
+
+  it('is replaced with a closed block: the closer would stand in the code otherwise', () => {
+    const edit = trackedEdits(
+      open,
+      [{ from: open.length, to: open.length, insert: 'a' }],
+      context(ada, ['m2bd']),
+    );
+    const text = applyChanges(open, edit.changes);
+    expect(bodyOf(text)).toBe(
+      'Intro.\n\n<!--sub m2bd \\x60\\x60\\x60js\\nlet x = 1-->\n\n```js\nlet x = 1a\n```\n<!--/m2bd-->',
+    );
+    expect(parse(text).ledgerRange).not.toBeNull();
+    // Rejecting gives the unclosed block back, byte for byte; accepting gives the closed one.
+    expect(back(text)).toBe(open);
+    expect(newestView(text).text.trimEnd()).toBe('Intro.\n\n```js\nlet x = 1a\n```');
+    expect(originalView(text).text).toBe(open);
+    expectEveryOrderAlike('unclosed code', text);
+  });
+
+  it('leaves the ledger after the closed block, where it is read', () => {
+    const edit = trackedEdits(open, [{ from: 14, to: 14, insert: 'a' }], context(ada, ['m2bd']));
+    expect(parse(applyChanges(open, edit.changes)).warnings).toEqual([]);
+  });
+
+  /** The file after typing `a` at the end of the unclosed block, then `more` done to it. */
+  const changed = (more: (text: string) => string) => {
+    const first = trackedEdits(
+      open,
+      [{ from: open.length, to: open.length, insert: 'a' }],
+      context(ada, ['m2bd']),
+    );
+    return more(applyChanges(open, first.changes));
+  };
+  const withLedgerLine = (line: string) => (text: string) =>
+    text.replace('version: 1\n', `version: 1\n${line}\n`);
+  const withThread = (text: string) =>
+    text
+      .replace('Intro', 'In<!--cmt c8d2-->tr<!--/c8d2-->o')
+      .replace(/\n-->(\n?)$/, `\ncomments:\n${thread('c8d2').join('\n')}\n-->$1`);
+  const withInsertion = (text: string) =>
+    applyChanges(
+      text,
+      trackedEdits(text, [{ from: 3, to: 3, insert: 'Z' }], context(ada, ['n8fx'])).changes,
+    );
+
+  // Where the ledger stays (a comment, a setting, another change), rejecting writes the original
+  // code with a closing fence, so that the ledger is outside it; with no ledger left, the block
+  // comes back as it was.
+  const shapes: Record<string, (text: string) => string> = {
+    'a comment thread': withThread,
+    'tracking: everyone': withLedgerLine('tracking: everyone'),
+    'history: full': withLedgerLine('history: full'),
+    'another change above it': withInsertion,
+  };
+  for (const [name, more] of Object.entries(shapes)) {
+    it(`is rejected with a closing fence where the ledger stays: ${name}`, () => {
+      const text = changed(more);
+      expect(parse(text).warnings, 'the file reads').toEqual([]);
+      const rejected = applyChanges(text, reject(text, 'm2bd'));
+      expect(parse(rejected).ledgerRange, 'the ledger is still read').not.toBeNull();
+      expect(parse(rejected).warnings).toEqual([]);
+      expect(bodyOf(rejected)).toContain('```js\nlet x = 1\n```');
+      expect(bodyOf(rejected)).not.toContain('<!--sub');
+      const accepted = applyChanges(text, accept(text, 'm2bd'));
+      expect(bodyOf(accepted)).toContain('```js\nlet x = 1a\n```');
+      // Every order reads the same, and no decision is refused.
+      expectEveryOrderAlike(name, text);
+      expect(expectNoDecisionRefused(name, text)).toBeGreaterThan(0);
+    });
+  }
+
+  it('is rejected back to the unclosed block when no ledger is left', () => {
+    const text = changed((t) => t);
+    expect(back(text)).toBe(open);
+    expect(applyChanges(text, rejectAll(text))).toBe(open);
+    expect(() => accept(text, 'm2bd')).not.toThrow();
+  });
+
+  it('keeps the container’s prefix on the fence it writes', () => {
+    const quote = '> ```js\n> let x = 1';
+    const edit = trackedEdits(
+      quote,
+      [{ from: quote.length, to: quote.length, insert: 'a' }],
+      context(ada, ['m2bd']),
+    );
+    const text = applyChanges(quote, edit.changes);
+    expect(bodyOf(text)).toContain('> ```js\n> let x = 1a\n> ```\n> <!--/m2bd-->');
+    expect(back(text)).toBe(quote);
   });
 });

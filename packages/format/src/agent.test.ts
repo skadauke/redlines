@@ -8,12 +8,12 @@ import {
   wordHunks,
 } from './agent.ts';
 import { eolOf, inEol } from './edit-support.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, acceptMarks, reject, rejectAll, rejectMarks } from './decide.ts';
 import { EditError } from './errors.ts';
-import { trackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {
@@ -921,13 +921,33 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const later = offsets.filter((offset) => offset >= from + 3 && offset <= from + 43);
         const oldStr = view.slice(from, later[below(later.length)] ?? from);
         if (oldStr.length < 3 || view.split(oldStr).length !== 2) continue;
-        const newStr = oldStr.replace(/\S+/g, (word) => {
-          if (/^(?:[-*+>]|\d+\.|#{1,6})$/.test(word)) return word;
+        // A change that takes all the text of a wrapped line takes the line break in front of it too,
+        // where it is written as a deletion (format §3.2, #427), and as a replacement that has the
+        // line in its new text where its words are hunked together: the plain replacement is the
+        // oracle here, so no line of the old string is emptied (`wrapped-line.test.ts` has the agent's
+        // deletions of lines, written as deletions).
+        const prefixWord = /^(?:[-*+>]|\d+\.|#{1,6})$/;
+        const words = oldStr
+          .split('\n')
+          .map((line) => line.match(/\S+/g)?.filter((w) => !prefixWord.test(w)) ?? []);
+        const seen = words.map(() => 0);
+        const kept = words.map(() => 0);
+        const newStr = oldStr.replace(/\S+/g, (word, offset: number) => {
+          if (prefixWord.test(word)) return word;
+          const line = oldStr.slice(0, offset).split('\n').length - 1;
+          seen[line] = (seen[line] ?? 0) + 1;
+          const last = seen[line] === words[line]?.length && (kept[line] ?? 0) === 0;
           const roll = below(6);
-          if (roll === 0) return WORDS[below(WORDS.length)] ?? word;
-          if (roll === 1) return '';
-          if (roll === 2) return `${word} ${WORDS[below(WORDS.length)] ?? ''}`;
-          return word;
+          const answer =
+            roll === 0
+              ? (WORDS[below(WORDS.length)] ?? word)
+              : roll === 1 && !last
+                ? ''
+                : roll === 2
+                  ? `${word} ${WORDS[below(WORDS.length)] ?? ''}`
+                  : word;
+          if (answer !== '') kept[line] = (kept[line] ?? 0) + 1;
+          return answer;
         });
         const label = `seed ${seed}, step ${step}: ${JSON.stringify([oldStr, newStr])}`;
         const author = below(2) === 0 ? claudeAda : bo;

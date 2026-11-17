@@ -671,7 +671,7 @@ describe('where nothing is corrected', () => {
     expect(notices).toEqual([]);
   });
 
-  it("says why a suggestion you pick can't be made, as typing would", async () => {
+  it('makes a suggestion you pick in inline code a substitution of the paragraph (format §3.12)', async () => {
     const notices: string[] = [];
     const editor = load('Say `teh` x\n', {
       tracking: true,
@@ -680,8 +680,9 @@ describe('where nothing is corrected', () => {
     editor.view.dispatch({ selection: { anchor: 5, head: 8 } });
     correct(editor, 5, 8, 'the');
     await settled();
-    expect(editor.getDoc()).toBe('Say `teh` x\n');
-    expect(notices).toEqual([expect.stringContaining("can't go inside code")]);
+    expect(editor.getDoc()).toContain('<!--sub ');
+    expect(editor.getDoc()).toContain('Say `the` x<!--/');
+    expect(notices).toEqual([]);
   });
 
   it('makes a suggestion you pick in a code block a substitution of the block (format §3.5)', async () => {
@@ -693,18 +694,18 @@ describe('where nothing is corrected', () => {
     expect(editor.getDoc()).toContain('```\nthe x\n```\n<!--/');
   });
 
-  it("leaves out unsaid a correction of the Mac's that Track Changes can't make", () => {
+  it("makes a correction of the Mac's in inline code a substitution of the paragraph", () => {
     const notices: string[] = [];
     const editor = load('Say `teh` x\n', {
       tracking: true,
       onNotice: (message) => notices.push(message),
     });
     editor.view.dispatch({ changes: { from: 6, to: 8, insert: 'he' }, userEvent: AUTOCORRECTION });
-    expect(editor.getDoc()).toBe('Say `teh` x\n');
+    expect(editor.getDoc()).toContain('Say `the` x<!--/');
     expect(notices).toEqual([]);
   });
 
-  it('leaves Raw as typed', async () => {
+  it('leaves Plain as typed', async () => {
     const editor = load('Hello ', { view: 'raw' });
     editor.view.dispatch({ selection: { anchor: 6 } });
     type(editor, 'teh ');

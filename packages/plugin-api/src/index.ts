@@ -62,6 +62,11 @@ export interface PluginContext {
   author: { handle: string; name: string };
   /** Shows a short message that does not interrupt. */
   notice(message: string): void;
+  /**
+   * Shows a card that goes by itself and may offer one action, such as Undo. A host with none leaves
+   * it out, and a plugin then does without.
+   */
+  toast?(toast: { text: string; action?: { label: string; run: () => void } }): void;
 }
 
 /** A command, for menus, the command palette and keyboard shortcuts. */
@@ -240,6 +245,25 @@ export interface AgentRequest {
   homeFolder?: string;
   homeRoots?: readonly string[];
   author: { handle: string; name: string; for: string };
+  /**
+   * The model to run, one of the ids the provider lists (`AgentProvider.models`); without it, or
+   * with an id the provider doesn't list, the agent's own default runs (#530).
+   */
+  model?: string;
+  /**
+   * Whether the agent may use the web, for this run (#529): the host sets it from Preferences'
+   * switch, or from an Allow Once. Off, a provider that can lets the agent reach for the web and
+   * says so with `web` (`allowed: false`) instead of letting it through.
+   */
+  web?: boolean;
+}
+
+/** A model an agent can run, as Preferences and Ask's picker list it. */
+export interface AgentModel {
+  /** What the program is told (`--model <id>`). */
+  id: string;
+  /** What the person reads (`Opus`). */
+  name: string;
 }
 
 /**
@@ -272,7 +296,12 @@ export type AgentEvent =
    */
   | { type: 'status'; text: string; blocked?: BlockedRead }
   /** `finalText` is the last message, for an agent that never called reply. */
-  | { type: 'done'; finalText?: string }
+  | { type: 'done'; finalText?: string; web?: true }
+  /**
+   * The agent used the web (`allowed: true`), or reached for it with the switch off (`allowed:
+   * false`), which the host answers by asking the person (#529). `text` is the status line.
+   */
+  | { type: 'web'; allowed: boolean; text: string }
   /**
    * `setup` is true when Preferences › Agents can put it right: the agent is signed out, or too
    * old to run here.
@@ -300,6 +329,13 @@ export interface AgentProvider {
    * changes nothing in the document. Without it, the agent has the toolbox.
    */
   toolbox?: false;
+  /** The models the agent can be told to run, none for an agent that chooses its own (#530). */
+  models?: readonly AgentModel[];
+  /**
+   * `true` for an agent that can look at a picture the toolbox shows it (`view_image`, an MCP image
+   * content block): the one that writes an image's alt text. Without it, Alt Text does not ask it.
+   */
+  seesImages?: true;
   detect(): Promise<AgentState>;
   run(request: AgentRequest, tools: McpEndpoint, signal: AbortSignal): AsyncIterable<AgentEvent>;
 }
@@ -307,10 +343,17 @@ export interface AgentProvider {
 /** An agent as the host lists it. */
 export interface AgentInfo {
   id: string;
+  /** What the agent is shown as: its handle, capitalized (`Ada`). */
   name: string;
+  /** What is written after an @ to name it (`ada`). Default: the id. */
+  handle?: string;
   readLimit: 'folder' | 'machine';
   /** `false` for an agent that answers in text and has no toolbox (`AgentProvider.toolbox`). */
   toolbox?: false;
+  /** The models it can run (`AgentProvider.models`); absent when it chooses its own (#530). */
+  models?: readonly AgentModel[];
+  /** `true` when the agent can look at a picture (`AgentProvider.seesImages`). */
+  seesImages?: true;
   state: AgentState;
 }
 

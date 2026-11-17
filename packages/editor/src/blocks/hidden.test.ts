@@ -76,7 +76,7 @@ describe('hidden blank lines', () => {
     }
   });
 
-  it('draws every line in Raw', () => {
+  it('draws every line in Plain', () => {
     const editor = load('One.\n\n\nTwo.\n');
     editor.setViewMode('raw');
     expect(drawn(editor)).toEqual(['One.', '', '', 'Two.', '']);
@@ -111,7 +111,8 @@ describe('hidden blank lines', () => {
       'End.',
     ].join('\n');
     const editor = load(doc);
-    editor.view.dispatch({ selection: { anchor: doc.length } });
+    // The caret is in the `<pre>`: a block drawn rendered shows its source there.
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('<pre>') + 7 } });
     // The blank lines between the blocks only.
     expect(runs(editor)).toEqual(['', '', '', '']);
     expect(editor.view.contentDOM.dataset['rlHiddenLines']).toBe('4');
@@ -150,21 +151,36 @@ describe('hidden blank lines', () => {
     () => {
       const make = (n: number) =>
         Array.from({ length: n }, (_, i) => `Para ${i}.\n\n<!--del k3x9 old-->\n\n`).join('');
-      const time = (n: number) => {
-        const editor = load(make(n));
-        let best = Infinity;
-        for (let run = 0; run < 3; run++) {
-          const start = performance.now();
-          trackedDecorations(editor.view.state);
-          best = Math.min(best, performance.now() - start);
-        }
-        return best;
+      const editors = [load(make(1000)), load(make(4000))];
+      const pass = (editor: Editor) => {
+        const start = performance.now();
+        trackedDecorations(editor.view.state);
+        return performance.now() - start;
       };
-      time(200);
-      const small = time(1000);
-      const large = time(4000);
-      // Four times the lines: linear takes about four times as long, quadratic sixteen.
-      expect(large / small).toBeLessThan(6);
+      for (let warm = 0; warm < 3; warm++) editors.forEach((editor) => pass(editor));
+      // The two sizes take turns, and each is held to its fastest pass: a runner slowed for a few
+      // seconds slows both alike, and each size's fastest pass is the one it slowed least. Timed one
+      // size after the other, as this was, the ratio read 6.1 to 7.1 on CI's runners (#398).
+      const attempt = () => {
+        const fastest = [Infinity, Infinity];
+        for (let round = 0; round < 9; round++) {
+          editors.forEach((editor, i) => {
+            fastest[i] = Math.min(fastest[i]!, pass(editor));
+          });
+        }
+        return fastest[1]! / fastest[0]!;
+      };
+      // Four times the lines: linear takes about four times as long (3.8 to 4.5 here, 3.1 to 5.8
+      // on CI's runners), quadratic sixteen. The limit is eight, as far from the one as from the
+      // other: a pass that grows faster than the lines to the power 1.5 fails.
+      const LIMIT = 8;
+      // As `held` in cost.test.ts does: a ratio over the limit is timed twice more, and the lowest
+      // is the one held to it, so that a real slowdown fails and a slow moment doesn't.
+      let ratio = attempt();
+      for (let again = 0; again < 2 && ratio >= LIMIT; again++) ratio = Math.min(ratio, attempt());
+      console.log(`hidden lines: 4,000 lines of markers cost ${ratio.toFixed(2)} times 1,000`);
+      expect(ratio).toBeLessThan(LIMIT);
     },
+    60_000,
   );
 });

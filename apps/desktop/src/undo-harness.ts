@@ -152,6 +152,9 @@ export async function openWindow(doc: string): Promise<Window> {
     exists: (path) => Promise.resolve(files.has(path)),
     reveal: () => Promise.resolve(),
     print: () => Promise.resolve(),
+    exportPdf: () => Promise.resolve(null),
+    exportWord: () => Promise.resolve(null),
+    openDocx: () => Promise.resolve(null),
     saveAs: () => Promise.resolve(null),
     watch: (path, onChange) => {
       watchers.set(path, onChange);
@@ -164,6 +167,8 @@ export async function openWindow(doc: string): Promise<Window> {
     allowDocument: () => Promise.resolve(),
     allowImages: () => Promise.resolve(false),
     imageUrl: () => null,
+    imageStamps: () => Promise.resolve([]),
+    imageSizes: () => Promise.resolve([]),
     forgetDocuments: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => {
@@ -171,6 +176,10 @@ export async function openWindow(doc: string): Promise<Window> {
       return Promise.resolve('cancel');
     },
     askToDiscardDraft: () => Promise.resolve(false),
+    askToSaveForImage: () => Promise.resolve(false),
+    chooseImages: () => Promise.resolve(null),
+    addImages: () => Promise.resolve({ paths: [], refused: [] }),
+    listenForImageDrops: () => Promise.resolve(() => {}),
     openWindow: () => Promise.resolve(),
     windowStart: () => Promise.resolve({ path: null, line: null, text: null }),
     readClipboardText: () => Promise.resolve(''),
@@ -210,6 +219,7 @@ export async function openWindow(doc: string): Promise<Window> {
     author: ada,
     document: {
       path: () => controller.state.path,
+      plainOnly: () => false,
       generation: () => controller.generation,
       read: () => editor.getDoc(),
       parsed: () => editor.getParsed(),

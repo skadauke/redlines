@@ -464,6 +464,70 @@ describe('the outline’s timing and its clean-up', () => {
     expect(document.activeElement).toBe(buttons(nav()!)[2]);
   });
 
+  it('keeps the focus on the same heading, by its place, when a heading is added above it', () => {
+    const { nav, editor } = mount();
+    editor.commands.run('outline.focus');
+    key(buttons(nav()!)[0]!, 'ArrowDown');
+    key(buttons(nav()!)[1]!, 'ArrowDown');
+    expect(document.activeElement?.textContent).toBe('Nested');
+    const at = editor.view.state.doc.toString().indexOf('## First');
+    editor.view.dispatch({ changes: { from: at, insert: '## Fresh\n\n' } });
+    settle();
+    expect(names(nav()!)).toEqual(['Title', 'Fresh', 'First', 'Nested', 'Second']);
+    expect(document.activeElement?.textContent).toBe('Nested');
+  });
+
+  it('tells a screen reader each heading level', () => {
+    const { nav } = mount();
+    expect(buttons(nav()!).map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Title, heading level 1',
+      'First, heading level 2',
+      'Nested, heading level 3',
+      'Second, heading level 2',
+    ]);
+  });
+
+  it('closes on Escape when the pointer opened it, with the focus elsewhere', () => {
+    const { nav } = mount();
+    const panel = nav()!.querySelector('.rl-outline-panel')!;
+    mouse(panel, 'mouseenter');
+    vi.advanceTimersByTime(100);
+    expect(nav()!.dataset['open']).toBe('true');
+    key(document.body, 'Escape');
+    expect(nav()!.dataset['open']).toBe('false');
+  });
+
+  describe('the hint of a truncated heading', () => {
+    /** Makes a button's text wider than the button, as a long heading is in the card. */
+    const truncate = (button: HTMLElement) => {
+      Object.defineProperty(button, 'scrollWidth', { value: 300, configurable: true });
+      Object.defineProperty(button, 'clientWidth', { value: 264, configurable: true });
+    };
+    const tip = (nav: HTMLElement) => nav.querySelector<HTMLElement>('.rl-outline-tip');
+
+    it('shows the full text after the title bar delay, and goes with the pointer', () => {
+      const { nav } = mount(DOC, { tooltipMs: 400 });
+      const first = buttons(nav()!)[1]!;
+      truncate(first);
+      mouse(first, 'mouseover');
+      vi.advanceTimersByTime(399);
+      expect(tip(nav()!)?.hidden ?? true).toBe(true);
+      vi.advanceTimersByTime(2);
+      expect(tip(nav()!)?.hidden).toBe(false);
+      expect(tip(nav()!)?.textContent).toBe('First');
+      expect(tip(nav()!)?.getAttribute('role')).toBe('tooltip');
+      mouse(first, 'mouseout');
+      expect(tip(nav()!)?.hidden).toBe(true);
+    });
+
+    it('shows nothing for a heading that fits', () => {
+      const { nav } = mount(DOC, { tooltipMs: 400 });
+      mouse(buttons(nav()!)[1]!, 'mouseover');
+      vi.advanceTimersByTime(1000);
+      expect(tip(nav()!)?.hidden ?? true).toBe(true);
+    });
+  });
+
   it('closes at once on a click, whatever keeps the pointer over it', () => {
     const { nav } = mount();
     const panel = nav()!.querySelector('.rl-outline-panel')!;

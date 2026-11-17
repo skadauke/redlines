@@ -226,10 +226,155 @@ interface Memo {
  */
 export function scan(text: string): Scan {
   for (const known of recent) if (known.text === text) return known.scanned;
-  const scanned = scanText(text);
+  const scanned = scanText(text).scanned;
+  remember(text, scanned);
+  return scanned;
+}
+
+/** The scan of `text`, whole and not remembered: what an incremental scan must equal. */
+export function scanFresh(text: string): Scan {
+  return scanText(text).scanned;
+}
+
+function remember(text: string, scanned: Scan): void {
   recent.unshift({ text, scanned });
   if (recent.length > RECENT) recent.pop();
+}
+
+/** The scan of `text` if it is among the last few, and none otherwise: it never scans. */
+export function knownScan(text: string): Scan | undefined {
+  for (const known of recent) if (known.text === text) return known.scanned;
+  return undefined;
+}
+
+/** What an incremental scan needs of an earlier one (#700); kept beside it, so that a scan is what
+ * it was. */
+interface Trail {
+  /** Line starts the scan began a step at, at least `SAMPLE` characters apart, each after a blank
+   * line, outside every construct: a scan can start again at one and find what it found. */
+  points: number[];
+  /** A `<!--` found no `-->` anywhere after it, which a later edit may supply. */
+  unclosed: boolean;
+}
+const trails = new WeakMap<Scan, Trail>();
+const SAMPLE = 2000;
+
+/** The lines of look-back that a fence's container takes (`containerContent`). */
+const LOOK_BACK = 201;
+
+/** Whether the line before the one that starts at `at` is blank, or there is none. */
+function blankBefore(text: string, at: number): boolean {
+  if (at === 0) return true;
+  if (text[at - 1] !== '\n') return false;
+  const top = at >= 2 ? text.lastIndexOf('\n', at - 2) + 1 : 0;
+  for (let i = top; i < at - 1; i++) {
+    const c = text[i];
+    if (c !== ' ' && c !== '\t' && c !== '\r') return false;
+  }
+  return true;
+}
+
+/** An edit: `[from, oldTo)` of the earlier text became `[from, newTo)` of the new one. */
+export interface Change {
+  from: number;
+  oldTo: number;
+  newTo: number;
+}
+
+/**
+ * The scan of `text`, made from the scan of the text before the edit `change` (#700), or undefined
+ * when that can't be done and the whole text must be scanned. It scans again from a line start
+ * before the edit, which the old scan began a step at after a blank line, with no construct
+ * open there, so that nothing before it can change; and it goes on until a line start where the
+ * old scan began a step too, more lines past the edit than a fence looks back, so that what
+ * follows is what the old scan found, shifted. Equal to `scan(text)`.
+ */
+export function scanChanged(before: string, text: string, change: Change): Scan | undefined {
+  const known = knownScan(text);
+  if (known) return known;
+  const old = knownScan(before);
+  const trail = old && trails.get(old);
+  if (!old || !trail || trail.unclosed || trail.points.length === 0) return undefined;
+  const { from, oldTo, newTo } = change;
+  const delta = newTo - oldTo;
+  if (text.length - before.length !== delta || from > oldTo || from > newTo) return undefined;
+  // Front matter is read by other rules; an edit in or near it scans the whole text.
+  const body = bodyStart(text);
+  if (body !== bodyStart(before) || from <= body) return undefined;
+  const { points } = trail;
+  // The last start before the edit that no raw block, which goes on scanning inside it, covers.
+  let index = lastAtMost(points, from);
+  while (index >= 0 && old.verbatim.some((v) => v.from < points[index]! && v.to > points[index]!)) {
+    index--;
+  }
+  if (index < 0) return undefined;
+  const start = points[index]!;
+  let limit = newTo;
+  for (let lines = 0; lines < LOOK_BACK && limit < text.length; lines++) {
+    const next = text.indexOf('\n', limit);
+    limit = next === -1 ? text.length : next + 1;
+  }
+  const made = scanText(text, true, {
+    start,
+    stop: (at) => at >= limit && has(points, at - delta),
+  });
+  if (made.stoppedAt === undefined || made.trail.unclosed) return undefined;
+  const resume = made.stoppedAt - delta;
+  const shift = <T extends { from: number; to: number }>(item: T): T => ({
+    ...item,
+    from: item.from + delta,
+    to: item.to + delta,
+  });
+  const markers = [
+    ...old.markers.filter((m) => m.from < start),
+    ...made.scanned.markers,
+    ...old.markers.filter((m) => m.from >= resume).map(shift),
+  ];
+  const ledgers = [
+    ...old.ledgers.filter((l) => l.start < start),
+    ...made.scanned.ledgers,
+    ...old.ledgers
+      .filter((l) => l.start >= resume)
+      .map((l) => ({
+        ...l,
+        start: l.start + delta,
+        headerEnd: l.headerEnd + delta,
+        end: l.end + delta,
+      })),
+  ];
+  const verbatim = [
+    ...old.verbatim.filter((v) => v.from < start),
+    ...made.scanned.verbatim,
+    ...old.verbatim.filter((v) => v.from >= resume).map(shift),
+  ];
+  const scanned: Scan = { markers, ledgers, verbatim };
+  trails.set(scanned, {
+    points: [
+      ...points.filter((p) => p < start),
+      ...made.trail.points,
+      ...points.filter((p) => p >= resume).map((p) => p + delta),
+    ],
+    unclosed: false,
+  });
+  remember(text, scanned);
   return scanned;
+}
+
+/** The index of the last element at most `value`, or -1. */
+function lastAtMost(sorted: readonly number[], value: number): number {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (sorted[middle]! <= value) low = middle + 1;
+    else high = middle;
+  }
+  return low - 1;
+}
+
+function has(sorted: readonly number[], value: number): boolean {
+  const index = lastAtMost(sorted, value);
+  return index >= 0 && sorted[index] === value;
 }
 
 /** The scans of the last few texts (up to four whole texts are held, for the life of the process):
@@ -239,19 +384,67 @@ export function scan(text: string): Scan {
 const recent: { text: string; scanned: Scan }[] = [];
 const RECENT = 4;
 
-function scanText(text: string): Scan {
+/**
+ * Finds the markers in a decoded payload: the old text of a substitution that holds other people's
+ * marks (format §3.12). A payload is a piece of the body, so it has no front matter and no ledger
+ * of its own: a `---` at its start is a thematic break, and what looks like a ledger is text.
+ */
+export function scanPayload(text: string): Scan {
+  for (const known of recentPayloads) if (known.text === text) return known.scanned;
+  const scanned = scanText(text, false).scanned;
+  recentPayloads.unshift({ text, scanned });
+  if (recentPayloads.length > RECENT) recentPayloads.pop();
+  return scanned;
+}
+
+const recentPayloads: { text: string; scanned: Scan }[] = [];
+
+/** The kinds of mark whose payload can hold other people's marks (format §3.12): the old text of a
+ * substitution, and the text of a deletion (a table's deletion, which holds the table). The lines of
+ * a deleted row or column are no such text. */
+export function holdsMarks(marker: Extract<Marker, { type: 'open' }>): boolean {
+  return (
+    (marker.kind === 'sub' || marker.kind === 'del') &&
+    marker.payload !== undefined &&
+    marker.payload.includes('<!--') &&
+    !/^(?:row|col)=/.test(marker.payload)
+  );
+}
+
+/** Scans from `start`, a line start, until the line start where `stop` says so. */
+interface Window {
+  start: number;
+  stop: (at: number) => boolean;
+}
+
+function scanText(
+  text: string,
+  front = true,
+  window?: Window,
+): { scanned: Scan; trail: Trail; stoppedAt?: number } {
   const markers: Marker[] = [];
   const ledgers: LedgerCandidate[] = [];
   const verbatim: Verbatim[] = [];
-  const body = bodyStart(text);
+  const body = front ? bodyStart(text) : 0;
   const memo: Memo = { paragraph: { from: 0, to: 0 }, noCommentEnd: false, body };
-  let at = 0;
+  const points: number[] = [];
+  let lastPoint = -SAMPLE;
+  let stoppedAt: number | undefined;
+  let at = window?.start ?? 0;
   let atLineStart = true;
   while (at < text.length) {
     const from = at;
     // No block starts in front matter.
     if (atLineStart && at < body) atLineStart = false;
     if (atLineStart) {
+      if (window && at > window.start && window.stop(at)) {
+        stoppedAt = at;
+        break;
+      }
+      if (at - lastPoint >= SAMPLE && blankBefore(text, at)) {
+        points.push(at);
+        lastPoint = at;
+      }
       atLineStart = false;
       FENCE_OPEN.lastIndex = at;
       const fence = FENCE_OPEN.exec(text);
@@ -303,7 +496,10 @@ function scanText(text: string): Scan {
     // Every step goes on, whatever the text: a file can't keep the scan from ending.
     if (at <= from) at = from + 1;
   }
-  return { markers, ledgers, verbatim };
+  const scanned: Scan = { markers, ledgers, verbatim };
+  const trail = { points, unclosed: memo.noCommentEnd };
+  trails.set(scanned, trail);
+  return { scanned, trail, stoppedAt };
 }
 
 /** Reads the comment at `at`: a marker, a ledger, or an ordinary comment. Returns where to go on. */

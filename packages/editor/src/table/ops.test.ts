@@ -6,7 +6,7 @@ import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, scriptRows, type Step } from '../blocks/script.ts';
 import { parse } from '@redlines/format';
-import { createEditor, type Editor, undo } from '../index.ts';
+import { alignCols, createEditor, type Editor, touchedCols, undo } from '../index.ts';
 
 interface Row {
   name: string;
@@ -261,4 +261,74 @@ describe('a tracked row made in Clean', () => {
       expect(editor.getUiState().view).toBe(markupView);
     },
   );
+});
+
+describe('Align, with Track Changes on', () => {
+  const doc = '| a | b | c |\n| - | - | - |\n| 11 | 12 | 13 |\n| 21 | 22 | 23 |\n';
+  const mounted: Editor[] = [];
+  afterEach(() => {
+    for (const editor of mounted.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+
+  it('writes one change for the columns of a rectangle, which is one step to undo', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking: true,
+    });
+    mounted.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    // A rectangle over the first two columns: from a cell of one to a cell of the other.
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('11'), head: doc.indexOf('22') + 2 } });
+    expect(alignCols(editor.view, 'right')).toBe(true);
+    // One mark and one entry for both columns, with the old row in it, at the end of the header.
+    const parsed = editor.getParsed();
+    expect(parsed.marks.map((mark) => mark.kind)).toEqual(['fmt']);
+    expect(Object.keys(parsed.ledger.marks)).toHaveLength(1);
+    expect(editor.getDoc()).toMatch(/\| c<!--fmt \w{4} align=[^>]*--> \|\n\| -: \| -: \| - \|\n/);
+    // The rectangle is still the cells of the two columns.
+    expect(touchedCols(editor.view.state)).toMatchObject({ first: 0, last: 1, rectangle: true });
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(doc);
+  });
+});
+
+describe('an operation that no tracked write holds', () => {
+  const UNCLOSED = '| A | B <!-- x |\n| - | - |\n| a1 | b1 |\n';
+  const mounted: Editor[] = [];
+  afterEach(() => {
+    for (const editor of mounted.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+
+  it('is asked about, never refused, and held until the person answers', async () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const asked: string[] = [];
+    const editor = createEditor(parent, {
+      doc: UNCLOSED,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking: true,
+      askUntracked: {
+        ask: (_reason, words) => {
+          asked.push(words?.title ?? '');
+          return Promise.resolve('cancel');
+        },
+        skip: () => false,
+      },
+      onNotice: (message) => asked.push(`notice: ${message}`),
+    });
+    mounted.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    editor.view.dispatch({ selection: { anchor: UNCLOSED.indexOf('a1') + 1 } });
+    expect(alignCols(editor.view, 'center')).toBe(true);
+    // Not refused: the edit is held for the sheet, and the file is as it was until it answers.
+    expect(asked.filter((line) => line.startsWith('notice:'))).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toEqual(["This change to the table can't be tracked. Make it without tracking?"]);
+    expect(editor.getDoc()).toBe(UNCLOSED);
+  });
 });

@@ -109,7 +109,21 @@ describe('copy and cut', () => {
     expect(await copy(editor, from!, to!)).toBe('anywhere and merges.\n\nEach');
   });
 
-  it('copy the source as written in Raw', async () => {
+  it('copy the struck text, as plain text, when the selection holds only a deletion (#35)', async () => {
+    const editor = load(doc);
+    const marker = '<!--del w2rf  Nothing to install.-->';
+    const from = doc.indexOf(marker);
+    const data = await copyData(editor, from, from + marker.length);
+    const text = data.getData('text/plain');
+    expect(text.trim()).toBe('Nothing to install.');
+    expect(text).not.toContain('<!--');
+    expect(text).not.toContain('w2rf');
+    // A selection that holds more than the deletion still copies the newest text alone.
+    const [start, end] = between(doc, 'merges.', marker);
+    expect(await copy(editor, start!, end!)).toBe('merges.');
+  });
+
+  it('copy the source as written in Plain', async () => {
     const editor = load(doc, { view: 'raw' });
     const [from, to] = between(doc, 'The changes', 'comments<!--/k3x9-->');
     expect(await copy(editor, from!, to!)).toBe(
@@ -173,6 +187,22 @@ describe('copied images', () => {
     );
     expect(out).toContain('<img src="mine.png" alt="Mine">');
   });
+
+  it('embeds a local image as its bytes when the host reads the file, and keeps remote ones', async () => {
+    const text = '![Mine](img/a%20b.png) and ![Far](https://e.com/a.png)\n';
+    const asked: string[] = [];
+    const editor = load(text, {
+      resolveImage: (path) => `asset://${path}`,
+      imageData: (path) => {
+        asked.push(path);
+        return Promise.resolve({ mimeType: 'image/png', data: 'QUJD' });
+      },
+    });
+    const out = (await copyData(editor, 0, text.indexOf('\n'))).getData('text/html');
+    expect(asked).toEqual(['img/a b.png']);
+    expect(out).toContain('<img src="data:image/png;base64,QUJD" alt="Mine">');
+    expect(out).toContain('<img src="https://e.com/a.png" alt="Far">');
+  });
 });
 
 describe('paste', () => {
@@ -212,7 +242,7 @@ describe('paste', () => {
     expect(parse(editor.getDoc()).warnings).toEqual([]);
   });
 
-  it('pastes as written in Raw, where markup is edited by hand', () => {
+  it('pastes as written in Plain, where markup is edited by hand', () => {
     const editor = load(doc, { view: 'raw' });
     paste(editor, doc.indexOf('Each'), '<!--hl h6bz-->Each<!--/h6bz--> ');
     expect(editor.getDoc()).toContain('<!--hl h6bz-->Each<!--/h6bz--> Each');
@@ -299,7 +329,7 @@ describe('rich text', () => {
     }
   });
 
-  it('puts only the source on the clipboard in Raw', async () => {
+  it('puts only the source on the clipboard in Plain', async () => {
     const editor = load('**bold**', { view: 'raw' });
     const data = await copyData(editor, 0, 8);
     expect(data.getData('text/plain')).toBe('**bold**');
@@ -398,7 +428,7 @@ describe('rich text', () => {
     });
   });
 
-  it('keeps the plain text when the html says nothing more, and in Raw', () => {
+  it('keeps the plain text when the html says nothing more, and in Plain', () => {
     const editor = load('A\n');
     paste(editor, 1, ' b', '<span>b</span>');
     expect(editor.getDoc()).toBe('A b\n');

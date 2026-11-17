@@ -3,7 +3,7 @@
 // the review interface and the other plugins. Every row has its command, its key and its state,
 // and no key is bound twice across the whole menu bar and the registry.
 
-import { createEditor, type Author, type Editor } from '@redlines/editor';
+import { baseTitle, createEditor, type Author, type Editor } from '@redlines/editor';
 import { createFormatting } from '@redlines/formatting';
 import { createReview } from '@redlines/review';
 import { afterEach, expect, it } from 'vitest';
@@ -69,9 +69,11 @@ function normalized(accelerator: string): string {
 }
 
 const STATE = {
+  plainOnly: false,
   inDocument: true,
   sidebarOpen: false,
   showResolved: false,
+  showWordCount: true,
   hasFile: false,
   recent: [],
   view: 'redlines',
@@ -81,18 +83,20 @@ const STATE = {
   textSize: 1,
 };
 
-it('puts Format and Paragraph between Edit and View', () => {
+it('puts Insert, Format and Paragraph between Edit and View', () => {
   const { model } = mount('Some text.\n');
   const titles = model.menus.map((menu) => menu.title);
   expect(titles.slice(titles.indexOf('Edit'), titles.indexOf('View') + 1)).toEqual([
     'Edit',
+    'Insert',
     'Format',
     'Paragraph',
+    'Table',
     'View',
   ]);
 });
 
-it('lists the Format rows with their keys, set apart by group, Add Comment last', () => {
+it('lists the Format rows with their keys, set apart by group, Highlight last', () => {
   const { model } = mount('Some text.\n');
   const rows = rowsOf(model, 'Format');
   expect(rows.map((row) => (isAction(row) ? [row.text, row.accelerator] : label(row)))).toEqual([
@@ -107,7 +111,7 @@ it('lists the Format rows with their keys, set apart by group, Add Comment last'
     'Separator',
     ['Clear Formatting', 'CmdOrCtrl+\\'],
     'Separator',
-    ['Add Comment', 'CmdOrCtrl+Alt+M'],
+    ['Highlight', 'CmdOrCtrl+Shift+H'],
   ]);
 });
 
@@ -129,24 +133,58 @@ it('lists the Paragraph rows with their keys, set apart by group', () => {
     ['Task List', 'CmdOrCtrl+Alt+X'],
     ['Check Item', 'CmdOrCtrl+Shift+U'],
     'Separator',
-    ['Code Block', 'CmdOrCtrl+Alt+C'],
-    ['Table', 'CmdOrCtrl+Alt+T'],
-    ['Alert', undefined],
-    ['Horizontal Rule', undefined],
-    'Separator',
     ['Indent', 'CmdOrCtrl+]'],
     ['Outdent', 'CmdOrCtrl+['],
   ]);
 });
 
+it('lists the Insert rows, and Insert Table again at the top of the Table menu', () => {
+  const { model } = mount('Some text.\n');
+  const read = (title: string) =>
+    rowsOf(model, title).map((row) => (isAction(row) ? [row.text, row.accelerator] : label(row)));
+  expect(read('Insert').map((row) => row?.[0] ?? row)).toEqual([
+    'Code Block',
+    'Table',
+    'Collapsible Section',
+    'Alert',
+    'Horizontal Rule',
+  ]);
+  expect(read('Table')[0]).toEqual(['Insert Table', undefined]);
+});
+
+it('has Add Comment and Ask… in the Review menu, not in Format', () => {
+  const { model } = mount('Some text.\n');
+  const names = (title: string) =>
+    rowsOf(model, title)
+      .filter(isAction)
+      .map((row) => row.text);
+  expect(names('Review')).toEqual(expect.arrayContaining(['Add Comment']));
+  expect(names('Format')).not.toContain('Add Comment');
+});
+
+it('disables Check Item outside a task item, and enables it inside one', () => {
+  const { editor, model } = mount('Some text.\n\n- [ ] a task\n');
+  const row = rowsOf(model, 'Paragraph')
+    .filter(isAction)
+    .find((candidate) => candidate.text === 'Check Item');
+  const enabledAt = (pos: number) => {
+    editor.view.dispatch({ selection: { anchor: pos } });
+    return row?.enabled?.({ ...STATE, ...editor.getUiState() } satisfies MenuState);
+  };
+  expect(enabledAt(2)).toBe(false);
+  expect(enabledAt(editor.getDoc().indexOf('a task'))).toBe(true);
+});
+
 it('gives every row its command, key and state, and runs the command from the row', () => {
-  const { editor, model } = mount('Some text.\n');
+  // The caret in a task item, where Check Item has something to do.
+  const { editor, model } = mount('- [ ] a task\n');
   const commands = editor.commands.list();
   const ui = editor.getUiState();
   const state = { ...STATE, ...ui } satisfies MenuState;
   for (const title of ['Format', 'Paragraph']) {
     for (const row of rowsOf(model, title).filter(isAction)) {
-      const command = commands.find((candidate) => candidate.title === row.text);
+      // (A title that reads the state, as Highlight's does, is what the menu shows before a state.)
+      const command = commands.find((candidate) => baseTitle(candidate) === row.text);
       expect(command, `${title}: ${row.text} has a command`).toBeDefined();
       expect(command?.menu).toBe(title.toLowerCase());
       expect(row.accelerator).toBe(
@@ -155,7 +193,11 @@ it('gives every row its command, key and state, and runs the command from the ro
       // The key is the editor's: the menu bar's item must not also handle it.
       expect(row.keyInMenuOnly).toBe(true);
       // Chosen from the menu, the command runs through the registry.
-      expect(row.enabled ? row.enabled(state) : true, `${row.text} is enabled`).toBe(true);
+      // A row is grayed exactly when the command says why it can't run here (its hint).
+      const enabled = row.enabled ? row.enabled(state) : true;
+      expect(enabled, `${row.text} follows disabledReasons`).toBe(
+        !(command!.id in ui.disabledReasons),
+      );
       if (command?.isActive) expect(row.checked).toBeDefined();
     }
   }
@@ -178,6 +220,25 @@ it('checks the rows that hold at the caret', () => {
   expect(checked()).toEqual(['Bold', 'Body']);
 });
 
+it('shows Highlight as Remove Highlight, with a check, where the caret is in a highlight', () => {
+  const doc =
+    'Some <!--hl h4kz-->marked<!--/h4kz--> text.\n\n<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\nmarks:\n  h4kz: {by: ada, at: 2026-10-31T09:41Z}\n-->\n';
+  const { editor, model } = mount(doc);
+  const row = rowsOf(model, 'Format')
+    .filter(isAction)
+    .find((candidate) => candidate.text === 'Highlight');
+  const state = () => ({ ...STATE, ...editor.getUiState() }) satisfies MenuState;
+  expect(row?.textFor).toBeDefined();
+  expect(row?.checked).toBeDefined();
+  editor.view.dispatch({ selection: { anchor: 0 } });
+  expect([row?.textFor?.(state()), row?.checked?.(state())]).toEqual(['Highlight', false]);
+  editor.view.dispatch({ selection: { anchor: doc.indexOf('marked') + 2 } });
+  expect([row?.textFor?.(state()), row?.checked?.(state())]).toEqual(['Remove Highlight', true]);
+  // Chosen from the menu, it takes the highlight away: the text stays.
+  row?.action();
+  expect(editor.getDoc()).toBe('Some marked text.\n');
+});
+
 it('binds no key twice across the menu bar and the registry', () => {
   const { editor, model } = mount('Some text.\n');
   const seen = new Map<string, string>();
@@ -194,7 +255,7 @@ it('binds no key twice across the menu bar and the registry', () => {
   // Every registered shortcut is in a menu, so none is bound outside one that the menu would meet.
   for (const command of editor.commands.list()) {
     if (command.shortcut) {
-      expect(seen.get(normalized(acceleratorFor(command.shortcut)))).toContain(command.title);
+      expect(seen.get(normalized(acceleratorFor(command.shortcut)))).toContain(baseTitle(command));
     }
   }
 });

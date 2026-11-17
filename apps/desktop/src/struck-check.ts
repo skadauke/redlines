@@ -646,13 +646,16 @@ const pointer: Check[] = [
       const drift = below ? below.getBoundingClientRect().top - rect.top : null;
       if (drift === null || Math.abs(drift) > 1) problems['drift'] = drift;
       if (editor.view.contentDOM.querySelector('.rl-struck')) problems['stillDrawn'] = true;
-      // And the bar of the block below switches back.
+      // And the bar of the block below, in Simple, opens the deleted block's card and stays in
+      // Simple (#716): the change is found on the line above, which the page hides.
       if (below) {
         const next = below.getBoundingClientRect();
         pressBar(editor, next.left - 23, next.top + 10);
         await frames();
-        if (editor.getUiState().view !== 'redlines') problems['back'] = editor.getUiState().view;
-        if (!blockWith(editor, 'This paragraph was deleted whole.')) problems['drawnAgain'] = false;
+        if (editor.getUiState().markupView !== 'simple') {
+          problems['back'] = editor.getUiState().markupView;
+        }
+        if (!editor.view.dom.querySelector('.rl-card-what')) problems['card'] = 'none opened';
       }
       return problemsOf(problems);
     },
@@ -818,16 +821,17 @@ const pointer: Check[] = [
     },
   },
   {
-    name: 'option-down-home-end-and-typing-next-to-a-struck-block-act-on-the-text-beside-it',
+    name: 'shift-option-down-home-end-and-typing-next-to-a-struck-block-act-on-the-text-beside-it',
     async run(editor) {
       await open(editor, 'redlines', 'After the deleted paragraph.');
       const problems: Problem = {};
       const aboveEnd = endOf(editor, 'Before the deleted paragraph.');
       const belowStart = at(editor, 'After the deleted paragraph.');
-      const keyed = async (key: string, altKey = false) => {
+      const keyed = async (key: string, altKey = false, shiftKey = false) => {
         const event = new KeyboardEvent('keydown', {
           key,
           altKey,
+          shiftKey,
           bubbles: true,
           cancelable: true,
         });
@@ -835,20 +839,20 @@ const pointer: Check[] = [
         await frames();
         return event.defaultPrevented;
       };
-      // ⌥↓ goes to the end of the paragraph the caret is in, then to the end of the next one's, past
-      // the struck block; ⌥↑ goes to the start of that paragraph, then of the one before it. The
-      // paragraph keys are the Mac's.
+      // ⇧⌥↓ extends to the end of the paragraph the caret is in, then to the end of the next one's,
+      // past the struck block; ⇧⌥↑ to the start of that paragraph, then of the one before it. (⌥↓
+      // and ⌥↑ alone move the block since 4b3b72da.) The paragraph keys are the Mac's.
       if (/Mac/.test(navigator.platform)) {
         const belowEnd = endOf(editor, 'After the deleted paragraph.');
         const aboveStart = at(editor, 'Before the deleted paragraph.');
         await place(editor, aboveEnd - 6);
         const seen: number[] = [];
         for (const down of [true, true, false, false]) {
-          await keyed(down ? 'ArrowDown' : 'ArrowUp', true);
+          await keyed(down ? 'ArrowDown' : 'ArrowUp', true, true);
           seen.push(head(editor));
         }
         const wanted = [aboveEnd, belowEnd, belowStart, aboveStart];
-        if (seen.join() !== wanted.join()) problems['option'] = { seen, wanted };
+        if (seen.join() !== wanted.join()) problems['shiftOption'] = { seen, wanted };
       }
       // End and Home stay on their own line, in the text, never in the block.
       await place(editor, belowStart + 4);

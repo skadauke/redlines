@@ -2,7 +2,13 @@
 // the file system and the native dialogs; in a plain browser (`pnpm dev`) it is a small in-memory
 // folder holding sample.md, so the interface can be worked on without the native shell.
 
-import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
+import {
+  Channel,
+  convertFileSrc,
+  invoke,
+  type InvokeArgs,
+  type InvokeOptions,
+} from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
@@ -12,7 +18,8 @@ import { deriveHandle } from './handle.ts';
 import { appIdentity, BROWSER_IDENTITY } from './identity.ts';
 import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugin-api';
 import { createProcesses, createRelay } from './agent-host.ts';
-import { extension, isDocument } from './file-names.ts';
+import { DOCUMENT_EXTENSIONS, extension, isDocument } from './file-names.ts';
+import { savedImageName } from './image-add.ts';
 import sample from './sample.md?raw';
 
 export type { FileEntry, ProjectRoot };
@@ -22,6 +29,34 @@ export type SaveChoice = 'save' | 'discard' | 'cancel';
 
 /** The answer to "This file changed on disk since you opened it" when saving. */
 export type OverwriteChoice = 'overwrite' | 'saveAs' | 'cancel';
+
+/**
+ * The images to add to a document (#308): files the app was given, which a drop on the window or
+ * its panel gave it and which it keeps for the window by an id, never by a path the page names; or
+ * image files the page holds, from a paste, or from a drop in a browser tab.
+ */
+export type ImageSource =
+  { kind: 'given'; id: number } | { kind: 'files'; files: File[]; pasted: boolean };
+
+/**
+ * What adding images did: the paths the document links them by, relative to it, in order, and a
+ * sentence to show the person for each image that couldn't be added (src-tauri/src/image_files.rs).
+ */
+export interface AddedImages {
+  paths: string[];
+  refused: string[];
+}
+
+/**
+ * Image files dropped on the window, which the app keeps under `id`: how many, and where they
+ * landed, in points from the top left of the window's page.
+ */
+export interface DroppedImages {
+  id: number;
+  count: number;
+  x: number;
+  y: number;
+}
 
 /**
  * What a window was opened for: a file, and a line in it; or text, for an Untitled document that
@@ -58,11 +93,32 @@ export interface Host {
   /** Prints the window's page, as it is shown (the system's print dialog). */
   print(): Promise<void>;
   /**
+   * Asks where to save the window's printed page as a PDF and writes it there, paginated as the
+   * print dialog would: the path, or null when the person cancels. The page must be ready first
+   * (print.ts).
+   */
+  exportPdf(name: string, folder?: string | null): Promise<string | null>;
+  /**
    * Asks where to save, starting from a file name or a full path, and writes the file there. For a
    * name alone, `folder` is where the dialog starts, if it is still there; without it, or when it
    * is gone, the dialog starts where macOS has it. A full path starts in its own folder.
    */
   saveAs(text: string, suggestedName: string, folder?: string | null): Promise<string | null>;
+  /**
+   * Asks for a Word file (.docx) and reads its bytes; null when the dialog is cancelled. In the
+   * development page, a file picker.
+   */
+  openDocx(): Promise<{ name: string; bytes: Uint8Array } | null>;
+  /**
+   * Asks where to save a Word file, starting from `suggestedName` in `folder` (as `saveAs` does),
+   * and writes the bytes there. Resolves to the name it was saved as, or null when the dialog is
+   * cancelled. In the development page the browser downloads it.
+   */
+  exportWord(
+    bytes: Uint8Array,
+    suggestedName: string,
+    folder?: string | null,
+  ): Promise<string | null>;
   /**
    * Calls `onChange` after the file changes on disk; resolves to a function that stops watching. In
    * the app, only the window's document, a file it may use, which the app watches for it.
@@ -70,17 +126,19 @@ export interface Host {
   watch(path: string, onChange: () => void): Promise<() => void>;
   /**
    * The folder an agent may read for the document at `documentPath`, which the file sidebar shows:
-   * its repository's root, or else its own folder.
+   * its repository's root, or else its own folder. In the app, only for a document the person
+   * opened or saved; any other path rejects with a line that says nothing of whether it is there.
    */
   projectRoot(documentPath: string): Promise<ProjectRoot>;
   /**
    * The entries of `folder`, which must be inside the project folder `root`, with hidden ones and
-   * those that git ignores left out.
+   * those that git ignores left out. In the app, only for a project folder a sidebar shows.
    */
   list(folder: string, root: string): Promise<FileEntry[]>;
   /**
    * Opens an image or a PDF inside the project folder `root` in Preview (in its default app off
-   * the Mac); rejects with a line to show the person.
+   * the Mac); rejects with a line to show the person. In the app, `root` must be a project folder
+   * a sidebar shows, and the file below no hidden name.
    */
   openDefault(path: string, root: string): Promise<void>;
   /**
@@ -97,6 +155,17 @@ export interface Host {
   /** The URL the page loads the file at `path` from, once `allowImages` is true; null if none. */
   imageUrl(path: string): string | null;
   /**
+   * The stamp of each image file, in order: one text that changes when the file is saved again
+   * (`src/image-watch.ts`). Null for a file the page may not load or that isn't there.
+   */
+  imageStamps(paths: string[]): Promise<(string | null)[]>;
+  /**
+   * The width and height in px of each image file, in order, read from its header: null for a file
+   * the page may not load, that isn't there, or whose format isn't read. The preview holds the
+   * room of an image before it loads from it.
+   */
+  imageSizes(paths: string[]): Promise<({ width: number; height: number } | null)[]>;
+  /**
    * Forgets the documents remembered for Open Recent, but those the windows hold: the next launch
    * doesn't let the windows use them again.
    */
@@ -111,6 +180,30 @@ export interface Host {
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
   askToOverwrite(name: string): Promise<OverwriteChoice>;
   /**
+   * Asks whether to save a document that has no file yet before an image is added to it, which is
+   * saved in the project’s folder for images. Resolves to true for Save…, false for Cancel.
+   */
+  askToSaveForImage(): Promise<boolean>;
+  /**
+   * Shows the system's panel for image files, and resolves to what was chosen, to be added to a
+   * document (`addImages`), or to null when the person cancels.
+   */
+  chooseImages(): Promise<ImageSource | null>;
+  /**
+   * Saves the images of `source` in `folder`, which is inside the folder of the document at
+   * `document` ('' for the folder itself), the document being the window's own. A name that is
+   * taken gets a number: nothing is ever replaced, and a file that is dropped or chosen is copied,
+   * never moved. Rejects with a sentence to show the person.
+   */
+  addImages(document: string, folder: string, source: ImageSource): Promise<AddedImages>;
+  /**
+   * Calls `onDrop` with each drop of image files on this window, and resolves to a function that
+   * stops it. In the app, a drop of image files and nothing else is the window's to add to its
+   * document; any other drop opens files, as it always did. A browser tab hears nothing here: its
+   * page gets the drop itself (`EditorOptions.onImageFiles`).
+   */
+  listenForImageDrops(onDrop: (drop: DroppedImages) => void): Promise<() => void>;
+  /**
    * Opens a new window: empty, or for the file at `path`, showing `line` (counted from 1), or for
    * an Untitled document that holds `text`, which is unsaved. A window opens for a file or for
    * text, not both: the app refuses that, and this rejects with its reason.
@@ -120,6 +213,13 @@ export interface Host {
   windowStart(): Promise<WindowStart>;
   /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
   readClipboardText(): Promise<string>;
+  /**
+   * Pastes the clipboard into the document as the Mac's own Paste does (`paste:` to the window's
+   * first responder), so that the page gets a paste event with the clipboard's HTML as well as its
+   * text, which the editor converts to Markdown as ⌘V does. Resolves to whether something took it.
+   * A browser tab has none: it reads text alone (`readClipboardText`).
+   */
+  pasteInDocument?(): Promise<boolean>;
   /**
    * Calls `onOpen` with each file the app gives this window, of those it was asked to open on its
    * command line or by the system (`open -a Redlines plan.md`): those given before it was called,
@@ -214,6 +314,15 @@ export function decodeText(bytes: Uint8Array): string {
  */
 export const DISCARD_DRAFT_BUTTONS = { ok: 'Cancel', cancel: 'Discard' };
 
+/**
+ * The buttons of the question before an image is added to a document with no file. The dialog
+ * makes the first Return's and gives Escape to the button called Cancel: Save… is the way on.
+ */
+export const SAVE_FOR_IMAGE_BUTTONS = { ok: 'Save…', cancel: 'Cancel' };
+
+/** The sentence for a file that isn't an image the preview shows (src-tauri/src/image_files.rs). */
+const notAnImage = (name: string) => `“${name}” isn’t an image Redlines can show.`;
+
 /** Whether the answer to that question is Discard, the label of the button clicked. */
 export function wantsDiscard(answer: string | undefined): boolean {
   return answer === 'Discard';
@@ -239,8 +348,11 @@ export function createHost(): Host {
   return '__TAURI_INTERNALS__' in window ? createTauriHost() : createBrowserHost();
 }
 
+/** The media type of a Word file. */
+const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
 /** What the open and save panels offer: the documents (`DOCUMENT_EXTENSIONS`). */
-const PANEL_EXTENSIONS = ['md', 'markdown', 'qmd', 'Rmd', 'txt'];
+const PANEL_EXTENSIONS = DOCUMENT_EXTENSIONS;
 
 /**
  * The panels' filter, with the extension of the document `name` first when there is one: the save
@@ -250,7 +362,7 @@ function panelFilters(name = '') {
   const own = isDocument(name) ? extension(name) : '';
   const first = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() === own);
   const rest = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() !== own);
-  return [{ name: 'Markdown and text', extensions: [...first, ...rest] }];
+  return [{ name: 'Markdown, text and code', extensions: [...first, ...rest] }];
 }
 
 /** How long Save waits to hear whether the default folder is there, before it goes without. */
@@ -281,6 +393,70 @@ async function savePanelStart(name: string, folder: string | null | undefined): 
   }
 }
 
+/** Runs one of the app's commands, and rejects with the sentence it refused with. */
+async function appCommand<T>(
+  command: string,
+  args?: InvokeArgs,
+  options?: InvokeOptions,
+): Promise<T> {
+  try {
+    if (options) return await invoke<T>(command, args, options);
+    if (args !== undefined) return await invoke<T>(command, args);
+    return await invoke<T>(command);
+  } catch (error) {
+    throw new Error(String(error), { cause: error });
+  }
+}
+
+/**
+ * Sends the image files the page holds, a paste's or a drop's in a window that gets them itself, to
+ * the app, one after another so that two of a name never meet. Each goes as its bytes, with the
+ * rest in headers, written as percent codes (src-tauri/src/image_files.rs: add_pasted_image). What
+ * the app refuses is a sentence for the person, not a failure of the rest.
+ */
+async function sendImageData(
+  document: string,
+  folder: string,
+  files: File[],
+  pasted: boolean,
+): Promise<AddedImages> {
+  const now = new Date();
+  const added: AddedImages = { paths: [], refused: [] };
+  for (const file of files) {
+    const name = savedImageName(file, pasted, now);
+    if (name === null) {
+      added.refused.push(notAnImage(file.name));
+      continue;
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const sent = await appCommand<AddedImages>('add_pasted_image', bytes, {
+        headers: {
+          'x-redlines-document': encodeURIComponent(document),
+          'x-redlines-folder': encodeURIComponent(folder),
+          'x-redlines-name': encodeURIComponent(name),
+        },
+      });
+      added.paths.push(...sent.paths);
+      added.refused.push(...sent.refused);
+    } catch (error) {
+      added.refused.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return added;
+}
+
+/**
+ * Writes bytes to a file the window may write: the one the save panel just returned, which the
+ * dialog added to its scope. The file plugin's text command writes the body it is given as it is,
+ * so the window needs no other write permission (`fs:allow-write-file` would be a broader one).
+ */
+export function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
+  return invoke('plugin:fs|write_text_file', bytes, {
+    headers: { path: encodeURIComponent(path) },
+  });
+}
+
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
   return {
@@ -306,6 +482,8 @@ function createTauriHost(): Host {
     exists: (path) => exists(path),
     reveal: (path) => invoke('reveal_in_finder', { path }),
     print: () => invoke('print_window'),
+    exportPdf: (name, folder) =>
+      invoke<string | null>('export_pdf', { name, folder: folder ?? null }),
     async saveAs(text, suggestedName, folder) {
       const filters = panelFilters(suggestedName);
       const defaultPath = await savePanelStart(suggestedName, folder);
@@ -316,6 +494,27 @@ function createTauriHost(): Host {
       // document.
       if (!isDocument(path)) throw new NotADocumentError(SAVES_DOCUMENTS_ONLY);
       await write(path, text);
+      return path;
+    },
+    async openDocx() {
+      const path = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: 'Word document', extensions: ['docx'] }],
+      });
+      if (!path) return null;
+      return { name: basename(path), bytes: await readFile(path) };
+    },
+    async exportWord(bytes, suggestedName, folder) {
+      const defaultPath = await savePanelStart(suggestedName, folder);
+      const path = await saveDialog({
+        defaultPath,
+        filters: [{ name: 'Word document', extensions: ['docx'] }],
+      });
+      if (!path) return null;
+      // Written where the panel said: only that path is in the window's scope. The Mac's panel
+      // adds the extension itself.
+      await writeBytes(path, bytes);
       return path;
     },
     watch: watchDocument,
@@ -330,6 +529,11 @@ function createTauriHost(): Host {
     },
     allowImages: (path) => invoke<boolean>('show_images', { path }),
     imageUrl: (path) => convertFileSrc(path),
+    imageStamps: (paths) => invoke<(string | null)[]>('image_stamps', { paths }),
+    imageSizes: async (paths) =>
+      (await invoke<([number, number] | null)[]>('image_sizes', { paths })).map((size) =>
+        size ? { width: size[0], height: size[1] } : null,
+      ),
     forgetDocuments: async () => {
       await invoke('forget_documents');
     },
@@ -361,6 +565,32 @@ function createTauriHost(): Host {
       );
       return answer === 'Save As…' ? 'saveAs' : answer === 'Overwrite' ? 'overwrite' : 'cancel';
     },
+    async askToSaveForImage() {
+      const answer = await message(
+        'An image is saved in the project’s folder for images, so the document has to be saved first.',
+        {
+          title: 'Do you want to save this document before adding the image?',
+          kind: 'info',
+          buttons: SAVE_FOR_IMAGE_BUTTONS,
+        },
+      );
+      return answer === SAVE_FOR_IMAGE_BUTTONS.ok;
+    },
+    async chooseImages() {
+      // The app shows the panel and keeps what is chosen: the page gets an id, never a path.
+      const given = await appCommand<{ id: number } | null>('pick_images');
+      return given ? { kind: 'given', id: given.id } : null;
+    },
+    async addImages(document, folder, source) {
+      if (source.kind === 'given') {
+        return appCommand<AddedImages>('add_images', { id: source.id, document, folder });
+      }
+      return sendImageData(document, folder, source.files, source.pasted);
+    },
+    listenForImageDrops: (onDrop) =>
+      getCurrentWebviewWindow().listen<DroppedImages>('images-dropped', ({ payload }) =>
+        onDrop(payload),
+      ),
     async openWindow(path, line, text) {
       await invoke('open_window', { path: path ?? null, line: line ?? null, text: text ?? null });
     },
@@ -368,6 +598,7 @@ function createTauriHost(): Host {
     // Through the app: the menu bar is not a gesture in the page, which the page's own clipboard
     // access would need.
     readClipboardText: () => readText(),
+    pasteInDocument: () => invoke<boolean>('paste_in_field'),
     async listenForFiles(onOpen, onRefused) {
       // The app keeps the files until they are taken, so an event missed while starting loses
       // nothing.
@@ -409,9 +640,56 @@ async function watchDocument(path: string, onChange: () => void): Promise<() => 
   };
 }
 
+/** `name`, or `name-2`, `name-3` and on before its extension, whichever `taken` doesn't say is. */
+function numbered(name: string, taken: (name: string) => boolean): string {
+  const dot = name.lastIndexOf('.');
+  const [stem, ending] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+  for (let number = 1; ; number++) {
+    const candidate = number === 1 ? name : `${stem}-${number}${ending}`;
+    if (!taken(candidate)) return candidate;
+  }
+}
+
+/**
+ * Debug only, in the development page: stands in for Preview, which a page has none of
+ * (`apps/desktop/journeys`). An image opened in it is recorded, and one saved again there is
+ * replaced, the way a save in Preview changes the file.
+ */
+export interface DevImages {
+  /** The paths asked to open in another app, in order. */
+  opened: string[];
+  /** Saves the image at `path` again, with other bytes. */
+  replace(path: string, blob: Blob): void;
+}
+
+declare global {
+  interface Window {
+    __redlinesImages?: DevImages;
+  }
+}
+
 /** A host for a plain browser tab: one folder in memory, starting with sample.md. */
 function createBrowserHost(): Host {
   const files = new Map<string, string>([['sample.md', sample]]);
+  // The images added in this tab, by the path a document links them by, and the addresses the page
+  // loads them from, each made once, or the preview would draw an image again at every look.
+  const images = new Map<string, Blob>();
+  const imageUrls = new Map<string, string>();
+  /** How many times each image was saved again, which only the development page does. */
+  const stamps = new Map<string, number>();
+  const dev: DevImages | null = import.meta.env.DEV
+    ? {
+        opened: [],
+        replace(path, blob) {
+          images.set(path, blob);
+          const url = imageUrls.get(path);
+          if (url) URL.revokeObjectURL(url);
+          imageUrls.delete(path);
+          stamps.set(path, (stamps.get(path) ?? 0) + 1);
+        },
+      }
+    : null;
+  if (dev) window.__redlinesImages = dev;
   const read = (path: string) => {
     const text = files.get(path);
     return text === undefined
@@ -441,23 +719,77 @@ function createBrowserHost(): Host {
       window.print();
       return Promise.resolve();
     },
+    // A tab has no panel of its own to write a file with: the browser's print dialog saves a PDF.
+    exportPdf: () => {
+      window.print();
+      return Promise.resolve(null);
+    },
     saveAs: (text, suggestedName) => {
       const path = basename(suggestedName);
       files.set(path, text);
       return Promise.resolve(path);
     },
+    openDocx: () =>
+      new Promise((resolve, reject) => {
+        // A tab has no open panel of the app's: the page's own file picker.
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.docx';
+        input.addEventListener('cancel', () => resolve(null));
+        input.addEventListener('change', () => {
+          const file = input.files?.[0];
+          if (!file) return resolve(null);
+          file
+            .arrayBuffer()
+            .then((buffer) => resolve({ name: file.name, bytes: new Uint8Array(buffer) }), reject);
+        });
+        input.click();
+      }),
+    exportWord: (bytes, suggestedName) => {
+      // A tab has no save panel: the browser downloads the file.
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: DOCX_TYPE }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = suggestedName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return Promise.resolve(suggestedName);
+    },
     watch: () => Promise.resolve(() => {}),
     // One folder, with no name and no repository.
     projectRoot: () => Promise.resolve({ folder: '', isRepo: false, tooBroad: false }),
+    // The images added in this tab are files of the folder too, to be dragged into the document.
     list: () =>
-      Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
-    openDefault: () =>
-      Promise.reject(new Error('A browser tab has no other apps to open files in.')),
+      Promise.resolve(
+        [...files.keys(), ...images.keys()].map((name) => ({ name, path: name, isDir: false })),
+      ),
+    // The development page has a stand-in for Preview (`DevImages`); a tab has no other apps.
+    openDefault: (path) => {
+      if (!dev)
+        return Promise.reject(new Error('A browser tab has no other apps to open files in.'));
+      dev.opened.push(path);
+      return Promise.resolve();
+    },
     // Every file of the folder is the tab's own, and it remembers nothing.
     allowDocument: () => Promise.resolve(),
-    // A tab has no folder to load images from.
-    allowImages: () => Promise.resolve(false),
-    imageUrl: () => null,
+    // The images added in this tab are in its memory, in the folder of the document.
+    allowImages: () => Promise.resolve(true),
+    imageUrl: (path) => {
+      const image = images.get(path);
+      if (!image) return null;
+      const known = imageUrls.get(path);
+      if (known) return known;
+      const url = URL.createObjectURL(image);
+      imageUrls.set(path, url);
+      return url;
+    },
+    imageStamps: (paths) =>
+      Promise.resolve(
+        paths.map((path) => (images.has(path) ? String(stamps.get(path) ?? 0) : null)),
+      ),
+    imageSizes: (paths) => Promise.resolve(paths.map(() => null)),
     forgetDocuments: () => Promise.resolve(),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.
@@ -467,6 +799,50 @@ function createBrowserHost(): Host {
       ),
     askToDiscardDraft: () =>
       Promise.resolve(window.confirm('Discard a comment or reply you haven’t posted?')),
+    askToSaveForImage: () =>
+      Promise.resolve(
+        window.confirm(
+          'Save this document first? An image is saved in the project’s folder for images.',
+        ),
+      ),
+    // The browser's own panel, which gives the files themselves.
+    chooseImages: () =>
+      new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;
+        input.addEventListener('change', () => {
+          const chosen = Array.from(input.files ?? []);
+          resolve(chosen.length ? { kind: 'files', files: chosen, pasted: false } : null);
+        });
+        input.addEventListener('cancel', () => resolve(null));
+        input.click();
+      }),
+    addImages: (_document, folder, source) => {
+      if (source.kind === 'given') {
+        return Promise.reject(new Error('A browser tab is given no files by the system.'));
+      }
+      const added: AddedImages = { paths: [], refused: [] };
+      const now = new Date();
+      for (const file of source.files) {
+        const name = savedImageName(file, source.pasted, now);
+        if (name === null) {
+          added.refused.push(notAnImage(file.name));
+          continue;
+        }
+        // A name that is taken gets a number: nothing is replaced, as in the app.
+        const made = numbered(name, (candidate) =>
+          images.has(folder ? `${folder}/${candidate}` : candidate),
+        );
+        const path = folder ? `${folder}/${made}` : made;
+        images.set(path, file);
+        added.paths.push(path);
+      }
+      return Promise.resolve(added);
+    },
+    // A drop reaches the page itself in a tab (`EditorOptions.onImageFiles`).
+    listenForImageDrops: () => Promise.resolve(() => {}),
     askToOverwrite: (name) =>
       Promise.resolve(
         window.confirm(`“${name}” changed since you opened it. Overwrite it?`)

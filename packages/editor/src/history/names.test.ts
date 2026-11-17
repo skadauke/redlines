@@ -69,6 +69,7 @@ describe('naming a step', () => {
       accept: 'Accept',
       reject: 'Reject',
       'review.comment': 'Comment',
+      'review.highlight': 'Highlight',
       'review.reply': 'Reply',
       'review.resolve': 'Resolve',
       'review.reopen': 'Reopen',

@@ -102,7 +102,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     flex: 'none',
     marginLeft: 'auto',
     paddingLeft: notePx(4),
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
   },
   '.rl-note-head': {
@@ -170,6 +170,11 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-note-icon svg': { width: notePx(14), height: notePx(14) },
   '.rl-note-icon:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
   '.rl-note-icon:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
+  // A button grayed with its reason as the hint (`setReason`): dimmed, still under the pointer.
+  '.rl-reason-disabled[aria-disabled="true"], .rl-reason-disabled[aria-disabled="true"] svg': {
+    color: 'var(--rl-ink-3)',
+  },
+  '.rl-reason-disabled[aria-disabled="true"]:hover': { backgroundColor: 'transparent' },
   '.rl-note-button': {
     height: notePx(22),
     padding: `0 ${notePx(6)}`,
@@ -202,7 +207,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     resize: 'none',
   },
   '.rl-note-box textarea:focus': { borderColor: 'var(--rl-ink-3)' },
-  '.rl-note-box textarea::placeholder': { color: 'var(--rl-ink-3)' },
+  '.rl-note-box textarea::placeholder': { color: 'var(--rl-ink-2)' },
   '.rl-note-box-row': {
     display: 'flex',
     justifyContent: 'flex-end',
@@ -266,6 +271,16 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // The anchor of the selected note: its tint doubled. A resolved thread's text has none at rest,
   // so its selected anchor takes only a light one.
   '.rl-anchor': { backgroundColor: 'var(--rl-color-tint)' },
+  // The change Review Changes is on: a ring around its text in the theme's inks, so that it reads
+  // as "this one" and never as a selection (the system's blue) or a comment's tint (an author's
+  // color). It has no wash: text sits on the page, or on the tint of code blocks and tables, and
+  // any wash takes some author colors under 4.5:1 there (measured over every theme; Book's red on
+  // its tint is already 4.49 bare), so the ring and the wider bar carry the mark.
+  '.rl-review-current': {
+    boxShadow:
+      '0 0 0 1px color-mix(in srgb, var(--rl-page) 80%, transparent), 0 0 0 2.5px color-mix(in srgb, var(--rl-ink-2) 75%, transparent)',
+    borderRadius: '2px',
+  },
   '.rl-anchor-resolved': {
     backgroundColor: 'color-mix(in srgb, var(--rl-ink-3) 18%, transparent)',
   },
@@ -279,7 +294,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     boxShadow: '0 0 0 3px color-mix(in srgb, var(--rl-ink-3) 25%, transparent)',
   },
   '.rl-note-resolved .rl-note-name, .rl-note-resolved .rl-note-text': {
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
   },
   '.rl-note-resolved .rl-dot': { backgroundColor: 'var(--rl-ink-3)' },
   '.rl-note-resolved-line': {
@@ -287,7 +302,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     alignItems: 'center',
     gap: notePx(4),
     marginTop: notePx(6),
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
   },
   '.rl-note-resolved-line svg': { flex: 'none', width: notePx(12), height: notePx(12) },
@@ -341,18 +356,19 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     overflow: 'hidden',
   },
 
-  // The review bar: one row on the card color, floating above the bottom of the window, centered
-  // under the text column, and the margin notes beside it, where the bar's measurements put its
-  // middle.
-  '.rl-review-bar': {
+  // The review panel (Review Changes): a card beside the change, in the margin or below or above it,
+  // fixed in the window. Its title is the handle that drags it.
+  '.rl-review-panel': {
     position: 'fixed',
-    zIndex: '300',
+    // Above the text, below the title bar (2) whose menus open over it.
+    zIndex: '1',
     display: 'flex',
-    alignItems: 'center',
-    gap: '2px',
+    flexDirection: 'column',
+    gap: '8px',
     boxSizing: 'border-box',
-    height: '42px',
-    padding: '0 6px',
+    width: '328px',
+    maxWidth: 'calc(100vw - 24px)',
+    padding: '8px 10px 10px',
     border: '1px solid var(--rl-rule)',
     borderRadius: '12px',
     backgroundColor: 'var(--rl-card)',
@@ -360,32 +376,122 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
     fontSize: 'var(--rl-size-ui)',
-    lineHeight: '1',
-    whiteSpace: 'nowrap',
+    lineHeight: '1.35',
     cursor: 'default',
-    transform: 'translateX(-50%)',
     userSelect: 'none',
     WebkitUserSelect: 'none',
   },
+  '.rl-review-panel:focus': { outline: 'none' },
+  '.rl-review-panel-dragging': { boxShadow: 'var(--rl-shadow-lifted, var(--rl-shadow))' },
+  '.rl-rp-top': {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    margin: '-2px -4px 0 0',
+    cursor: 'grab',
+    touchAction: 'none',
+    color: 'var(--rl-ink-2)',
+    fontSize: 'var(--rl-size-ui-small)',
+  },
+  '.rl-review-panel-dragging .rl-rp-top': { cursor: 'grabbing' },
+  '.rl-rp-title': {
+    color: 'var(--rl-ink)',
+    fontSize: 'var(--rl-size-ui)',
+    fontWeight: '700',
+    lineHeight: '1.3',
+  },
+  '.rl-rp-top .rl-bar-count': {
+    flex: '1',
+    minWidth: '0',
+    padding: '0',
+    textAlign: 'right',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  '.rl-rp-body': { display: 'flex', flexDirection: 'column', gap: '4px' },
+  '.rl-rp-head': {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    color: 'var(--rl-ink-2)',
+    fontSize: 'var(--rl-size-ui-small)',
+  },
+  '.rl-rp-head .rl-dot': {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    backgroundColor: 'var(--rl-color)',
+  },
+  '.rl-rp-name': { color: 'var(--rl-ink)', fontWeight: '600' },
+  '.rl-rp-what': { overflowWrap: 'anywhere', userSelect: 'text', WebkitUserSelect: 'text' },
+  '.rl-rp-form': { display: 'block' },
+  '.rl-rp-form[hidden]': { display: 'none' },
+  '.rl-rp-field': {
+    boxSizing: 'border-box',
+    width: '100%',
+    resize: 'none',
+    padding: '6px 8px',
+    border: '1px solid var(--rl-rule)',
+    borderRadius: '8px',
+    backgroundColor: 'var(--rl-paper, transparent)',
+    color: 'var(--rl-ink)',
+    font: 'inherit',
+    userSelect: 'text',
+    WebkitUserSelect: 'text',
+  },
+  '.rl-rp-field:focus': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-1px' },
+  // Two rows on one grid (#665): Accept, Reject and Comment on one line, never wrapping; Previous
+  // and Next under them, at the same left and right edges. The keys are small enough for all three
+  // to fit the panel; where they don't fit they are left out (`rl-rp-narrow`), and a label that still
+  // doesn't fit is cut short.
+  '.rl-rp-actions, .rl-rp-nav': {
+    display: 'flex',
+    flexWrap: 'nowrap',
+    justifyContent: 'space-between',
+    margin: '0 -4px',
+  },
+  '.rl-rp-nav': { paddingTop: '6px', borderTop: '1px solid var(--rl-rule)' },
+  '.rl-rp-actions .rl-bar-text, .rl-rp-nav .rl-bar-text': {
+    gap: '4px',
+    padding: '0 6px',
+    whiteSpace: 'nowrap',
+    minWidth: '0',
+    flex: '0 1 auto',
+  },
+  '.rl-rp-actions .rl-bar-label, .rl-rp-nav .rl-bar-label': {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  '.rl-rp-actions .rl-bar-key, .rl-rp-nav .rl-bar-key': {
+    marginLeft: '1px',
+    minWidth: '14px',
+    padding: '0 3px',
+  },
+  '.rl-rp-narrow .rl-bar-key': { display: 'none' },
+  '.rl-rp-actions[hidden], .rl-rp-nav[hidden]': { display: 'none' },
+  '.rl-bar-key': {
+    marginLeft: '2px',
+    minWidth: '16px',
+    padding: '1px 4px',
+    border: '1px solid var(--rl-rule)',
+    borderRadius: '4px',
+    color: 'var(--rl-ink-2)',
+    fontSize: 'var(--rl-size-ui-small)',
+    lineHeight: '1.2',
+    textAlign: 'center',
+  },
   // Why a decision was refused, above the bar for a few seconds.
   '.rl-bar-error': {
-    position: 'absolute',
-    bottom: 'calc(100% + 8px)',
-    left: '50%',
     boxSizing: 'border-box',
-    width: 'max-content',
-    maxWidth: 'min(420px, calc(100vw - 32px))',
     padding: '7px 10px',
     border: '1px solid var(--rl-rule)',
     borderRadius: '8px',
     backgroundColor: 'var(--rl-card)',
-    boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui)',
     lineHeight: '1.35',
     whiteSpace: 'normal',
-    transform: 'translateX(-50%)',
   },
+  '.rl-bar-error[hidden]': { display: 'none' },
   '.rl-bar-count': {
     minWidth: '104px',
     padding: '0 4px',
@@ -409,11 +515,6 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-bar-icon': { width: '30px', padding: '0' },
   '.rl-bar-text': { gap: '6px', padding: '0 11px 0 9px', color: 'var(--rl-ink)' },
   '.rl-bar-text svg': { color: 'var(--rl-ink-2)' },
-  // In a bar too wide for its window Accept and Reject are icons, named by their hints.
-  '.rl-bar-text .rl-hint': { display: 'none' },
-  '.rl-review-bar-narrow .rl-bar-label': { display: 'none' },
-  '.rl-review-bar-narrow .rl-bar-text': { width: '30px', padding: '0' },
-  '.rl-review-bar-narrow .rl-bar-text .rl-hint': { display: 'flex' },
   '.rl-bar-icon:enabled:hover, .rl-bar-text:enabled:hover': {
     backgroundColor: 'var(--rl-pressed)',
   },
@@ -423,13 +524,6 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   },
   '.rl-bar-icon:disabled, .rl-bar-text:disabled, .rl-bar-text:disabled svg': {
     color: 'var(--rl-ink-3)',
-  },
-  '.rl-bar-divider': {
-    flex: 'none',
-    width: '1px',
-    height: '20px',
-    margin: '0 5px',
-    backgroundColor: 'var(--rl-rule)',
   },
 
   // An icon's hint, shown above it after a pause on hover: its name and shortcut.
@@ -442,8 +536,10 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     gap: '12px',
     padding: '7px 10px',
     borderRadius: '8px',
-    backgroundColor: 'var(--rl-tip)',
-    color: '#ffffff',
+    border: '1px solid var(--rl-rule)',
+    backgroundColor: 'var(--rl-card)',
+    boxShadow: 'var(--rl-shadow)',
+    color: 'var(--rl-ink)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
     lineHeight: '1',
     whiteSpace: 'nowrap',
@@ -453,15 +549,14 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     opacity: '0',
     transition: 'opacity 90ms ease-out, visibility 0s linear 90ms',
   },
-  '.rl-bar-icon:hover .rl-hint, .rl-note-icon:hover .rl-hint, .rl-review-bar-narrow .rl-bar-text:hover .rl-hint':
-    {
-      visibility: 'visible',
-      opacity: '1',
-      transition: 'opacity 90ms ease-out 400ms, visibility 0s linear 400ms',
-    },
+  '.rl-bar-icon:hover .rl-hint, .rl-note-icon:hover .rl-hint': {
+    visibility: 'visible',
+    opacity: '1',
+    transition: 'opacity 90ms ease-out 400ms, visibility 0s linear 400ms',
+  },
   // The review bar's hints keep the interface's own size, whatever the text size.
-  '.rl-review-bar .rl-hint': { fontSize: 'var(--rl-size-ui-small)' },
-  '.rl-hint-keys': { color: 'rgb(255 255 255 / 0.62)', letterSpacing: '0.04em' },
+  '.rl-review-panel .rl-hint': { fontSize: 'var(--rl-size-ui-small)' },
+  '.rl-hint-keys': { color: 'var(--rl-ink-2)', letterSpacing: '0.04em' },
 
   '@media (prefers-reduced-motion: reduce)': {
     // Every selector above that moves something by a transition is here, with its own specificity.

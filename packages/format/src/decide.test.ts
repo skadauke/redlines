@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment, deleteThread } from './comments.ts';
-import { accept, acceptAll, reject, rejectAll } from './decide.ts';
+import {
+  accept,
+  acceptAll,
+  acceptMarks,
+  canReject,
+  rejectReason,
+  isDecidable,
+  reject,
+  rejectAll,
+  rejectMarks,
+} from './decide.ts';
 import { EditError } from './errors.ts';
+import { encodeValue } from './format-ops.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {
@@ -596,7 +607,7 @@ describe('when a decision would hide another change', () => {
     } catch (error) {
       expect((error as EditError).code).toBe('would-hide-marks');
     }
-    // In the words of a decision, not of an edit, which can be made in Raw instead.
+    // In the words of a decision, not of an edit, which can be made in Plain instead.
     expect(() => rejectAll(text, (m) => m.id === 'b4rt')).toThrow(
       'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.',
     );
@@ -1220,5 +1231,93 @@ describe('format changes (format §2.6)', () => {
       expect(applyChanges(text, reject(text, id)), body).toBe(original);
       expectViewsAgree(body, text);
     }
+  });
+});
+
+describe('a point alignment change (format §3.7, #281)', () => {
+  // Ada's change, which centered the second column of a table, as one mark with no closer at the end of the
+  // header's last cell, and Bo's typing in the table: decided by id, alone or together.
+  const OLD = encodeValue('| - | - |');
+  const text = file(
+    `| a | b<!--fmt k3x9 align=${OLD}--> |\n| - | :-: |\n| c | <!--ins w8nn-->d<!--/w8nn--> |`,
+    { k3x9: 'ada', w8nn: 'bo' },
+  );
+  const parsed = parse(text);
+  const mark = parsed.marks.find((candidate) => candidate.id === 'k3x9');
+  const trim = (t: string) => bodyOf(t).replace(/[\r\n]+$/, '');
+
+  it('is decidable by accept and reject, and can be rejected while its table has its columns', () => {
+    expect(mark && isDecidable(mark)).toBe(true);
+    expect(mark && canReject(parsed, mark)).toBe(true);
+    expect(trim(applyChanges(text, accept(text, 'k3x9')))).toBe(
+      '| a | b |\n| - | :-: |\n| c | <!--ins w8nn-->d<!--/w8nn--> |',
+    );
+    expect(trim(applyChanges(text, reject(text, 'k3x9')))).toBe(
+      '| a | b |\n| - | - |\n| c | <!--ins w8nn-->d<!--/w8nn--> |',
+    );
+    // SPEC has two cells, and the table has one column: it can only be accepted.
+    const narrow = file(`| a<!--fmt k3x9 align=${OLD}--> |\n| :-: |\n| c |`, { k3x9: 'ada' });
+    const gone = parse(narrow).marks[0];
+    expect(gone && isDecidable(gone)).toBe(true);
+    expect(gone && canReject(parse(narrow), gone)).toBe(false);
+    // The hint of the grayed Reject says why, in the words of the interface (design §4.1).
+    expect(gone && rejectReason(parse(narrow), gone)).toBe(
+      'This change can only be accepted: the table no longer has the columns it had.',
+    );
+    expect(mark && rejectReason(parsed, mark)).toBeUndefined();
+  });
+
+  it('is rejected, with another change, as one decision that gives what rejecting each does', () => {
+    const ids = ['k3x9', 'w8nn'];
+    const together = applyChanges(text, rejectMarks(text, ids));
+    expect(trim(together)).toBe('| a | b |\n| - | - |\n| c |  |');
+    for (const order of [ids, ids.toReversed()]) {
+      let step = text;
+      for (const id of order) step = applyChanges(step, reject(step, id));
+      expect(together, order.join(' ')).toBe(step);
+    }
+    expect(together).toBe(applyChanges(text, rejectAll(text)));
+    expect(parse(together).marks).toEqual([]);
+    expect(parse(together).ledger.marks).toEqual({});
+    // And accepted: both marks go, the text stays.
+    const kept = applyChanges(text, acceptMarks(text, ids));
+    expect(trim(kept)).toBe('| a | b |\n| - | :-: |\n| c | d |');
+    expect(kept).toBe(applyChanges(text, acceptAll(text)));
+    expect(trim(kept)).toBe(trim(newestView(text).text));
+    expect(trim(together)).toBe(trim(originalView(text).text));
+  });
+
+  it('is refused as a decision of several marks when it can not be rejected, and nothing is written', () => {
+    const narrow = file(
+      `| a<!--fmt k3x9 align=${OLD}--> |\n| :-: |\n| <!--ins w8nn-->c<!--/w8nn--> |`,
+      { k3x9: 'ada', w8nn: 'bo' },
+    );
+    expect(() => rejectMarks(narrow, ['k3x9', 'w8nn'])).toThrow(EditError);
+    // The others are decided on their own.
+    expect(trim(applyChanges(narrow, rejectMarks(narrow, ['w8nn'])))).toBe(
+      '| a<!--fmt k3x9 align=\\|\\x20-\\x20\\|\\x20-\\x20\\|--> |\n| :-: |\n|  |',
+    );
+  });
+});
+
+describe('why a change can only be accepted (the hint of the grayed Reject)', () => {
+  const hint = (text: string) => {
+    const parsed = parse(text);
+    const mark = parsed.marks[0];
+    return mark && rejectReason(parsed, mark);
+  };
+
+  it('says the formatting is gone, or nothing is left of the text', () => {
+    // The format was taken off in the text, so rejecting has no syntax to take away.
+    expect(hint(file('A <!--fmt m2bd +bold-->big<!--/m2bd--> plan.', { m2bd: 'bo' }))).toBe(
+      'This change can only be accepted: its text no longer has that formatting.',
+    );
+    expect(hint(file('A <!--fmt m2bd +bold-->**big**<!--/m2bd--> plan.', { m2bd: 'bo' }))).toBe(
+      undefined,
+    );
+  });
+
+  it('says nothing for a change that can be rejected', () => {
+    expect(hint(file('A <!--ins k3x9-->new<!--/k3x9--> plan.', { k3x9: 'bo' }))).toBeUndefined();
   });
 });

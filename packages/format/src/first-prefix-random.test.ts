@@ -17,7 +17,7 @@ import {
   seeded,
 } from './random-docs.ts';
 import { ada, bodyOf, context, exactly, expectEveryOrderAlike, file } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import { originalView } from './views.ts';
 import { readsAsNewest } from './oracle.ts';
 

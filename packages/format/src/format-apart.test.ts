@@ -10,11 +10,12 @@ import { EditError } from './errors.ts';
 import { holdsMisreadItem, itemLines, marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
 import { formatReader } from './format-reader.ts';
-import { trackedFormat, tryingEveryMark, untrackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat, tryingEveryMark, untrackedFormat } from './formatting.ts';
 import { markerRanges } from './markers.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
-import { trackedEdit } from './track.ts';
+import { cellAt } from './table-cells.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import type { TrackedEdits } from './track.ts';
 import {
   TIME,
@@ -235,7 +236,8 @@ describe('the lines that the reading of list items is sure are items (format §2
         ).toBe(true);
       }
     }
-    expect(sure).toBeGreaterThan(1000);
+    // A quarter of a draw each, as the default 4,000 draws give 1,000 (#606: the count scales).
+    expect(sure).toBeGreaterThan(Math.floor(fuzzCount(4000) / 4));
   });
 });
 
@@ -1222,6 +1224,10 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
   });
 });
 
+/** Whether `range` is in a cell of a table. */
+const tableCellAt = (text: string, range: Range) =>
+  cellAt(text, parse(text), range.from, range.to) !== undefined;
+
 describe(
   'marks apart from the change, on random lists, tables and quotes',
   { timeout: 3_600_000 },
@@ -1589,8 +1595,18 @@ describe(
           expect(apart.result, label).toEqual(every.result);
           alike++;
         } else if (!tooMany(every.error)) {
-          // And what it refuses, leaving some pending refuses too.
-          expect(apart.result, `${label}\n${every.error?.message ?? ''}`).toBeUndefined();
+          // And what it refuses, leaving some pending refuses too: but for a change in a table's
+          // cell, which is then a replacement of the table (lane R2).
+          if (apart.result && tableCellAt(text, range)) {
+            const after = applyChanges(text, apart.result.changes);
+            const old = new Set(parse(text).marks.map((mark) => mark.id));
+            expect(
+              parse(after).marks.some((mark) => mark.kind === 'sub' && !old.has(mark.id)),
+              `${label}\nwidened: ${every.error?.message ?? ''}`,
+            ).toBe(true);
+          } else {
+            expect(apart.result, `${label}\n${every.error?.message ?? ''}`).toBeUndefined();
+          }
         } else if (apart.result && apart.result.changes.length > 0) {
           // More than every mark can be tried for: every order of them, exactly.
           const result: TrackedEdits = apart.result;

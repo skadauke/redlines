@@ -54,7 +54,7 @@ import type { DocView, MarkRange, Parsed, Range, Segment, TextChange } from './t
 const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
 
 const NOT_A_TYPE =
-  "This block can't change type: Markdown writes it in a way a change couldn't give back. Change it in Raw.";
+  "This block can't change type: Markdown writes it in a way a change couldn't give back. Change it in Plain.";
 const INSIDE =
   "A block inside a list or a quote can't change type. Change the list item or the quote it is in.";
 const ON_ITS_OWN =
@@ -80,11 +80,15 @@ const NARROWER =
   "This item can't get a narrower bullet: lines under it that are not part of it now would be read as part of it.";
 const AT_START =
   'A pending change or a comment starts this block, and would have to move. Decide it first.';
+const AT_START_OWN =
+  'Your new text starts this block, and would have to move. Accept or reject your new text and its line breaks first.';
 const OWN_FIRST = 'Accept or reject your other change to this block first.';
 const NOT_ITEM = 'Only a list item can be indented or outdented.';
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 const NO_PARENT = "This item can't be outdented: it isn't under another item.";
-const NUMBERED_CHILD =
+/** Why an item can't be outdented: the numbered item after it would become text of its own. The
+ * editor's Backspace says it in the same words (it reads the refusal, not its text). */
+export const NUMBERED_CHILD =
   "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.";
 const QUOTE_TIGHT =
   "A list in a quote written with no space after the `>` can't be indented or outdented, because the lines would need a space the quote doesn't have. Add the space after each `>` first.";
@@ -93,15 +97,15 @@ const NO_ROOM = "This item can't be outdented: a line under it isn't indented fa
 const STACKED =
   "This change of a block's type can't be rejected while another change starts the block. Decide that one first.";
 const LOST =
-  "This format change can't be rejected, because its block no longer has that syntax. Accept it, or change the text in Raw with Track Changes off.";
+  "This format change can't be rejected, because its block no longer has that syntax. Accept it, or change the text in Plain with Track Changes off.";
 const NOT_AN_ALERT =
   'This is not an alert: an alert is a quote at the left edge whose first line is a type in brackets, such as [!NOTE].';
 const ALERT_ON_ITS_OWN =
   'An alert changes type only with a blank line before and after it (or right under a heading, a thematic break or a closing fence), so that no line goes on from it.';
 const ALERT_END =
-  "This alert ends in a line that takes no marker at its end, such as a code block's fence, a rule or HTML, so its type can't change here. Change it in Raw, or add a line of text at the end of the alert.";
+  "This alert ends in a line that takes no marker at its end, such as a code block's fence, a rule or HTML, so its type can't change here. Change it in Plain, or add a line of text at the end of the alert.";
 const ALERT_LOST =
-  "This format change can't be rejected, because its alert no longer has a type in brackets on its first line. Accept it, or change the text in Raw with Track Changes off.";
+  "This format change can't be rejected, because its alert no longer has a type in brackets on its first line. Accept it, or change the text in Plain with Track Changes off.";
 
 /** The syntax that the serializer writes for each type. */
 const SYNTAX: Record<BlockType, string> = {
@@ -297,7 +301,9 @@ function readBlock(reader: BlockReader, paragraph: Range, items = false): Block 
       if (!starts) continue;
       const ops = mark.kind === 'fmt' ? opsOf(mark, segment) : [];
       if (!ops.some((op) => op.name === 'was') || mark.entry.by !== reader.owner) {
-        throw refused(AT_START);
+        throw refused(
+          mark.kind === 'ins' && mark.entry.by === reader.owner ? AT_START_OWN : AT_START,
+        );
       }
       own = { mark, segment, ops };
       if (opener < line) {
@@ -698,7 +704,13 @@ function planType(
     // The block after the blank line, indented to the item's text or more, would be the item's.
     let next = nextLine(reader, block.end);
     while (next !== undefined && isBlank(text, next)) next = nextLine(reader, next);
-    const indent = next === undefined ? 0 : (/^ */.exec(lineAt(text, next))?.[0].length ?? 0);
+    // A tab is four columns, to the next multiple of four (#445).
+    let indent = 0;
+    if (next !== undefined) {
+      for (const ch of /^[ \t]*/.exec(lineAt(text, next))?.[0] ?? '') {
+        indent = ch === '\t' ? indent + 4 - (indent % 4) : indent + 1;
+      }
+    }
     if (next !== undefined && indent >= (to === 'ol' ? 3 : 2)) throw refused(PULLS_IN);
   }
   if (isList(block.type) && isList(to)) {

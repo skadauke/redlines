@@ -15,7 +15,15 @@ import { trackingField } from '../tracked/typing.ts';
 import { planCodeReturn } from './code.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
-import { type Block, blockAt, isGapLine, neighbours, openConstructs } from './structure.ts';
+import {
+  type Block,
+  blockAt,
+  holdsMarkersOnly,
+  isGapLine,
+  listItems,
+  neighbours,
+  openConstructs,
+} from './structure.ts';
 
 /** A key's edit: plain changes, where the caret goes, and what it is, for the history. */
 export interface KeyEdit {
@@ -26,6 +34,8 @@ export interface KeyEdit {
   userEvent:
     | 'input.break'
     | 'input.break.line'
+    | 'input.type'
+    | 'input.paste'
     | 'delete.selection'
     | 'delete.backward.block'
     | 'delete.forward.block'
@@ -64,6 +74,9 @@ export interface KeyEdit {
   caretAfterText?: { from: number; text: string };
   /** Joins the step before it in the history, so that the two are one step to undo. */
   join?: boolean;
+  /** ↓ at the end of code that is never closed: the changes write its closing fence, and the key
+   * goes on to open the empty paragraph below it. */
+  closeFence?: boolean;
   /** Kept in the record of Returns (Return and Shift-Return are, whatever their user event). */
   record?: boolean;
   /**
@@ -88,6 +101,9 @@ export interface KeyEdit {
   openPlain?: { insert: string; down: number; at?: number };
   /** What the key does instead when the format refuses its changes. */
   fallback?: KeyEdit;
+  /** The changes are written as a replacement of their unit at once: the format accepts a fine
+   * form of them that a reader of the file reads otherwise than the newest view. */
+  widenFirst?: boolean;
 }
 
 /** A key that is taken and does nothing, the caret left where it is. */
@@ -211,7 +227,7 @@ export function itemsAround(state: EditorState, block: Block): Item[] {
       marker: state.sliceDoc(mark.from, mark.to),
       after: space || ' ',
       task: node.getChild('Task') !== null,
-      loose: !!container?.loose && (list?.getChildren('ListItem').length ?? 0) > 1,
+      loose: !!container?.loose && listItems(state, list).length > 1,
     });
   }
   return items;
@@ -222,7 +238,7 @@ export function itemsAround(state: EditorState, block: Block): Item[] {
 export function nextMarker(state: EditorState, item: Item): string {
   const number = /^(\d+)([.)])$/.exec(item.marker);
   if (!number) return item.marker;
-  const numbers = (item.node.parent?.getChildren('ListItem') ?? []).map((other) => {
+  const numbers = listItems(state, item.node.parent).map((other) => {
     const mark = other.getChild('ListMark');
     return mark ? Number.parseInt(state.sliceDoc(mark.from, mark.to), 10) : NaN;
   });
@@ -265,32 +281,123 @@ function textLineAbove(state: EditorState, line: Line): Line | null {
 }
 
 /** Whether a block of an item is its last one, but for lists nested in it. */
-function lastInItem(state: EditorState, block: Block, item: Item): boolean {
+export function lastInItem(state: EditorState, block: Block, item: Item): boolean {
   let child: SyntaxNode | null = (
     ensureSyntaxTree(state, block.lines.to, 50) ?? syntaxTree(state)
   ).resolveInner(block.text.from, 1);
   while (child && child.parent && child.parent.from !== item.node.from) child = child.parent;
   for (let next = child?.nextSibling ?? null; next; next = next.nextSibling) {
+    // In a quote, the marks of its later lines are nodes between the blocks.
+    if (next.name === 'QuoteMark') continue;
     if (next.name !== 'BulletList' && next.name !== 'OrderedList') return false;
   }
   return true;
 }
 
+/**
+ * The pending split whose break stands right above `line`: of the author's own, or another person's.
+ * The blank lines between are the split's own (the break of a loose list holds its blank line:
+ * `b<split>⏎⏎   - `). Null where the line above is no split's.
+ */
+function splitAbove(state: EditorState, line: Line): 'own' | 'theirs' | null {
+  const { doc } = state;
+  let n = line.number - 1;
+  while (n > 1 && /^[ \t>]*$/.test(doc.line(n).text)) n--;
+  if (n < 1) return null;
+  const above = doc.line(n);
+  const found = state
+    .field(parsedField, false)
+    ?.marks.find(
+      (mark) => mark.kind === 'split' && mark.segments.some((g) => g.open.to === above.to),
+    );
+  if (!found) return null;
+  return found.entry.by === state.facet(authorFacet)?.handle ? 'own' : 'theirs';
+}
+
+/**
+ * A bare marker (`-`, `*`, `+`, `1.` or `1)` alone on its line) at the end of an item's text,
+ * which the syntax tree reads as a line of that text, though the item's text ends before it and
+ * CommonMark reads the line as an empty item of a list of its own: `1. text⏎-`, a bullet under
+ * a numbered item, or a number under a bullet, or the other delimiter. The parse (like the
+ * rule that an empty item can't interrupt a paragraph) takes it for more of the paragraph, and
+ * a Return there would split the item, writing the split right behind the marker (`-<split>`),
+ * which reads as text, not as the item (#581). It is the Return in an empty item: the item's
+ * line as a block of its own, and the items around it, from the one whose text it is no more of.
+ * Null for any other caret.
+ */
+function bareItemAt(
+  state: EditorState,
+  block: Block,
+  head: number,
+): { block: Block; items: Item[] } | null {
+  const { doc } = state;
+  const line = doc.lineAt(head);
+  if (head !== line.to || line.to > block.text.to) return null;
+  if (line.number <= doc.lineAt(block.lines.from).number) return null;
+  const found = /^((?:[ \t]*>)*[ \t]*)([-+*]|\d{1,9}[.)])$/.exec(line.text);
+  if (!found) return null;
+  const column = found[1]!.length;
+  const items = itemsAround(state, block);
+  const text = (item: Item) => item.indent.length + item.marker.length + item.after.length;
+  // As far in as the text of the innermost item, the line is more of its paragraph for CommonMark too.
+  if (!items[0] || column >= text(items[0])) return null;
+  // A line after it indented to its content column is its content: the item is not empty.
+  if (line.number < doc.lines) {
+    const next = doc.line(line.number + 1).text;
+    const lead = /^(?:[ \t]*>)*[ \t]*/.exec(next)![0].length;
+    if (next.trim() && lead >= column + found[2]!.length + 1 && /[^ \t>]/.test(next)) return null;
+  }
+  const outer = items.findIndex((item) => column >= text(item));
+  const parents = outer < 0 ? [] : items.slice(outer);
+  const bare: Item = {
+    node: items[0].node,
+    line,
+    indent: found[1]!,
+    marker: found[2]!,
+    after: ' ',
+    task: false,
+    loose: false,
+  };
+  const own: Block = {
+    ...block,
+    lines: { from: line.from, to: line.to },
+    text: { from: line.to, to: line.to },
+  };
+  return { block: own, items: [bare, ...parents] };
+}
+
 /** Return in an empty item: up a level, or out of the list at the top. One container per Return. */
-function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): KeyEdit {
+/** Why Return is refused in the empty item of another person's pending split. */
+const THEIR_SPLIT =
+  "Another person's pending change made this item. Accept or reject it before moving it out of its list.";
+
+function returnInEmptyItem(state: EditorState, block: Block, items: Item[], bare = false): KeyEdit {
   const { doc } = state;
   const item = items[0]!;
   const line = doc.lineAt(block.lines.from);
-  const nested = item.node.getChild('BulletList') ?? item.node.getChild('OrderedList');
+  const nested = bare
+    ? null
+    : (item.node.getChild('BulletList') ?? item.node.getChild('OrderedList'));
   const parent = items[1];
   if (parent && !nested) {
     // Up one level: the item's syntax as its parent's next item has it.
     const target = `${parent.indent}${nextMarker(state, parent)}${parent.after}${item.task ? '[ ] ' : ''}`;
-    const change = retype(line, line.to, target);
+    // Up to where the markers behind the syntax start, which stay where they are.
+    const syntaxEnd =
+      line.to - (/(?:(?:<!--\/[a-z0-9]+-->)+[ \t]*)?$/.exec(line.text)?.[0].length ?? 0);
+    const change = retype(line, syntaxEnd, target);
+    // The item a Return of the author's own made, with Track Changes on: its line is the syntax of
+    // that Return's pending split, and the new syntax goes over it as it is, as Tab's does, with no
+    // mark. Typed over, the format takes the break with the old marker and writes the new one at
+    // the end of the text above (`1. a⏎   - b‸`, Return twice: `b<ins>2. </ins>`, #440). Another
+    // person's split is theirs to decide first, as for Tab.
+    const split = state.field(trackingField, false) ? splitAbove(state, line) : null;
+    if (split === 'theirs') return { ...nothing(state), refusal: THEIR_SPLIT };
     return {
       changes: [change],
       selection: EditorSelection.single(line.from + target.length),
       userEvent: 'input.break',
+      ...(split === 'own' ? { final: true, caretAt: syntaxEnd } : {}),
     };
   }
   // Out of the list: an empty paragraph after it, in the containers around it. With Track Changes
@@ -445,7 +552,12 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
   const items = itemsAround(state, block);
   const item = items[0];
   if (!item) return null;
-  if (block.text.from >= block.text.to || !state.sliceDoc(block.text.from, block.text.to).trim()) {
+  // Markers behind an empty item's syntax (the closer of the insertion that holds a Return's break
+  // and the new line, `-  <!--/id-->`) are no text of it (#464).
+  const inText = state
+    .sliceDoc(block.text.from, block.text.to)
+    .replace(/(?:<!--\/[a-z0-9]+-->)+[ \t]*$/, '');
+  if (block.text.from >= block.text.to || !inText.trim()) {
     return returnInEmptyItem(state, block, items);
   }
   const start = textStart(state, block);
@@ -508,6 +620,17 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       userEvent: 'input.break',
       caretAt: start,
     };
+  }
+  // The start of a later paragraph of the item: an empty paragraph above it, in the item, as in
+  // any paragraph (Return, and Shift-Return which is Return here, never a new item; #621).
+  if (head <= start && !first && block.kind === 'paragraph') {
+    // Not on a soft line break (the lines above are another block's, a blank line or a block that
+    // takes no text), which Return at the start of the line takes to the end of the line above.
+    const over = lineAbove(state, state.doc.lineAt(block.lines.from));
+    const prev = neighbours(state, block).prev;
+    if ((over && BLANK.test(over.text)) || (prev && prev.kind !== 'html')) {
+      return returnAtStart(state, block, start);
+    }
   }
   if (head >= end) {
     // A paragraph of the item comes after this one: an empty paragraph in the item, between them.
@@ -586,6 +709,27 @@ function continuationOf(item: Item): string {
   return `${item.indent}${' '.repeat(item.marker.length)}${item.after}`;
 }
 
+/** A line of room: it holds only a no-break space entity, which every reader draws as empty. */
+export const NBSP_LINE = '&nbsp;';
+
+/**
+ * Whether Return is in the open empty paragraph at the top level, where it writes a line of room.
+ */
+export function inRoomParagraph(state: EditorState): boolean {
+  const open = openBlock(state);
+  const { main } = state.selection;
+  if (
+    !open ||
+    state.selection.ranges.length > 1 ||
+    !main.empty ||
+    main.head < open.empty.from ||
+    main.head > open.empty.to
+  ) {
+    return false;
+  }
+  return state.doc.lineAt(open.empty.from).text === '' && !open.item && !open.line;
+}
+
 /** Return in the open empty paragraph. */
 function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   const open = openBlock(state);
@@ -595,6 +739,7 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   const syntax = line.text;
   // At the top level: nothing (Markdown keeps no second empty paragraph). In a list item: a new
   // item after it, or nothing between two of its paragraphs.
+  // (Return again in the empty paragraph at the top level writes a line of room: `keys.ts`.)
   if (!/>[ \t]?$/.test(syntax)) return syntax ? returnInOpenItem(state, line) : nothing(state);
   // In a quote: out of it one level, from the end of the block above, as the empty paragraph opened
   // after it. In the middle of the quote, this parts it.
@@ -635,15 +780,18 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   };
 }
 
-/** Return at the end of a block's text: an empty paragraph below it. */
-export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
+/**
+ * Return at the end of a block's text: an empty paragraph below it. With `outside` the paragraph
+ * is outside the block's quotes (↓ from the end of the document), not one more in them.
+ */
+export function returnAtEnd(state: EditorState, block: Block, outside = false): KeyEdit {
   const { doc } = state;
   const last = doc.lineAt(block.lines.to);
-  const cont = continuation(state, block);
+  const cont = outside ? '' : continuation(state, block);
   const at = last.to;
   const changes: ChangeSpec[] = [];
   let insert: string;
-  if (isAlertLine(state, block)) {
+  if (!outside && isAlertLine(state, block)) {
     // Into the alert's body, on the line under its marker.
     insert = `\n${cont}`;
   } else {
@@ -652,7 +800,7 @@ export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   const caret = at + insert.length;
   let merged = false;
   changes.push({ from: at, insert });
-  if (!isAlertLine(state, block) && !blankAfter(state, last)) {
+  if (!(!outside && isAlertLine(state, block)) && !blankAfter(state, last)) {
     // The block below is right under this one: the empty paragraph gets a blank line below it too.
     const next = neighbours(state, block).next;
     const below = next ? blankOf(continuation(state, next)) : '';
@@ -756,6 +904,7 @@ const EDGED = new Set([
   'Link',
   'Subscript',
   'Superscript',
+  'HtmlElement',
 ]);
 
 /**
@@ -781,7 +930,9 @@ function outsideEdges(state: EditorState, head: number): number {
                   ? 'SubscriptMark'
                   : node.name === 'Superscript'
                     ? 'SuperscriptMark'
-                    : 'EmphasisMark',
+                    : node.name === 'HtmlElement'
+                      ? 'HtmlTagMark'
+                      : 'EmphasisMark',
         );
         const open = marks[0];
         const close = node.name === 'Link' ? marks[1] : marks.at(-1);
@@ -806,7 +957,7 @@ function outsideEdges(state: EditorState, head: number): number {
  * the split goes outside the delimiters, after the break. An atom (an image, an autolink, a tag)
  * the caret is inside of is never parted: the break goes after it.
  */
-function splitAt(
+export function splitAt(
   state: EditorState,
   head: number,
   insert: string,
@@ -927,6 +1078,22 @@ export function planReturn(state: EditorState): KeyEdit | null {
   if (inOpen) return inOpen;
   const block = blockAt(state, head);
   if (!block) return null;
+  // An item whose text starts with the marker of a pending deletion, alone after the item's marker
+  // with the rest of the text on the next line (format §3.3), which the parse reads as an HTML
+  // block: Return in front of it is Return at the start of the item's text, the empty item above
+  // and the pending deletion staying with the text, not an empty paragraph above an HTML block
+  // inside the item (#292, walk seed 1326).
+  if (block.kind === 'html' && block.containers.at(-1)?.kind === 'item') {
+    const item = itemsAround(state, block)[0];
+    if (
+      item &&
+      item.line.number === state.doc.lineAt(block.lines.from).number &&
+      holdsMarkersOnly(state, block) &&
+      head <= textStart(state, block)
+    ) {
+      return returnInItem(state, block, head);
+    }
+  }
   if (block.kind !== 'paragraph' && block.kind !== 'heading') {
     // The very start of front matter: nothing goes before it.
     if (block.kind === 'front-matter' && head === block.text.from) return nothing(state);
@@ -952,6 +1119,8 @@ export function planReturn(state: EditorState): KeyEdit | null {
     return planCodeReturn(state, block, head);
   }
   if (block.kind === 'paragraph' && block.containers.at(-1)?.kind === 'item') {
+    const bare = bareItemAt(state, block, head);
+    if (bare) return returnInEmptyItem(state, bare.block, bare.items, true);
     return returnInItem(state, block, head);
   }
   const start = textStart(state, block);
@@ -1209,7 +1378,7 @@ export function lastCharOfLine(state: EditorState, block: Block, head: number): 
   };
 }
 
-const HEADING_ONE_LINE = 'A heading is one line in Markdown.';
+const HEADING_ONE_LINE = 'A heading is one line. Press Return to start a new paragraph.';
 const ALREADY_A_BREAK = 'There is a line break here already. Return starts a new paragraph.';
 
 /**

@@ -81,7 +81,11 @@ their words:
 - *"A tracked change can't go in code that starts a list item yet. Turn off Track Changes to edit
   it."*
 - *"Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes."*
-- *"Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it."*
+- *"Accept or reject the alignment change in this table first."* A column inserted, deleted or moved
+  with Track Changes on, while a change to the table's alignment is pending. The alignment change
+  keeps the whole old row of dashes and colons under the header, and a deleted or moved column keeps
+  its own cell of that row; decided in some orders, the two would leave the old row a cell short or
+  long.
 
 In most of these the way out is to decide the other person's change first, or to turn Track Changes
 off for the edit; the refusal says which.
@@ -89,9 +93,8 @@ off for the edit; the refusal says which.
 **Some of these are planned to go away.** Code that starts a list item, and indented code in an item or
 a quote, can't change with Track Changes on yet (#284). Typing in code that holds another person's
 pending code change is refused (#285); the open issue asks for a way of writing it that reads the same
-in every order, or for a proof that there is none, in which case the refusal stays. Aligning a table's
-column with Track Changes on is refused for now (#281). Bold over more than five cells of a table used
-to be refused, and no longer is (#267).
+in every order, or for a proof that there is none, in which case the refusal stays. Bold over more
+than five cells of a table used to be refused, and no longer is (#267).
 
 ## The evidence, in numbers
 
@@ -125,13 +128,12 @@ We would rather say it than have you find it.
   still writes something that reads differently from what it shows, or leaves a change that can't be
   decided. Each is an open issue, and the list is what has been found, not a count of what is there:
   - numbered lists under Backspace (#292);
-  - a prefix edit of a blank quote line between two paragraphs, flanked by other people's pending
-    changes (#358);
+  - a deletion inside a blank line of a quote between two paragraphs, in a few shapes (#447), and a
+    change in the break of your own pending line break there (#419);
   - typing over one `*` of a pending bold's `**` (#299);
   - a bold change on a line that rejecting a pending deletion makes a link definition (#335), and
     typing at the end of a link reference definition (#262);
-  - deleting the last block after a setext heading (#372), and rejecting a row move with a comment in
-    the moved row (#371);
+  - rejecting a row move with a comment in the moved row (#371);
   - a highlight that runs from the text above a table into its header row can make another person's
     pending column change impossible to decide (#396);
   - an indented numbered item or bullet under an item, which the format's checks read as a new item

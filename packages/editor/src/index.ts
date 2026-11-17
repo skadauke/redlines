@@ -13,20 +13,22 @@ import {
 } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
+import { acceptAndStop, changesToAccept, trackingBack } from './accept-stop.ts';
 import {
   accept as acceptChange,
   acceptMarks,
-  EditError,
   reject as rejectChange,
   rejectMarks,
-  setTracking as trackingInFile,
+  recordTracking as recordTrackingInFile,
   setView as viewInFile,
   type TextChange,
 } from '@redlines/format';
 import type {
   Author,
+  DocumentKind,
   Editor,
   EditorOptions,
+  MarkdownDialect,
   MetPerson,
   EditorTyping,
   EditorUiState,
@@ -37,10 +39,23 @@ import {
   activeCommands,
   commandTitles,
   createCommandRegistry,
-  enabledCommands,
+  disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
-import { frontMatter } from './blocks/front-matter.ts';
+import { untrackedAskFacet } from './tracked/ask.ts';
+import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
+export { inFrontMatter };
+export {
+  type Container,
+  containersOf,
+  holdOpenAt,
+  isOpen as isSectionOpen,
+  setFold,
+} from './blocks/containers.ts';
+import { tabItems } from './blocks/tab-items.ts';
+import { tableMarkers } from './table/markers.ts';
+import { images, imageSpot } from './images.ts';
+export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -50,6 +65,7 @@ import {
   agentStep,
   joinsNewestStep,
   redoDepth,
+  redoDisabledReason,
   redoHasSomething,
   redoName,
   redoSayingWhy,
@@ -57,13 +73,16 @@ import {
   startOver,
   undoDepth,
   undoHistory,
+  undoDisabledReason,
   undoHasSomething,
   undoKeys,
   undoName,
   undoSayingWhy,
 } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
+import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
 import { tableMouse } from './table/mouse.ts';
@@ -72,12 +91,27 @@ import { tableWidths } from './table/widths.ts';
 import { tableGhosts } from './table/ghosts.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
-import { imageResolver, refreshImagesEffect } from './preview/image.ts';
+import { tableFill } from './table/fill.ts';
+import { imageSizeCommands } from './image-commands.ts';
+import { imageInSelection } from './image-size.ts';
+import { CROP_NO_IMAGE, CROP_RAW, CROP_REMOTE, startCrop } from './image-crop.ts';
+import { dialectFacet, noticeFacet } from './image-size.ts';
+import { likelyParsing } from './likely/parse.ts';
+import {
+  imageOpening,
+  imageReader,
+  imageResolver,
+  imageSizer,
+  imageSelection,
+  localImageAt,
+  refreshImagesEffect,
+} from './preview/image.ts';
 import { emojiCodes } from './preview/emoji.ts';
+import { htmlInline } from './preview/html-inline.ts';
 import { scriptTags } from './preview/script.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barLayer } from './tracked/bar-layer.ts';
-import { barSwitch } from './tracked/bar-switch.ts';
+import { barSwitch, lookedAt, switchLookAt } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard, plainPastes } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
@@ -97,6 +131,7 @@ import {
   menuViewOf,
   parsedField,
   peopleFacet,
+  plainOnlyFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
@@ -105,13 +140,33 @@ import {
   editingKeymap,
   refusedEditEffect,
   setTrackingEffect,
+  trackingStepEffect,
   trackedTyping,
   trackingField,
 } from './tracked/typing.ts';
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
-export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
+export { type CropRect, type ImageCropper } from './image-crop.ts';
+export {
+  imageAt,
+  imageInSelection,
+  setImageAlt,
+  setImageSrc,
+  type ImageElement,
+} from './image-size.ts';
+/** Whether the parse has a node at `pos` other than the document: what the journeys ask of a far jump. */
+export const parsedAt = (state: EditorState, pos: number): boolean =>
+  syntaxTree(state).resolveInner(pos, 1).name !== 'Document';
+export {
+  agentOf,
+  followsText,
+  joinsNewestStep,
+  redo,
+  redoDepth,
+  undo,
+  undoDepth,
+} from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export {
@@ -122,7 +177,19 @@ export {
 } from './preview/callout.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
+export {
+  documentHtml,
+  documentText,
+  editorDocumentHtml,
+  type DocumentHtmlOptions,
+  type DocumentViewKind,
+} from './clipboard/document-html.ts';
 export { indentItems } from './blocks/keys.ts';
+export { indentReason } from './blocks/tab.ts';
+export { disabledReasonOf } from './commands.ts';
+export { convertTwin, inTwin, twinAt, twinReason } from './blocks/twin.ts';
+export type { TwinHere } from './blocks/twin.ts';
+export { currentChange, setCurrentChange, type CurrentChange } from './tracked/bar-layer.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {
@@ -132,6 +199,7 @@ export {
   colTitles,
   deleteCols,
   deleteRows,
+  deleteTable,
   insertColsAt,
   insertCols,
   insertRowBelow,
@@ -139,6 +207,14 @@ export {
   insertRowsAt,
   moveCols,
   moveColsTo,
+  canMoveCols,
+  canMoveRows,
+  alignReason,
+  deleteColsReason,
+  deleteRowsReason,
+  moveColsReason,
+  moveRowsReason,
+  NOT_IN_TABLE,
   moveRows,
   moveRowsTo,
   rowCount,
@@ -166,15 +242,29 @@ export {
   markupViewFacet,
   menuViewOf,
   parsedField,
+  PLAIN_ONLY_TRACKING,
+  PLAIN_ONLY_VIEWS,
+  plainOnlyFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
 export { baseTitle } from './commands.ts';
 export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
+export {
+  UNTRACKED_DETAILS,
+  UNTRACKED_TITLE,
+  type UntrackedAnswer,
+  type UntrackedAsker,
+  type UntrackedReason,
+  type UntrackedWords,
+} from './tracked/ask.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
+
+/** A hint of one id, or none. */
+const reasonFor = (id: string, reason: string | undefined) => (reason ? { [id]: reason } : {});
 
 const sameTitles = (a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>) => {
   const keys = Object.keys(a);
@@ -183,6 +273,7 @@ const sameTitles = (a: Readonly<Record<string, string>>, b: Readonly<Record<stri
 
 /** Whether the host has been told everything in `b` already. */
 const sameUi = (a: EditorUiState, b: EditorUiState) =>
+  a.kind === b.kind &&
   a.view === b.view &&
   a.markupView === b.markupView &&
   a.tracking === b.tracking &&
@@ -192,14 +283,16 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   sameIds(a.activeCommands, b.activeCommands) &&
   sameIds(a.enabledCommands, b.enabledCommands) &&
   sameTitles(a.commandTitles, b.commandTitles) &&
+  sameTitles(a.disabledReasons, b.disabledReasons) &&
   a.undo === b.undo &&
   a.redo === b.redo &&
   a.canUndo === b.canUndo &&
-  a.canRedo === b.canRedo;
+  a.canRedo === b.canRedo &&
+  a.canAcceptAll === b.canAcceptAll;
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
- * in the Clean, Redlines and Raw views, Track Changes, copy and paste of the text as it reads, and
+ * in the Clean, Redlines and Plain views, Track Changes, copy and paste of the text as it reads, and
  * undo.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
@@ -211,23 +304,34 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const peopleCompartment = new Compartment();
   const typingCompartment = new Compartment();
   const lineBreakMarksCompartment = new Compartment();
+  const plainOnlyCompartment = new Compartment();
+  const dialectCompartment = new Compartment();
+  let dialect: MarkdownDialect = options.dialect ?? 'gfm';
+  let kind: DocumentKind = options.kind ?? 'markdown';
   let author = options.author;
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
   const saveTracking = options.saveTracking ?? false;
+  /**
+   * What the person last chose for Track Changes in this document, which the next save records in
+   * its ledger (`recordTracking`); null when they chose nothing since it was loaded, and the file
+   * says what it says.
+   */
+  let trackingChosen: boolean | null = null;
   /** The markup view chosen last, kept across `setDoc` (a choice reaches it through the state). */
   let markupView: MarkupView = options.markupView ?? 'redlines';
   /**
-   * The look of Redlines shown last, which a View menu's Redlines brings back (`showView`). It is
-   * the markup view, unless the review bar showed the full markup without choosing it, or the
-   * document opened in the look its ledger chose (format §5.6); it starts over with each document,
-   * from the look the document opened in (`lookOf`).
+   * The look of Redlines shown last in this document, which a View menu's Redlines brings back
+   * (`showView`): the look the review bar showed without choosing it, or the one its ledger chose
+   * (format §5.6), which the markup view may not be. Null while no look was shown, and then the
+   * markup view as it is now, which another window may have changed; it starts over with each
+   * document, from the look the document opened in (`lookOf`).
    */
-  let shownLook: MarkupView = markupView;
-  /** The look of Redlines that `state` shows, or the markup view when it shows another view. */
-  const lookOf = (state: EditorState): MarkupView => {
+  let shownLook: MarkupView | null = null;
+  /** The look of Redlines that `state` shows, or null when it shows another view. */
+  const lookOf = (state: EditorState): MarkupView | null => {
     const shown = state.field(viewModeField);
-    return shown === 'simple' || shown === 'redlines' ? shown : markupView;
+    return shown === 'simple' || shown === 'redlines' ? shown : null;
   };
   let destroyed = false;
   /** The file's text the host was last told of, through `onChange`. */
@@ -236,15 +340,19 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const asked = new Set<string>();
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
+  const markdownSupport = markdown({
+    extensions: [GFM, tabItems, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
+    codeLanguages: options.codeLanguages,
+  });
   const extensions = [
-    markdown({
-      extensions: [GFM, frontMatter, scriptTags, emojiCodes],
-      codeLanguages: options.codeLanguages,
-    }),
+    markdownSupport,
+    likelyParsing(markdownSupport.language.parser),
     trackedChanges(),
     barLayer(),
     barSwitch(),
     trackedTyping(),
+    // Before the blocks' keys, which Return would else replace a selected HTML block with a line.
+    htmlBlockKeys,
     openBlocks(),
     emptyLineTyping,
     typedSyntax,
@@ -252,18 +360,36 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     blockKeys(),
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
+    // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
+    images(options.onImageFiles, options.onNotice, options.projectImageLink),
+    noticeFacet.of(options.onNotice),
+    options.onError
+      ? EditorView.exceptionSink.of((error) => {
+          console.error(error);
+          options.onError?.(error);
+        })
+      : [],
+    options.askUntracked ? untrackedAskFacet.of(options.askUntracked) : [],
     clipboard(),
     caretKeys,
     markdownPreview(),
+    longLines(),
     options.openLink ? linkOpening({ open: options.openLink }) : [],
     tableLayout(),
     tableGhosts(),
     tableStops(),
+    // After the stops, whose guard it runs ahead of.
+    tableFill(),
     tableMouse(),
     tableReach(),
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
+    options.imageData ? imageReader.of(options.imageData) : [],
+    options.imageSize ? imageSizer.of(options.imageSize) : [],
+    options.openImage ? imageOpening(options.openImage) : [],
+    imageSelection(),
     undoHistory(),
+    trackingBack,
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),
     baseTheme,
     EditorView.lineWrapping,
@@ -291,6 +417,25 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         startState.field(viewModeField) !== state.field(viewModeField) ||
         startState.facet(markupViewFacet) !== markupView;
       const trackingChanged = startState.field(trackingField) !== state.field(trackingField);
+      // Undo and Redo of a step that stopped Track Changes switch it with the text: the file's
+      // record follows, as for a switch of the person's.
+      if (trackingChanged && update.docChanged && saveTracking) {
+        trackingChosen = state.field(trackingField);
+      }
+      // Every switch says so (design §5.4), also one that Undo or Redo makes with the text; the
+      // step's own message is the host's, which says what was accepted.
+      if (
+        trackingChanged &&
+        update.transactions.some(
+          (tr) =>
+            tr.effects.some((effect) => effect.is(trackingStepEffect)) &&
+            tr.annotation(Transaction.userEvent) !== 'accept',
+        )
+      ) {
+        options.onNotice?.(
+          state.field(trackingField) ? 'Track Changes is on' : 'Track Changes is off',
+        );
+      }
       // A command's state may read the syntax tree, which a background parse brings further along
       // in a transaction that changes nothing else.
       const parsedFurther = syntaxTree(startState) !== syntaxTree(state);
@@ -307,6 +452,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   ];
   /** Extensions added after the editor was made (`addExtension`), each once, in order. */
   const addedCompartment = new Compartment();
+  /** The commands' keys: ahead of every other extension, so that the person's own keys win. */
+  const commandKeysCompartment = new Compartment();
+  let commandKeymap: Extension = [];
   let added: { extension: Extension }[] = [];
   const addedExtensions = () => added.map((entry) => entry.extension);
   /** A state for a loaded file, shown and tracked as given, or by default as its document asks. */
@@ -314,7 +462,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const state = EditorState.create({
       doc: loaded.doc,
       extensions: [
+        commandKeysCompartment.of(commandKeymap),
         loaded.extension,
+        plainOnlyCompartment.of(plainOnlyFacet.of(kind === 'plain-only')),
+        dialectCompartment.of(dialectFacet.of(dialect)),
         markupViewCompartment.of(markupViewFacet.of(markupView)),
         view ? viewModeField.init(() => view) : [],
         tracking === undefined ? [] : trackingField.init(() => tracking),
@@ -329,24 +480,46 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const selection = visibleSelection(state);
     return selection === state.selection ? state : state.update({ selection }).state;
   };
-  const initial = stateFor(loadFile(options.doc), options.view, options.tracking);
+  const plain = () => kind === 'plain-only';
+  const initial = stateFor(loadFile(options.doc, plain()), options.view, options.tracking);
   told = fileText(initial);
-  const commands = createCommandRegistry(() => editor, report);
+  const commands = createCommandRegistry(
+    () => editor,
+    report,
+    (message) => options.onNotice?.(message),
+    options.commandKeys,
+    (keymap) => {
+      commandKeymap = keymap;
+      view.dispatch({ effects: commandKeysCompartment.reconfigure(commandKeymap) });
+    },
+  );
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
+    const reasons = disabledReasons(commands.list(), state);
     return {
+      kind: state.facet(plainOnlyFacet) ? 'plain-only' : 'markdown',
       view: state.field(viewModeField),
       markupView: state.facet(markupViewFacet),
       tracking: state.field(trackingField),
       hasRedlines: hasRedlines(parsed),
       changes: parsed.marks.filter(isChange),
       activeCommands: activeCommands(commands.list(), state),
-      enabledCommands: enabledCommands(commands.list(), state),
+      enabledCommands: commands
+        .list()
+        .filter(({ id }) => !(id in reasons))
+        .map(({ id }) => id),
+      disabledReasons: {
+        ...reasons,
+        // Undo and Redo are the host's Edit items, not registered commands; their hints are here.
+        ...reasonFor('edit.undo', undoDisabledReason(state)),
+        ...reasonFor('edit.redo', redoDisabledReason(state)),
+      },
       commandTitles: commandTitles(commands.list(), state),
       undo: undoName(state),
       redo: redoName(state),
       canUndo: undoHasSomething(state),
       canRedo: redoHasSomething(state),
+      canAcceptAll: changesToAccept(state).length > 0,
     };
   };
   let reported = uiFor(initial);
@@ -388,20 +561,64 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     });
   };
 
+  /**
+   * Puts a setting that the host records at a save into the document (`recordTracking`,
+   * `recordView`): joined to the newest step, so that Undo gives it back with the step and no step
+   * is left that undoes nothing a person can see (steps to redo, which a change would put out of
+   * step, are dropped, as by any edit); with no step at all, outside the history, which has none to
+   * put out of step. It is made in no empty paragraph's place, which would open one that the file
+   * never gets.
+   */
+  const recordInFile = (changes: TextChange[]) => {
+    if (!changes.length) return;
+    const { state } = view;
+    const joins = undoDepth(state) > 0;
+    // With every step taken back there is none to join, and a change outside the history would
+    // put the ledger out of step with the steps to redo: a save made while they remain leaves the
+    // file as the history has it, and the first save after a new edit records it.
+    if (!joins && redoDepth(state) > 0) return;
+    view.dispatch({
+      changes,
+      annotations: [
+        trackedEditAnnotation.of(true),
+        Transaction.remote.of(true),
+        ...(joins
+          ? [joinsNewestStep.of(true), isolateHistory.of('after')]
+          : [Transaction.addToHistory.of(false)]),
+      ],
+    });
+  };
+
   const editor: Editor = {
     view,
     commands,
     getDoc: () => fileText(view.state),
-    setDoc: (doc) => {
-      view.setState(stateFor(loadFile(doc)));
+    setKind: (next, nextDialect = 'gfm') => {
+      if (next === kind && nextDialect === dialect) return;
+      kind = next;
+      dialect = nextDialect;
+      view.dispatch({
+        effects: [
+          plainOnlyCompartment.reconfigure(plainOnlyFacet.of(kind === 'plain-only')),
+          dialectCompartment.reconfigure(dialectFacet.of(dialect)),
+        ],
+      });
+      trackingChosen = null;
+    },
+    setDoc: (doc, next, nextDialect) => {
+      kind = next ?? 'markdown';
+      dialect = nextDialect ?? 'gfm';
+      view.setState(stateFor(loadFile(doc, plain())));
+      trackingChosen = null;
       shownLook = lookOf(view.state);
       told = fileText(view.state);
       report();
       tellNewPeople();
     },
     reloadDoc: (doc) => {
-      const next = loadFile(doc);
+      const next = loadFile(doc, plain());
       const { state } = view;
+      const asked = state.field(parsedField).ledger.tracking === 'everyone';
       const { changes, selection, effects } = newVersion(state, next.doc);
       // A change to the line breaks alone leaves the document's text as it was, but not the file's.
       const changed = !changes.empty || next.text !== fileText(state);
@@ -415,10 +632,23 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',
       });
+      // A file that newly asks everyone to track changes is read as one that is opened: Track
+      // Changes turns on, which writes nothing, since the file asks already (design §5.4, #364), and
+      // no choice is left to record. One that stops asking leaves it as it is, so that nobody's
+      // tracking is switched off under them, and a choice of the person's is kept, for the next save
+      // to record (format §5.6).
+      if (
+        !asked &&
+        view.state.field(parsedField).ledger.tracking === 'everyone' &&
+        !view.state.field(trackingField)
+      ) {
+        view.dispatch({ effects: setTrackingEffect.of(true) });
+        trackingChosen = null;
+      }
     },
     applyAgentEdit: (doc, step) => {
       if (doc === fileText(view.state)) return;
-      const next = loadFile(doc);
+      const next = loadFile(doc, plain());
       const { state } = view;
       const { changes, selection, effects } = newVersion(state, next.doc);
       view.dispatch({
@@ -432,8 +662,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),
-    setViewMode: (mode) => view.dispatch({ effects: chooseViewEffects(mode) }),
+    setViewMode: (mode) => {
+      if (!plain()) view.dispatch({ effects: chooseViewEffects(mode) });
+    },
     showView: (menuView) => {
+      // A Plain-only file has Plain alone.
+      if (plain()) return;
       if (menuView !== 'redlines') {
         view.dispatch({ effects: chooseViewEffects(menuView) });
         return;
@@ -442,68 +676,36 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       // chooses a look. Otherwise it comes back in the look that was shown last, which chooses
       // nothing: the look chosen stays the one a click made.
       if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
-      view.dispatch({ effects: setViewModeEffect.of(shownLook) });
+      view.dispatch({ effects: setViewModeEffect.of(shownLook ?? markupView) });
+    },
+    switchLook: () => {
+      // Nothing to measure in Clean and Plain, which have no look to switch.
+      if (menuViewOf(view.state.field(viewModeField)) !== 'redlines') return;
+      const at = lookedAt(view);
+      switchLookAt(view, at.pos, undefined, undefined, at.row);
     },
     setMarkupView: (mode) => {
       if (mode === view.state.facet(markupViewFacet)) return;
       view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
     },
     setTracking: (on, switched) => {
-      if (!(switched?.inFile ?? saveTracking)) {
-        view.dispatch({ effects: setTrackingEffect.of(on) });
-        return true;
-      }
-      let changes: TextChange[];
-      try {
-        changes = trackingInFile(view.state.doc.toString(), on);
-      } catch (error) {
-        if (!(error instanceof EditError)) throw error;
-        // The file can't take the setting: Track Changes stays as it was, and says why.
-        options.onNotice?.(error.message);
-        return false;
-      }
-      view.dispatch({
-        changes,
-        effects: setTrackingEffect.of(on),
-        // A step of its own, apart from the typing around it, that Undo takes back with Track
-        // Changes itself (`trackingInverse`); not typing, which Track Changes would rewrite, and
-        // not an edit in the caret's place, where it would open an empty paragraph that the file
-        // never gets (as a reload isn't).
-        annotations: [
-          trackedEditAnnotation.of(true),
-          Transaction.remote.of(true),
-          isolateHistory.of('full'),
-        ],
-        userEvent: 'track.switch',
-      });
-      return true;
+      // A Plain-only file is never tracked, and has no ledger to record a choice in.
+      if (plain()) return;
+      view.dispatch({ effects: setTrackingEffect.of(on) });
+      // The switch writes nothing and makes no edit (format §5.6): the file records it when it is
+      // saved for another reason (`recordTracking`). A switch that is the person's own preference,
+      // not the document's, is never recorded.
+      if (switched?.inFile ?? saveTracking) trackingChosen = on;
+    },
+    recordTracking: () => {
+      if (trackingChosen === null) return;
+      recordInFile(recordTrackingInFile(view.state.doc.toString(), trackingChosen));
     },
     recordView: () => {
       const shown = view.state.field(viewModeField);
-      // Raw is never saved: the file keeps the view it had.
+      // Plain is never saved: the file keeps the view it had.
       if (shown === 'raw') return;
-      const changes = viewInFile(view.state.doc.toString(), shown);
-      if (!changes.length) return;
-      const { state } = view;
-      const joins = undoDepth(state) > 0;
-      // With every step taken back there is none to join, and a change outside the history would
-      // put the ledger out of step with the steps to redo: the next save records the view.
-      if (!joins && redoDepth(state) > 0) return;
-      view.dispatch({
-        changes,
-        // Joined to the newest step, so that Undo gives it back with the step, and no step is
-        // left that undoes nothing a person can see (steps to redo, which a change would put out
-        // of step, are dropped, as by any edit); with no step at all, outside the history, which
-        // has none to put out of step. What comes after is a step of its own. Not an edit in the
-        // caret's place, which would open an empty paragraph that the file never gets.
-        annotations: [
-          trackedEditAnnotation.of(true),
-          Transaction.remote.of(true),
-          ...(joins
-            ? [joinsNewestStep.of(true), isolateHistory.of('after')]
-            : [Transaction.addToHistory.of(false)]),
-        ],
-      });
+      recordInFile(viewInFile(view.state.doc.toString(), shown));
     },
     setTyping: (next: EditorTyping) => {
       typing = next;
@@ -536,6 +738,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     accept: (id) => {
       const text = view.state.doc.toString();
       decide(typeof id === 'string' ? acceptChange(text, id) : acceptMarks(text, id), 'accept');
+    },
+    acceptAllAndStopTracking: () => {
+      const tr = acceptAndStop(view.state);
+      if (!tr) return false;
+      view.dispatch(tr);
+      if (saveTracking) trackingChosen = false;
+      return true;
     },
     reject: (id) => {
       const text = view.state.doc.toString();
@@ -586,6 +795,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     wordAt: (pos) => wordAt(view, pos),
     pickCorrection: (at, replaced, text) => correctText(view, at, replaced, text, true),
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
+    imageSpot: (at) => imageSpot(view, at, options.onNotice),
     focus: () => view.focus(),
     destroy: () => {
       destroyed = true;
@@ -594,6 +804,46 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   };
   // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
   queueMicrotask(tellNewPeople);
+  const { cropImage } = options;
+  if (cropImage) {
+    // Crop… of a host's Image menu (#624): a host that can write a cropped copy of an image file
+    // gives `cropImage`.
+    commands.register([
+      {
+        id: 'image.crop',
+        title: 'Crop Image',
+        disabledReason: (state) => {
+          if (state.field(viewModeField) === 'raw') return CROP_RAW;
+          if (imageInSelection(state) === null) return CROP_NO_IMAGE;
+          return localImageAt(state) === null ? CROP_REMOTE : undefined;
+        },
+        run: ({ view }) =>
+          startCrop(view, cropImage, (message) => options.onNotice?.(message)) !== null,
+      },
+    ]);
+  }
+  const { openImage } = options;
+  if (openImage) {
+    // For a host's Image menu (a host that has one gives `openImage`): the image under the caret or
+    // in the selection, its size and its alignment.
+    commands.register(imageSizeCommands(options.onNotice));
+    commands.register([
+      {
+        id: 'image.edit',
+        title: 'Edit Image in Preview',
+        disabledReason: (state) =>
+          localImageAt(state) === null
+            ? 'Select an image in the document to edit it in Preview.'
+            : undefined,
+        run: ({ view: { state } }) => {
+          const src = localImageAt(state);
+          if (src === null) return false;
+          openImage(src);
+          return true;
+        },
+      },
+    ]);
+  }
   return editor;
 }
 
@@ -665,3 +915,5 @@ function pasteIntoField(view: EditorView, text: string): boolean {
   }
   return false;
 }
+
+export { moveBlocks, moveBlocksReason, moveRunTo, runOfSelection } from './blocks/move.ts';

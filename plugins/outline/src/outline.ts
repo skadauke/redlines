@@ -11,6 +11,7 @@
 // arrows move between headings, Return goes to one and Escape gives the focus back to the text.
 
 import { syntaxTree } from '@codemirror/language';
+import type { Text } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { Editor } from '@redlines/editor';
 import { type Heading, headingsOf } from './headings.ts';
@@ -44,6 +45,8 @@ export interface OutlineOptions {
   geometry?: OutlineGeometry;
   /** Says a short word to the person, as when the outline has too few headings to show. */
   notice?: (message: string) => void;
+  /** How long the pointer rests on a cut-off heading before its full text shows: the title bar's `TOOLTIP_MS`. */
+  tooltipMs?: number;
 }
 
 /** How long after the text changes the headings are read again: not at each keystroke. */
@@ -120,6 +123,7 @@ const element = <K extends keyof HTMLElementTagNameMap>(
  * function that takes it out again. */
 export function createOutline(editor: Editor, options: OutlineOptions = {}): () => void {
   const geometry = options.geometry ?? pageGeometry;
+  const tooltipMs = options.tooltipMs ?? 400;
   let instance: Outline | null = null;
 
   class Outline {
@@ -129,6 +133,8 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
     private readonly panel: HTMLElement;
     private readonly ticks: HTMLElement;
     private readonly list: HTMLOListElement;
+    private readonly tip: HTMLElement;
+    private tipTimer: ReturnType<typeof setTimeout> | undefined;
     private headings: Heading[] = [];
     /** The heading of the section being read. */
     private current = 0;
@@ -163,13 +169,21 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       this.ticks.setAttribute('aria-hidden', 'true');
       this.list = element(this.doc, 'ol', 'rl-outline-list');
       this.panel.append(this.ticks, this.list);
-      this.nav.append(this.panel);
+      // The full text of a heading the card cuts off: the title bar's kind of hint, after its delay.
+      this.tip = element(this.doc, 'div', 'rl-outline-tip');
+      this.tip.setAttribute('role', 'tooltip');
+      this.tip.hidden = true;
+      this.nav.append(this.panel, this.tip);
 
       this.panel.addEventListener('mouseenter', this.enter);
       this.panel.addEventListener('mouseleave', this.leave);
       this.nav.addEventListener('focusin', this.focusIn);
       this.nav.addEventListener('focusout', this.focusOut);
       this.list.addEventListener('keydown', this.keys);
+      this.list.addEventListener('mouseover', this.hint);
+      this.list.addEventListener('mouseout', this.unhint);
+      // Escape closes a card the pointer opened, where the focus is in the text and not in the list.
+      this.doc.addEventListener('keydown', this.escape, true);
       // A scroll doesn't bubble: whatever scrolls is heard by the capture, and the window's size
       // and the sidebar's width change the pane.
       this.doc.addEventListener('scroll', this.locateSoon, true);
@@ -178,7 +192,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       this.resizes =
         typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.locateSoon());
 
-      this.headings = headingsOf(view.state);
+      this.headings = this.read();
       this.render();
       this.locate();
     }
@@ -204,6 +218,8 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       clearTimeout(this.locateTimer);
       clearTimeout(this.openTimer);
       clearTimeout(this.closeTimer);
+      clearTimeout(this.tipTimer);
+      this.doc.removeEventListener('keydown', this.escape, true);
       this.doc.removeEventListener('scroll', this.locateSoon, true);
       this.doc.defaultView?.removeEventListener('resize', this.locateSoon);
       this.resizes?.disconnect();
@@ -219,11 +235,34 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       return true;
     }
 
+    /**
+     * The headings of the document. Where the text is the one they were read from and the parse has
+     * gone on, only the stretch it added is read: a long document's parse is many steps (#696).
+     */
+    private read(): Heading[] {
+      const { state } = this.view;
+      const tree = syntaxTree(state);
+      const before = this.readFrom;
+      this.readFrom = { doc: state.doc, reach: tree.length };
+      if (!before || before.doc !== state.doc) return headingsOf(state);
+      const block = tree.topNode.childBefore(before.reach);
+      const from = block?.prevSibling?.from ?? block?.from ?? 0;
+      return [
+        ...this.headings.filter((heading) => heading.from < from),
+        ...headingsOf(state, from),
+      ];
+    }
+
+    private readFrom: { doc: Text; reach: number } | null = null;
+
     private readonly refreshSoon = () => {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = setTimeout(() => {
-        this.headings = headingsOf(this.view.state);
-        this.render();
+        // The heading that has the focus, by its place (the headings were moved with each edit).
+        const focused = this.items().findIndex((button) => button === this.doc.activeElement);
+        const focusedFrom = this.headings[focused]?.from;
+        this.headings = this.read();
+        this.render(focusedFrom);
         this.locate();
       }, REFRESH_MS);
     };
@@ -243,9 +282,14 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
     };
 
     /** Draws the lines and the list, or hides the outline when there is too little to outline. */
-    private render(): void {
+    private render(focusedFrom?: number): void {
       const buttons = this.items();
-      const hadFocus = buttons.findIndex((button) => button === this.doc.activeElement);
+      let hadFocus = buttons.findIndex((button) => button === this.doc.activeElement);
+      if (hadFocus >= 0 && focusedFrom !== undefined) {
+        // The focus follows the heading, not its index: one added above it moves it down.
+        const moved = this.headings.findIndex((heading) => heading.from === focusedFrom);
+        if (moved >= 0) hadFocus = moved;
+      }
       this.nav.hidden = this.headings.length < MIN_HEADINGS;
       this.ticks.replaceChildren(
         ...this.headings.map(({ level }) => {
@@ -260,6 +304,8 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
           const button = element(this.doc, 'button', 'rl-outline-item');
           button.type = 'button';
           button.textContent = heading.text;
+          // The list is flat, so the level is said in the name, after the text that shows.
+          button.setAttribute('aria-label', `${heading.text}, heading level ${heading.level}`);
           button.dataset['level'] = String(heading.level);
           button.style.setProperty('--rl-outline-level', String(heading.level));
           button.addEventListener('click', () => this.go(i));
@@ -353,6 +399,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
 
     private setOpen(open: boolean): void {
       this.open = open;
+      if (!open) this.unhint();
       this.nav.dataset['open'] = String(open);
       this.reach();
       if (open) this.reveal();
@@ -399,6 +446,34 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       clearTimeout(this.openTimer);
       this.setOpen(false);
     }
+
+    private readonly hint = (event: MouseEvent) => {
+      const button = (event.target as Element | null)?.closest<HTMLButtonElement>('button');
+      if (!button || !this.list.contains(button)) return;
+      this.unhint();
+      // Only a heading that is cut off has anything to add.
+      if (button.scrollWidth <= button.clientWidth) return;
+      this.tipTimer = setTimeout(() => {
+        this.tip.textContent = button.textContent;
+        this.tip.hidden = false;
+        const rect = button.getBoundingClientRect();
+        const nav = this.nav.getBoundingClientRect();
+        this.tip.style.left = `${rect.right - nav.left + 8}px`;
+        this.tip.style.top = `${rect.top - nav.top + rect.height / 2}px`;
+      }, tooltipMs);
+    };
+
+    private readonly unhint = () => {
+      clearTimeout(this.tipTimer);
+      this.tip.hidden = true;
+    };
+
+    private readonly escape = (event: KeyboardEvent) => {
+      // The list handles its own Escape, which also gives the focus back.
+      if (event.key !== 'Escape' || !this.open || this.focusedIn) return;
+      this.unhint();
+      this.setOpen(false);
+    };
 
     private readonly enter = () => {
       this.hovered = true;

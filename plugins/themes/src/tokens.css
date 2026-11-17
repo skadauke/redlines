@@ -62,20 +62,33 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #ffffff;
   --rl-ink: #1d1d1f;
-  --rl-ink-2: #6e6e73;
-  --rl-ink-3: #a1a1a6;
+  --rl-ink-2: #6a6a6f;
+  --rl-ink-3: #828285;
   --rl-rule: #e5e5ea;
   --rl-tint: #f3f3f5;
   --rl-syntax: #c7c7cc;
   --rl-card: #ffffff;
   --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -10px rgba(0, 0, 0, 0.18);
-  --rl-tip: #1d1d1f;
   --rl-pressed: #ececef;
   --rl-red: #d42a1e;
   --rl-mixed: #aeaeb2;
+  --rl-on: #8e8e93;
+  --rl-on-fg: #ffffff;
+  --rl-off: #d1d1d6;
+  --rl-seg-on: #ffffff;
 
   --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
@@ -133,20 +146,33 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #1e1e1f;
   --rl-ink: #f2f2f5;
   --rl-ink-2: #a1a1a8;
-  --rl-ink-3: #6e6e75;
+  --rl-ink-3: #818187;
   --rl-rule: #38383b;
   --rl-tint: #2a2a2d;
   --rl-syntax: #5c5c62;
   --rl-card: #2a2a2c;
   --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -10px rgba(0, 0, 0, 0.6);
-  --rl-tip: #48484c;
   --rl-pressed: #333336;
   --rl-red: #ff6a5c;
   --rl-mixed: #636366;
+  --rl-on: #a1a1a8;
+  --rl-on-fg: #1e1e1f;
+  --rl-off: #48484c;
+  --rl-seg-on: #4a4a4f;
 
   --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;
@@ -204,20 +230,33 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #fffefb;
   --rl-ink: #25231f;
   --rl-ink-2: #6b665d;
-  --rl-ink-3: #a29d93;
+  --rl-ink-3: #858178;
   --rl-rule: #e8e4dc;
-  --rl-tint: #f4f1ea;
+  --rl-tint: #f5f2eb;
   --rl-syntax: #cdc7bc;
   --rl-card: #fffefb;
   --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -10px rgba(0, 0, 0, 0.18);
-  --rl-tip: #25231f;
   --rl-pressed: #eeebe4;
   --rl-red: #c8281d;
   --rl-mixed: #b5afa4;
+  --rl-on: #8e8e93;
+  --rl-on-fg: #ffffff;
+  --rl-off: #d1d1d6;
+  --rl-seg-on: #ffffff;
 
   --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
@@ -275,20 +314,33 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #1c1b19;
   --rl-ink: #ece7de;
   --rl-ink-2: #a8a196;
-  --rl-ink-3: #716b62;
+  --rl-ink-3: #87827a;
   --rl-rule: #3a3732;
   --rl-tint: #292723;
   --rl-syntax: #5d574f;
   --rl-card: #2a2825;
   --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -10px rgba(0, 0, 0, 0.6);
-  --rl-tip: #4a463f;
   --rl-pressed: #33302b;
   --rl-red: #ff6e60;
   --rl-mixed: #6b655c;
+  --rl-on: #a1a1a8;
+  --rl-on-fg: #1e1e1f;
+  --rl-off: #48484c;
+  --rl-seg-on: #4a4a4f;
 
   --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;
@@ -346,20 +398,33 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #ffffff;
   --rl-ink: #15171c;
   --rl-ink-2: #5a616d;
-  --rl-ink-3: #9aa1ac;
+  --rl-ink-3: #7d838c;
   --rl-rule: #e2e5ea;
   --rl-tint: #f2f4f7;
   --rl-syntax: #c5cad3;
   --rl-card: #ffffff;
   --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -10px rgba(0, 0, 0, 0.18);
-  --rl-tip: #15171c;
   --rl-pressed: #eaedf1;
   --rl-red: #d42a1e;
   --rl-mixed: #aab0ba;
+  --rl-on: #8e8e93;
+  --rl-on-fg: #ffffff;
+  --rl-off: #d1d1d6;
+  --rl-seg-on: #ffffff;
 
   --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
@@ -417,20 +482,33 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #15171b;
   --rl-ink: #e7e9ed;
   --rl-ink-2: #9aa1ad;
-  --rl-ink-3: #666d79;
+  --rl-ink-3: #747b85;
   --rl-rule: #2d313a;
   --rl-tint: #1f2228;
   --rl-syntax: #4d535e;
   --rl-card: #22252b;
   --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -10px rgba(0, 0, 0, 0.6);
-  --rl-tip: #3d424c;
   --rl-pressed: #2a2e36;
   --rl-red: #ff6a5c;
   --rl-mixed: #5a606b;
+  --rl-on: #a1a1a8;
+  --rl-on-fg: #1e1e1f;
+  --rl-off: #48484c;
+  --rl-seg-on: #4a4a4f;
 
   --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;

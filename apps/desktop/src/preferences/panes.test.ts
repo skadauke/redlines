@@ -12,7 +12,7 @@ import {
   type PaneId,
   renderPane,
   rowLabels,
-  showZoom,
+  renderFilter,
 } from './panes.ts';
 
 afterEach(() => document.body.replaceChildren());
@@ -23,13 +23,9 @@ function setup(extra: Partial<PaneDeps> = {}) {
   const update = vi.fn((change: Partial<Settings>) => {
     settings = { ...settings, ...change };
   });
-  const setZoom = vi.fn((level: number) => {
-    settings = { ...settings, zoom: level };
-  });
   const deps: PaneDeps = {
     settings: () => settings,
     update,
-    setZoom,
     installCommandLine: () =>
       Promise.resolve({ outcome: 'linked', linked: '/usr/local/bin/redlines', onPath: true }),
     installCommandLineAtHome: () =>
@@ -41,7 +37,7 @@ function setup(extra: Partial<PaneDeps> = {}) {
   };
   const container = document.createElement('div');
   document.body.append(container);
-  return { deps, container, update, setZoom, now: () => settings };
+  return { deps, container, update, now: () => settings };
 }
 
 const draw = (pane: PaneId, extra: Partial<PaneDeps> = {}) => {
@@ -84,8 +80,28 @@ const loseFocus = () => {
 };
 
 describe('the panes', () => {
-  it('has four panes, General first', () => {
-    expect(PANES.map((pane) => pane.label)).toEqual(['General', 'Appearance', 'Editor', 'Agents']);
+  it('has five panes, General first and Shortcuts last', () => {
+    expect(PANES.map((pane) => pane.label)).toEqual([
+      'General',
+      'Editor',
+      'Appearance',
+      'Agents',
+      'Shortcuts',
+    ]);
+  });
+
+  it('lists text and code files in the sidebar by default, and the row leaves them out', () => {
+    const made = draw('general');
+    const code = control<HTMLInputElement>(
+      made.container,
+      'Show code and text files in the sidebar',
+      'input',
+    );
+    expect(code.checked).toBe(true);
+    code.checked = false;
+    code.dispatchEvent(new Event('change'));
+    expect(made.update).toHaveBeenLastCalledWith({ showPlainOnlyFiles: false });
+    expect(made.now().showPlainOnlyFiles).toBe(false);
   });
 
   it('holds exactly the rows of the design, each pane', () => {
@@ -93,27 +109,82 @@ describe('the panes', () => {
       'Name and handle',
       'On launch',
       'Default folder for new documents',
+      'Show code and text files in the sidebar',
       'Check for updates automatically',
-      iconRotationLabel(),
       'Default app for Markdown',
       'Command line',
+      iconRotationLabel(),
     ]);
     expect(rowLabels(draw('appearance').container)).toEqual([
       'Appearance',
       'Theme',
-      'Zoom',
-      'Text size',
+      'Default text size',
     ]);
     expect(rowLabels(draw('editor').container)).toEqual([
       'Spell check',
       'Smart quotes and dashes',
       'Close brackets and Markdown pairs',
       'Suggest emoji after a colon',
-      'Track Changes on for new documents',
       'Show line break marks (¶)',
       'Show word count',
+      'Show the toolbar at the bottom',
+      'Images',
     ]);
     expect(rowLabels(draw('agents').container)).toEqual([]);
+  });
+
+  it('groups the rows of General, Editor and Appearance under small headings', () => {
+    const headings = (pane: PaneId) =>
+      [...draw(pane).container.querySelectorAll('.rl-pref-section')].map((h) => h.textContent);
+    expect(headings('general')).toEqual(['You', 'Opening', 'The app']);
+    expect(headings('editor')).toEqual(['Writing', 'Display', 'Images']);
+    expect(headings('appearance')).toEqual(['Appearance']);
+  });
+
+  it('drops the rows that are the window’s own, or another place’s: Zoom, Track Changes for new documents', () => {
+    const all = (['general', 'editor', 'appearance'] as const).flatMap((pane) =>
+      rowLabels(draw(pane).container),
+    );
+    for (const gone of ['Zoom', 'Track Changes on for new documents', 'Simple look']) {
+      expect(all).not.toContain(gone);
+    }
+  });
+
+  describe('the filter', () => {
+    const filtered = (query: string) => {
+      const { deps, container } = setup();
+      renderFilter(query, container, deps);
+      return container;
+    };
+
+    it('shows the matching rows of every pane, each under its pane and section', () => {
+      const container = filtered('spell');
+      expect(rowLabels(container)).toEqual(['Spell check']);
+      expect([...container.querySelectorAll('.rl-pref-section')].map((h) => h.textContent)).toEqual(
+        ['Editor › Writing'],
+      );
+      const apps = filtered('default');
+      expect([...apps.querySelectorAll('.rl-pref-section')].map((h) => h.textContent)).toEqual([
+        'General › Opening',
+        'General › The app',
+        // The theme named Default is in the Theme row's choices.
+        'Appearance › Appearance',
+      ]);
+    });
+
+    it('matches every word, in any order, ignoring case', () => {
+      expect(rowLabels(filtered('SIZE text'))).toEqual(['Default text size']);
+    });
+
+    it('says when nothing matches, and its rows work as they do in their pane', () => {
+      expect(filtered('zzzz').textContent).toContain('Nothing matches.');
+      const { deps, container, update } = setup();
+      renderFilter('emoji', container, deps);
+      const box = control<HTMLInputElement>(container, 'Suggest emoji after a colon', 'input');
+      box.checked = false;
+      box.dispatchEvent(new Event('change'));
+      expect(update).toHaveBeenLastCalledWith({ emojiSuggestions: false });
+    });
   });
 
   it('applies a change at once with no Save button', () => {
@@ -124,15 +195,6 @@ describe('the panes', () => {
     spell.dispatchEvent(new Event('change'));
     expect(update).toHaveBeenCalledWith({ spellCheck: false });
     expect(now().spellCheck).toBe(false);
-
-    const track = control<HTMLInputElement>(
-      container,
-      'Track Changes on for new documents',
-      'input',
-    );
-    track.checked = true;
-    track.dispatchEvent(new Event('change'));
-    expect(now().trackNewDocuments).toBe(true);
 
     // The list of emoji starts on, and goes off at once.
     const emoji = control<HTMLInputElement>(container, 'Suggest emoji after a colon', 'input');
@@ -157,6 +219,14 @@ describe('the panes', () => {
     count.dispatchEvent(new Event('change'));
     expect(update).toHaveBeenLastCalledWith({ showWordCount: false });
     expect(now().showWordCount).toBe(false);
+
+    // The toolbar starts away, and stays at the bottom when the person wants it there.
+    const toolbar = control<HTMLInputElement>(container, 'Show the toolbar at the bottom', 'input');
+    expect(toolbar.checked).toBe(false);
+    toolbar.checked = true;
+    toolbar.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ toolbarAtBottom: true });
+    expect(now().toolbarAtBottom).toBe(true);
   });
 
   it('starts each control at the stored setting', () => {
@@ -245,58 +315,15 @@ describe('the panes', () => {
     expect(now()).toMatchObject({ theme: 'book', appearance: 'system' });
   });
 
-  it('steps the zoom through the ladder, asks for it, and stops at its ends', () => {
-    const { container, now, setZoom, update } = draw('appearance');
-    expect(rowLabels(container)).toEqual(['Appearance', 'Theme', 'Zoom', 'Text size']);
-    const [smaller, larger] = [
-      ...container.querySelectorAll<HTMLButtonElement>('[data-row="Zoom"] .rl-pref-step'),
-    ];
-    const shown = () => container.querySelector('[data-row="Zoom"] .rl-pref-size')?.textContent;
-    expect(shown()).toBe('100%');
-    expect(container.querySelector('[data-row="Zoom"]')?.textContent).toContain(
-      'Everything in Redlines’ windows',
-    );
-    larger?.click();
-    expect(setZoom).toHaveBeenLastCalledWith(1.1);
-    expect(now().zoom).toBe(1.1);
-    expect(shown()).toBe('110%');
-    for (let i = 0; i < 10; i++) smaller?.click();
-    expect(now().zoom).toBe(0.8);
-    expect(shown()).toBe('80%');
-    expect(smaller?.disabled).toBe(true);
-    for (let i = 0; i < 10; i++) larger?.click();
-    expect(now().zoom).toBe(2);
-    expect(larger?.disabled).toBe(true);
-    // The zoom is the app's to keep: it never goes through the settings' update.
-    expect(update).not.toHaveBeenCalled();
-  });
-
-  it('shows a zoom that lands in place, keeping the pressed button and its live region', () => {
-    const { container, setZoom } = draw('appearance');
-    const row = container.querySelector('[data-row="Zoom"]')!;
-    const larger = row.querySelectorAll<HTMLButtonElement>('.rl-pref-step')[1]!;
-    larger.focus();
-    larger.click();
-    const value = row.querySelector('.rl-pref-size');
-    expect(document.activeElement).toBe(larger);
-    // The app's landing (another window's change too) shows the level without redrawing.
-    showZoom(container, 1.5);
-    expect(document.activeElement).toBe(larger);
-    expect(row.querySelector('.rl-pref-size')).toBe(value);
-    expect(value?.textContent).toBe('150%');
-    // The next step goes from the level shown.
-    larger.click();
-    expect(setZoom).toHaveBeenLastCalledWith(1.75);
-    expect(document.activeElement).toBe(larger);
-  });
-
   it('steps the text size through the ladder and stops at its ends', () => {
     const { container, now } = draw('appearance');
     const [smaller, larger] = [
-      ...container.querySelectorAll<HTMLButtonElement>('[data-row="Text size"] .rl-pref-step'),
+      ...container.querySelectorAll<HTMLButtonElement>(
+        '[data-row="Default text size"] .rl-pref-step',
+      ),
     ];
     const shown = () =>
-      container.querySelector('[data-row="Text size"] .rl-pref-size')?.textContent;
+      container.querySelector('[data-row="Default text size"] .rl-pref-size')?.textContent;
     expect(shown()).toBe('100%');
     larger?.click();
     expect(now().textSize).toBe(1.1);
@@ -318,7 +345,7 @@ describe('the panes', () => {
       const made = setup();
       made.update({ textSize: size });
       renderPane('appearance', made.container, made.deps);
-      const row = made.container.querySelector('[data-row="Text size"]')!;
+      const row = made.container.querySelector('[data-row="Default text size"]')!;
       const shown = row.querySelector('.rl-pref-size')?.textContent;
       row.querySelectorAll<HTMLButtonElement>('.rl-pref-step')[button]?.click();
       return { shown, saved: made.now().textSize };
@@ -723,6 +750,105 @@ describe('the panes', () => {
       installing.resolve({ outcome: 'cancelled' });
       await vi.waitFor(() => expect(row.shown()).toContain('Install in Your Home Folder'));
       expect(document.activeElement).toBe(name);
+    });
+  });
+
+  describe('the Images row', () => {
+    /** The row's parts: the folder's name, and the line that says where images go. */
+    const imagesRow = (container: HTMLElement) => {
+      const row = container.querySelector<HTMLElement>('[data-row="Images"]');
+      const status = row?.querySelector<HTMLElement>('[role="status"]');
+      const name = row?.querySelector<HTMLInputElement>('input[type="text"]');
+      if (!row || !status || !name) throw new Error('no Images row');
+      return {
+        name,
+        said: () => status.textContent,
+        failed: () => status.classList.contains('rl-pref-failure'),
+        type: (field: HTMLInputElement, text: string) => {
+          field.value = text;
+          field.dispatchEvent(new Event('input'));
+        },
+      };
+    };
+    const WHERE = (name: string) =>
+      `Every image goes in “${name}” in the project’s folder, the one the sidebar shows; a document that is in no project keeps one beside it. An image dragged in is copied, never moved, and nothing is ever replaced.`;
+
+    it('is one folder’s name, images, for the whole project, and has no choice of place', () => {
+      const container = draw('editor').container;
+      const row = imagesRow(container);
+      expect(container.querySelector('[data-row="Images"] select')).toBeNull();
+      expect(row.name.value).toBe('images');
+      expect(row.said()).toBe(WHERE('images'));
+      expect(row.failed()).toBe(false);
+    });
+
+    it('starts at the stored name', () => {
+      const { container } = setup();
+      const settings = { ...DEFAULT_SETTINGS, imageFolderName: 'pictures' };
+      renderPane('editor', container, { ...setup().deps, settings: () => settings });
+      const row = imagesRow(container);
+      expect(row.name.value).toBe('pictures');
+      expect(row.said()).toBe(WHERE('pictures'));
+    });
+
+    it('saves the folder’s name as it is typed, without the spaces around it', () => {
+      const { container, update, now } = draw('editor');
+      const row = imagesRow(container);
+      row.type(row.name, ' Bilder 2026 ');
+      expect(update).toHaveBeenLastCalledWith({ imageFolderName: 'Bilder 2026' });
+      expect(now().imageFolderName).toBe('Bilder 2026');
+      expect(row.said()).toBe(WHERE('Bilder 2026'));
+      expect(row.failed()).toBe(false);
+    });
+
+    it('saves no name that a folder in the project can’t have, and says why', () => {
+      const { container, update, now } = draw('editor');
+      const row = imagesRow(container);
+      for (const typed of ['.images', 'a/b', '../images', 'a\\b']) {
+        update.mockClear();
+        row.type(row.name, typed);
+        expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
+        expect(row.said()).toBe('A folder’s name has no slash and doesn’t start with a dot.');
+        expect(row.failed()).toBe(true);
+      }
+      // What is wrong is what is said: a name that is missing or too long has no slash to blame.
+      for (const [typed, said] of [
+        ['', 'A folder needs a name.'],
+        ['  ', 'A folder needs a name.'],
+        ['x'.repeat(101), 'A folder’s name can’t be longer than 100 characters.'],
+      ] as const) {
+        update.mockClear();
+        row.type(row.name, typed);
+        expect(update, JSON.stringify(typed)).not.toHaveBeenCalled();
+        expect(row.said()).toBe(said);
+        expect(row.failed()).toBe(true);
+      }
+      expect(now().imageFolderName).toBe('images');
+    });
+
+    it('goes back to the saved name when the field is left with one that isn’t a name', () => {
+      const { container } = draw('editor');
+      const row = imagesRow(container);
+      row.type(row.name, 'a/b');
+      // While it is being typed it is left as it is.
+      expect(row.name.value).toBe('a/b');
+      row.name.dispatchEvent(new Event('blur'));
+      expect(row.name.value).toBe('images');
+      expect(row.said()).toBe(WHERE('images'));
+      expect(row.failed()).toBe(false);
+      // A name that was fine is shown as it was saved, trimmed.
+      row.type(row.name, ' pics ');
+      row.name.dispatchEvent(new Event('blur'));
+      expect(row.name.value).toBe('pics');
+    });
+
+    it('is a group named for the row, whose field has a name of its own', () => {
+      const { container } = draw('editor');
+      const row = container.querySelector<HTMLElement>('[data-row="Images"]');
+      const group = row?.querySelector<HTMLElement>('[role="group"]');
+      const label = row?.querySelector<HTMLElement>('.rl-pref-label');
+      expect(group?.getAttribute('aria-labelledby')).toBe(label?.id);
+      expect(group?.querySelector('input')?.getAttribute('aria-label')).toBe('Folder name');
     });
   });
 

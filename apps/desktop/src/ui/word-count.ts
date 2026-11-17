@@ -1,7 +1,7 @@
 // The word count in the window's lower right corner (design §5.1): a small gray label that stays
 // there while the person writes, "1,204 words", and with a selection "120 of 1,204 words". It
 // counts what a reader sees, as the file name's hover facts do (the newest text, never the markers
-// or the ledger), and on idle, a moment after the last change, so that typing never waits for it and
+// or the ledger), and on idle, a moment after the last change to the text, or a few frames after a moved selection, so that typing never waits for it and
 // a long document stays fast. It sits on a fade of the page's color, as the title bar does at the
 // top, so that text and notes that scroll under it never meet it, and what the editor scrolls to
 // stops short of the fade. Preferences can hide it.
@@ -12,27 +12,70 @@ import type { Editor } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { wordCount } from './titlebar.ts';
 
-/** How long after the last change the words are counted. */
-export const IDLE_MS = 400;
+/** How long after the last change to the text the words are counted. */
+export const IDLE_MS = 150;
+
+/** How long after a moved selection its words are counted: a drag is counted in steps of this. */
+export const SELECTION_MS = 40;
 
 /** What the label counts. */
 export interface Words {
   total: number;
   /** The words a selection covers, or null when nothing with a word in it is selected. */
   selected: number | null;
+  /** The lines and characters, for the label's hover hint (#682). */
+  parts: TextParts;
+}
+
+/** The lines and characters of what a reader sees, and of the selection, which is null when empty. */
+export interface TextParts {
+  lines: number;
+  characters: number;
+  selectedLines: number | null;
+  selectedCharacters: number | null;
+}
+
+/** The lines of `text` (none for no text), and its characters, which a line break is not one of. */
+function linesAndCharacters(text: string): { lines: number; characters: number } {
+  if (text === '') return { lines: 0, characters: 0 };
+  let lines = 1;
+  let characters = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 10) lines++;
+    // The low half of a pair is no character of its own.
+    else if (code < 0xdc00 || code > 0xdfff) characters++;
+  }
+  return { lines, characters };
 }
 
 /** What a reader sees of a document: its newest view. */
 type Newest = ReturnType<typeof newestView>;
 
+/** What a reading of a document holds, counted. */
+const counted = new WeakMap<object, { total: number; lines: number; characters: number }>();
+
 /** The words of a document as a reader sees it, and of the selection `from` to `to` in its source. */
 function wordsOf(view: Newest, selection: { from: number; to: number }): Words {
-  const total = wordCount(view.text);
-  if (selection.from === selection.to) return { total, selected: null };
+  // The whole text is counted once for each reading of it, not for each place the selection moves to.
+  let whole = counted.get(view);
+  if (!whole) {
+    whole = { total: wordCount(view.text), ...linesAndCharacters(view.text) };
+    counted.set(view, whole);
+  }
+  const { total, lines, characters } = whole;
+  const parts: TextParts = { lines, characters, selectedLines: null, selectedCharacters: null };
+  if (selection.from === selection.to) return { total, selected: null, parts };
   const from = view.map.fromSource(selection.from);
   const to = view.map.fromSource(selection.to);
-  const selected = wordCount(view.text.slice(from, to));
-  return { total, selected: selected > 0 ? selected : null };
+  const chosen = view.text.slice(from, to);
+  const inside = linesAndCharacters(chosen);
+  if (inside.characters > 0) {
+    parts.selectedLines = inside.lines;
+    parts.selectedCharacters = inside.characters;
+  }
+  const selected = wordCount(chosen);
+  return { total, selected: selected > 0 ? selected : null, parts };
 }
 
 /**
@@ -65,9 +108,28 @@ export function wordCountLabel(total: number, selected: number | null): string {
   return selected === null ? all : `${selected.toLocaleString()} of ${all}`;
 }
 
+/**
+ * What hovering the label says: "12 lines · 640 characters", and with a selection "3 of 12 lines ·
+ * 120 of 640 characters".
+ */
+export function textPartsLabel(parts: TextParts): string {
+  const n = (count: number, one: string) =>
+    `${count.toLocaleString()} ${count === 1 ? one : `${one}s`}`;
+  const of = (selected: number | null, total: number, one: string) =>
+    selected === null ? n(total, one) : `${selected.toLocaleString()} of ${n(total, one)}`;
+  return [
+    of(parts.selectedLines, parts.lines, 'line'),
+    of(parts.selectedCharacters, parts.characters, 'character'),
+  ].join(' \u00b7 ');
+}
+
 export interface WordCount {
-  /** The document or the selection changed: counts once the changes stop. */
-  schedule(): void;
+  /**
+   * The document changed (the default): counts once the changes stop. Only the selection changed
+   * (`textChanged` false): counts after `SELECTION_MS`, since the text is already read, unless a
+   * count is waiting, which then covers the selection too.
+   */
+  schedule(textChanged?: boolean): void;
   /**
    * A document has just opened: counts as soon as the page has drawn it, so that the label never
    * tells of the document before for as long as an idle wait.
@@ -82,7 +144,7 @@ export interface WordCount {
 /**
  * Adds the label to `parent`, which the page's lower right corner is in, after what is there, so
  * that its fade is over the page. `source.count` is asked only while the label is shown, and after
- * the changes have stopped for `IDLE_MS`. While it is shown the parent is marked `rl-has-footer`,
+ * the changes to the text have stopped for `IDLE_MS` (a moved selection, after `SELECTION_MS`). While it is shown the parent is marked `rl-has-footer`,
  * which the style sheet keeps what scrolls into view clear of the fade by.
  */
 export function createWordCount(
@@ -101,24 +163,38 @@ export function createWordCount(
   footer.hidden = !visible;
   parent.classList.toggle('rl-has-footer', visible);
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let waiting = false;
 
   const show = () => {
-    const { total, selected } = source.count();
+    const { total, selected, parts } = source.count();
     label.textContent = wordCountLabel(total, selected);
+    // The app's hint style draws a title (ui/title-hints.ts, docs/widgets.md), as it does the others'.
+    label.title = textPartsLabel(parts);
+  };
+  const later = (ms: number) => {
+    clearTimeout(timer);
+    waiting = true;
+    timer = setTimeout(() => {
+      waiting = false;
+      show();
+    }, ms);
   };
 
   return {
-    schedule() {
-      clearTimeout(timer);
-      if (visible) timer = setTimeout(show, IDLE_MS);
+    schedule(textChanged = true) {
+      if (!visible) return;
+      if (textChanged) later(IDLE_MS);
+      else if (!waiting) later(SELECTION_MS);
     },
     refresh() {
       clearTimeout(timer);
-      if (visible) timer = setTimeout(show, 0);
+      waiting = false;
+      if (visible) later(0);
     },
     setVisible(next) {
       if (next === visible) return;
       visible = next;
+      waiting = false;
       footer.hidden = !next;
       parent.classList.toggle('rl-has-footer', next);
       clearTimeout(timer);
@@ -131,7 +207,7 @@ export function createWordCount(
 
 /**
  * The word count of `editor`: the label in `parent`, counting what the editor holds, on idle after
- * its text or its selection changes (a document that opens is `refresh`ed by the host), and what the
+ * its text changes, and a moment after its selection does (a document that opens is `refresh`ed by the host), and what the
  * editor scrolls to kept clear of the label's fade while it is shown.
  */
 export function createEditorWordCount(
@@ -142,7 +218,8 @@ export function createEditorWordCount(
   const words = createWordCount(parent, { count: editorWords(editor.view) }, options);
   editor.addExtension([
     EditorView.updateListener.of((update) => {
-      if (update.docChanged || update.selectionSet) words.schedule();
+      if (update.docChanged) words.schedule();
+      else if (update.selectionSet) words.schedule(false);
     }),
     // As the title bar's room above, so that a caret scrolled into view from below isn't left in the
     // fade, where the line being typed would be gone.

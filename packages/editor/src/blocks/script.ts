@@ -16,6 +16,7 @@ import {
   acceptAll,
   applyChanges,
   decodePayload,
+  plainPayload,
   encodePayload,
   newestView,
   originalView,
@@ -28,6 +29,7 @@ import { expect, it } from 'vitest';
 import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
 import { redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
+import { plainPastes } from '../tracked/clipboard.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { openBlock, textWithoutOpen } from './open.ts';
 
@@ -63,10 +65,19 @@ export type KeyName =
 
 /**
  * A step of a script: a key, text typed over the selection as the keyboard types it, an agent's
- * edit (a paragraph of its own at the top of the document), or a decision on the first pending
- * change (accepted or rejected, where the format decides it).
+ * edit (a paragraph of its own at the top of the document), a command of the registry run by its
+ * id (the image size's, #526), a decision on the first pending
+ * change (accepted or rejected, where the format decides it), or Track Changes switched on or off
+ * for this editor.
  */
-export type Step = KeyName | { type: string } | { agent: string } | { decide: 'accept' | 'reject' };
+export type Step =
+  | KeyName
+  | { type: string }
+  | { paste: string; plain?: boolean }
+  | { agent: string }
+  | { command: string }
+  | { decide: 'accept' | 'reject' }
+  | { tracking: boolean };
 
 /** What `checkInvariants` holds every script to, by name, for a script to skip with a reason. */
 export type Invariant =
@@ -99,7 +110,11 @@ export type Invariant =
   /** After the keys, and after leaving an empty paragraph still open, Undo all the way back gives
    * only texts the document had, and ends at the starting file: no step whose text a take-back
    * removed is left to replay. */
-  | 'history';
+  | 'history'
+  /** After every step, the file the editor gives (`getDoc`, what is saved) is its document with
+   * the open empty paragraph taken back, as it stands: no text twice or lost (a file of LF line
+   * breaks, whose line breaks the editor gives back as they are). */
+  | 'file-text';
 
 export interface Script {
   name: string;
@@ -144,6 +159,8 @@ export interface StepResult {
   /** The file before and after the step. */
   before: string;
   after: string;
+  /** The line the caret was on before the step, and its column in it. */
+  caretLine: { text: string; col: number };
 }
 
 export interface ScriptResult {
@@ -169,6 +186,10 @@ export interface ScriptResult {
   listReadFailures: string[];
   /** What Undo all the way back gave that the document never had, or where it ended. */
   historyFailures: string[];
+  /** The steps after which `getDoc` was not the document with the open block taken back. */
+  fileTextFailures: string[];
+  /** Whether an empty item is open after the keys (out of the file, the caret in it). */
+  openItem: boolean;
 }
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -306,10 +327,10 @@ export function shorten(text: string): string {
       }
       if (!kind || !id) return all;
       if (kind === 'split') return '<split>';
-      if (kind === 'del') return `<del ${decodePayload(payload ?? '')}>`;
+      if (kind === 'del') return `<del ${plainPayload(decodePayload(payload ?? ''))}>`;
       kinds.set(id, kind);
       if (kind === 'ins') return '<ins>';
-      if (kind === 'sub') return `<sub ${decodePayload(payload ?? '')}>`;
+      if (kind === 'sub') return `<sub ${plainPayload(decodePayload(payload ?? ''))}>`;
       return `<fmt ${payload ?? ''}>`;
     },
   );
@@ -364,6 +385,8 @@ function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted 
     tracking: script.tc,
     showLineBreakMarks: script.lineBreakMarks ?? false,
     onNotice: (message) => refusals.push(message),
+    // A host with an Image menu, whose commands a script may run (#526).
+    openImage: () => {},
     extensions: [
       editSourceFacet.of({ now: () => NOW, random: randomIds(ids) }),
       // Every text the document has, for the history invariant.
@@ -392,11 +415,26 @@ function play(editor: Editor, step: Step): boolean {
   if (typeof step === 'string') return press(view, step);
   if ('type' in step) {
     view.dispatch(view.state.replaceSelection(step.type), { userEvent: 'input.type' });
+  } else if ('paste' in step) {
+    // The whole document parsed first, as for a key: the paste reads its place from the tree.
+    forceParsing(view, view.state.doc.length, 5000);
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', step.paste);
+    const event = new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true });
+    // Paste as Plain Text: the text goes in as text, whatever it is.
+    if (step.plain) plainPastes.add(event);
+    view.contentDOM.dispatchEvent(event);
   } else if ('agent' in step) {
     editor.applyAgentEdit(`${step.agent}\n\n${editor.getDoc()}`, {
       group: 'walk',
       agent: 'Claude',
     });
+  } else if ('command' in step) {
+    // The whole document parsed first: a command reads its place from the tree.
+    forceParsing(view, view.state.doc.length, 5000);
+    return editor.commands.run(step.command);
+  } else if ('tracking' in step) {
+    editor.setTracking(step.tracking, { inFile: false });
   } else {
     const mark = parse(editor.getDoc()).marks.find((m) => m.kind !== 'split' && m.kind !== 'cmt');
     if (mark) {
@@ -413,7 +451,7 @@ function play(editor: Editor, step: Step): boolean {
 }
 
 /** Whether a step is Undo or Redo: it is no step of its own to take back. */
-const inHistory = (step: Step) => step === 'Mod-z' || step === 'Mod-Shift-z';
+const inHistory = (step: Step) => step === 'Mod-z' || step === 'Mod-Shift-z' || step === 'Mod-y';
 
 /** The body with the caret or the selection in it, in the notation. */
 function caretText(editor: Editor): string {
@@ -449,15 +487,35 @@ function hiddenAt(editor: Editor): string | null {
 /** The lines of a body that start a list item, outside fenced code. */
 function itemLines(body: string): number {
   let fence: string | null = null;
+  let where = { indent: 0, quotes: 0 };
   let count = 0;
+  const shape = (line: string) => ({
+    indent: /^[ \t>]*/.exec(line.replace(/^(?:[ \t]*>)+/, ''))?.[0].length ?? 0,
+    quotes: (/^(?:[ \t]*>)*/.exec(line)?.[0].match(/>/g) ?? []).length,
+  });
   for (const line of body.split('\n')) {
     const opens = FENCE.exec(line)?.[1];
     if (fence) {
-      if (opens && opens.startsWith(fence[0]!) && opens.length >= fence.length) fence = null;
-      continue;
+      // A fence that is never closed ends where its container does: a line of text with fewer
+      // quote markers, or indented less than the fence is, which leaves its list item.
+      const now = shape(line);
+      const ends =
+        line.trim() !== '' &&
+        (now.quotes < where.quotes || (now.quotes === where.quotes && now.indent < where.indent));
+      if (opens && opens.startsWith(fence[0]!) && opens.length >= fence.length) {
+        fence = null;
+        continue;
+      }
+      if (!ends) continue;
+      fence = null;
     }
-    if (/^(?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) count++;
-    if (opens) fence = opens;
+    // A line of three or more `-` or `*` (`- ---`, `* * *`) is a thematic break, not an item.
+    const thematic = /^(?:[ \t]*>)*[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/.test(line);
+    if (!thematic && /^(?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) count++;
+    if (opens) {
+      fence = opens;
+      where = shape(line);
+    }
   }
   return count;
 }
@@ -492,7 +550,7 @@ function undoEach(script: Script, expanded: Expanded): string[] {
       const before = docOf(mounted.editor);
       const selection = selectionOf(mounted.editor);
       view.dispatch({ annotations: isolateHistory.of('full') });
-      const opened = openBlock(view.state) ? textWithoutOpen(view.state) : null;
+      const opened = openBlock(view.state) ? textWithoutOpen(view.state, true) : null;
       play(mounted.editor, step);
       const after = docOf(mounted.editor);
       if (after === before) return;
@@ -554,7 +612,16 @@ function undoAllTheWay(view: EditorView, seen: Set<string>, start: string): stri
 }
 
 /** Plays a script on a real editor and reports what it did; `checkInvariants` judges it. */
-export function runScript(script: Script): ScriptResult {
+export function runScript(
+  script: Script,
+  options: {
+    /** Without the replays (Undo after each step, Undo all the way back, the take-back), which
+     * cost most of a script's time: for suites that play many scripts and check other things. */
+    light?: boolean;
+    /** Called with the editor after each step, for a suite that reads the editor itself. */
+    onStep?: (editor: Editor, index: number) => void;
+  } = {},
+): ScriptResult {
   const expanded = expandDoc(script);
   const seen = new Set<string>([expanded.text]);
   const mounted = mount(script, expanded, seen);
@@ -563,19 +630,33 @@ export function runScript(script: Script): ScriptResult {
     const start = editor.getDoc();
     const openCaretFailures: string[] = [];
     const listReadFailures: string[] = [];
+    const fileTextFailures: string[] = [];
     const unread = unreadItems(start);
     const steps: StepResult[] = script.keys.map((step, i) => {
       const before = editor.getDoc();
+      const { head } = editor.view.state.selection.main;
+      const caretOn = editor.view.state.doc.lineAt(head);
+      const caretLine = { text: caretOn.text, col: head - caretOn.from };
       const handled = play(editor, step);
+      options.onStep?.(editor, i);
       const open = openWithoutCaret(editor.view);
       if (open) openCaretFailures.push(`step ${i + 1} (${JSON.stringify(step)}): ${open}`);
+      if (!start.includes('\r')) {
+        const given = editor.getDoc();
+        const held = textWithoutOpen(editor.view.state);
+        if (given !== held) {
+          fileTextFailures.push(
+            `step ${i + 1} (${JSON.stringify(step)}): the file is ${notation(given)}, not ${notation(held)}`,
+          );
+        }
+      }
       const more = unreadItems(editor.getDoc()) - unread;
       if (more > 0) {
         listReadFailures.push(
           `step ${i + 1} (${JSON.stringify(step)}): ${more} more lines start an item than micromark reads in ${notation(bodyOf(editor.getDoc()))}`,
         );
       }
-      return { step, handled, before, after: editor.getDoc() };
+      return { step, handled, before, after: editor.getDoc(), caretLine };
     });
     const result: ScriptResult = {
       script,
@@ -585,13 +666,15 @@ export function runScript(script: Script): ScriptResult {
       steps,
       refusals: [...mounted.refusals],
       hiddenCaret: hiddenAt(editor),
-      undoFailures: undoEach(script, expanded),
+      undoFailures: options.light ? [] : undoEach(script, expanded),
       openCaretFailures,
       listReadFailures,
       historyFailures: [],
+      fileTextFailures,
+      openItem: openBlock(editor.view.state)?.item === true,
     };
-    result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
-    if (script.keys.length === 1 && script.keys[0] === 'Enter') {
+    if (!options.light) result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
+    if (!options.light && script.keys.length === 1 && script.keys[0] === 'Enter') {
       const again = mount(script, expanded);
       try {
         play(again.editor, 'Enter');
@@ -870,7 +953,11 @@ export function decisionProblems(file: string): string[] {
   ];
   const all = marksOf(file);
   if (all.length === 0) return [];
-  if (all.length > DECISION_LIMIT) return sampleDecisions(file, all);
+  // A long file with many marks (a widened replacement holds the marks in its old text) is sampled:
+  // the full walk parses it at every step.
+  if (all.length > DECISION_LIMIT || file.length > 800) {
+    return sampleDecisions(file, all);
+  }
   const outcomes = new Map<string, Set<string>>();
   const problems: string[] = [];
   const seen = new Set<string>();
@@ -985,6 +1072,7 @@ export function invariantProblems(result: ScriptResult): Record<Invariant, strin
     'list-reads': result.listReadFailures,
     'open-caret': result.openCaretFailures,
     history: result.historyFailures,
+    'file-text': result.fileTextFailures,
   };
 }
 

@@ -41,8 +41,7 @@ const both = (rows: Row[]): Script[] =>
 
 const NUMBERED_UNDER =
   "This numbered item can't move there: right after the text above it, Markdown would read it as part of that text. Put a blank line before it, or number it 1.";
-const NOT_UNDER_TEXT =
-  "An empty item can't be indented under a line of text in Markdown. Type in it first.";
+const NOT_UNDER_TEXT = "An empty item can't go under a line of text. Type in the item first.";
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
 
 describe('Tab in a list item', () => {
@@ -548,6 +547,72 @@ describe("an empty item of another person's pending split", () => {
         refusal: THEIRS,
       },
     })),
+  );
+});
+
+// The author's own pending split before an empty item, with another person's pending deletion on
+// the indented line after it (#465): the plain edit of the item's line went to the file unchecked
+// and made a line Markdown reads as code. It is checked by the format, and the list is replaced
+// where no fine write reads right.
+describe('an empty item of the author’s own split, with a pending change below it', () => {
+  const HIDES_OTHERS =
+    'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain with Track Changes off.';
+  scriptRows([
+    {
+      name: 'Shift-Tab, Track Changes on: every order of decisions reads the same',
+      doc:
+        '1. one⏎\t2. two<!--split k3x9-->⏎\t3. ‸⏎\t   * beta<!--del m4t7 q-->⏎⏎' +
+        '<!-- redlines⏎version: 1⏎people:⏎  ada: {name: Ada Lovelace}⏎  bo: {name: Bo Chen}⏎marks:⏎' +
+        '  k3x9: {by: ada, at: 2026-11-01T10:00Z}⏎  m4t7: {by: bo, at: 2026-11-01T10:00Z}⏎-->⏎',
+      keys: ['Shift-Tab'],
+      tc: true,
+      // Another person's pending change in the lines below can't be taken into a replacement of
+      // the list: the key says so, in the format's words, and the file stays as it is.
+      expect: {
+        file: '1. one⏎\t2. two<split>⏎\t3. ⏎\t   * beta<del q>',
+        refusal: HIDES_OTHERS,
+      },
+    },
+    {
+      name: 'Shift-Tab, Track Changes on, a sound write: made as it stands',
+      doc: '- one⏎  - two<split>⏎  - ‸⏎    - beta<del q>',
+      keys: ['Shift-Tab'],
+      tc: true,
+      expect: {},
+    },
+  ]);
+});
+
+// The caret at the end of an item's text with a block after it stays there (#508): the tracked
+// layer's closer and the line breaks after it make one hidden range, and the caret was taken to
+// its far end, the start of the next block, where the next letters went.
+describe('Tab and Shift-Tab at the end of an item with a block after it', () => {
+  scriptRows(
+    both([
+      {
+        name: 'Tab: the caret stays after the item’s text',
+        doc: '- one⏎- two‸⏎⏎Next',
+        keys: ['Tab'],
+        off: { caret: '- one⏎  - two‸⏎⏎Next' },
+        on: { caret: '- one⏎  - <fmt was=indent=0>⏎    two‸</fmt>⏎⏎Next' },
+      },
+      {
+        name: 'Tab in a numbered list',
+        doc: '1. one⏎2. two⏎3. three‸⏎⏎Next',
+        keys: ['Tab'],
+        off: { caret: '1. one⏎2. two⏎   1. three‸⏎⏎Next' },
+        on: {
+          caret: '1. one⏎2. two⏎   1. <fmt was=indent=0 was=ol=3.\\x20>⏎      three‸</fmt>⏎⏎Next',
+        },
+      },
+      {
+        name: 'Shift-Tab: the caret stays after the item’s text',
+        doc: '- one⏎  - two‸⏎⏎Next',
+        keys: ['Shift-Tab'],
+        off: { caret: '- one⏎- two‸⏎⏎Next' },
+        on: { caret: '- one⏎- <fmt was=indent=2>⏎  two‸</fmt>⏎⏎Next' },
+      },
+    ]),
   );
 });
 

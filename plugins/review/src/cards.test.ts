@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { activateHover } from '@codemirror/view';
 import type { Editor } from '@redlines/editor';
-import { parse, type MarkRange } from '@redlines/format';
+import { encodePayload, parse, type MarkRange } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { describeChange, describeChanges } from './cards.ts';
 import {
@@ -202,19 +202,26 @@ describe('change cards', () => {
     }
   });
 
-  it('shows no card on hover and pins none on a click in Simple', async () => {
+  it('shows no card on hover in Simple, and a click on a change there pins its card (#664)', async () => {
     const { editor } = mount(doc);
     editor.setViewMode('simple');
     expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del')).toBeNull();
     const at = doc.indexOf('new ');
     activateHover(editor.view, at, 1);
     expect(card(editor)).toBeNull();
-    // Nothing is drawn to click on; a click on the text pins none either.
-    const line = editor.view.contentDOM.querySelector('.cm-line')!;
-    click(line, editor.view.contentDOM);
+    // A click on the text where nothing changed pins none.
+    click(editor.view.contentDOM.querySelector('.cm-line')!, editor.view.contentDOM);
     await tick();
     expect(card(editor)).toBeNull();
-    // In Redlines, the same position does show one.
+    // A click on an insertion's colored text pins that change's card, with Accept and Reject.
+    await clickOn(editor, '.rl-ins-plain');
+    expect(what(editor)).toBe('Inserted “new”');
+    expect(
+      [...card(editor)!.querySelectorAll('.rl-card-button')].map(
+        (b) => b.getAttribute('aria-label') ?? b.textContent,
+      ),
+    ).toEqual(['Accept', 'Reject']);
+    // In Redlines, hovering the same position shows one.
     editor.setViewMode('redlines');
     activateHover(editor.view, at, 1);
     expect(what(editor)).toBe('Inserted “new”');
@@ -541,7 +548,7 @@ describe('format change cards', () => {
     expect(editor.getDoc()).toContain('We ship the new importer.');
   });
 
-  it('offers only Accept for a format change whose text has lost the format', async () => {
+  it('grays Reject, with the reason, for a format change whose text has lost the format', async () => {
     const lost = file('We ship the <!--fmt m2bd +bold-->new<!--/m2bd--> importer.', [
       ...PEOPLE,
       'marks:',
@@ -549,7 +556,14 @@ describe('format change cards', () => {
     ]);
     const { editor, decided } = mount(lost);
     await clickOn(editor, '.rl-fmt');
-    expect(() => button(card(editor)!, 'Reject')).toThrow('No button');
+    // Reject is grayed, and its hint says why; clicking it decides nothing.
+    const reject = button(card(editor)!, 'Reject');
+    expect(reject.getAttribute('aria-disabled')).toBe('true');
+    expect(reject.title).toBe(
+      'This change can only be accepted: its text no longer has that formatting.',
+    );
+    reject.click();
+    expect(decided).toEqual([]);
     button(card(editor)!, 'Accept').click();
     expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
   });
@@ -632,6 +646,100 @@ describe('an inserted table row', () => {
   it('is listed in the review bar’s changes', () => {
     const { editor } = mount(ONE);
     expect(editor.getUiState().changes.map((change) => change.id)).toEqual(['k3x9']);
+  });
+});
+
+describe('a table deleted whole', () => {
+  /** A table of `columns` columns and `rows` rows, the header's and the body's. */
+  const table = (columns: number, rows: number) => {
+    const cells = (label: string) =>
+      `| ${Array.from({ length: columns }, (_, c) => `${label}${c}`).join(' | ')} |`;
+    const delimiter = `| ${Array.from({ length: columns }, () => '---').join(' | ')} |`;
+    return [
+      cells('h'),
+      delimiter,
+      ...Array.from({ length: rows - 1 }, (_, r) => cells(`r${r}`)),
+    ].join('\n');
+  };
+  const ledger = [...PEOPLE, 'marks:', '  w2rf: {by: bo, at: 2026-10-31T09:35Z}'];
+  /** The deletion in front of the block after the table, behind the block above at the end, or alone. */
+  const forms = (text: string) => ({
+    middle: file(`One.\n\n<!--del w2rf ${encodePayload(`${text}\n\n`)}-->\n\nAfter.`, ledger),
+    end: file(`One.<!--del w2rf ${encodePayload(`\n\n${text}`)}-->`, ledger),
+    alone: file(`<!--del w2rf ${encodePayload(text)}-->`, ledger),
+  });
+  const said = (doc: string) => {
+    const parsed = parse(doc);
+    return describeChange(parsed, parsed.marks[0]!);
+  };
+
+  it('is described as Deleted table, with its columns and rows', () => {
+    expect(said(forms(table(3, 20)).middle)).toBe('Deleted table (3 columns, 20 rows)');
+    expect(said(forms(table(2, 3)).middle)).toBe('Deleted table (2 columns, 3 rows)');
+  });
+
+  it('is singular for one column or one row, and counts a header alone as a row', () => {
+    expect(said(forms(table(1, 1)).middle)).toBe('Deleted table (1 column, 1 row)');
+    expect(said(forms(table(1, 5)).middle)).toBe('Deleted table (1 column, 5 rows)');
+    expect(said(forms(table(4, 1)).middle)).toBe('Deleted table (4 columns, 1 row)');
+  });
+
+  it('is described the same in every form it is written in', () => {
+    for (const [form, doc] of Object.entries(forms(table(3, 20)))) {
+      expect(said(doc), form).toBe('Deleted table (3 columns, 20 rows)');
+    }
+  });
+
+  it('is not said of a deletion of more than a table, or of a table’s text inside a paragraph', () => {
+    const more = file(
+      `One.\n\n<!--del w2rf ${encodePayload(`Intro.\n\n${table(2, 3)}\n\n`)}-->\n\nAfter.`,
+      ledger,
+    );
+    expect(said(more)).toMatch(/^Deleted “Intro\./);
+    const words = file('One <!--del w2rf | a | b |-->two.', ledger);
+    expect(said(words)).toBe('Deleted “| a | b |”');
+  });
+
+  it('is described in the list of a suggestion’s changes, as each change is', () => {
+    const parsed = parse(forms(table(3, 20)).middle);
+    expect(describeChanges(parsed, parsed.marks)).toBe('Deleted table (3 columns, 20 rows)');
+  });
+
+  it('opens its card on hover over the ghost table, and pins it on a click', async () => {
+    const { editor } = mount(forms(table(3, 20)).middle);
+    const ghost = editor.view.contentDOM.querySelector<HTMLElement>('.rl-ghost-table')!;
+    expect(ghost).not.toBeNull();
+    const cell = ghost.querySelector('.rl-del')!;
+    cell.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    activateHover(editor.view, editor.view.posAtDOM(ghost), 1);
+    expect(what(editor)).toBe('Deleted table (3 columns, 20 rows)');
+    expect(card(editor)?.querySelector('.rl-card-name')?.textContent).toBe('Bo Chen');
+    // A press on the table pins the card too, and puts no caret in it.
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    click(ghost.querySelector('.rl-del')!, editor.view.contentDOM);
+    await tick();
+    expect(what(editor)).toBe('Deleted table (3 columns, 20 rows)');
+    expect(editor.view.state.selection.main.head).toBe(1);
+  });
+
+  it('Reject in its card puts the table back, and Accept makes the deletion final', async () => {
+    const doc = forms(table(2, 3)).middle;
+    const { editor, decided } = mount(doc);
+    click(editor.view.contentDOM.querySelector('.rl-ghost-table .rl-del')!, editor.view.contentDOM);
+    await tick();
+    button(card(editor)!, 'Reject').click();
+    expect(decided).toEqual([{ id: 'w2rf', how: 'reject' }]);
+    expect(editor.getDoc()).toContain(`${table(2, 3)}\n\nAfter.`);
+    expect(editor.view.contentDOM.querySelector('.rl-ghost-table')).toBeNull();
+    const again = mount(doc);
+    click(
+      again.editor.view.contentDOM.querySelector('.rl-ghost-table .rl-del')!,
+      again.editor.view.contentDOM,
+    );
+    await tick();
+    button(card(again.editor)!, 'Accept').click();
+    expect(again.editor.getDoc()).not.toContain('h0');
+    expect(again.editor.getDoc()).not.toContain('w2rf');
   });
 });
 
@@ -722,6 +830,7 @@ describe('an inserted, deleted or moved table column', () => {
 
 describe('an alignment change of a table', () => {
   const SPEC = '\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|';
+  // The span form, which another tool wrote: the opener above the table, the closer below it.
   const CENTERED = file(
     `<!--fmt k3x9 align=${SPEC}-->\n\n| Fruit | Count |\n| ----- | :---: |\n| Apples | 3 |\n\n<!--/k3x9-->`,
     [...PEOPLE, 'marks:', '  k3x9: {by: bo, at: 2026-10-31T09:30Z}'],
@@ -762,5 +871,77 @@ describe('an alignment change of a table', () => {
         .editor.getUiState()
         .changes.map((change) => change.id),
     ).toEqual(['k3x9']);
+  });
+
+  describe('as the point that ends the header’s last cell, which Redlines writes', () => {
+    const POINT = file(
+      `| Fruit | Count<!--fmt k3x9 align=${SPEC}--> |\n| ----- | :---: |\n| Apples | 3 |`,
+      [...PEOPLE, 'marks:', '  k3x9: {by: bo, at: 2026-10-31T09:30Z}'],
+    );
+
+    it('is described by the column it changed, as the span form is', () => {
+      const parsed = parse(POINT);
+      expect(describeChange(parsed, parsed.marks[0]!)).toBe(
+        'Formatted: column Count centered (was default)',
+      );
+    });
+
+    it('names the column by the text the page shows, with Bo’s insertion typed in its cell', async () => {
+      // The insertion's markers are not part of the name: they show nowhere on the page.
+      const typed = file(
+        `| Fruit | Count<!--ins m2bd-->x<!--/m2bd--><!--fmt k3x9 align=${SPEC}--> |\n| ----- | :---: |\n| Apples | 3 |`,
+        [
+          ...PEOPLE,
+          'marks:',
+          '  k3x9: {by: bo, at: 2026-10-31T09:30Z}',
+          '  m2bd: {by: bo, at: 2026-10-31T09:31Z}',
+        ],
+      );
+      const parsed = parse(typed);
+      expect(
+        describeChange(
+          parsed,
+          parsed.marks.find((found) => found.id === 'k3x9')!,
+        ),
+      ).toBe('Formatted: column Countx centered (was default)');
+      const { editor } = mount(typed);
+      editor.setViewMode('redlines');
+      await clickOn(editor, '.rl-fmt');
+      expect(what(editor)).toBe('Formatted: column Countx centered (was default)');
+    });
+
+    it('opens its card on the header row, with Accept and Reject', async () => {
+      const { editor } = mount(POINT);
+      editor.setViewMode('redlines');
+      await clickOn(editor, '.rl-fmt');
+      expect(what(editor)).toBe('Formatted: column Count centered (was default)');
+      expect(button(card(editor)!, 'Accept')).toBeInstanceOf(HTMLButtonElement);
+      expect(button(card(editor)!, 'Reject')).toBeInstanceOf(HTMLButtonElement);
+    });
+
+    it('Accept removes the mark and keeps the new alignment, and Reject writes the old row back', async () => {
+      const { editor } = mount(POINT, { real: true });
+      editor.setViewMode('redlines');
+      await clickOn(editor, '.rl-fmt');
+      button(card(editor)!, 'Accept').click();
+      expect(editor.getDoc()).toContain('| Fruit | Count |\n| ----- | :---: |\n| Apples | 3 |');
+      expect(editor.getDoc()).not.toContain('<!--');
+      const rejecting = mount(POINT, { real: true });
+      rejecting.editor.setViewMode('redlines');
+      await clickOn(rejecting.editor, '.rl-fmt');
+      button(card(rejecting.editor)!, 'Reject').click();
+      expect(rejecting.editor.getDoc()).toContain(
+        '| Fruit | Count |\n| ----- | ----- |\n| Apples | 3 |',
+      );
+      expect(rejecting.editor.getDoc()).not.toContain('<!--');
+    });
+
+    it('is listed once in the review bar’s changes', () => {
+      expect(
+        mount(POINT)
+          .editor.getUiState()
+          .changes.map((change) => change.id),
+      ).toEqual(['k3x9']);
+    });
   });
 });

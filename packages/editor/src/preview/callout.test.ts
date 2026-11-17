@@ -215,7 +215,7 @@ describe('an alert in the preview (#311)', () => {
       expect(lineClasses(editor).get(pending.indexOf('> [!TIP]'))).toContain('rl-callout-tip');
     });
 
-    it('is pending but in no author’s color in Simple, and not in Raw', () => {
+    it('is pending but in no author’s color in Simple, and not in Plain', () => {
       const simple = title(editorAt(pending, 0, 'simple'));
       expect(simple?.classList.contains('rl-callout-pending')).toBe(true);
       expect(simple?.className).not.toMatch(/rl-author/);
@@ -251,7 +251,7 @@ describe('an alert in the preview (#311)', () => {
     expect(editor.getDoc()).toBe(ALERT);
   });
 
-  it('is not drawn in Raw, which shows the source as written', () => {
+  it('is not drawn in Plain, which shows the source as written', () => {
     const editor = editorAt(ALERT, 0);
     editor.setViewMode('raw');
     expect(title(editor)).toBeNull();
@@ -265,5 +265,66 @@ describe('an alert in the preview (#311)', () => {
     expect(lines).toContain('rl-callout-tip');
     expect(lines).toContain('rl-li');
     expect(lines).toContain('rl-codeblock');
+  });
+});
+
+describe('two alerts one blank line apart (#389)', () => {
+  const classesAt = (doc: string, needle: string) =>
+    lineClasses(editorAt(doc, doc.length)).get(doc.indexOf(needle)) ?? [];
+
+  it('keep apart: the space is outside the second box, not padding inside a tint', () => {
+    const doc = '> [!NOTE]\n> One.\n\n> [!TIP]\n> Two.\n';
+    expect(classesAt(doc, '> [!TIP]')).toContain('rl-space-block-apart');
+    expect(classesAt(doc, '> [!TIP]')).not.toContain('rl-space-block');
+  });
+
+  it('keep apart after an alert of several paragraphs, and for three in a row', () => {
+    const doc = '> [!NOTE]\n> One.\n>\n> Again.\n\n> [!TIP]\n> Two.\n\n> [!WARNING]\n> Three.\n';
+    expect(classesAt(doc, '> [!TIP]')).toContain('rl-space-block-apart');
+    expect(classesAt(doc, '> [!WARNING]')).toContain('rl-space-block-apart');
+  });
+
+  it('leave the space under a paragraph above an alert, and over a paragraph below it, as it was', () => {
+    const doc = 'Intro.\n\n> [!NOTE]\n> One.\n\nAfter.\n';
+    expect(classesAt(doc, 'After.')).toContain('rl-space-block');
+    expect(classesAt(doc, 'After.')).not.toContain('rl-space-block-apart');
+    expect([...lineClasses(editorAt(doc, 0)).values()].flat()).not.toContain(
+      'rl-space-block-apart',
+    );
+  });
+});
+
+describe('tinted blocks under an alert, and an alert under code (#639)', () => {
+  const classesAt = (doc: string, needle: string) =>
+    lineClasses(editorAt(doc, doc.length)).get(doc.indexOf(needle)) ?? [];
+
+  it('put the space of code under an alert outside both boxes', () => {
+    const doc = '> [!NOTE]\n> Third.\n\n```\ncode\n```\n';
+    expect(classesAt(doc, '```\ncode')).toContain('rl-space-block-apart');
+    expect(classesAt(doc, '```\ncode')).toContain('rl-codeblock-first');
+    // Nothing is added to the alert's last line, which would grow its tint.
+    expect(classesAt(doc, '> Third.')).not.toContain('rl-space-block-below');
+  });
+
+  it('do the same for an alert under code, and for code under code', () => {
+    const under = '```\ncode\n```\n\n> [!NOTE]\n> Text.\n';
+    expect(classesAt(under, '> [!NOTE]')).toContain('rl-space-block-apart');
+    const two = '```\none\n```\n\n```\ntwo\n```\n';
+    expect(classesAt(two, '```\ntwo')).toContain('rl-space-block-apart');
+    // Under a table, which has no tint to keep clear of but none to take padding either.
+    const table = '| a | b |\n| - | - |\n| 1 | 2 |\n\n```\ncode\n```\n';
+    expect(classesAt(table, '```\ncode')).toContain('rl-space-block-apart');
+  });
+
+  it('put the space of a table under an alert below the alert, clipped out of its tint', () => {
+    const doc = '> [!NOTE]\n> Text.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n';
+    expect(classesAt(doc, '> Text.')).toContain('rl-space-block-clip');
+    expect(classesAt(doc, '> Text.')).toContain('rl-callout-last');
+  });
+
+  it('leave code under a plain paragraph with its space below the paragraph, as it was', () => {
+    const doc = 'Intro.\n\n```\ncode\n```\n';
+    expect(classesAt(doc, 'Intro.')).toContain('rl-space-block-below');
+    expect(classesAt(doc, '```\ncode')).not.toContain('rl-space-block-apart');
   });
 });

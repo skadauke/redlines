@@ -23,12 +23,22 @@ export const SAY = {
   already: 'Already 5, per uploader.ts:88. Nothing to change.',
   missing: "I can't find the retry count in this note any more.",
   refused: "I couldn't make that edit here.",
+  readingAsk: 'Reading the document',
+  /** The scripted answer to an Ask, which cites the document's first sentence as [1]. */
+  answer:
+    'This is a scripted answer: the demo has no model. It read the note, and cites its first sentence [1].',
   /** The page's closing word for a run that ended with a reply. */
   done: 'replied.',
 } as const;
 
 /** The count the code has. */
 const RETRIES = '5';
+
+/** The first sentence of the document as `view` shows it, without line numbers or the heading. */
+function firstSentence(viewed: string): string {
+  const plain = viewed.replace(/^ *\d+\t/gm, '').replace(/^#+\s.*\n+/, '');
+  return /^[^\n]*?[.!?](?=\s|$)/.exec(plain)?.[0] ?? plain.split('\n')[0] ?? '';
+}
 
 /** Waits `ms`, or rejects as soon as `signal` aborts, with its timer gone. */
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -50,10 +60,28 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 /** The agents the page lists: the scripted Claude alone. `pause` is how long each step takes. */
 export function scriptedAgents(options: { pause(): number }): HostAgents {
   async function* script(
+    request: Parameters<HostAgents['run']>[1],
     tools: Parameters<HostAgents['run']>[2],
     signal: AbortSignal,
   ): AsyncGenerator<AgentEvent> {
     const client = toolClient(tools);
+    if (request.thread.startsWith('ask-')) {
+      // An Ask (#351): one canned answer, which writes nothing and cites the first sentence.
+      try {
+        await client.initialize();
+        await client.call('status', { text: SAY.readingAsk });
+        await wait(options.pause(), signal);
+        const viewed = await client.call('view');
+        if (signal.aborted) return;
+        yield {
+          type: 'done',
+          finalText: `${SAY.answer}\n\nSources:\n[1] "${firstSentence(viewed.text)}"`,
+        };
+      } catch {
+        if (!signal.aborted) yield { type: 'error', message: SAY.refused };
+      }
+      return;
+    }
     try {
       await client.initialize();
       await client.call('status', { text: SAY.reading });
@@ -90,6 +118,6 @@ export function scriptedAgents(options: { pause(): number }): HostAgents {
 
   return {
     list: () => Promise.resolve([CLAUDE]),
-    run: (_agent, _request, tools, signal) => script(tools, signal),
+    run: (_agent, request, tools, signal) => script(request, tools, signal),
   };
 }

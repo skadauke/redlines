@@ -25,10 +25,15 @@ isn't held*, and a gap is a bug.
    §2.1, §3.4); the words the file reads as must not depend on the order, and are judged by micromark
    4.0.2 with GFM tables and strikethrough, the oracle of the suites ([format.md](format.md) §12), and
    not by eye.
-2. **Redlines is meant to refuse rather than repair, and a refusal says why.** An edit that no form
-   can write soundly is refused, in words that name the cause and the way out ("This would change
-   how Bo Chen's insertion reads. Decide it first, or turn off Track Changes."). A key that does
-   nothing and says nothing is a bug.
+2. **Redlines is meant to widen rather than refuse, and ask before an untracked edit.** An edit that
+   no fine form can write soundly is written as a replacement of the smallest unit that holds it,
+   with other people's pending changes in its old text, or, where no unit can be written, made
+   without tracking after the person is asked ([format.md](format.md) §3.12, §3.13). A refusal is
+   kept only where every write would leave the file wrong (an unreadable ledger, forged markup, an
+   agent's quote that is not there), in words that name the cause; one more is kept for now, where
+   the unit's old text holds another person's pending mark (the guard of #808, below). A key that
+   does nothing and says nothing is a bug. `refusals.node.test.ts` holds it: every place in the sources that refuses an
+   edit has a tier in `refusals.ts`, and a new one is a red test.
 3. **No line of a paragraph, heading, list item, quote, footnote or table row begins with a
    marker.** In CommonMark a line that starts with `<!--` starts an HTML block, which changes how
    the rest of the line reads, so a marker stays at the end of the previous line
@@ -95,9 +100,18 @@ REDLINES_SEED=<n> pnpm exec vitest run packages/format/src/table-cols-random.tes
 `format-apart` at one seed.
 
 The tables have a **pair model** besides: every pair of operations on rows and columns by two
-people is decided in every order (`table-pairs.test.ts`, [format.md](format.md) §3.7).
+people is decided in every order (`table-pairs.test.ts`, [format.md](format.md) §3.7). A tracked
+alignment change, one mark at the end of the header row, is among the operations (#281), and
+`table-cols-random`, `table-format-random` and `table-rows-random` draw it with other people's
+marks, rows and columns around it: every order of deciding it reads alike, and the pair model,
+`table-cols-random` and `table-rows-random` fail on a decision of it that is refused.
 
 ### Differential runs against main
+
+`packages/format/src/differential.node.test.ts` is the run kept in the repository for a change that
+adds a writer and calls it nowhere: a digest of what the existing writers, decisions and views write
+over a fixed corpus of random documents, which a branch must give as main does. R1's engine did
+(150 documents, one digest).
 
 A change to how an edit is written is run by its reviewer against main on the same random documents,
 and every decision where the two disagree is looked at. Those scripts are the reviewer's own, kept in
@@ -116,11 +130,17 @@ the harness: `runScript` plays a script on a real editor, through its keymaps, a
 `invariantProblems` reads what no key may break from the result. A walk is held to the invariants
 that its starting document holds: a hidden caret, an empty paragraph in the file, a stray blank
 line, micromark's reading of the file against the newest view, structural warnings, more markers at
-a line start than before, the order of decisions, Undo, the caret in an open empty paragraph, and
-the history. A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
+a line start than before, the order of decisions, Undo, the caret in an open empty paragraph, the
+history, and the file's text (`getDoc()` is the document with the open line taken back, each line
+and the ledger once: #439; a file with a CR is left out of that one, since its line endings come
+back as the file has them). A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
 that are skipped by name for known failures (46, 130 and 146 of the Tab walks: 46 and 130 are #258,
 and 146 is named in the comment of `KNOWN_STAGE_1`) and in one form of Return that has a row of its
-own. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
+own. `walk-248.test.ts` also skips 'list-reads' for a step that takes a character out of a list marker
+with the caret inside the marker and Track Changes off (`editedMarker`, seed 1140 of #292, `3.‸ ship`
+and Backspace): that is the person editing the syntax, the next numbered item reads as text of the
+line as Markdown reads it, and the tracked key is refused. A key that takes a marker away from the
+caret at an item's text, or an outdent, is held to it. A script row (`scriptRows`, for the findings in `walk-seeds.test.ts` and the suites of keys) is
 held further: to no refusal that it does not name, and to the rule that a skipped invariant that now
 holds fails; and a script of a single Return must be taken back by Backspace. `REDLINES_FUZZ=200`
 plays 200 walks of each kind; they run in Node's default heap since #286 was fixed (they had run out
@@ -135,12 +155,17 @@ own. The file's header says how: the same file runs in a checkout whose keys are
 with `REDLINES_COST=record`, which prints the numbers; on today's main it would measure the block
 keys against themselves, and the file's imports are newer than that commit, so recording them again
 means carrying the file back to a build like it. A key may take at most twice what that build's
-took. `hidden.test.ts` holds the hidden lines' pass to a linear cost, and
+took. `hidden.test.ts` holds the hidden lines' pass to a linear cost (4,000 lines of markers may
+take at most eight times what 1,000 take: linear is four, quadratic sixteen), and
 `preview/long-document.test.ts` holds the drawing, and a keystroke, in long documents with deleted
 blocks and tables to bounds that are a multiple of the markdown parse of the document alone.
 `held()` retries a timing over its bound twice, with its yardstick timed again beside it, so that a
-busy machine fails a bound only when it keeps failing. These run only with `REDLINES_COST=check`,
-which CI's check job sets.
+busy machine fails a bound only when it keeps failing. Where a timing has a yardstick of the same
+kind (the hidden lines' pass at two sizes; a key in code and a key in a paragraph of the same
+document), the two take turns, so that a runner slowed for a few seconds slows both alike. A
+yardstick of another kind tracks the timing less well on CI: a key in code varied by 19 % from run
+to run against the markdown parse and by 11 % against a key in a paragraph. These run only with
+`REDLINES_COST=check` (AGENTS.md says when CI sets it).
 
 ### The system WKWebView checks: `apps/desktop/src/*-check.ts`
 
@@ -179,8 +204,9 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
    it. A shape that no random document draws is a shape nothing has tested.
 3. **Hold it to micromark.** The judge is micromark 4.0.2 with GFM, on the file and on every decision
    of it (`newestView`, `originalView`, `accept`, `reject`), and not your reading of the spec.
-4. **Refuse where no form reads alike, and say why.** A refusal names the cause and the way out, and a
-   test holds its words. Don't repair: a form that reads alike in most orders only is not a form.
+4. **Widen where no form reads alike.** The edit is a replacement of the unit that holds it
+   (`widen.ts`), not a refusal, and a form that reads alike in most orders only is not a form. Don't
+   add a refusal: `refusals.node.test.ts` fails on one with no tier.
 5. **If it is a key, keep it cheap,** and add a row to the cost gate.
 6. **If it is drawn or measured, add a check for WKWebView.**
 7. **Have it reviewed** by someone who will try to break it.
@@ -190,20 +216,35 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
 **Silent wrong writes, and changes that can't be decided, found so far.** Each is an open issue with
 its case; each is a bug. The list is what has been found, not a count of what is there.
 
-- Numbered lists: Backspace on `1. a⏎   - ‸plan⏎   2. ship`, and with Track Changes off Backspace at
-  a first item above an item that a pending deletion empties; the walks of `walk-248.test.ts` fail
-  four seeds at `REDLINES_FUZZ=2000` (#292).
-- A prefix edit of a blank quote line between two paragraphs, flanked by other people's pending
-  changes, is written without its line breaks (#358).
+- The editor's document has LF line breaks only, and its record of a break's kind forgets a break
+  whose LF a tracked edit takes out, so in a file with mixed line breaks the editor writes that
+  break into the change as the file's own kind and rejecting gives it back in the file's kind. The
+  command line writes the break's own kind and gives it back exactly (format §2.5, #924).
+- A raw line break typed at the start of a bullet item's text under a line of text, or under the line
+  of the item it is in, is written where the file reads the bullet as an item and the newest view as
+  the underline of the text above it; the words typed on its blank lines (#143) are written the same
+  way (#443).
+- The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
+  as a lazy line of the item's paragraph, where CommonMark reads a list: the first item taken out of
+  its list leaves that line as text, and the editor sees no change (#446; the keys of Return, Tab,
+  Shift-Tab and Backspace read such a line as the text it is since #600, format §3.2).
+- Outdenting an item (Shift-Tab, ⌘[) whose next item a pending change empties writes a file that
+  reads as a heading in some order of decisions: the format refuses a numbered sibling that would
+  become the item's first child, not an item with no text (#433; Backspace at a nested first item
+  waits for such a change since #292).
+- A deletion inside a blank line of a break that takes no line break, in a shape that the rule for a
+  quote's blank lines does not know (the `>` of a blank line indented in a list item, in the break of
+  a pending split, a quote that starts at the blank line), is written as the join of the two blocks;
+  the last check sees it only where letters differ (#447, #418). So is a replacement inside the
+  blank line of the break of the author's own pending split, and a line break typed there with
+  letters as well (#419).
 - Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite
   skips micromark's reading for that shape (#299).
 - A bold change on a line that rejecting a pending deletion makes a link definition reads otherwise in
   some orders (#335); typing at the end of a link reference definition with Track Changes on reads
   wrongly (#262).
-- Deleting the last block after a setext heading takes the heading's underline into the payload, so
-  that accepting leaves the text without it (#372); rejecting a row move with a comment in the moved
-  row puts the comment point in the wrong place (#371, found in a table with no pipe at its row
-  starts).
+- Rejecting a row move with a comment in the moved row puts the comment point in the wrong place
+  (#371, found in a table with no pipe at its row starts).
 - A highlight that runs from the text above a table into its header row can make another person's
   pending column change impossible to decide (#396).
 - The format's checks read an indented numbered item or bullet under an item as a new item where
@@ -222,12 +263,46 @@ its case; each is a bug. The list is what has been found, not a count of what is
   what renders (#136). It writes the break as two line breaks that read as one now, a stray blank
   line in the file that no reader sees, and the issue is still open.
 
-**Refusals that are planned to go away.** Code that starts a list item, and indented code in an item
-or a quote, are refused with Track Changes on (#284). Typing in code that holds another person's
-pending code change is refused (#285): the issue asks for a form that reads alike in every order, or
-a proof that none exists, with the refusal kept. Aligning a column with Track Changes on is refused
-("Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.",
-#281). Bold over more than five cells of a table was one of them, and is not any more (#267).
+**The guard: refusals that widening keeps (#808).** The engine that replaces refusals (`widen.ts`,
+format §3.12) is called by the writers for tables (#657, #863), lists (#797), blocks (#813) and
+code (#810), and an edit that no unit can hold, or that is in front matter or in Plain, is asked
+about before it is made untracked (#714, #730, format §3.13). One refusal is kept on purpose. When
+the unit that holds an edit has another person's pending mark in its old text, `widen` reports it
+(`heldByOthers`) and the writers for lists, blocks and code (`edits-widen.ts`) keep the refusal the
+fine writer had, because rejecting every mark in a random order after such a replacement does not
+always give the original view. Tables are the exception: a table operation, and an edit or a format
+in a table's cell, are written as a replacement of the table with other people's marks left in its
+old text (#657, #863), and only a format change outside a cell keeps the refusal (`table-widen.ts`). The cases that made the guard are in #808:
+`typing-order.test.ts` seeds 12 and 27, and a block move over a widened list in `walk.test.ts`
+(two caret misses next to blocks inserted whole are #811, and are on main too). That is a cost, not a hole: the edit is not written, so nothing is silently
+wrong, but a person (or an agent) whose edit lands in a block that holds someone else's pending
+change is refused where the policy says to widen. In the lane's random run of agent suggestions over
+other people's marks, about 11 in 100 were refused for this reason; the run is not kept in the
+repository, so the figure is a measure of that run, not a bound. The tests that pin it say
+`(#808)` in their comments (`code-substitution.test.ts`, `block-widen.test.ts`, `issues.test.ts`
+for #107). Widening over other people's marks is not done: the guard keeps the refusal there. Also not held:
+
+- A unit of more than eight top-level blocks (`WIDEN_MOST_BLOCKS`) is not written; the edit is asked
+  about and made untracked, and in an embed with no asker a table operation that no tracked write
+  holds is made untracked without a question, where typing refuses (#863).
+- With `REDLINES_FUZZ=400`, a whole-table deletion beside a pending move or comment can still end
+  with "a marker would be left alone on its line" (the random table test names it; #863).
+- A join onto a setext heading inside a list or quote is still refused (`SETEXT_JOIN`, tiered `widen` in `refusals.ts`, so it is a gap, not a policy): the block's
+  replacement does not read right there yet (#813). The caret after a widened join onto a setext
+  heading is one character off in rare numbered joins.
+- A widened table cell format leaves the selection in the old text (`hidden-caret`, skipped in
+  `cells-marks.test.ts` with the reason; #657).
+
+`refusals.ts` says which of the refusals in the sources is widened, asked about, disabled or kept,
+and the test that holds it fails on a new one. What is not held of the engine itself: a replacement
+is found by a reader of lines that knows quotes, items, fences, indented code, raw text and tables,
+and not every Markdown form (a table that interrupts a paragraph, display math with a blank line in
+it, setext headings in a container; HTML blocks of types 1 to 5 in `widen-units.ts`); where its gate
+(the views, the shape of the lists, the two decisions of the replacement) does not catch what
+micromark reads otherwise, the random suites are what does (`widen-random.test.ts`,
+`widen-pairs.test.ts`, `payload-marks.test.ts`, and `list-widen.test.ts`, `block-widen.test.ts` and
+the table suites through `expectWidened` in `oracle.ts`: every edit that the fine form refuses is
+written, reads alike in every order, and rejects back).
 
 **What the spec names.** [format.md](format.md) §13 lists what is not yet tested, among it Word
 import into full history and live sessions with several authors in full history. §7 says what

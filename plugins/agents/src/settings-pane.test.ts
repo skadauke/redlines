@@ -25,7 +25,12 @@ function setup(
   start: Partial<AgentsPaneSettings> = {},
   skills: Record<string, PaneSkill> = {},
 ) {
-  let settings: AgentsPaneSettings = { agentScope: 'folder', consent: {}, ...start };
+  let settings: AgentsPaneSettings = {
+    agentScope: 'folder',
+    consent: {},
+    agentHandles: {},
+    ...start,
+  };
   const detect = vi.fn<(id: string, fresh?: boolean) => Promise<AgentState>>((id) => {
     const state = states[id];
     if (state instanceof Error) return Promise.reject(state);
@@ -731,6 +736,85 @@ describe('the Agents pane', () => {
     expect(now().agentScope).toBe('everything');
   });
 
+  describe('answers that stand again when the setting is widened (#382)', () => {
+    const widen = (container: HTMLElement, to: string) => {
+      const select = row(container, 'What agents may read').querySelector('select')!;
+      select.value = to;
+      select.dispatchEvent(new Event('change'));
+    };
+    const consent = {
+      'claude|/a': 'everything',
+      'claude|/b': 'folder',
+      'codex|/c': 'no',
+    } as const;
+
+    it('says how many right under the setting, and offers Forget them', () => {
+      const { deps, container } = setup({}, { agentScope: 'document', consent: { ...consent } });
+      renderAgentsPane(container, deps);
+      widen(container, 'folder');
+      const text = row(container, 'What agents may read').textContent;
+      expect(text).toContain('2 folders you allowed before are readable again.');
+      expect(buttons(container, 'What agents may read')).toContain('Forget them');
+    });
+
+    it('says nothing when narrowed, or when nothing was answered wider', () => {
+      const { deps, container } = setup({}, { agentScope: 'folder', consent: { ...consent } });
+      renderAgentsPane(container, deps);
+      widen(container, 'document');
+      expect(row(container, 'What agents may read').textContent).not.toContain('allowed before');
+      const bare = setup({}, { agentScope: 'document' });
+      renderAgentsPane(bare.container, bare.deps);
+      widen(bare.container, 'everything');
+      expect(row(bare.container, 'What agents may read').textContent).not.toContain(
+        'allowed before',
+      );
+    });
+
+    it('counts every answer that stands again when widened in two steps, and none after narrowing back', () => {
+      const { deps, container, now } = setup(
+        {},
+        { agentScope: 'document', consent: { ...consent } },
+      );
+      renderAgentsPane(container, deps);
+      const line = () => row(container, 'What agents may read').textContent;
+      widen(container, 'folder');
+      widen(container, 'everything');
+      expect(line()).toContain('2 folders you allowed before are readable again.');
+      buttonOf(container, 'What agents may read', 'Forget them').click();
+      expect(now().consent).toEqual({ 'codex|/c': 'no' });
+      widen(container, 'document');
+      expect(line()).not.toContain('allowed before');
+    });
+
+    it('forgets those answers and no others, and the line goes', () => {
+      const { deps, container, now } = setup({}, { agentScope: 'folder', consent: { ...consent } });
+      renderAgentsPane(container, deps);
+      widen(container, 'everything');
+      expect(row(container, 'What agents may read').textContent).toContain(
+        '1 folder you allowed before is readable again.',
+      );
+      buttonOf(container, 'What agents may read', 'Forget them').click();
+      expect(now().consent).toEqual({ 'claude|/b': 'folder', 'codex|/c': 'no' });
+      expect(row(container, 'What agents may read').textContent).not.toContain('allowed before');
+    });
+  });
+
+  it('has one switch for the web, off by default, for every agent (#529)', () => {
+    const { deps, container, update, now } = setup({});
+    renderAgentsPane(container, deps);
+    const web = row(container, 'Web access').querySelector('input')!;
+    expect(web.type).toBe('checkbox');
+    expect(web.checked).toBe(false);
+    expect(row(container, 'Web access').textContent).toContain('Allow Once, or Allow Always');
+    web.checked = true;
+    web.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenCalledWith({ webAccess: true });
+    expect(now().webAccess).toBe(true);
+    web.checked = false;
+    web.dispatchEvent(new Event('change'));
+    expect(now().webAccess).toBe(false);
+  });
+
   describe('the note under What agents may read', () => {
     const noteOf = (container: HTMLElement) =>
       row(container, 'What agents may read').querySelector('.rl-pref-note')?.textContent ?? '';
@@ -1001,7 +1085,15 @@ describe('the Agents pane', () => {
     renderAgentsPane(container, deps);
     expect(
       [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
-    ).toEqual(['Claude', 'Codex', 'What agents may read', 'Remembered answers', 'Agent logs']);
+    ).toEqual([
+      'Default agent',
+      'Claude',
+      'Codex',
+      'What agents may read',
+      'Web access',
+      'Remembered answers',
+      'Agent logs',
+    ]);
   });
 
   describe('other agents', () => {
@@ -1059,7 +1151,15 @@ describe('the Agents pane', () => {
       await settle();
       expect(
         [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
-      ).toEqual(['Claude', 'Codex', 'Other agents', 'What agents may read', 'Agent logs']);
+      ).toEqual([
+        'Default agent',
+        'Claude',
+        'Codex',
+        'Other agents',
+        'What agents may read',
+        'Web access',
+        'Agent logs',
+      ]);
       const text = row(container, 'Other agents').textContent;
       expect(text).toContain('Gemini');
       expect(text).toContain('/opt/homebrew/bin/gemini --experimental-acp');
@@ -1205,7 +1305,11 @@ describe('the Redlines skill', () => {
     const waiting = row(container, 'Claude').querySelector(
       'button[aria-label^="Install the Redlines"]',
     );
-    expect((waiting as HTMLButtonElement).disabled).toBe(true);
+    // Not disabled, which would take the focus from it; a second press does nothing.
+    expect((waiting as HTMLButtonElement).disabled).toBe(false);
+    expect(waiting?.getAttribute('aria-disabled')).toBe('true');
+    (waiting as HTMLButtonElement).click();
+    expect(claude.install).toHaveBeenCalledTimes(1);
     await settle();
     expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
     expect(words(container)).not.toContain('Installing');
@@ -1228,7 +1332,7 @@ describe('the Redlines skill', () => {
     renderAgentsPane(container, deps);
     await settle();
     expect(words(container)).toContain(
-      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one.',
+      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak.',
     );
     expect(buttons(container)).toEqual(['Check Again', 'Update Skill']);
     press(container, 'Update Skill');
@@ -1452,6 +1556,8 @@ describe('the Redlines skill', () => {
     )!;
     install.focus();
     install.click();
+    // While it writes, the focus stays on the button.
+    expect(document.activeElement).toBe(install);
     await settle();
     expect(row(container, 'Claude').contains(document.activeElement)).toBe(true);
     expect(document.activeElement?.textContent).toBe('Check Again');
@@ -1568,5 +1674,172 @@ describe('the Redlines skill', () => {
     tidy();
     await settle();
     expect(words(container)).not.toMatch(/skill/i);
+  });
+
+  describe('the handle', () => {
+    const field = (container: HTMLElement, id: string) => {
+      const root = container.querySelector<HTMLElement>(`[data-handle-of="${id}"]`)!;
+      return {
+        input: root.querySelector('input')!,
+        text: () => root.textContent ?? '',
+      };
+    };
+    const type = async (input: HTMLInputElement, value: string) => {
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+      input.dispatchEvent(new Event('change'));
+      await settle();
+    };
+    const ready: AgentState = { found: true, signedIn: true };
+
+    it('starts as claude and codex, shown as Claude and Codex', async () => {
+      const { container, deps } = setup({ claude: ready, codex: ready });
+      renderAgentsPane(container, deps);
+      await settle();
+      expect(field(container, 'claude').input.value).toBe('claude');
+      expect(field(container, 'claude').text()).toContain('Shown as Claude');
+      expect(field(container, 'codex').input.value).toBe('codex');
+    });
+
+    it('keeps a new handle, and shows what it is shown as', async () => {
+      const { container, deps, now } = setup({ claude: ready, codex: ready });
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'claude').input, 'ada');
+      expect(now().agentHandles).toEqual({ claude: 'ada' });
+      expect(field(container, 'claude').text()).toContain('Shown as Ada');
+    });
+
+    it('refuses a handle another agent has, says so, and puts the old one back', async () => {
+      const { container, deps, now } = setup({ claude: ready, codex: ready });
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'claude').input, 'codex');
+      expect(now().agentHandles).toEqual({});
+      expect(field(container, 'claude').input.value).toBe('claude');
+      expect(field(container, 'claude').text()).toContain('Another agent is @codex.');
+    });
+
+    it('keeps nothing for a handle put back to the default', async () => {
+      const { container, deps, now } = setup(
+        { claude: ready, codex: ready },
+        { agentHandles: { claude: 'ada' } },
+      );
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'claude').input, 'claude');
+      expect(now().agentHandles).toEqual({});
+    });
+
+    it('refuses what is not a handle', async () => {
+      const { container, deps, now } = setup({ claude: ready, codex: ready });
+      renderAgentsPane(container, deps);
+      await settle();
+      await type(field(container, 'codex').input, 'Bo Peep');
+      expect(now().agentHandles).toEqual({});
+      expect(field(container, 'codex').input.value).toBe('codex');
+      expect(field(container, 'codex').text()).toMatch(/lowercase letters, digits and hyphens/);
+    });
+  });
+});
+
+describe('the Model field (#530)', () => {
+  const ok: AgentState = { found: true, signedIn: true, version: '1', path: '/bin/x' };
+  const models = [
+    { id: 'opus', name: 'Opus' },
+    { id: 'sonnet', name: 'Sonnet' },
+  ];
+  const field = (container: HTMLElement) =>
+    container.querySelector<HTMLSelectElement>('.rl-pref-agent-model select');
+
+  it('has none for an agent that lists no models', async () => {
+    const { container, deps } = setup({ claude: ok, codex: ok });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(field(container)).toBeNull();
+  });
+
+  it('lists Default and the models, shows the one kept, and keeps a new choice', async () => {
+    const { container, deps, now } = setup(
+      { claude: ok, codex: ok },
+      { agentModels: { claude: 'sonnet' } },
+    );
+    deps.agents = deps.agents.map((agent) =>
+      agent.id === 'claude' ? { ...agent, models } : agent,
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    const select = field(container)!;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      'Default',
+      'Opus',
+      'Sonnet',
+    ]);
+    expect(select.value).toBe('sonnet');
+    select.value = 'opus';
+    select.dispatchEvent(new Event('change'));
+    expect(now().agentModels).toEqual({ claude: 'opus' });
+    select.value = '';
+    select.dispatchEvent(new Event('change'));
+    expect(now().agentModels).toEqual({});
+  });
+});
+
+describe('Update, only when there is a newer version (#527)', () => {
+  const claude = '/Users/me/.local/bin/claude';
+  const installed: AgentState = { found: true, signedIn: true, version: '2.1.400', path: claude };
+  const buttonsOf = (container: HTMLElement) =>
+    [...container.querySelectorAll('[data-row="Claude"] button')].map((b) => b.textContent);
+
+  const withLatest = (latest: (fresh?: boolean) => Promise<string>) => {
+    const made = setup({ claude: installed, codex: installed });
+    made.deps.agents = made.deps.agents.map((agent) => ({ ...agent, latest }));
+    return made;
+  };
+
+  it('offers Update, and says which version is out, when a newer one is', async () => {
+    const { container, deps } = withLatest(() => Promise.resolve('2.2.0'));
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).toContain('Update');
+    expect(row(container, 'Claude').textContent).toContain('Version 2.2.0 is available.');
+  });
+
+  it('offers none when the program is the newest, or ahead', async () => {
+    for (const latest of ['2.1.400', '2.1.3']) {
+      const { container, deps } = withLatest(() => Promise.resolve(latest));
+      renderAgentsPane(container, deps);
+      await settle();
+      expect(buttonsOf(container)).not.toContain('Update');
+    }
+  });
+
+  it('offers none, and says nothing, when the newest can not be found', async () => {
+    const { container, deps } = withLatest(() => Promise.reject(new Error('offline')));
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).not.toContain('Update');
+    expect(row(container, 'Claude').textContent).not.toContain('offline');
+  });
+
+  it('asks afresh on Check Again, and Update goes once the program is current', async () => {
+    const asked: (boolean | undefined)[] = [];
+    const { container, deps, detect } = withLatest((fresh) => {
+      asked.push(fresh);
+      return Promise.resolve('2.2.0');
+    });
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(buttonsOf(container)).toContain('Update');
+    detect.mockImplementation((id) =>
+      Promise.resolve(id === 'claude' ? { ...installed, version: '2.2.0' } : installed),
+    );
+    const again = [...container.querySelectorAll('[data-row="Claude"] button')].find(
+      (b) => b.textContent === 'Check Again',
+    ) as HTMLButtonElement;
+    again.click();
+    await settle();
+    expect(asked.at(-1)).toBe(true);
+    expect(buttonsOf(container)).not.toContain('Update');
   });
 });

@@ -6,11 +6,18 @@
 // The bars of table rows and of struck blocks are the line's and the block's own (`rl-bar`, drawn
 // by the table's first cell and by the block), and are not drawn here.
 
-import { EditorSelection, type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
-import { Direction, EditorView, layer, type LayerMarker, RectangleMarker } from '@codemirror/view';
+import { type Extension, Facet, StateEffect, StateField } from '@codemirror/state';
+import {
+  BlockType,
+  Direction,
+  EditorView,
+  layer,
+  type LayerMarker,
+  RectangleMarker,
+} from '@codemirror/view';
 import { colorClass } from './colors.ts';
 import { type ChangeSpan, trackedChangeSpans } from './decorations.ts';
-import { viewModeField } from './field.ts';
+import { parsedField, viewModeField } from './field.ts';
 
 /** How far left of the text a bar stands, in CSS pixels (the theme draws it 2 px wide). */
 export const BAR_LEFT = 24;
@@ -175,29 +182,111 @@ export function bandsOf(
   }));
 }
 
-/** The real page: the screen lines found by where CodeMirror says each one starts and ends. */
+/** The vertical extent of a box on the page, in the viewport's coordinates. */
+export interface Extent {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * The rows of a line of text from the rectangles of what it draws (`rects`, in any order): the
+ * fragments of its text, a hidden marker's empty span, a widget, an image. Those that lie on the
+ * same part of the page are one row, those that overlap by more than half of the smaller are, so
+ * that an inline image that makes a row taller leaves the row below it its own. A rectangle with
+ * no height, such as a line break's, is no part of a row.
+ */
+export function rowsOfRects(rects: readonly Extent[]): Extent[] {
+  const rows: Extent[] = [];
+  const sorted = rects
+    .filter(({ top, bottom }) => bottom - top > 1)
+    .sort((a, b) => a.top - b.top || a.bottom - b.bottom);
+  for (const { top, bottom } of sorted) {
+    const row = rows.at(-1);
+    const overlap = row ? Math.min(row.bottom, bottom) - Math.max(row.top, top) : -1;
+    if (row && overlap > 0.5 * Math.min(row.bottom - row.top, bottom - top)) {
+      row.top = Math.min(row.top, top);
+      row.bottom = Math.max(row.bottom, bottom);
+    } else rows.push({ top, bottom });
+  }
+  return rows;
+}
+
+/**
+ * The screen lines of a line of the file from its `rows`, with `startOf` saying where in the file
+ * a row starts (the page knows: the position at the row's edge). The first starts the line, and
+ * each of the others where the page says, never before the one above it or past the line's end; a
+ * struck widget that wraps has one position for all its rows. Rows past a limit are one screen
+ * line, the last, as tall as they are together.
+ */
+export function stopsOf(
+  rows: readonly Extent[],
+  line: { from: number; to: number },
+  startOf: (row: Extent) => number,
+): ScreenLine[] {
+  const stops: ScreenLine[] = [];
+  for (const [i, row] of rows.slice(0, MAX_SCREEN_LINES).entries()) {
+    const previous = stops.at(-1);
+    const from =
+      i === 0 || !previous ? line.from : Math.min(Math.max(startOf(row), previous.from), line.to);
+    stops.push({ from, to: line.to, top: row.top, bottom: row.bottom });
+    if (previous) previous.to = from;
+  }
+  const last = stops.at(-1);
+  const end = rows.at(-1);
+  if (last && end && rows.length > MAX_SCREEN_LINES) last.bottom = end.bottom;
+  return stops;
+}
+
+/** Letters of the scripts that run right to left: Hebrew, Arabic, Syriac, Thaana and their forms. */
+const RIGHT_TO_LEFT = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+
+/**
+ * Whether `text` has letters that run right to left. Where a row mixes the two directions, its
+ * edges are not where its text starts and ends, and the positions at its edges say nothing of
+ * which row a change is on: such a line is one screen line, a bar down its paragraph.
+ */
+export const hasRightToLeft = (text: string): boolean => RIGHT_TO_LEFT.test(text);
+
+/**
+ * The space at the top of an alert's box that is no part of it (#389): an alert under an alert
+ * keeps the space between blocks as padding on its first line and clips its tint to leave it out
+ * (`rl-space-*-apart`, preview/theme.ts), so its bar starts below that, as the box does.
+ */
+function spaceApart(el: Element): number {
+  if (!/\brl-space-\w+-apart\b/.test(el.className)) return 0;
+  const clip = /^inset\(([\d.]+)px/.exec(getComputedStyle(el).clipPath);
+  return clip ? Number(clip[1]) : 0;
+}
+
+/**
+ * The real page: the screen lines found from the page's own boxes. The rows are where the
+ * rectangles of the line's content lie, and each row starts at the position at its left edge.
+ * Stepping through positions with `coordsAtPos` and `moveToLineBoundary` can't tell a row's end
+ * from the start of the next where a hidden marker or a widget is at the wrap: the zero-width
+ * nodes CodeMirror puts around it stay at the end of the row above, and the walk lost the rest of
+ * the paragraph (a bar down to its end).
+ */
 const pageMeasure: BarMeasure = {
   screenLines(view, line) {
     const el = lineElement(view, line.from);
     if (!el) return null;
     const box = el.getBoundingClientRect();
     if (!box.height) return null;
-    // Where each stretch of the text starts, its end and the text's own height there.
-    const stops: ScreenLine[] = [];
-    for (let pos = line.from; stops.length < MAX_SCREEN_LINES;) {
-      const coords = view.coordsAtPos(pos, 1);
-      if (!coords) break;
-      let end = Math.min(
-        line.to,
-        view.moveToLineBoundary(EditorSelection.cursor(pos, 1), true).head,
+    const apart = spaceApart(el);
+    let stops: ScreenLine[] = [];
+    if (!hasRightToLeft(view.state.sliceDoc(line.from, line.to))) {
+      const range = el.ownerDocument.createRange();
+      range.selectNodeContents(el);
+      const rows = rowsOfRects([...range.getClientRects()]);
+      stops = stopsOf(rows, line, (row) =>
+        view.posAtCoords({ x: box.left + 1, y: (row.top + row.bottom) / 2 }, false),
       );
-      // A boundary that doesn't go on leaves the rest of the line as one screen line.
-      if (end <= pos || stops.length === MAX_SCREEN_LINES - 1) end = line.to;
-      stops.push({ from: pos, to: end, top: coords.top, bottom: coords.bottom });
-      if (end >= line.to) break;
-      pos = end;
     }
-    return { left: box.left, lines: bandsOf(stops, box, line), drawn: struckPieces(el) };
+    return {
+      left: box.left,
+      lines: bandsOf(stops, { top: box.top + apart, bottom: box.bottom }, line),
+      drawn: struckPieces(el),
+    };
   },
 };
 
@@ -210,6 +299,43 @@ export const barMeasure = Facet.define<BarMeasure, BarMeasure>({
 export interface HotBar {
   from: number;
 }
+
+/**
+ * The change a review has moved to (the review bar's current change), by the ranges of its marks
+ * in the text, markers included. Its bars are drawn wider than the others (`rl-bar-current`), and
+ * the review plugin marks its text. It moves with the text, and goes when the selection moves or
+ * the review closes, which the plugin says with a null.
+ */
+export interface CurrentChange {
+  /** The ids of its marks: the mark goes when one is gone, decided or edited away, by anyone. */
+  ids?: readonly string[];
+  ranges: readonly { from: number; to: number }[];
+}
+
+export const setCurrentChange = StateEffect.define<CurrentChange | null>();
+
+export const currentChange = StateField.define<CurrentChange | null>({
+  create: () => null,
+  update(value, tr) {
+    const set = tr.effects.findLast((effect) => effect.is(setCurrentChange));
+    if (set) return set.value;
+    if (!value) return value;
+    // The person moved the selection elsewhere: they are no longer on that change.
+    if (tr.selection) return null;
+    if (!tr.docChanged) return value;
+    if (value.ids?.length) {
+      const here = new Set(tr.state.field(parsedField).marks.map((mark) => mark.id));
+      if (value.ids.some((id) => !here.has(id))) return null;
+    }
+    return {
+      ids: value.ids,
+      ranges: value.ranges.map(({ from, to }) => ({
+        from: tr.changes.mapPos(from, 1),
+        to: tr.changes.mapPos(to, -1),
+      })),
+    };
+  },
+});
 
 export const setHotBar = StateEffect.define<HotBar | null>();
 
@@ -225,12 +351,35 @@ export const hotBar = StateField.define<HotBar | null>({
   },
 });
 
+/**
+ * The line of the file that holds `pos`, or, where the view draws it joined to the lines around it
+ * (a list item's text brought up to its bullet over the hidden marker lines between, #540), the
+ * joined lines: the page draws them as one line of text, which starts at the first.
+ */
+function visualLine(
+  view: EditorView,
+  pos: number,
+  cache?: Map<number, { from: number; to: number }>,
+): { from: number; to: number } {
+  const line = view.state.doc.lineAt(pos);
+  const known = cache?.get(line.from);
+  if (known) return known;
+  const block = view.lineBlockAt(pos);
+  // Only a line of text drawn together with others: not a block widget's range around it.
+  const joined =
+    block.type === BlockType.Text && (block.from < line.from || block.to > line.to)
+      ? { from: block.from, to: block.to }
+      : line;
+  cache?.set(line.from, joined);
+  return joined;
+}
+
 /** The pieces of the change bar of the line that holds `pos`, in the viewport's coordinates. */
 export function barsOnLine(
   view: EditorView,
   pos: number,
 ): { left: number; segments: BarSegment[] } | null {
-  const line = view.state.doc.lineAt(pos);
+  const line = visualLine(view, pos);
   const found = view.state.facet(barMeasure).screenLines(view, line);
   if (!found) return null;
   const spans = trackedChangeSpans(view.state).filter(
@@ -259,32 +408,40 @@ function markersOf(view: EditorView): readonly LayerMarker[] {
   const { from: lo, to: hi } = view.viewport;
   // The changes in view, by the lines of the file they are on.
   const byLine = new Map<number, ChangeSpan[]>();
+  const lines = new Map<number, { from: number; to: number }>();
   for (const span of trackedChangeSpans(view.state)) {
     if (span.to < lo || span.from > hi) continue;
     const first = doc.lineAt(Math.max(span.from, lo)).number;
     const last = doc.lineAt(Math.min(span.to, hi)).number;
     for (let n = first; n <= last; n++) {
-      const here = byLine.get(n);
+      // Lines the view draws as one are one line of bar (`visualLine`), keyed by their first.
+      const joined = visualLine(view, doc.line(n).from, lines);
+      const key = doc.lineAt(joined.from).number;
+      const here = byLine.get(key);
       if (here) here.push(span);
-      else byLine.set(n, [span]);
+      else byLine.set(key, [span]);
     }
   }
   if (!byLine.size) return [];
   const measure = view.state.facet(barMeasure);
   const hot = view.state.field(hotBar);
+  const current = view.state.field(currentChange)?.ranges ?? [];
   const base = layerBase(view);
   const markers: LayerMarker[] = [];
   for (const [n, spans] of [...byLine].sort((a, b) => a[0] - b[0])) {
-    const line = doc.line(n);
+    const line = visualLine(view, doc.line(n).from, lines);
     const found = measure.screenLines(view, line);
     if (!found) continue;
     for (const segment of segmentsOf(line, found.lines, spans, found.drawn)) {
       const [only] = segment.colors;
       const author = segment.colors.length === 1 && only ? colorClass(only) : 'rl-bar-mixed';
       const hotClass = hot?.from === segment.from ? ' rl-bar-hot' : '';
+      // Exclusive edges: a change that only touches the current one's end is not it. A screen line
+      // that holds both (a segment is a screen line) widens together.
+      const isCurrent = current.some((range) => segment.from < range.to && segment.to > range.from);
       markers.push(
         new RectangleMarker(
-          `rl-bar-seg ${author}${hotClass}`,
+          `rl-bar-seg ${author}${hotClass}${isCurrent ? ' rl-bar-current' : ''}`,
           found.left - BAR_LEFT * view.scaleX - base.left,
           segment.top - base.top,
           null,
@@ -303,6 +460,8 @@ export const barLayerThemeSpec = {
   '.rl-bar-seg.rl-bar-mixed': { backgroundColor: 'var(--rl-mixed)' },
   // Under the pointer, a bar is wider (3 px instead of 2): a click on it switches the looks.
   '.rl-bar-seg.rl-bar-hot': { width: '3px' },
+  // The change a review is on: its bar is wider still (4 px), so that it reads as this one.
+  '.rl-bar-seg.rl-bar-current, .rl-bar-seg.rl-bar-current.rl-bar-hot': { width: '4px' },
 };
 
 const barLayerTheme = EditorView.baseTheme(barLayerThemeSpec);
@@ -311,6 +470,7 @@ const barLayerTheme = EditorView.baseTheme(barLayerThemeSpec);
 export function barLayer(): Extension {
   return [
     hotBar,
+    currentChange,
     barLayerTheme,
     layer({
       above: false,
@@ -319,7 +479,8 @@ export function barLayer(): Extension {
       update: (update) =>
         update.viewportChanged ||
         trackedChangeSpans(update.state) !== trackedChangeSpans(update.startState) ||
-        update.startState.field(hotBar) !== update.state.field(hotBar),
+        update.startState.field(hotBar) !== update.state.field(hotBar) ||
+        update.startState.field(currentChange) !== update.state.field(currentChange),
     }),
   ];
 }

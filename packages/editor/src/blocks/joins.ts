@@ -11,16 +11,29 @@
 // a join for the format and not a deletion "together with other text".
 
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
-import { EditError, type FormatOp } from '@redlines/format';
+import {
+  type ChangeSpec,
+  EditorSelection,
+  type EditorState,
+  findClusterBreak,
+  type Line,
+} from '@codemirror/state';
+import {
+  decodePayload,
+  EditError,
+  plainPayload,
+  type FormatOp,
+  OUTDENT_NUMBERED_CHILD,
+} from '@redlines/format';
 import { onlyHidden } from '../tracked/decorations.ts';
-import { parsedField } from '../tracked/field.ts';
+import { authorFacet, parsedField } from '../tracked/field.ts';
 import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
 import {
   blankOf,
   continuation,
   hardBreakAt,
   lastCharOfLine,
+  type Item,
   itemsAround,
   type KeyEdit,
   moveTo,
@@ -29,6 +42,7 @@ import {
   textEnd,
   textStart,
 } from './edits.ts';
+import { EMPTY_ITEM, MARKER, unsoundEmptyItem } from './empty-item.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock } from './open.ts';
 import {
@@ -47,6 +61,9 @@ const isEmpty = (state: EditorState, block: Block) =>
   !NO_TEXT.has(block.kind) &&
   block.kind !== 'rule' &&
   !state.sliceDoc(block.text.from, block.text.to).trim();
+
+/** A line that is a list marker and nothing else, after its quote markers and the markers of the items it is in. */
+const BARE_LINE = /^(?:[ \t]*>)*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
 
 const tree = (state: EditorState, to: number) =>
   ensureSyntaxTree(state, to, 50) ?? syntaxTree(state);
@@ -89,20 +106,28 @@ function edit(
 
 /**
  * A block change as the format writes it (`trackedFormat` or `untrackedFormat`), final, or null
- * when the format refuses it: the key then writes the plain edit instead.
+ * when the format refuses it: the key then writes the plain edit instead. `stands` is a refusal
+ * that the plain edit would only get around, by writing what the format won't (a numbered item
+ * read into the text above it): it is the key's refusal, in the format's words.
  */
 function formatted(
   state: EditorState,
   at: number,
   op: FormatOp,
   userEvent: 'delete.backward.block' | 'delete.forward.block',
+  stands?: string,
 ): KeyEdit | null {
   try {
     const changes = blockFormatChanges(state, { from: at, to: at }, op);
     if (!changes.length) return null;
     return { changes, selection: state.selection, userEvent, final: true };
   } catch (error) {
-    if (error instanceof EditError) return null;
+    if (error instanceof EditError) {
+      if (stands !== undefined && error.message === stands) {
+        return { ...nothing(state), userEvent, refusal: error.message };
+      }
+      return null;
+    }
     throw error;
   }
 }
@@ -131,19 +156,298 @@ const readsAsText = (row: string) =>
   /^[ \t>]*(?:(?:\d{1,9}[.)]|[-+*])[ \t]*|=+[ \t]*|-{2,}[ \t]*)$/.test(row) ||
   (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1';
 
-/** Why the first item of a nested numbered list can't go up a level, with items numbered after it. */
-const OUTDENT_NUMBERED =
-  'The items after this one would be left numbered from a number other than 1 under its text, where they would read as part of the text. Number them from 1 first, or outdent the whole list.';
+/**
+ * Why an item can't move (up a level, or out of its list, or into the paragraph above it) while a
+ * pending change in the line below it would make that line read otherwise: an item that the change
+ * leaves empty (a deletion of all its text, an insertion that is all of it) is an item with text in
+ * some readings of the file and empty in others, which can't follow text and would turn it into a
+ * heading.
+ */
+const BELOW_CHANGES =
+  "A pending change in the line below would make it read differently once this item has moved: an item that the change leaves empty can't follow text, and would turn it into a heading. Accept or reject that change first.";
 
-/** Why a join in a list or quote can't keep the next numbered item apart, tracked. */
-const NUMBERED_IN_CONTAINER =
-  "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
+/** Why an item can't go up a level where the line after it would become part of its text. */
+const ABSORBED =
+  "This item can't go up a level: the line after it would read as part of its text, since a number other than 1, an empty item or an underline can't start a block right under text. Put a blank line between them first.";
+
+/**
+ * A line as the original view reads it, every change on it rejected (an insertion's text goes, a
+ * deletion's comes back); null where that can't be told on one line (a split or a format change).
+ */
+function originalRow(row: string): string | null {
+  const text = row
+    .replace(/<!--ins [a-z0-9]+-->[^]*?<!--\/[a-z0-9]+-->/g, '')
+    .replace(/<!--sub [a-z0-9]+ ([^]*?)-->[^]*?<!--\/[a-z0-9]+-->/g, (_all, payload: string) =>
+      plainPayload(decodePayload(payload)),
+    )
+    .replace(/<!--del [a-z0-9]+ ([^]*?)-->/g, (_all, payload: string) =>
+      plainPayload(decodePayload(payload)),
+    )
+    .replace(/<!--\/[a-z0-9]+-->|<!--(?:cmt|hl) [a-z0-9]+(?: [^]*?)?-->/g, '');
+  return /<!--(?:split|fmt) /.test(text) ? null : text;
+}
+
+/**
+ * Whether a line under a paragraph is text of it (or its underline) in each of the ways the file
+ * reads: as it is, as the newest view reads it and as the original view reads it.
+ */
+const readingsOf = (row: string): boolean[] => {
+  const original = originalRow(row);
+  return [row, row.replace(MARKER, ''), ...(original === null ? [] : [original])].map(readsAsText);
+};
+
+/**
+ * Whether the line after `line` holds a marker and is text of a paragraph above it in some of the
+ * ways it reads and not in all: it can't follow text in one reading (an item with no text, a number
+ * other than 1, an underline) and can in another.
+ */
+function readsOtherwiseBelow(state: EditorState, line: Line): boolean {
+  if (line.number >= state.doc.lines) return false;
+  const row = state.doc.line(line.number + 1).text;
+  if (BLANK.test(row) || row.replace(MARKER, '') === row) return false;
+  const reads = readingsOf(row);
+  return reads.some(Boolean) && !reads.every(Boolean);
+}
+
+/** A line's quote markers, each with the space after it. */
+const QUOTE_PREFIX = /^(?:[ \t]{0,3}>[ \t]?)*/;
+
+/** The columns of white space in front of a line's text after its quote markers; null with a tab. */
+function indentOf(text: string): number | null {
+  const white = /^[ \t]*/.exec(text.slice(QUOTE_PREFIX.exec(text)![0].length))![0];
+  return white.includes('\t') ? null : white.length;
+}
+
+/**
+ * The columns an item's marker and its text start at, after the quote markers: the text is the
+ * marker and the spaces after it, one to four, or one where the marker is alone or more follow.
+ * Null where a tab is in the way.
+ */
+function itemColumns(
+  state: EditorState,
+  item: SyntaxNode,
+): { marker: number; text: number } | null {
+  const mark = item.getChild('ListMark');
+  if (!mark) return null;
+  const line = state.doc.lineAt(mark.from);
+  const marker = indentOf(line.text);
+  const after = /^[ \t]*/.exec(line.text.slice(mark.to - line.from))![0];
+  if (marker === null || after.includes('\t')) return null;
+  const alone = line.text.slice(mark.to - line.from).trim() === '';
+  const spaces = alone || after.length > 4 ? 1 : Math.max(after.length, 1);
+  return { marker, text: marker + (mark.to - mark.from) + spaces };
+}
+
+/**
+ * The item that holds the last paragraph of `item` and its nested items (the paragraph a line right
+ * under them follows), or null where they end in anything else. A line that starts with a marker of
+ * a change is an HTML block to the parse and a paragraph to the views: it counts as a paragraph.
+ */
+function lastParagraphItem(state: EditorState, item: SyntaxNode): SyntaxNode | null {
+  let node: SyntaxNode = item;
+  for (;;) {
+    let last: SyntaxNode | null = null;
+    for (let child = node.lastChild; child; child = child.prevSibling) {
+      if (child.name !== 'ListMark' && child.name !== 'Task') {
+        last = child;
+        break;
+      }
+    }
+    if (!last) return null;
+    if (last.name === 'Paragraph') return node;
+    if (last.name === 'CommentBlock' || last.name === 'HTMLBlock') {
+      return /<!--(?:\/|(?:split|ins|del|sub|fmt|cmt|hl) )/.test(state.sliceDoc(last.from, last.to))
+        ? node
+        : null;
+    }
+    if (last.name !== 'BulletList' && last.name !== 'OrderedList') return null;
+    const inner = last.getChildren('ListItem').at(-1);
+    if (!inner) return null;
+    node = inner;
+  }
+}
+
+/**
+ * Why `items[0]` can't go up a level (to the indentation of `items[1]`, the item it is in): the
+ * line right after it and its nested items, which stays where it is, would come to stand under the
+ * text of its last paragraph, where a number other than 1, an empty item or an underline can't
+ * start a block and is text of it. That is so where the line is indented far enough to continue the
+ * item that holds that paragraph once it has moved (its text column, less the columns it moves:
+ * the nested items move with it when the format writes the change, `shifted`; the plain edit moves
+ * the item's own line only), and was not, where it stood: a line that continued the paragraph
+ * before is text of it as it was. The format's own check reads the next item at the item's
+ * indentation only, and is not made at all where it refuses first (tabs, a pending break). Null
+ * where the line reads as an item in every reading, or lands elsewhere.
+ */
+function absorbedBelow(state: EditorState, items: Item[], shifted: boolean): string | null {
+  const [moved, parent] = items;
+  if (!moved || !parent) return null;
+  const { doc } = state;
+  const last = doc.lineAt(moved.node.to);
+  if (last.number >= doc.lines) return null;
+  const row = doc.line(last.number + 1).text;
+  if (BLANK.test(row)) return null;
+  const reads = readingsOf(row);
+  if (!reads.some(Boolean)) return null;
+  const deepest = lastParagraphItem(state, moved.node);
+  if (!deepest) return null;
+  const own = itemColumns(state, moved.node);
+  const inner = itemColumns(state, deepest);
+  const up = itemColumns(state, parent.node);
+  const at = indentOf(row);
+  // A tab in the way (the format refuses it, and the columns can't be told): keep the line apart.
+  if (own && inner && up && at !== null) {
+    const shift = own.marker - up.marker;
+    const after = shifted || deepest === moved.node ? inner.text - shift : inner.text;
+    if (!(at >= after && at < inner.text)) return null;
+  }
+  if (!reads.every(Boolean)) return BELOW_CHANGES;
+  const number = /^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row.replace(MARKER, ''))?.[1];
+  return number !== undefined && number !== '1' ? OUTDENT_NUMBERED_CHILD : ABSORBED;
+}
+
+/** The column at `to` in `text`, a tab going on to the next multiple of four. */
+function columnAt(text: string, to: number): number {
+  let column = 0;
+  for (let i = 0; i < to; i++) column = text[i] === '\t' ? column + 4 - (column % 4) : column + 1;
+  return column;
+}
+
+/**
+ * The edits that take up to `by` columns of white space from the start of each line, after its
+ * quote markers, from `first` to `last`: where a line has less white space it loses what it has,
+ * and a blank line is left as it is. A tab is written as the spaces it came to, as far as it is cut.
+ */
+function takeColumns(state: EditorState, first: number, last: number, by: number): ChangeSpec[] {
+  const { doc } = state;
+  const changes: ChangeSpec[] = [];
+  for (let n = first; n <= last && n <= doc.lines; n++) {
+    const line = doc.line(n);
+    const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
+    const white = /^[ \t]*/.exec(line.text.slice(quoted))![0];
+    if (!white || line.text.slice(quoted).trim() === '') continue;
+    const start = columnAt(line.text, quoted);
+    const columns = columnAt(line.text, quoted + white.length) - start;
+    const take = Math.min(columns, by);
+    if (take <= 0) continue;
+    const from = line.from + quoted;
+    changes.push(
+      white.includes('\t')
+        ? { from, to: from + white.length, insert: ' '.repeat(columns - take) }
+        : { from, to: from + take },
+    );
+  }
+  return changes;
+}
+
+/** The edits that put `by` spaces in at the start of each line, after its quote markers, that has text. */
+function putColumns(state: EditorState, first: number, last: number, by: number): ChangeSpec[] {
+  const { doc } = state;
+  const changes: ChangeSpec[] = [];
+  for (let n = first; n <= last && n <= doc.lines; n++) {
+    const line = doc.line(n);
+    const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
+    if (line.text.slice(quoted).trim() === '') continue;
+    changes.push({ from: line.from + quoted, insert: ' '.repeat(by) });
+  }
+  return changes;
+}
+
+/**
+ * How far an item's text stands in from where its marker line starts after the quote markers: its
+ * indentation, its marker and the spaces after it (one to four, or one where the marker is alone
+ * or more follow), as CommonMark counts. The lines of what is in the item are indented this far or
+ * more (a line of its paragraph's text may be less).
+ */
+function textOffset(state: EditorState, item: SyntaxNode): number {
+  const mark = item.getChild('ListMark')!;
+  const line = state.doc.lineAt(mark.from);
+  const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
+  const end = mark.to - line.from;
+  const rest = line.text.slice(end);
+  const white = /^[ \t]*/.exec(rest)![0];
+  const marked = columnAt(line.text, end);
+  const spans = columnAt(line.text, end + white.length) - marked;
+  const space = rest.trim() === '' || spans > 4 ? 1 : Math.max(spans, 1);
+  return marked + space - columnAt(line.text, quoted);
+}
+
+/**
+ * What an item takes out of its list with its marker (a paragraph that was its first block, which
+ * Backspace leaves where it is, or Delete joins into the text above) does to the blocks that were
+ * under it: they stood in the item, a line of them indented at least as far as its text. Taken as
+ * they are, a list or a block of text that would stand four columns or more past `into`, the column
+ * the text now stands at (`    - a` under `* note`, which is `note` at the start of the line: 0),
+ * is text of the paragraph, or code, and no item, in the file as it will be; and one that would
+ * stand before `into` has left the item that holds the text. So all the lines under the paragraph
+ * move together, by the difference between the item's text offset and `into`, which keeps their
+ * depth among themselves; where no block of them would be read otherwise, they stay as they are.
+ * `needed` says which.
+ */
+function leaving(
+  state: EditorState,
+  item: SyntaxNode,
+  after: number,
+  into = 0,
+): { needed: boolean; changes: ChangeSpec[]; replace: ChangeSpec | null; code: boolean } {
+  const { doc } = state;
+  const offset = textOffset(state, item);
+  let needed = false;
+  let code = false;
+  for (let child = item.firstChild; child; child = child.nextSibling) {
+    if (child.name === 'ListMark' || child.name === 'Task' || child.name === 'QuoteMark') continue;
+    const line = doc.lineAt(child.from);
+    // The item's own first block, on the marker line, or in the lines of the paragraph.
+    if (line.number <= after) continue;
+    // Code keeps its content, which is what stands past its four columns: untracked it moves with
+    // the rest. Tracked, a substitution can't hold indented code in an item (the tracked layer
+    // refuses it), so code alone is left, as it was, with the spaces its content gains.
+    if (child.name === 'CodeBlock') {
+      code = true;
+      if (offset !== into && !state.field(trackingField, false)) needed = true;
+      continue;
+    }
+    const quoted = QUOTE_PREFIX.exec(line.text)![0].length;
+    const white = /^[ \t]*/.exec(line.text.slice(quoted))![0];
+    const at = columnAt(line.text, quoted + white.length) - columnAt(line.text, quoted);
+    if (at < into || at - into >= 4) needed = true;
+  }
+  // Code anywhere below (in a nested item too) is in the lines a substitution would hold.
+  for (let c = item.cursor(); needed && !code && c.next();) {
+    if (c.to > item.to) break;
+    if ((c.name === 'FencedCode' || c.name === 'CodeBlock') && doc.lineAt(c.from).number > after) {
+      code = true;
+    }
+  }
+  if (!needed) return { needed, changes: [], replace: null, code };
+  const last = doc.lineAt(item.to).number;
+  const by = offset - into;
+  const changes =
+    by > 0 ? takeColumns(state, after + 1, last, by) : putColumns(state, after + 1, last, -by);
+  // The same lines as one replacement, from the end of the paragraph's last line to the end of the
+  // item's: the one change a tracked edit can write for them (a substitution that holds the old
+  // lines), as indentation alone is no text it can hold.
+  const from = doc.line(after).to;
+  const to = doc.line(last).to;
+  const moved = state.changes(changes);
+  const text = state
+    .update({ changes })
+    .state.doc.sliceString(moved.mapPos(from, -1), moved.mapPos(to, 1));
+  return { needed, changes, replace: { from, to, insert: text }, code };
+}
+
+/** The edits of `leaving`'s lines as the file is edited: Track Changes on writes the replacement. */
+const movedLines = (
+  state: EditorState,
+  under: { changes: ChangeSpec[]; replace: ChangeSpec | null },
+): ChangeSpec[] =>
+  state.field(trackingField, false) ? (under.replace ? [under.replace] : []) : under.changes;
 
 /** Why the first item of a numbered list at the start of a file can't leave it, tracked. */
 const FIRST_NUMBERED =
   "This item can't leave its list while Track Changes is on: a line below it (a number other than 1, an empty item or an underline) would read as part of its text. Take the marker out with Track Changes off, or move the lines below it first.";
 
-/** Words for a join onto a setext heading with Track Changes on. */
+/** Words for a join onto a setext heading in a list or a quote with Track Changes on. */
 const SETEXT_JOIN =
   "A heading underlined with === or --- can't take the block below it while Track Changes is on: its underline would have to be written again after the new text, behind a marker, where it would no longer be an underline. Join them with Track Changes off.";
 
@@ -159,12 +463,22 @@ function join(
   userEvent: 'delete.backward.block' | 'delete.forward.block',
 ): KeyEdit {
   const { doc } = state;
+  // The item that `below` is the first block of goes into the text above: its marker is taken, as
+  // when Backspace takes the first item out of its list, and the line after it reads otherwise in
+  // some readings if a pending change empties it (#292).
+  const taken = itemStartedBy(state, below, containerNodes(state, below));
+  if (taken && !itemBefore(taken) && readsOtherwiseBelow(state, doc.lineAt(taken.to))) {
+    return { ...nothing(state), refusal: BELOW_CHANGES };
+  }
   const changes: ChangeSpec[] = [];
   let from = above.lines.to;
-  if (above.kind === 'heading' && above.setext && state.field(trackingField, false)) {
-    // The underline would be written again after the text joined to it, as an insertion, whose
-    // closer ends the underline's line: micromark reads that line as text, and the newest view as
-    // a heading. No other order of the marks puts a clean `===` line there (format §3.4).
+  // The underline written again after the text joined to it would end in a closer: a reader of the
+  // file reads that line as text, and the newest view as a heading. A replacement of the block
+  // holds it (format §3.12).
+  let widenFirst =
+    above.kind === 'heading' && !!above.setext && !!state.field(trackingField, false);
+  if (widenFirst && above.containers.length) {
+    // The block's replacement is not known to read right inside a container yet.
     return { ...nothing(state), refusal: SETEXT_JOIN };
   }
   if (above.kind === 'heading' && above.setext) {
@@ -181,11 +495,10 @@ function join(
     changes.push({ from: below.text.to, to: below.lines.to });
   }
   const blank = numberedKept(state, above, below);
+  // The blank line that keeps the next numbered item from becoming text can't be written beside a
+  // closer inside a list or a quote: a replacement of the unit holds both.
   if (blank !== null && state.field(trackingField, false) && above.containers.length) {
-    // The blank line that keeps the next numbered item from becoming text would be written with
-    // the closer of the change on its own line, inside a list or a quote, where it is no blank
-    // line to a reader that doesn't know the markers (format §3.4; #248, walk seed 887).
-    return { ...nothing(state), refusal: NUMBERED_IN_CONTAINER };
+    widenFirst = true;
   }
   const first = changes[0] as { from: number; to: number };
   if (
@@ -194,12 +507,30 @@ function join(
     !(below.kind === 'heading' && below.setext)
   ) {
     const words = holdsOthersChange(state, first.from, doc.lineAt(below.lines.to).to);
-    if (words) return { ...nothing(state), refusal: words };
-    changes[0] = withBlankAfter(state, first, doc.lineAt(below.lines.to).to, blank);
+    if (words && !state.field(trackingField, false)) return { ...nothing(state), refusal: words };
+    if (words) {
+      // Text that holds another person's marks can't be written again behind a marker: the blank
+      // line is a change of its own, and the format widens the two where they can't stand together.
+      changes.push({ from: doc.lineAt(below.lines.to).to + 1, insert: `${blank}\n` });
+    } else {
+      changes[0] = withBlankAfter(state, first, doc.lineAt(below.lines.to).to, blank);
+    }
   } else if (blank !== null) {
     changes.push({ from: doc.lineAt(below.lines.to).to + 1, insert: `${blank}\n` });
   }
-  return edit(state, changes, from, userEvent);
+  if (taken) {
+    // What stood in the item whose marker goes follows the text into the block above: at that
+    // block's own text column, or it would be text of its paragraph, code, or out of its item.
+    const holder = containerNodes(state, above).at(-1);
+    const under = leaving(
+      state,
+      taken,
+      doc.lineAt(below.lines.to).number,
+      holder?.name === 'ListItem' ? textOffset(state, holder) : 0,
+    );
+    changes.push(...movedLines(state, under));
+  }
+  return { ...edit(state, changes, from, userEvent), ...(widenFirst ? { widenFirst } : {}) };
 }
 
 /**
@@ -210,7 +541,7 @@ function join(
 function holdsOthersChange(state: EditorState, from: number, to: number): string | null {
   const names = markNames(state, from, to);
   if (!names.length) return null;
-  return `This line holds a tracked change by ${names.join(' and ')}, which the join would have to write again. Decide that change first, or edit it in the raw view.`;
+  return `This line holds a tracked change by ${names.join(' and ')}, which the join would have to write again. Decide that change first, or edit it in the Plain view.`;
 }
 
 /** The names of the people whose marks have a marker in `from`–`to`. */
@@ -290,6 +621,10 @@ function numberedKept(state: EditorState, above: Block, joined: Block): string |
   return blankOf(number[1]!);
 }
 
+/** The lines between the last line of `above` and the first line of `below`. */
+const blankLines = (state: EditorState, above: Block, below: Block): number =>
+  state.doc.lineAt(below.lines.from).number - state.doc.lineAt(above.lines.to).number - 1;
+
 /** The empty block goes, with the break above it (or below, for the first), the caret above. */
 function removeEmpty(
   state: EditorState,
@@ -298,14 +633,80 @@ function removeEmpty(
 ): KeyEdit {
   const { prev, next } = neighbours(state, block);
   if (userEvent === 'delete.forward.block' && next) {
+    // No blank line above the block and one below it: the forward edit takes the one below and
+    // keeps the line break above, which leaves the next block right under the text above, as a
+    // line of it (`- one⏎- ‸⏎⏎After.`: the paragraph is a lazy line of the item; `- one⏎  - ‸⏎⏎After.`:
+    // the same, and an empty bullet is the underline of `one`). The block goes with the break
+    // above it, as Backspace takes it, and the blank line stays (#441). With a blank line above,
+    // the forward edit keeps one and is sound; front matter above has no break to take, and the
+    // caret in a table's hidden pipes is no place for the key to leave it.
+    if (
+      prev &&
+      prev.kind !== 'front-matter' &&
+      next.kind !== 'table' &&
+      blankLines(state, prev, block) === 0 &&
+      blankLines(state, block, next) > 0
+    ) {
+      return edit(
+        state,
+        [{ from: prev.lines.to, to: block.lines.to }],
+        prev.lines.to,
+        userEvent,
+        next.text.from,
+      );
+    }
     // Delete: the next block keeps its kind, the caret at its start.
-    return edit(
+    const forward = edit(
       state,
       [{ from: block.lines.from, to: next.lines.from }],
       block.lines.from,
       userEvent,
       next.text.from,
     );
+    // The format has no place for the marker of that deletion in front of an item nested under
+    // another one (`  - ` alone on the line, at the start of it), tracked: the same text goes as
+    // the break above it and the item, as Backspace takes it, one edit that is a substitution
+    // (#204). Untracked the first form is refused only where a change of someone else's is next to
+    // it, which the break above it would decide: that refusal stands.
+    if (!prev || !state.field(trackingField, false)) return forward;
+    return {
+      ...forward,
+      fallback: edit(
+        state,
+        [{ from: prev.lines.to, to: block.lines.to }],
+        prev.lines.to,
+        userEvent,
+        next.text.from,
+      ),
+    };
+  }
+  // A bare marker right above (`-` alone on its line, an empty item): the deletion of the break
+  // after it would stand right behind the marker (`-<del ⏎->`), which reads as text of a
+  // paragraph with a marker's character in it, not as the item the newest view has. The
+  // deletion starts at the end of the line before the bare marker instead, as the format
+  // writes it where the marker has a space after it (`b<del ⏎  - ⏎- >`), so that the empty item
+  // above goes with the break, and the item stays an item in every order of decisions (#581).
+  if (
+    prev &&
+    userEvent === 'delete.backward.block' &&
+    state.field(trackingField, false) &&
+    isEmpty(state, prev) &&
+    BARE_LINE.test(state.doc.lineAt(prev.lines.to).text)
+  ) {
+    // Up past a run of bare markers, which all go: none may be left with the deletion behind it.
+    let top = prev;
+    let before = neighbours(state, top).prev;
+    while (
+      before &&
+      isEmpty(state, before) &&
+      BARE_LINE.test(state.doc.lineAt(before.lines.to).text) &&
+      state.doc.lineAt(before.lines.to).number + 1 === state.doc.lineAt(top.lines.from).number
+    ) {
+      top = before;
+      before = neighbours(state, top).prev;
+    }
+    const from = before ? before.lines.to : top.lines.from;
+    return edit(state, [{ from, to: block.lines.to }], from, userEvent);
   }
   if (prev)
     return edit(state, [{ from: prev.lines.to, to: block.lines.to }], prev.lines.to, userEvent);
@@ -441,10 +842,8 @@ function backspaceAtItem(
     const parent = nodes.at(-2);
     if (parent?.name === 'ListItem') {
       // The items after it would become its children, and a numbered one other than 1 can't start a
-      // list under its text: it would be text (#248, walk seed 332).
-      const next = item.nextSibling;
-      const number = next && /^(\d{1,9})[.)]/.exec(state.sliceDoc(next.from, next.from + 12));
-      if (number && number[1] !== '1') return { ...nothing(state), refusal: OUTDENT_NUMBERED };
+      // list under its text: it would be text (#248, walk seed 332; #292): `outdent` keeps the
+      // format's refusal and checks the rest itself.
       return outdent(state, block);
     }
     return outOfList(state, block, item, prev);
@@ -503,7 +902,18 @@ function removeBullet(state: EditorState, block: Block, prev: Block | null): Key
 /** The first item of a nested list, up one level: Shift-Tab's block change, or its plain edit. */
 function outdent(state: EditorState, block: Block): KeyEdit {
   const userEvent = 'delete.backward.block';
-  const change = formatted(state, block.text.from, { kind: 'indent', by: -1 }, userEvent);
+  const change = formatted(
+    state,
+    block.text.from,
+    { kind: 'indent', by: -1 },
+    userEvent,
+    OUTDENT_NUMBERED_CHILD,
+  );
+  if (change?.refusal) return change;
+  // The format's own check is not exact, and not made at all where it refuses first (tabs, a
+  // pending break), where the plain edit below was written: so the line after is looked at here.
+  const words = absorbedBelow(state, itemsAround(state, block), change !== null);
+  if (words) return { ...nothing(state), userEvent, refusal: words };
   if (change) return { ...change, caretAt: block.text.from };
   // The block doesn't stand alone for the format: its marker line takes its parent's indentation.
   const items = itemsAround(state, block);
@@ -513,9 +923,23 @@ function outdent(state: EditorState, block: Block): KeyEdit {
   const line = own.line;
   const from = line.from;
   const markerAt = line.from + line.text.length - line.text.trimStart().length;
+  // What is nested in the item moves up with it, as the format writes it: its text column moves
+  // left by as many columns as the marker does, and a line left where it was would stand that much
+  // further in, four columns or more, as text or code.
+  const moved =
+    columnAt(line.text, markerAt - line.from) - columnAt(parent.indent, parent.indent.length);
+  const first = state.doc.lineAt(block.lines.to).number;
+  const into = textOffset(state, own.node) - moved;
+  const tracked = leaving(state, own.node, first, into);
+  const under =
+    moved <= 0
+      ? []
+      : state.field(trackingField, false)
+        ? movedLines(state, tracked)
+        : takeColumns(state, line.number + 1, state.doc.lineAt(own.node.to).number, moved);
   return edit(
     state,
-    [{ from, to: markerAt, insert: parent.indent }],
+    [{ from, to: markerAt, insert: parent.indent }, ...under],
     block.text.from,
     userEvent,
     block.text.from,
@@ -536,14 +960,27 @@ function outOfList(
 ): KeyEdit {
   const userEvent = 'delete.backward.block';
   const { doc } = state;
+  // A line below that a pending change empties would follow the text as an underline (#292).
+  if (readsOtherwiseBelow(state, doc.lineAt(item.to))) {
+    return { ...nothing(state), refusal: BELOW_CHANGES };
+  }
   const list = item.parent;
-  const alone = (list?.getChildren('ListItem').length ?? 0) <= 1;
+  // A one-item list is the format's block change, which writes nothing for the line below: a number
+  // other than 1 there is text of the paragraph once the item is one (the key writes the blank line
+  // that keeps it apart), so it takes the way of a longer list.
+  const underItem = doc.lineAt(item.to);
+  const below = underItem.number < doc.lines ? doc.line(underItem.number + 1).text : '';
+  const alone =
+    (list?.getChildren('ListItem').length ?? 0) <= 1 &&
+    (BLANK.test(below) || !readingsOf(below).some(Boolean));
   if (alone) {
     const change = formatted(state, block.text.from, { kind: 'block', to: 'p' }, userEvent);
     if (change) return { ...change, caretAt: block.text.from };
   }
   const line = doc.lineAt(block.lines.from);
   const own = block.containers.at(-1)!;
+  // What stood in the item moves out of it with the paragraph, by the item's own offset.
+  const under = leaving(state, item, doc.lineAt(block.lines.to).number);
   // The first line of the file, Track Changes on: the format takes the marker out as a change of
   // its own, and the lines below it, up to a blank line, must not turn into text of this one or
   // make a heading of it (an item that can't interrupt a paragraph: numbered other than 1, or
@@ -590,9 +1027,33 @@ function outOfList(
         };
       }
       const words = holdsOthersChange(state, first.from, last.to);
-      if (words) return { ...nothing(state), refusal: words };
-      changes[0] = withBlankAfter(state, first, last.to, blankOf(number[1]!));
+      if (words && !state.field(trackingField, false)) return { ...nothing(state), refusal: words };
+      if (words) {
+        changes.push({ from: last.to + 1, insert: `${blankOf(number[1]!)}\n` });
+      } else {
+        changes[0] = withBlankAfter(state, first, last.to, blankOf(number[1]!));
+      }
     }
+  }
+  const moving = movedLines(state, under);
+  if (moving.length && prev && state.field(trackingField, false)) {
+    // Under a block, the marker's removal is a substitution of the break before it, which a
+    // second edit right after can't be written beside: one replacement from the break to the end
+    // of the item's lines.
+    const all = [...changes, ...moving];
+    const starts = all.map((c) => (c as { from: number }).from);
+    const from = Math.min(prev.lines.to, ...starts);
+    const to = (moving[0] as { to: number }).to;
+    const after = state.update({ changes: all });
+    const mapped = state.changes(all);
+    changes.length = 0;
+    changes.push({
+      from,
+      to,
+      insert: after.state.doc.sliceString(mapped.mapPos(from, -1), mapped.mapPos(to, 1)),
+    });
+  } else {
+    changes.push(...moving);
   }
   // In front of the text, however the format writes the break: right after the break's line
   // breaks, which a marker's payload never holds as they are.
@@ -765,6 +1226,120 @@ function inNoText(
   return null;
 }
 
+/** Whether the text from `from` to `to` is inside a pending insertion of the author's own. */
+function inOwnInsertion(state: EditorState, from: number, to: number): boolean {
+  const me = state.facet(authorFacet)?.handle;
+  return !!state
+    .field(parsedField, false)
+    ?.marks.some(
+      (mark) =>
+        mark.kind === 'ins' &&
+        mark.entry.by === me &&
+        mark.segments.some(({ open, close }) => open.to <= from && close && close.from >= to),
+    );
+}
+
+/**
+ * Backspace (or Delete) over the only character of an item's text, where the item left empty is no
+ * item in Markdown: an empty bullet under a line of text is the underline of a heading, and an empty
+ * numbered item is more of the text (`empty-item.ts`). The file must not hold it (#204: it held the
+ * item's marker alone, which read the text above it as a heading, though the editor drew an empty
+ * item), so the item does not stay in it:
+ *
+ * - Track Changes off: the plain key, and `open.ts` opens the empty item after it, as after any
+ *   edit that takes the text of such an item (#442): drawn, out of the file, written when text is
+ *   typed in it, gone with the next Backspace or when the caret leaves.
+ * - Track Changes on, text of the author's own insertion that holds the item's break: the item goes
+ *   whole with the character, as the author's own pending text does.
+ * - Track Changes on, text that isn't the author's own: the format deletes the whole item itself.
+ *
+ * Null where the item holds more, where the text is more than one code point, and where the empty
+ * item would be sound.
+ */
+function onlyCharOfItem(
+  state: EditorState,
+  block: Block,
+  head: number,
+  forward: boolean,
+): KeyEdit | null {
+  if (block.kind !== 'paragraph' || block.containers.at(-1)?.kind !== 'item') return null;
+  // One character and the closer of the insertion that holds it, at most: the rest is a key inside
+  // the text, which costs nothing here.
+  if (block.text.to - block.text.from > 64) return null;
+  const start = textStart(state, block);
+  const end = textEnd(state, block);
+  if (forward ? head !== start : head !== end) return null;
+  if ([...state.sliceDoc(start, end)].length !== 1) return null;
+  const { doc } = state;
+  const item = itemsAround(state, block)[0];
+  const line = doc.lineAt(block.lines.from);
+  if (
+    !item ||
+    line.number < 2 ||
+    item.line.number !== line.number ||
+    doc.lineAt(item.node.to).number !== line.number
+  ) {
+    return null;
+  }
+  // What the item is once the character is gone.
+  const rest = (doc.sliceString(line.from, start) + doc.sliceString(end, line.to)).replace(
+    MARKER,
+    '',
+  );
+  const found = EMPTY_ITEM.exec(rest);
+  if (!found || !unsoundEmptyItem(doc, line.number, found[1]!, found[2]!.length, found[3]!)) {
+    return null;
+  }
+  const userEvent = forward ? 'delete.forward.block' : 'delete.backward.block';
+  const above = doc.line(line.number - 1);
+  // Track Changes off is the plain key's: `open.ts` opens the item it leaves.
+  if (!state.field(trackingField, false)) return null;
+  // Text that isn't the author's own is deleted whole by the format; the author's own goes with
+  // the break that it made, and the item.
+  if (!inOwnInsertion(state, start, end)) return null;
+  return edit(state, [{ from: above.to, to: end }], above.to, userEvent);
+}
+
+/**
+ * Backspace or Delete over the only character of the first line of a paragraph that goes on: the
+ * line goes with its break and the next line's prefix, as the format deletes a whole line, so that
+ * no empty line is left in front of the paragraph's text (`delt⏎⏎⏎ship`, a stray blank line; walk
+ * seed 1141). Null elsewhere: the character is not alone on the line, a marker is on it, or the
+ * paragraph has no line after it.
+ */
+function onlyCharOfFirstLine(
+  state: EditorState,
+  block: Block,
+  head: number,
+  forward: boolean,
+): KeyEdit | null {
+  if (block.kind !== 'paragraph') return null;
+  const start = block.text.from;
+  const { doc } = state;
+  const first = doc.lineAt(block.lines.from);
+  // Where the caret is on the line, and how long the line is, decide before anything is read: a key
+  // inside the text costs nothing here.
+  if (forward ? head !== start : head !== first.to) return null;
+  if (first.to - start > 32 || first.number >= doc.lineAt(block.lines.to).number) return null;
+  const line = state.sliceDoc(start, first.to);
+  if (line.includes('<!--') || line === '' || findClusterBreak(line, 0) !== line.length)
+    return null;
+  // The next line's text, after its quote markers and indentation. As the first line it is the
+  // start of the block: syntax there (a number, a bullet, a `>`, a `#`, an underline) is no longer
+  // the text it was as a wrapped line, so only a line of words takes the place.
+  const next = doc.line(first.number + 1);
+  const to = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
+  const words = next.text.slice(to - next.from);
+  if (!/^[\p{L}\p{N}]/u.test(words) || /^\d{1,9}[.)](?:[ \t]|$)/.test(words)) return null;
+  return edit(
+    state,
+    [{ from: start, to }],
+    start,
+    forward ? 'delete.forward.block' : 'delete.backward.block',
+    to,
+  );
+}
+
 /**
  * Backspace at the caret, without a Return to take back (design: block editing, "Backspace and
  * Delete at block edges"). Null declines: inside a block's text, in a prefix that shows as source,
@@ -783,10 +1358,17 @@ export function planBackspace(state: EditorState): KeyEdit | null {
   if (block.kind === 'rule') return null;
   if (head < block.text.from) return null;
   const start = textStart(state, block);
-  if (head > start) return lastCharOfLine(state, block, head) ?? afterHardBreak(state, block, head);
+  if (head > start) {
+    return (
+      onlyCharOfItem(state, block, head, false) ??
+      onlyCharOfFirstLine(state, block, head, false) ??
+      lastCharOfLine(state, block, head) ??
+      afterHardBreak(state, block, head)
+    );
+  }
   const nodes = containerNodes(state, block);
   const { prev } = neighbours(state, block);
-  const deleted = prev && onlyDeletedText(state, prev);
+  const deleted = prev && !state.field(trackingField, false) && onlyDeletedText(state, prev);
   if (deleted) return { ...nothing(state), refusal: deleted };
   const item = itemStartedBy(state, block, nodes);
   let edit: KeyEdit;
@@ -841,9 +1423,13 @@ export function planDelete(state: EditorState): KeyEdit | null {
   if (block.kind === 'rule') return null;
   if (isEmpty(state, block) && head >= block.text.from) return removeEmpty(state, block, userEvent);
   const end = textEnd(state, block);
-  if (head < end || head < block.text.from) return null;
+  if (head < end || head < block.text.from) {
+    return (
+      onlyCharOfItem(state, block, head, true) ?? onlyCharOfFirstLine(state, block, head, true)
+    );
+  }
   const { next } = neighbours(state, block);
-  const deleted = next && onlyDeletedText(state, next);
+  const deleted = next && !state.field(trackingField, false) && onlyDeletedText(state, next);
   if (deleted) return { ...nothing(state), refusal: deleted };
   if (!next || NO_TEXT.has(next.kind) || onlyHidden(state, next.lines.from, next.lines.to)) {
     return nothing(state);

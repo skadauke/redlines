@@ -70,6 +70,8 @@ async function watchAsTheAppDoes(path: string, onChange: () => void): Promise<()
 function nodeHost(): Host {
   return {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
+    exportWord: () => Promise.resolve(null),
+    openDocx: () => Promise.resolve(null),
     open: () => Promise.resolve(null),
     read: async (path) => decodeText(await readFile(path)),
     write: (path, text) => writeFile(path, text),
@@ -77,6 +79,7 @@ function nodeHost(): Host {
     exists: (path) => Promise.resolve(existsSync(path)),
     reveal: () => Promise.resolve(),
     print: () => Promise.resolve(),
+    exportPdf: () => Promise.resolve(null),
     saveAs: () => Promise.resolve(null),
     watch: watchAsTheAppDoes,
     projectRoot: (path) =>
@@ -86,6 +89,8 @@ function nodeHost(): Host {
     allowDocument: () => Promise.resolve(),
     allowImages: () => Promise.resolve(false),
     imageUrl: () => null,
+    imageStamps: () => Promise.resolve([]),
+    imageSizes: () => Promise.resolve([]),
     forgetDocuments: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
@@ -93,6 +98,10 @@ function nodeHost(): Host {
     openWindow: () => Promise.resolve(),
     windowStart: () => Promise.resolve({ path: null, line: null, text: null }),
     readClipboardText: () => Promise.resolve(''),
+    askToSaveForImage: () => Promise.resolve(false),
+    chooseImages: () => Promise.resolve(null),
+    addImages: () => Promise.resolve({ paths: [], refused: [] }),
+    listenForImageDrops: () => Promise.resolve(() => {}),
     listenForFiles: () => Promise.resolve(),
   };
 }

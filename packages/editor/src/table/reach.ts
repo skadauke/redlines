@@ -1,6 +1,7 @@
 // Selections that reach into a table (design: tables, "Selecting cells" and the Call about them). A
-// selection that covers whole tables deletes them as blocks, as block editing deletes any covered
-// block. One that ends inside a table clears the text of the cells in the rows it reaches (the table
+// selection that covers exactly one whole table (⌫, ⌦, Cut) deletes it as Delete Table does (#471);
+// one that covers more deletes the tables as blocks, as block editing deletes any covered block.
+// One that ends inside a table clears the text of the cells in the rows it reaches (the table
 // keeps its shape), deletes the text outside the table as block editing deletes a selection, and
 // never joins across the table. Delete, Backspace, Return and typing all work, Return and typing
 // doing the deleting first and then writing where the caret is: in the first cleared cell, or at
@@ -17,17 +18,20 @@ import {
   type SelectionRange,
   StateField,
   Transaction,
+  type TransactionSpec,
 } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
+import { parse } from '@redlines/format';
 import { planReturn } from '../blocks/edits.ts';
 import { applyKeyEdit } from '../blocks/keys.ts';
 import { endOf, startOf } from '../blocks/motion.ts';
 import { blockAt, neighbours } from '../blocks/structure.ts';
-import { viewModeField } from '../tracked/field.ts';
+import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
 import { cellsOfRect, clearedCells, rectOf, rectSpec } from './cells.ts';
 import { composeOverCells } from './compose.ts';
-import { type Cell, type Table, tablesField, tablesOf } from './model.ts';
+import { type Cell, endsBeforeNextCell, type Table, tablesField, tablesOf } from './model.ts';
+import { deleteTableSpec } from './ops.ts';
 
 /** What a selection reaches in the tables of a state. */
 export interface Reach {
@@ -148,13 +152,19 @@ export function reachChanges(
   let caret = range.from;
   const start = reach.partial.find((p) => p.table.from <= range.from && range.from <= p.table.to);
   if (start) {
+    const lastCell = start.table.rows.at(-1)?.cells.at(-1);
     const cell = start.table.rows
-      .flatMap((row) => shown(start.table, row.cells))
+      .flatMap((row) => shown(start.table, row.cells).map((c) => ({ c, row })))
       .find(
-        (c) =>
+        ({ c, row }) =>
           c.from <= range.from &&
-          (range.from < c.to || c === start.table.rows.at(-1)?.cells.at(-1)),
-      );
+          (range.from < c.to ||
+            c === lastCell ||
+            // Where the next cell's mark begins is this cell's when its text ends there (`holds`): the
+            // selection starts in an empty cell with one space of padding or none, or at the end of text
+            // with none after it.
+            (range.from === c.to && endsBeforeNextCell(row, c))),
+      )?.c;
     caret = cell ? cell.textFrom : range.from;
   }
   if (insert !== '') {
@@ -228,6 +238,28 @@ export function deleteReach(view: EditorView, then?: 'return' | { typed: string 
   return true;
 }
 
+/** The table that `range` covers and nothing else (only white space beside it), or null. */
+function onlyTable(state: EditorState, range: SelectionRange): Table | null {
+  const touched = tablesOf(state).filter((t) => range.from < t.to && range.to > t.from);
+  const [table] = touched;
+  if (touched.length !== 1 || !table || range.from > table.from || range.to < table.to) return null;
+  const blank = (from: number, to: number) => !/\S/.test(state.doc.sliceString(from, to));
+  if (!blank(range.from, table.from) || !blank(table.to, range.to)) return null;
+  // A table that is all the text there is: nothing would be left to rest the caret on, which is
+  // block editing's to place (#470).
+  const end = bodyEnd(state.field(parsedField, false) ?? parse('')) ?? state.doc.length;
+  return blank(0, table.from) && blank(table.to, end) ? null : table;
+}
+
+/**
+ * ⌫, ⌦ and Cut over a selection that covers exactly one whole table (#471): the deletion Delete Table
+ * makes, with its rules (format §3.7, rule 6): another person's pending change in the table is named
+ * in a refusal, yours are folded into the deletion, a comment becomes a point comment.
+ */
+function deleteWholeTable(start: EditorState, table: Table): TransactionSpec {
+  return deleteTableSpec(start, table.from);
+}
+
 /** Typing, pasting and deleting over a selection that reaches into a table: the same as deleting it
  * and writing there. */
 const routeEdits = Prec.lowest(
@@ -248,6 +280,11 @@ const routeEdits = Prec.lowest(
     });
     const change = only as { from: number; to: number; insert: string } | null;
     if (count !== 1 || !change || change.from !== range.from || change.to !== range.to) return tr;
+    // A whole table, deleted: by Delete Table's rules.
+    const whole = change.insert === '' ? onlyTable(start, range) : null;
+    if (whole) {
+      return [deleteWholeTable(start, whole)];
+    }
     // Cells selected: their text goes, and what is written is written in the first.
     const rect = rectOf(start, range);
     if (rect) {
@@ -256,6 +293,8 @@ const routeEdits = Prec.lowest(
         rect,
         change.insert,
         tr.annotation(Transaction.userEvent) ?? event,
+        // Typing clears the top-left cell alone; a paste, a drop or a cut clears them all.
+        tr.isUserEvent('input.type') && change.insert !== '',
       );
       return spec ? [spec] : [{}];
     }
@@ -313,7 +352,28 @@ const selectedField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+/** The class the editor's root has while cells are selected (`selectedField` marks some): the theme
+ * hides the page's own text highlight in the table's rows by it. A class on the root, from the state,
+ * and not a `:has()` on the content, which WebKit rechecks as the DOM changes. */
+export const CELL_SELECTING = 'rl-cell-selecting';
+const selectingAttributes = EditorView.editorAttributes.compute([selectedField], (state) =>
+  state.field(selectedField).size > 0 ? { class: CELL_SELECTING } : { class: '' },
+);
+
 /** The keys and the filter that act on selections reaching into a table, and their drawing. */
 export function tableReach() {
-  return [selectedField, routeEdits, composeOverCells];
+  return [selectedField, selectingAttributes, routeEdits, composeOverCells];
+}
+
+/** ⌫ and ⌦ over a selection that covers exactly one whole table: Delete Table's deletion (#471).
+ * False when the selection is not that. */
+export function deleteWholeTableSelection(view: EditorView): boolean {
+  const { state } = view;
+  if (state.field(viewModeField, false) === 'raw' || state.selection.ranges.length > 1)
+    return false;
+  const range = state.selection.main;
+  const table = range.empty ? null : onlyTable(state, range);
+  if (!table) return false;
+  view.dispatch(deleteWholeTable(state, table));
+  return true;
 }

@@ -81,6 +81,25 @@ describe('Shift-Return', () => {
         on: { file: 'One two.⏎⏎Next.', caret: 'One two.<ins><split>\\⏎‸·</ins>⏎⏎Next.' },
       },
       {
+        name: "at the start of an item's second paragraph: an empty paragraph above, no new item (#621)",
+        doc: '- a⏎⏎  ‸b',
+        keys: ['Shift-Enter'],
+        off: { caret: '- a⏎⏎  ⏎⏎  ‸b' },
+        on: { caret: '- a⏎⏎  <split>⏎⏎  ‸b' },
+      },
+      {
+        name: 'the same under a code fence, and with Return (#621)',
+        doc: '- a⏎⏎  ```⏎  x⏎  ```⏎  ‸b',
+        keys: ['Enter'],
+        off: { caret: '- a⏎⏎  ```⏎  x⏎  ```⏎  ⏎⏎  ‸b' },
+        // Track Changes on: the tracked layer takes the edit out, so nothing happens (no new item);
+        // the widening of lane R is the way to write it.
+        on: {
+          caret: '- a⏎⏎  ```⏎  x⏎  ```⏎  ‸b',
+          refusal: 'A line that is only Markdown syntax takes no change.',
+        },
+      },
+      {
         name: 'in a list item, at its end: an empty line at the text column',
         doc: '- One two.‸⏎⏎Next.',
         keys: ['Shift-Enter'],
@@ -286,15 +305,27 @@ describe('Shift-Return', () => {
         name: 'inside a heading: refused',
         doc: '## Head‸ing',
         keys: ['Shift-Enter'],
-        off: { caret: '## Head‸ing', refusal: 'A heading is one line in Markdown.' },
-        on: { caret: '## Head‸ing', refusal: 'A heading is one line in Markdown.' },
+        off: {
+          caret: '## Head‸ing',
+          refusal: 'A heading is one line. Press Return to start a new paragraph.',
+        },
+        on: {
+          caret: '## Head‸ing',
+          refusal: 'A heading is one line. Press Return to start a new paragraph.',
+        },
       },
       {
         name: 'over a selection inside a heading: refused before anything is deleted',
         doc: '## He[ad]ing',
         keys: ['Shift-Enter'],
-        off: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
-        on: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
+        off: {
+          caret: '## He[ad]ing',
+          refusal: 'A heading is one line. Press Return to start a new paragraph.',
+        },
+        on: {
+          caret: '## He[ad]ing',
+          refusal: 'A heading is one line. Press Return to start a new paragraph.',
+        },
       },
       {
         name: 'in code: a line break, as Return (a substitution of the block with Track Changes on)',

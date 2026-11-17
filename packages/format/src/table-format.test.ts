@@ -5,16 +5,28 @@
 // and deleted rows and columns.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { addComment } from './comments.ts';
 import { acceptAll, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
-import { trackedFormatRanges } from './formatting.ts';
+import { encodeValue } from './format-ops.ts';
+import { trackedFormat, trackedFormatRanges, untrackedFormat } from './formatting.ts';
 import type { FormatOp } from './formatting.ts';
 import { expectEveryOrderRead } from './oracle.ts';
 import { readTables } from './table.ts';
 import { parse } from './parse.ts';
 import { tableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
-import { ada, bo, context, everyOrder, exactly, file } from './test-helpers.ts';
+import {
+  ada,
+  bo,
+  context,
+  everyOrder,
+  exactly,
+  expectEveryOrderAlike,
+  expectNoDecisionRefused,
+  file,
+  problemsOf,
+} from './test-helpers.ts';
 import type { Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -154,15 +166,14 @@ describe('a cell that is only a marker', () => {
     }
   }, 60_000);
 
-  it('is refused in words that name the cell and the person, and writes nothing', () => {
-    expect(
-      over(text, [
-        [1, 0],
-        [1, 1],
-      ]).refusal,
-    ).toBe(
-      "Bo Chen's insertion is in the cell in row 1, column 1. Accept or reject it first, then format the cell.",
-    );
+  it('is written as a replacement of the table, with the person’s change in its old text', () => {
+    const wide = over(text, [
+      [1, 0],
+      [1, 1],
+    ]);
+    expect(wide.refusal).toBeUndefined();
+    expect(parse(wide.after ?? '').marks.some((mark) => mark.kind === 'sub')).toBe(true);
+    expectEveryOrderRead('widened cell format', wide.after ?? '');
     // A cell with nothing to format but a marker takes no change.
     expect(over(text, [[2, 0]])).toEqual({ after: text, refusal: undefined });
   });
@@ -211,13 +222,20 @@ describe('a table without outer pipes', () => {
     ]);
   });
 
-  it('refuses a row that has no leading pipe, as before', () => {
-    expect(over(bare, [[1, 1]]).refusal).toBe(
-      'A row of a table needs a leading | to hold a format change.',
-    );
-    expect(over(bare, [[1, 0]]).refusal).toBe(
-      'A row of a table needs a leading | to hold a format change.',
-    );
+  it('is written as a replacement of the table, for a row that has no leading pipe', () => {
+    for (const cells of [
+      [[1, 1]],
+      [[1, 0]],
+      [[0, 0]],
+      [
+        [1, 0],
+        [2, 1],
+      ],
+    ] as const) {
+      expectWritten(`bare ${JSON.stringify(cells)}`, bare, cells);
+    }
+    // Beside another person's change in the table.
+    expectWritten('mixed header', mixed, [[0, 0]]);
   });
 });
 
@@ -233,10 +251,8 @@ describe('rows and columns pending in the table', () => {
   );
   const edit = (text: string, op: TableOp, who: Person, ids: string[]) =>
     applyChanges(text, tableEdit(text, op, context(who, ids)).changes);
-  const BO_ROW =
-    "Bo Chen's insertion is in the cell in row 2, column 2. Accept or reject it first, then format the cell.";
 
-  it('formats cells beside a moved row, and refuses a cell of the moved row', () => {
+  it('formats cells beside a moved row, and widens a cell of the moved row', () => {
     const moved = edit(plain, { kind: 'moveRows', table: 0, rows: [1], to: 3 }, bo, [
       'k3x9',
       'm2bd',
@@ -252,7 +268,10 @@ describe('rows and columns pending in the table', () => {
       BOLD,
       false,
     );
-    expect(over(moved, [[2, 1]]).refusal).toBe(BO_ROW);
+    // A cell of the moved row is a replacement of the table.
+    const wide = over(moved, [[2, 1]]);
+    expect(wide.refusal).toBeUndefined();
+    expectEveryOrderRead('a moved row', wide.after ?? '');
   });
 
   it('formats cells in the other columns of a deleted or a moved one', () => {
@@ -302,9 +321,9 @@ describe('rows and columns pending in the table', () => {
       ITALIC,
       false,
     );
-    expect(over(shifted, [[0, 1]]).refusal).toBe(
-      "Bo Chen's insertion is in the cell in the header, column 2. Accept or reject it first, then format the cell.",
-    );
+    const wide = over(shifted, [[0, 1]]);
+    expect(wide.refusal).toBeUndefined();
+    expectEveryOrderRead('a moved column header', wide.after ?? '');
   });
 
   it('formats cells beside an inserted row', () => {
@@ -319,5 +338,108 @@ describe('rows and columns pending in the table', () => {
       BOLD,
       false,
     );
+  });
+});
+
+// A tracked alignment change is one mark at the end of the header's last cell (format §3.7, #281). Its
+// decisions only take the mark away and write the delimiter row, so it can't change how the cell's
+// syntax reads, and it doesn't keep the cell from being formatted: bold over the last header cell, or
+// over the whole header row, is written in front of the mark, and every order of decisions reads alike.
+describe('a pending alignment change in the header', () => {
+  const OLD = encodeValue('| - | - | - |');
+  const MARK = `<!--fmt k3x9 align=${OLD}-->`;
+  /** Bo's change: Count centered. The mark ends the text of the last header cell. */
+  const POINT = file(`| a | b | c${MARK} |\n| - | :-: | - |\n| 11 | 12 | 13 |\n| 21 | 22 | 23 |`, {
+    k3x9: 'bo',
+  });
+  const HEADER = [
+    [0, 0],
+    [0, 1],
+    [0, 2],
+  ] as const;
+
+  /** The file after `op` over the cells, in every order of decisions, with no decision refused. */
+  function expectFormatted(
+    label: string,
+    text: string,
+    op: FormatOp,
+    cells: readonly (readonly [number, number])[] = HEADER,
+  ) {
+    const after = expectWritten(label, text, cells, op);
+    expect(problemsOf(parse(after)), label).toEqual([]);
+    expect(
+      parse(after).marks.map((mark) => mark.id),
+      label,
+    ).toContain('k3x9');
+    expect(expectNoDecisionRefused(label, after), label).toBeGreaterThan(2);
+    return after;
+  }
+
+  it('does not keep the last header cell from being made bold or italic, and writes the mark last', () => {
+    for (const op of [BOLD, ITALIC]) {
+      const after = expectFormatted(`last header cell ${op.kind}`, POINT, op, [[0, 2]]);
+      // One range, as `trackedFormat` has it, is the same change.
+      const range = cellsAt(POINT, [[0, 2]])[0] ?? { from: 0, to: 0 };
+      expect(applyChanges(POINT, trackedFormat(POINT, range, op, context(ada, IDS)).changes)).toBe(
+        after,
+      );
+      expect(after).toMatch(
+        /<!--fmt \w{4} \+(?:bold|italic)-->[*_]+c[*_]+<!--\/\w{4}--><!--fmt k3x9/,
+      );
+    }
+  });
+
+  it('does not keep the whole header row from being formatted, one change for each cell', () => {
+    for (const op of [BOLD, ITALIC]) {
+      const after = expectFormatted(`header row ${op.format}`, POINT, op);
+      expect(marksOf(after), op.kind).toBe(4);
+    }
+  });
+
+  it('does not keep a plain bold over the last header cell or the whole header row', () => {
+    for (const [name, cells] of [
+      ['the last header cell', [[0, 2]]],
+      ['the header row', HEADER],
+    ] as const) {
+      // One after the other from the last, as the editor does with Track Changes off.
+      let after = POINT;
+      for (const range of cellsAt(POINT, cells).toReversed()) {
+        after = applyChanges(after, untrackedFormat(after, range, BOLD, { author: ada }));
+      }
+      expect(after, name).toMatch(/\*\*c\*\*<!--fmt k3x9/);
+      expect(problemsOf(parse(after)), name).toEqual([]);
+      expectEveryOrderAlike(name, after, exactly);
+      expectEveryOrderRead(name, after);
+      expect(expectNoDecisionRefused(name, after), name).toBeGreaterThan(1);
+    }
+  });
+
+  it('does not keep a comment over all the text of the header row, which ends in front of the mark', () => {
+    const cells = cellsAt(POINT, HEADER);
+    const range = { from: cells[0]?.from ?? 0, to: cells[2]?.to ?? 0 };
+    const after = applyChanges(
+      POINT,
+      addComment(POINT, range, 'A note.', context(ada, IDS)).changes,
+    );
+    expect(after).toMatch(/<!--cmt \w{4}-->a \| b \| c<!--\/\w{4}--><!--fmt k3x9/);
+    expectEveryOrderAlike('a comment over the header', after, exactly);
+    expectEveryOrderRead('a comment over the header', after);
+    expect(expectNoDecisionRefused('a comment over the header', after)).toBeGreaterThan(1);
+  });
+
+  it('formats the last header cell of a table the other person aligned, with the mark Ada’s', () => {
+    // The same, the other way round: Bo bolds the cell that has Ada's mark.
+    const text = file(POINT.split('\n\n<!-- redlines')[0] ?? '', { k3x9: 'ada' });
+    const { changes } = trackedFormat(
+      text,
+      cellsAt(text, [[0, 2]])[0] ?? { from: 0, to: 0 },
+      BOLD,
+      context(bo, IDS),
+    );
+    const after = applyChanges(text, changes);
+    expect(after).toMatch(/<!--fmt \w{4} \+bold-->\*\*c\*\*<!--\/\w{4}--><!--fmt k3x9/);
+    expectEveryOrderAlike('bo bolds', after, exactly);
+    expectEveryOrderRead('bo bolds', after);
+    expect(expectNoDecisionRefused('bo bolds', after)).toBeGreaterThan(2);
   });
 });

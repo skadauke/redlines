@@ -6,7 +6,8 @@
 import { EditError } from '@redlines/format';
 import { COMMANDS, UsageError } from './commands.ts';
 import type { Command } from './commands.ts';
-import { readText, readTextOptions, saveText } from './files.ts';
+import { cannot, readText, readTextOptions, saveText } from './files.ts';
+import { isPlainOnly } from './plain-only.ts';
 
 /** What the command line reads and writes, so tests can run it in memory. */
 export interface CliIo {
@@ -31,11 +32,23 @@ export interface CliIo {
   readStdin(): Promise<string>;
   /** `n` random bytes as `2 * n` lowercase hexadecimal digits, from the operating system. */
   randomHex(n: number): string;
+  /** Writes a binary file. Absent where the command line can't make one (the app's program). */
+  writeBytes?(path: string, bytes: Uint8Array): Promise<void>;
+  /** The text as a .docx and what the file can't hold. Absent where `writeBytes` is. */
+  /** The bytes of a file. Absent where `importDocx` is. */
+  readBytes?(path: string): Promise<Uint8Array>;
+  /** A .docx as Markdown, with what could not be kept. Absent where `exportDocx` is. */
+  importDocx?(
+    bytes: Uint8Array,
+  ): Promise<{ markdown: string; notes: string[]; media: Record<string, Uint8Array> }>;
+  exportDocx?(text: string): Promise<{ bytes: Uint8Array; notes: string[] }>;
 }
 
 const USAGE = `Usage: redlines <command> <file> [options]
 
 Commands:
+  redlines export-docx <file> [-o <out.docx>]
+  redlines import-docx <file.docx> [-o <out.md>]
 ${Object.entries(COMMANDS)
   .map(([name, command]) => `  redlines ${name} ${command.usage}`)
   .join('\n')}
@@ -109,6 +122,106 @@ function parseArguments(command: Command, argv: readonly string[]): CommandLine 
   return { file, args, flags };
 }
 
+/** `redlines export-docx <file.md> [-o out.docx]`: the file as a Word file, with its tracked
+ * changes and comments. It leaves the file alone, so it is no command of the table. */
+async function exportDocx(rest: string[], io: CliIo): Promise<number> {
+  let file: string | undefined;
+  let out: string | undefined;
+  for (let arg = rest.shift(); arg !== undefined; arg = rest.shift()) {
+    if (arg === '-o' || arg === '--output') {
+      out = rest.shift();
+      if (out === undefined) throw new UsageError(`${arg} needs a value`);
+    } else if (arg.startsWith('-')) {
+      throw new UsageError(`Unknown option: ${arg}`);
+    } else if (file === undefined) {
+      file = arg;
+    } else {
+      throw new UsageError(`Unexpected argument: ${arg}`);
+    }
+  }
+  if (file === undefined) throw new UsageError('Missing <file>');
+  if (!io.exportDocx || !io.writeBytes) {
+    throw new EditError('export-docx is not in this copy of redlines. Use the one in a checkout.');
+  }
+  const text = await readText(io, file);
+  const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.docx';
+  if (target === file)
+    throw new EditError(`${file} is the file to export; give another name with -o.`);
+  const { bytes, notes } = await io.exportDocx(text);
+  await io.writeBytes(target, bytes).catch(cannot('write', target));
+  for (const note of notes) io.stderr(`${note}\n`);
+  io.stdout(`${target}\n`);
+  return 0;
+}
+
+/** `redlines import-docx <file.docx> [-o out.md]`: a Word or Google Docs file as a Redlines file,
+ * beside the .docx by default; never over a file that is there. */
+async function importDocx(rest: string[], io: CliIo): Promise<number> {
+  let file: string | undefined;
+  let out: string | undefined;
+  for (let arg = rest.shift(); arg !== undefined; arg = rest.shift()) {
+    if (arg === '-o' || arg === '--output') {
+      out = rest.shift();
+      if (out === undefined) throw new UsageError(`${arg} needs a value`);
+    } else if (arg.startsWith('-')) {
+      throw new UsageError(`Unknown option: ${arg}`);
+    } else if (file === undefined) {
+      file = arg;
+    } else {
+      throw new UsageError(`Unexpected argument: ${arg}`);
+    }
+  }
+  if (file === undefined) throw new UsageError('Missing <file>');
+  if (!io.importDocx || !io.readBytes) {
+    throw new EditError('import-docx is not in this copy of redlines. Use the one in a checkout.');
+  }
+  const bytes = await io.readBytes(file).catch(cannot('read', file));
+  const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.md';
+  if (target === file)
+    throw new EditError(`${file} is the file to import; give another name with -o.`);
+  const { markdown, notes, media } = await io.importDocx(bytes).catch(() => {
+    throw new EditError(`${file} is not a Word file that redlines can read.`);
+  });
+  // Never over a file that is there, whatever its name came from.
+  if (
+    await io.realpath(target).then(
+      () => true,
+      () => false,
+    )
+  ) {
+    throw new EditError(`${target} is there already; give another name with -o.`);
+  }
+  // The pictures go beside the Markdown, where its links name them (`media/image1.png`), and
+  // never over a file that is there.
+  const folder = target.includes('/') ? target.slice(0, target.lastIndexOf('/') + 1) : '';
+  if (Object.keys(media).length > 0 && !io.writeBytes) {
+    throw new EditError('This copy of redlines cannot write the pictures of a file.');
+  }
+  const pictures = Object.entries(media).filter(
+    ([name]) => /^media\/[^/\\]+$/.test(name) && name !== 'media/..',
+  );
+  if (pictures.length < Object.keys(media).length) {
+    notes.push('Some pictures have names redlines does not write, and were left out.');
+  }
+  for (const [name] of pictures) {
+    if (
+      await io.realpath(folder + name).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      throw new EditError(`${folder + name} is there already; give another folder with -o.`);
+    }
+  }
+  for (const [name, picture] of pictures) {
+    await io.writeBytes?.(folder + name, picture).catch(cannot('write', folder + name));
+  }
+  await io.writeFile(target, markdown).catch(cannot('write', target));
+  for (const note of notes) io.stderr(`${note}\n`);
+  io.stdout(`${target}\n`);
+  return 0;
+}
+
 /** Runs a command and returns its exit code: 0 when it worked, 1 when the edit or the file was
  * refused (the message is on stderr), and 2 when the command line was wrong. */
 export async function run(argv: string[], io: CliIo): Promise<number> {
@@ -119,10 +232,22 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
   }
   try {
     if (name === undefined) throw new UsageError('Missing <command>');
+    if (name === 'export-docx') return await exportDocx(rest, io);
+    if (name === 'import-docx') return await importDocx(rest, io);
     const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined;
     if (command === undefined) throw new UsageError(`Unknown command: ${name}`);
     const { file, args, flags } = parseArguments(command, rest);
     const text = await readText(io, file);
+    if (isPlainOnly(file)) {
+      // Text and code hold no marks: `view` is the file as it is, and no command makes one.
+      if (name !== 'view') {
+        throw new EditError(
+          `${file} is not a Markdown document: text and code files hold no tracked changes or comments. Edit the file as text.`,
+        );
+      }
+      io.stdout(text);
+      return 0;
+    }
     await readTextOptions(io, command, flags);
     const outcome = command.run(text, { args, flags, now: io.now() });
     for (const note of outcome.notes ?? []) io.stderr(`${note}\n`);

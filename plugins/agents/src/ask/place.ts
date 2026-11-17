@@ -4,10 +4,9 @@
 // coordinates, so that it scrolls with the text.
 
 import type { EditorView } from '@codemirror/view';
+import { RAIL_GAP } from '@redlines/review';
 import { BUBBLE_WIDTH } from './styles.ts';
 
-/** The rail's gap from the text column, at the theme's own size (`RAIL_GAP` of the review plugin). */
-const GAP = 44;
 /** The least space to the window's edge. */
 const EDGE = 16;
 /** The space between the selection and a bubble under it. */
@@ -43,7 +42,7 @@ export function placeBubble(
   // The right edge of the text column: the content's padding on its right keeps the rail's room.
   const columnRight = content.right - (parseFloat(style.paddingRight) || 0);
   const width = BUBBLE_WIDTH * scale;
-  const beside = columnRight + GAP * scale;
+  const beside = columnRight + RAIL_GAP * scale;
   if (beside + width + EDGE <= scroller.right) {
     bubble.style.left = `${beside - originLeft}px`;
     bubble.style.top = `${box.top - originTop}px`;

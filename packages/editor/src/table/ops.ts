@@ -4,10 +4,18 @@
 // while a column is pending deleted), and the refusal is told to the person.
 
 import { isolateHistory } from '@codemirror/commands';
-import { ChangeSet, EditorSelection, type EditorState } from '@codemirror/state';
+import {
+  ChangeSet,
+  EditorSelection,
+  type EditorState,
+  Transaction,
+  type TransactionSpec,
+} from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   EditError,
+  askedTableEdit,
+  fineTableEdit,
   tableEdit,
   type TableOp,
   type TextChange,
@@ -20,6 +28,7 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from '../tracked/field.ts';
+import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
 import {
   contextFor,
   editSourceFacet,
@@ -28,8 +37,14 @@ import {
 } from '../tracked/typing.ts';
 import type { Align, Row, Table } from './model.ts';
 import { rectOf, rectSelection } from './cells.ts';
+import { missingCaret } from './missing.ts';
 import { shownCellAt } from './stops.ts';
 import { tablesField } from './model.ts';
+
+/** What `planned` gives: the changes, where the caret goes, and the rows or columns made. */
+export type Planned =
+  | { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[]; untracked?: true }
+  | { refusal: string };
 
 /** The format's changes for `op` on the state's text, as Track Changes says; or the refusal. */
 export function planned(
@@ -38,13 +53,36 @@ export function planned(
   group?: string,
   /** The text to work on, when it is not the state's (a paste that does several things in a row). */
   onText?: string,
-):
-  { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[] } | { refusal: string } {
-  const { state } = view;
+  /** The operation as the table's own rules write it, never as a replacement of the table: for a
+   * caller that works on where the operation put the cells (a paste that goes on to fill them). */
+  fine = false,
+  /** The operation as Track Changes off writes it, whatever the setting: what a question to the
+   * person answered Make Edit asks for. */
+  untracked = false,
+  /** Where no tracked write holds the operation, the plain one, marked `untracked`, for a caller that
+   * asks the person first. */
+  asked = false,
+): Planned {
+  return plannedIn(view.state, op, group, onText, fine, untracked, asked);
+}
+
+/** `planned` for a state, where there is no view (a transaction filter's). */
+export function plannedIn(
+  state: EditorState,
+  op: TableOp,
+  group?: string,
+  onText?: string,
+  fine = false,
+  untracked = false,
+  asked = false,
+): Planned {
   const text = onText ?? state.doc.toString();
   try {
-    if (state.field(trackingField))
-      return tableEdit(text, op, { ...contextFor(state), ...(group ? { group } : {}) });
+    if (state.field(trackingField) && !untracked)
+      return (fine ? fineTableEdit : asked ? askedTableEdit : tableEdit)(text, op, {
+        ...contextFor(state),
+        ...(group ? { group } : {}),
+      });
     const { random } = state.facet(editSourceFacet);
     const editing = state.facet(authorFacet);
     const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
@@ -71,6 +109,9 @@ export function coalesced(text: string, changes: readonly TextChange[]): TextCha
   return [{ from, to, insert: insert + text.slice(at, to) }];
 }
 
+/** The sheet's question for a table operation that no tracked write holds. */
+const UNTRACKED_OPERATION = "This change to the table can't be tracked. Make it without tracking?";
+
 /** Makes an operation's changes one step to undo, the caret where the operation says; or says why
  * it can't. */
 function perform(
@@ -83,12 +124,12 @@ function perform(
     changes: readonly TextChange[],
   ) => EditorSelection,
 ): boolean {
-  const done = planned(view, op);
+  const done = planned(view, op, undefined, undefined, false, false, true);
   if ('refusal' in done) {
     view.dispatch({ effects: refusedEditEffect.of(done.refusal) });
     return true;
   }
-  const tracked = view.state.field(trackingField);
+  const tracked = view.state.field(trackingField) && !done.untracked;
   // An operation on columns writes into every line of the table: as many changes as lines, which the
   // syntax tree would read again one by one. Written as one change over the lines they span, the table
   // is read again once.
@@ -98,11 +139,32 @@ function perform(
   const selection = select
     ? select({ state: next.state } as EditorView, done, changes)
     : EditorSelection.single(done.caret);
+  const annotations = [trackedEditAnnotation.of(true), isolateHistory.of('full')];
+  if (done.untracked) {
+    // No tracked write holds it: the person is asked, and the operation is made without tracking
+    // (design: widen, alert or disable, §3.1), never refused.
+    const asker = view.state.facet(untrackedAskFacet);
+    if (asker) {
+      view.dispatch({
+        effects: heldEditEffect.of({
+          reason: 'accept-pending',
+          words: { title: UNTRACKED_OPERATION },
+          doc: view.state.doc,
+          changes: ChangeSet.of(changes, view.state.doc.length),
+          selection,
+          annotations: [Transaction.userEvent.of(userEvent), ...annotations],
+          scrollIntoView: true,
+        }),
+      });
+      return true;
+    }
+    annotations.push(untrackedAnswerAnnotation.of(true));
+  }
   view.dispatch({
     changes,
     selection,
     userEvent,
-    annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+    annotations,
     // A tracked change made in Clean shows in Redlines, in the look chosen last, as typing's do.
     effects:
       tracked && view.state.field(viewModeField) === 'clean'
@@ -119,7 +181,7 @@ export function insertRowAfter(view: EditorView, table: Table, row: Row): boolea
 }
 
 /** The rows the selection touches: a rectangle's rows, or the caret's row. Null outside a table, and
- * in Raw. */
+ * in Plain. */
 export function touchedRows(
   state: EditorState,
 ): { table: Table; first: number; last: number; rectangle: boolean } | null {
@@ -168,8 +230,9 @@ function rowsSelected(
   const last = rows.at(-1);
   if (!read || first === undefined || last === undefined) return EditorSelection.single(fallback);
   if (rectangle) {
-    const end = Math.max(0, (read.rows[last]?.cells.length ?? 1) - 1);
-    const rect = rectSelection(read, { row: first, col: 0 }, { row: last, col: end });
+    // Whole rows: to the table's last column, whatever the last of them has (a row that lacks cells
+    // ends early, as Select Row does), not to the last row's own end.
+    const rect = rectSelection(read, { row: first, col: 0 }, { row: last, col: read.columns - 1 });
     if (rect) return rect;
   }
   const cell = read.rows[first]?.cells[0];
@@ -201,6 +264,37 @@ export function deleteRows(view: EditorView): boolean {
   return perform(view, { kind: 'deleteRows', table: touched.table.from, rows }, 'table.delete.row');
 }
 
+/**
+ * Deletes the table the selection is in, whole: a block deletion with Track Changes on, the text of
+ * the table taken out with it off. The caret goes to the start of the text that follows it, or to the
+ * end of the text before it when none does. The format refuses it where another person's pending
+ * change is in the table (rule 6), and the refusal is told.
+ */
+export function deleteTable(view: EditorView): boolean {
+  const touched = touchedRows(view.state);
+  if (!touched) return false;
+  return perform(view, { kind: 'deleteTable', table: touched.table.from }, 'table.delete.table');
+}
+
+/** Delete Table as a transaction spec of a state's own, for a filter or a key that has no view: the
+ * deletion with Track Changes' rules, or the refusal as a notice (#471). */
+export function deleteTableSpec(state: EditorState, table: number): TransactionSpec {
+  const done = plannedIn(state, { kind: 'deleteTable', table });
+  if ('refusal' in done) return { effects: refusedEditEffect.of(done.refusal) };
+  const changes = ChangeSet.of(coalesced(state.doc.toString(), done.changes), state.doc.length);
+  return {
+    changes,
+    selection: EditorSelection.cursor(done.caret),
+    userEvent: 'table.delete.table',
+    annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+    effects:
+      state.field(trackingField) && state.field(viewModeField) === 'clean'
+        ? [setViewModeEffect.of(state.facet(markupViewFacet))]
+        : [],
+    scrollIntoView: true,
+  };
+}
+
 /** Moves rows `first` to `last` of `table` to the boundary `to` (0 above the header, the number of
  * rows below the last), and keeps them selected as they were. A boundary that is where they are is
  * no move: it says so. */
@@ -225,6 +319,43 @@ export function moveRowsTo(
 /** Inserts `count` rows at the boundary `at` (0 above the header), the caret in the first. */
 export function insertRowsAt(view: EditorView, table: Table, at: number, count = 1): boolean {
   return perform(view, { kind: 'insertRows', table: table.from, after: at - 1, count });
+}
+
+/** Whether the rows the selection touches have a place to move to: false at the top (up) or the
+ * bottom (down) of the table, and outside one. */
+export function canMoveRows(state: EditorState, up: boolean): boolean {
+  const touched = touchedRows(state);
+  if (!touched) return false;
+  return up ? touched.first > 0 : touched.last < touched.table.rows.length - 1;
+}
+
+/** Whether the columns the selection touches have a place to move to: false at the left (left) or
+ * the right edge, and outside a table. */
+export function canMoveCols(state: EditorState, left: boolean): boolean {
+  const touched = touchedCols(state);
+  if (!touched) return false;
+  return left ? touched.first > 0 : touched.last < touched.table.columns - 1;
+}
+
+/** Why a command of the Table menu can't run with the caret outside a table (disabled, with this hint). */
+export const NOT_IN_TABLE = 'This command works in a table. Put the caret in one.';
+
+/** Why the rows the selection touches can't move up or down, or undefined when they can. */
+export function moveRowsReason(state: EditorState, up: boolean): string | undefined {
+  const touched = touchedRows(state);
+  if (!touched) return NOT_IN_TABLE;
+  const many = touched.last > touched.first;
+  if (canMoveRows(state, up)) return undefined;
+  const where = up ? 'top' : 'bottom';
+  return `${many ? 'These rows are' : 'This row is'} at the ${where} of the table already.`;
+}
+
+/** Why the rows the selection touches can't be deleted, or undefined when they can. */
+export function deleteRowsReason(state: EditorState): string | undefined {
+  const touched = touchedRows(state);
+  if (!touched) return NOT_IN_TABLE;
+  const everyRow = touched.first === 0 && touched.last === touched.table.rows.length - 1;
+  return everyRow ? 'A table keeps at least one row. Delete the table instead.' : undefined;
 }
 
 /** Moves the rows the selection touches one place up or down; they stay selected. At the top or the
@@ -256,7 +387,7 @@ export function insertRowBelow(view: EditorView): boolean {
 // Columns: the same operations, on the columns the selection touches.
 
 /** The columns the selection touches: a rectangle's, or the caret's column; and the row the caret is
- * in. Null outside a table, and in Raw. */
+ * in. Null outside a table, and in Plain. */
 export function touchedCols(state: EditorState): {
   table: Table;
   first: number;
@@ -273,6 +404,18 @@ export function touchedCols(state: EditorState): {
       last: rect.cols[1],
       rectangle: true,
       row: rect.head.row,
+    };
+  }
+  // A caret in a cell its row lacks is in the column it was put in.
+  const lacking = missingCaret(state);
+  if (lacking) {
+    const { col } = lacking.cell;
+    return {
+      table: lacking.table,
+      first: col,
+      last: col,
+      rectangle: false,
+      row: lacking.row.index,
     };
   }
   const found = shownCellAt(state, state.selection.main.head);
@@ -404,6 +547,36 @@ export function insertColsAt(view: EditorView, table: Table, at: number, count =
   );
 }
 
+/** Why the columns the selection touches can't move left or right, or undefined when they can. */
+export function moveColsReason(state: EditorState, left: boolean): string | undefined {
+  const touched = touchedCols(state);
+  if (!touched) return NOT_IN_TABLE;
+  if (canMoveCols(state, left)) return undefined;
+  const many = touched.last > touched.first;
+  const edge = left ? 'left' : 'right';
+  return `${many ? 'These columns are' : 'This column is'} at the ${edge} edge of the table already.`;
+}
+
+/** Why the columns the selection touches can't be deleted, or undefined when they can. */
+export function deleteColsReason(state: EditorState): string | undefined {
+  const touched = touchedCols(state);
+  if (!touched) return NOT_IN_TABLE;
+  const everyColumn = touched.first === 0 && touched.last === touched.table.columns - 1;
+  return everyColumn ? 'A table keeps at least one column. Delete the table instead.' : undefined;
+}
+
+/** Why the columns the selection touches can't be aligned `align`, or undefined when they can. */
+export function alignReason(state: EditorState, align: Align): string | undefined {
+  const touched = touchedCols(state);
+  if (!touched) return NOT_IN_TABLE;
+  for (let col = touched.first; col <= touched.last; col++) {
+    if (touched.table.aligns[col] !== align) return undefined;
+  }
+  return touched.last > touched.first
+    ? 'The columns are already aligned this way.'
+    : 'The column is already aligned this way.';
+}
+
 /** Moves the columns the selection touches one place left or right; they stay selected. At the edge
  * there is no place: it says so. */
 export function moveCols(view: EditorView, left: boolean): boolean {
@@ -436,27 +609,22 @@ export function moveCols(view: EditorView, left: boolean): boolean {
 export function caretAlign(state: EditorState): Align | null {
   const touched = touchedCols(state);
   if (!touched) return null;
-  const found = shownCellAt(state, state.selection.main.head);
-  const col = found?.cell.col ?? touched.first;
+  const found = missingCaret(state)?.cell ?? shownCellAt(state, state.selection.main.head)?.cell;
+  const col = found?.col ?? touched.first;
   return touched.table.aligns[col] ?? null;
 }
 
-export const ALIGN_NOT_READY =
-  "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
-
 /**
- * Aligns the columns the selection touches: the delimiter row as it says, with Track Changes off
- * (format §3.7); with it on, a refusal in words. The selection stays where it is.
+ * Aligns the columns the selection touches (format §3.7): the delimiter row as it says with Track
+ * Changes off; with it on, the format's tracked change, one mark at the end of the header's last
+ * cell that keeps the old row. Either way it is one step to undo. The selection stays where it is,
+ * and a caret at the end of the last header cell stays in front of the mark. A refusal is the
+ * format's, told in its words, with nothing written; columns that have the alignment already are
+ * no change and no refusal.
  */
 export function alignCols(view: EditorView, align: Align): boolean {
   const touched = touchedCols(view.state);
   if (!touched) return false;
-  // A tracked alignment change is not written yet: where its closer should stand is open (#281). A
-  // refusal in words, never a silent no-op; a pending one from another tool is still decided.
-  if (view.state.field(trackingField)) {
-    view.dispatch({ effects: refusedEditEffect.of(ALIGN_NOT_READY) });
-    return true;
-  }
   const cols = Array.from(
     { length: touched.last - touched.first + 1 },
     (_, i) => touched.first + i,
@@ -467,8 +635,9 @@ export function alignCols(view: EditorView, align: Align): boolean {
     view,
     { kind: 'align', table: touched.table.from, cols, align },
     'table.align.col',
-    // A mark written at the start of the table is in front of the caret that stood there.
+    // The default mapping: text written where a caret stands goes after it, so a caret at the end of
+    // the last header cell stays in front of the mark.
     (_after, _done, changes) =>
-      view.state.selection.map(ChangeSet.of([...changes], view.state.doc.length), 1),
+      view.state.selection.map(ChangeSet.of([...changes], view.state.doc.length)),
   );
 }

@@ -5,6 +5,9 @@ import {
   currentAppearance,
   DEFAULT_SETTINGS,
   authorFrom,
+  imageFolderNameOf,
+  imageFolderNameProblem,
+  keepWindowOwn,
   loadSettings,
   meetPeopleInSettings,
   reopenLastDocument,
@@ -46,11 +49,23 @@ function mockColorScheme(dark: boolean) {
 }
 
 describe('settings', () => {
+  it('keeps the sidebar width in range, and the default for what is not a width (#680)', () => {
+    const load = (width: unknown) => {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sidebarWidth: width }));
+      return loadSettings().sidebarWidth;
+    };
+    expect(load(333)).toBe(333);
+    expect(load(20)).toBe(180);
+    expect(load(5000)).toBe(480);
+    expect(load('wide')).toBe(240);
+  });
+
   it('settings default and persist', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       theme: 'default',
       appearance: 'system',
       sidebarOpen: false,
+      sidebarWidth: 240,
       showResolved: false,
       markupView: 'redlines',
       rotateIcon: true,
@@ -65,13 +80,20 @@ describe('settings', () => {
       smartPunctuation: true,
       closePairs: true,
       emojiSuggestions: true,
-      trackNewDocuments: false,
       showLineBreakMarks: false,
       showWordCount: true,
+      showPlainOnlyFiles: true,
+      toolbarAtBottom: false,
       agentScope: 'folder',
       consent: {},
+      agentHandles: {},
+      defaultAgent: null,
+      agentModels: {},
+      webAccess: false,
       people: [],
       newDocumentFolder: null,
+      imageFolderName: 'images',
+      shortcuts: {},
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -79,6 +101,7 @@ describe('settings', () => {
       theme: 'book',
       appearance: 'dark',
       sidebarOpen: true,
+      sidebarWidth: 320,
       showResolved: true,
       markupView: 'simple',
       rotateIcon: false,
@@ -93,16 +116,23 @@ describe('settings', () => {
       smartPunctuation: false,
       closePairs: false,
       emojiSuggestions: false,
-      trackNewDocuments: true,
       showLineBreakMarks: true,
       showWordCount: false,
+      showPlainOnlyFiles: false,
+      toolbarAtBottom: true,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
+      agentHandles: { claude: 'ada' },
+      defaultAgent: 'codex',
+      agentModels: { claude: 'opus' },
+      webAccess: true,
       people: [
         { handle: 'bo', color: 2 },
         { handle: 'claude-bo', color: 3 },
       ],
       newDocumentFolder: '/Users/ada/Notes',
+      imageFolderName: 'pictures',
+      shortcuts: { 'File/Save': 'Alt-Mod-s', 'command:format.bold': '' },
     } as const;
     saveSettings(changed);
     // With the theme for each appearance, as earlier builds read it.
@@ -341,6 +371,86 @@ describe('settings', () => {
     expect(updateSettings({ newDocumentFolder: null }).newDocumentFolder).toBeNull();
   });
 
+  it('puts images in a folder named images, also for settings saved before, which may name a place', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book"}');
+    expect(loadSettings().imageFolderName).toBe('images');
+    // A place saved before the project's one folder (#523) is let go; its name is kept.
+    localStorage.setItem(SETTINGS_KEY, '{"imagePlace":"assets","imageFolderName":"pics"}');
+    expect(loadSettings().imageFolderName).toBe('pics');
+    expect('imagePlace' in loadSettings()).toBe(false);
+  });
+
+  it('keeps the name of the folder for images only if a folder can have it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"imageFolderName":"Bilder 2026"}');
+    expect(loadSettings().imageFolderName).toBe('Bilder 2026');
+    // Inside the project the preview loads from: one name, no slash, and not a hidden one.
+    const refused = [
+      '',
+      ' ',
+      '.images',
+      '..',
+      'a/b',
+      '../images',
+      '/images',
+      'a\\b',
+      'a\u0007b',
+      'a\u0085b',
+    ];
+    for (const name of refused) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: name }));
+      expect(loadSettings().imageFolderName, JSON.stringify(name)).toBe('images');
+    }
+    for (const stored of ['7', 'null', '["images"]']) {
+      localStorage.setItem(SETTINGS_KEY, `{"imageFolderName":${stored}}`);
+      expect(loadSettings().imageFolderName).toBe('images');
+    }
+    // A name of any length a folder can't have is none, as is a name with a space at its ends.
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: 'x'.repeat(200) }));
+    expect(loadSettings().imageFolderName).toBe('images');
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ imageFolderName: '  pics  ' }));
+    expect(loadSettings().imageFolderName).toBe('pics');
+  });
+
+  it('says what is wrong with a name for the folder, as the folder’s own rules do', () => {
+    expect(imageFolderNameProblem('images')).toBeNull();
+    expect(imageFolderNameProblem(' Bilder 2026 ')).toBeNull();
+    expect(imageFolderNameProblem('')).toBe('A folder needs a name.');
+    expect(imageFolderNameProblem('   ')).toBe('A folder needs a name.');
+    expect(imageFolderNameProblem('x'.repeat(101))).toBe(
+      'A folder’s name can’t be longer than 100 characters.',
+    );
+    for (const typed of ['.images', 'a/b', '../x', 'a\\b', 'a:b']) {
+      expect(imageFolderNameProblem(typed), JSON.stringify(typed)).toBe(
+        'A folder’s name has no slash and doesn’t start with a dot.',
+      );
+    }
+    // A control character is not a slash, and the sentence doesn't say it is (#375).
+    for (const typed of ['a\u0007b', 'a\u0085b', 'a\u007fb']) {
+      expect(imageFolderNameProblem(typed), JSON.stringify(typed)).toBe(
+        'A folder’s name can’t have control characters in it.',
+      );
+    }
+    // The limit counts characters as the person does: a hundred emoji are a hundred characters.
+    expect(imageFolderNameProblem('😀'.repeat(100))).toBeNull();
+    expect(imageFolderNameProblem('😀'.repeat(101))).toBe(
+      'A folder’s name can’t be longer than 100 characters.',
+    );
+    // The same names the settings take.
+    for (const typed of [
+      'images',
+      ' Bilder 2026 ',
+      '',
+      '.images',
+      'a/b',
+      'a\u0085b',
+      'x'.repeat(101),
+    ]) {
+      expect(imageFolderNameOf(typed) === null, JSON.stringify(typed)).toBe(
+        imageFolderNameProblem(typed) !== null,
+      );
+    }
+  });
+
   it('keeps a zoom from the ladder, and 100% for anything else or nothing', () => {
     localStorage.setItem(SETTINGS_KEY, '{"zoom":1.25}');
     expect(loadSettings().zoom).toBe(1.25);
@@ -396,7 +506,7 @@ describe('settings', () => {
         smartPunctuation: 0,
         closePairs: null,
         emojiSuggestions: 'sure',
-        trackNewDocuments: 'no',
+        trackNewDocuments: true,
         showLineBreakMarks: 'yes',
         showWordCount: 'no',
         agentScope: 'machine',
@@ -515,7 +625,7 @@ describe('settings', () => {
     };
     const reopen = (lastDocument: string) =>
       reopenLastDocument({ ...DEFAULT_SETTINGS, onLaunch: 'reopen', lastDocument }, open);
-    for (const stale of ['/notes/logo.svg', '/notes/Makefile', '/notes/main.ts']) {
+    for (const stale of ['/notes/logo.docx', '/notes/Makefile', '/notes/main.zig']) {
       expect(await reopen(stale), stale).toBe(false);
     }
     // Not even read: nothing would be said.
@@ -585,5 +695,72 @@ describe('settings', () => {
     });
     const second = meetPeopleInSettings(['di'], first);
     expect(second.map((p) => p.handle)).toEqual(['bo', 'cy', 'di']);
+  });
+
+  it('keeps the handles of agents that are handles, and none that another agent has', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        agentHandles: { claude: 'ada', codex: 'ada', x: 'Bo!', y: 'two-words', z: 3 },
+      }),
+    );
+    expect(loadSettings().agentHandles).toEqual({ claude: 'ada', y: 'two-words' });
+    // The handle of an agent with none of its own is taken, and a default is no choice.
+    localStorage.setItem(SETTINGS_KEY, '{"agentHandles":{"claude":"codex","codex":"codex"}}');
+    expect(loadSettings().agentHandles).toEqual({});
+    localStorage.setItem(SETTINGS_KEY, '{"agentHandles":[1]}');
+    expect(loadSettings().agentHandles).toEqual({});
+  });
+
+  it('keeps the default agent as an id, and nothing else (#528)', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"defaultAgent":"codex"}');
+    expect(loadSettings().defaultAgent).toBe('codex');
+    for (const bad of ['""', '3', 'null', '{}']) {
+      localStorage.setItem(SETTINGS_KEY, `{"defaultAgent":${bad}}`);
+      expect(loadSettings().defaultAgent).toBeNull();
+    }
+  });
+
+  it('keeps the models chosen as text by agent, and drops the rest (#530)', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ agentModels: { claude: 'opus', codex: '', x: 3 } }),
+    );
+    expect(loadSettings().agentModels).toEqual({ claude: 'opus' });
+    localStorage.setItem(SETTINGS_KEY, '{"agentModels":[1]}');
+    expect(loadSettings().agentModels).toEqual({});
+  });
+
+  it('keeps web access only when it is true, and off otherwise (#529)', () => {
+    expect(loadSettings().webAccess).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, '{"webAccess":true}');
+    expect(loadSettings().webAccess).toBe(true);
+    for (const bad of ['"yes"', '1', 'null']) {
+      localStorage.setItem(SETTINGS_KEY, `{"webAccess":${bad}}`);
+      expect(loadSettings().webAccess).toBe(false);
+    }
+  });
+});
+
+describe('the Default text size (#557)', () => {
+  it('is what a new window opens at, and no window’s own text size changes it', () => {
+    updateSettings({ textSize: 1.25 });
+    let own = { ...loadSettings(), textSize: 2 };
+    own = keepWindowOwn(own, updateSettings({ spellCheck: false }));
+    expect(own.textSize).toBe(2);
+    expect(loadSettings().textSize).toBe(1.25);
+  });
+
+  it('changes no window that is open', () => {
+    const open = { ...loadSettings(), textSize: 1.5 };
+    const stored = updateSettings({ textSize: 3 });
+    expect(keepWindowOwn(open, stored).textSize).toBe(1.5);
+    expect(loadSettings().textSize).toBe(3);
+  });
+
+  it('is changed by Preferences, which keeps what it set', () => {
+    const open = { ...loadSettings(), textSize: 1 };
+    const stored = updateSettings({ textSize: 1.75 });
+    expect(keepWindowOwn(open, stored, { textSize: 1.75 }).textSize).toBe(1.75);
   });
 });

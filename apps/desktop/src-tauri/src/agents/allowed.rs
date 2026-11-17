@@ -282,7 +282,7 @@ fn claude_wide_settings(reach: &HomeReach) -> String {
 /// to them and the working folder), the folders' own skills and commands off, and the settings
 /// that deny what the scope leaves out.
 fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
-    let line = |isolation: &[&str], wide: Option<&HomeReach>| {
+    let line = |isolation: &[&str], wide: Option<&HomeReach>, model: Option<&str>| {
         let configs = known
             .sockets
             .iter()
@@ -298,27 +298,35 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
         });
         let skills = wide.map(|_| Part::Exact("--disable-slash-commands".to_owned()));
         // At the home folder scope the file tools are always there: it isn't This document.
+        // The web tools are always on the list, so that an agent can reach for one, and allowed
+        // only when the person allowed the web (`--allowedTools` below); `dontAsk` refuses them
+        // otherwise (#529).
         let tools = if wide.is_some() {
-            vec!["Read,Grep,Glob".to_owned()]
+            vec!["Read,Grep,Glob,WebSearch,WebFetch".to_owned()]
         } else {
-            vec!["Read,Grep,Glob".to_owned(), String::new()]
+            vec![
+                "Read,Grep,Glob,WebSearch,WebFetch".to_owned(),
+                "WebSearch,WebFetch".to_owned(),
+            ]
         };
+        let toolbox = "mcp__redlines__view,mcp__redlines__read_thread,mcp__redlines__str_replace,\
+                       mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status,\
+                       mcp__redlines__view_image";
+        let allowed = vec![toolbox.to_owned(), format!("{toolbox},WebSearch,WebFetch")];
         let settings = wide.map_or_else(
             || r#"{"disableAllHooks":true}"#.to_owned(),
             claude_wide_settings,
         );
         exact(&["-p", "--output-format", "stream-json", "--verbose"])
+            .chain(model_parts("--model", model))
             .chain(exact(isolation))
             .chain(granted)
             .chain(skills)
             .chain(exact(&["--permission-mode", "dontAsk", "--tools"]))
             .chain([Part::OneOf(tools)])
-            .chain(exact(&[
-                "--allowedTools",
-                "mcp__redlines__view,mcp__redlines__read_thread,mcp__redlines__str_replace,\
-                 mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status",
-                "--mcp-config",
-            ]))
+            .chain(exact(&["--allowedTools"]))
+            .chain([Part::OneOf(allowed)])
+            .chain(exact(&["--mcp-config"]))
             .chain([Part::OneOf(configs)])
             .chain(exact(&[
                 "--strict-mcp-config",
@@ -331,94 +339,119 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
             .chain([Part::Prompt])
             .collect()
     };
-    let mut lines = vec![
-        line(&["--restricted"], None),
-        line(&["--setting-sources", "user"], None),
-    ];
-    lines.extend(
-        known
-            .reach
-            .map(|reach| line(&["--restricted"], Some(reach))),
-    );
+    // A model the provider lists may come after `--verbose`, as `--model <id>`, on any of the lines.
+    let mut lines = Vec::new();
+    for model in models(&CLAUDE_MODELS) {
+        lines.push(line(&["--restricted"], None, model));
+        lines.push(line(&["--setting-sources", "user"], None, model));
+        lines.extend(
+            known
+                .reach
+                .map(|reach| line(&["--restricted"], Some(reach), model)),
+        );
+    }
     lines
+}
+
+/// The models of `claudeArgs` and `codexArgs` (`CLAUDE_MODELS`, `CODEX_MODELS`), which only a model
+/// the provider lists may be passed as: nothing else follows `--model` or `-m`.
+const CLAUDE_MODELS: [&str; 3] = ["opus", "sonnet", "haiku"];
+const CODEX_MODELS: [&str; 2] = ["gpt-5-codex", "gpt-5"];
+
+/// No model, then each of `listed`.
+fn models<'a>(listed: &'a [&'a str]) -> impl Iterator<Item = Option<&'a str>> {
+    std::iter::once(None).chain(listed.iter().copied().map(Some))
+}
+
+/// `flag` and `model` as two parts, or nothing without a model.
+fn model_parts(flag: &str, model: Option<&str>) -> impl Iterator<Item = Part> {
+    let flag = flag.to_owned();
+    model
+        .into_iter()
+        .flat_map(move |model| [Part::Exact(flag.clone()), Part::Exact(model.to_owned())])
 }
 
 /// `codexArgs` in `plugins/agent-codex`.
 fn codex_lines(known: &Known) -> Vec<Vec<Part>> {
-    let args = known
+    let args: Vec<String> = known
         .sockets
         .iter()
         .map(|socket| format!("mcp_servers.redlines.args={}", relay_args(socket)))
         .collect();
-    let line = exact(&["exec", "--json", "--strict-config", "-C"])
-        .chain([Part::Folder])
-        .chain(exact(&[
-            "--skip-git-repo-check",
-            "--ignore-user-config",
-            "--ignore-rules",
-            "-c",
-            r#"approval_policy="never""#,
-            "-c",
-            r#"default_permissions="redlines""#,
-            "-c",
-        ]))
-        .chain([Part::OneOf(
-            [
-                Some(codex_filesystem(known.program_folders, true, None)),
-                Some(codex_filesystem(known.program_folders, false, None)),
-                known
-                    .reach
-                    .map(|reach| codex_filesystem(known.program_folders, true, Some(reach))),
-            ]
-            .into_iter()
-            .flatten()
-            .collect(),
-        )])
-        .chain(exact(&[
-            "-c",
-            &format!(
-                "mcp_servers.redlines.command={}",
-                json_string(known.bundled)
-            ),
-            "-c",
-        ]))
-        .chain([Part::OneOf(args)])
-        .chain(exact(&[
-            "-c",
-            r#"mcp_servers.redlines.default_tools_approval_mode="approve""#,
-            "-c",
-        ]))
-        .chain([Part::Instructions])
-        .chain(exact(&[
-            "--disable",
-            "apps",
-            "--disable",
-            "plugins",
-            "--disable",
-            "image_generation",
-            "--disable",
-            "goals",
-            "--disable",
-            "skill_search",
-            "--disable",
-            "tool_suggest",
-            "--disable",
-            "computer_use",
-            "--disable",
-            "browser_use",
-            "--disable",
-            "in_app_browser",
-            "--disable",
-            "hooks",
-            "-c",
-            r#"web_search="disabled""#,
-            "-c",
-            r#"skills.include_instructions=false"#,
-            "--",
-        ]))
-        .chain([Part::Prompt])
-        .collect();
-    vec![line]
+    let line = |model: Option<&str>| {
+        exact(&["exec", "--json", "--strict-config", "-C"])
+            .chain([Part::Folder])
+            .chain(exact(&["--skip-git-repo-check"]))
+            .chain(model_parts("-m", model))
+            .chain(exact(&[
+                "--ignore-user-config",
+                "--ignore-rules",
+                "-c",
+                r#"approval_policy="never""#,
+                "-c",
+                r#"default_permissions="redlines""#,
+                "-c",
+            ]))
+            .chain([Part::OneOf(
+                [
+                    Some(codex_filesystem(known.program_folders, true, None)),
+                    Some(codex_filesystem(known.program_folders, false, None)),
+                    known
+                        .reach
+                        .map(|reach| codex_filesystem(known.program_folders, true, Some(reach))),
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
+            )])
+            .chain(exact(&[
+                "-c",
+                &format!(
+                    "mcp_servers.redlines.command={}",
+                    json_string(known.bundled)
+                ),
+                "-c",
+            ]))
+            .chain([Part::OneOf(args.clone())])
+            .chain(exact(&[
+                "-c",
+                r#"mcp_servers.redlines.default_tools_approval_mode="approve""#,
+                "-c",
+            ]))
+            .chain([Part::Instructions])
+            .chain(exact(&[
+                "--disable",
+                "apps",
+                "--disable",
+                "plugins",
+                "--disable",
+                "image_generation",
+                "--disable",
+                "goals",
+                "--disable",
+                "skill_search",
+                "--disable",
+                "tool_suggest",
+                "--disable",
+                "computer_use",
+                "--disable",
+                "browser_use",
+                "--disable",
+                "in_app_browser",
+                "--disable",
+                "hooks",
+                "-c",
+            ]))
+            // Codex's own search, off unless the person allowed the web (#529).
+            .chain([Part::OneOf(vec![
+                r#"web_search="disabled""#.to_owned(),
+                r#"web_search="live""#.to_owned(),
+            ])])
+            .chain(exact(&["-c", r#"skills.include_instructions=false"#, "--"]))
+            .chain([Part::Prompt])
+            .collect()
+    };
+    models(&CODEX_MODELS).map(line).collect()
 }
 
 /// How far a line matches, and what's wrong where it stops.
@@ -581,11 +614,50 @@ pub mod tests {
     #[test]
     fn every_provider_line_is_allowed() {
         with_known(|lines, known| {
-            assert_eq!(lines.lines.len(), 6);
+            assert_eq!(lines.lines.len(), 8);
             for (name, line) in &lines.lines {
                 assert_eq!(
                     check_run_line(agent_of(name), line, known),
                     Ok(()),
+                    "{name}"
+                );
+            }
+        });
+    }
+
+    /// A line with `flag` and `model` after the argument `after`.
+    fn with_model(line: &[String], after: &str, flag: &str, model: &str) -> Vec<String> {
+        let at = line.iter().position(|arg| arg == after).unwrap() + 1;
+        let mut changed = line.to_vec();
+        changed.splice(at..at, [flag.to_owned(), model.to_owned()]);
+        changed
+    }
+
+    #[test]
+    fn a_model_the_provider_lists_is_allowed_and_no_other() {
+        with_known(|lines, known| {
+            for (name, line) in &lines.lines {
+                let (after, flag) = if name.starts_with("claude") {
+                    ("--verbose", "--model")
+                } else {
+                    ("--skip-git-repo-check", "-m")
+                };
+                let models: &[&str] = if name.starts_with("claude") {
+                    &["opus", "sonnet", "haiku"]
+                } else {
+                    &["gpt-5-codex", "gpt-5"]
+                };
+                for model in models {
+                    let with = with_model(line, after, flag, model);
+                    assert_eq!(
+                        check_run_line(agent_of(name), &with, known),
+                        Ok(()),
+                        "{name} {model}"
+                    );
+                }
+                let other = with_model(line, after, flag, "--dangerously-bad-flag");
+                assert!(
+                    check_run_line(agent_of(name), &other, known).is_err(),
                     "{name}"
                 );
             }
@@ -843,17 +915,15 @@ pub mod tests {
     #[test]
     fn protective_flags_cant_be_left_out() {
         // These ran a folder's own `SessionStart` hook, and brought back the person's config.
-        assert!(
-            claude(&[
-                "-p",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--",
-                "hi"
-            ])
-            .is_err()
-        );
+        assert!(claude(&[
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--",
+            "hi"
+        ])
+        .is_err());
         assert!(codex(&["exec", "--skip-git-repo-check", "--", "hi"]).is_err());
         assert!(claude(&["-p"]).is_err());
         assert!(claude(&[]).is_err());

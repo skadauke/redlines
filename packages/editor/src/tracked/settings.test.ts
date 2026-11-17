@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-// The two settings of the ledger that the editor applies and writes (format §5.6): Track Changes,
-// which turning it on or off writes when the host asks for it, and the view a document opens in,
-// which the host has the editor record when it saves the file.
+// The two settings of the ledger that the editor applies and writes (format §5.6): Track Changes
+// and the view a document opens in, which the host has the editor record when it saves the file.
+// Switching either never edits the document.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { applyChanges, parse, setTracking as trackingInFile, setView } from '@redlines/format';
+import { applyChanges, parse, setView } from '@redlines/format';
 import { createEditor, type Editor, type EditorOptions, redoDepth, undoDepth } from '../index.ts';
 import { editSourceFacet } from './typing.ts';
 
@@ -78,10 +78,60 @@ describe('the view a document opens in (format §5.6)', () => {
     expect(clean.getUiState().hasRedlines).toBe(true);
     expect(load(reviewed('view: redlines')).getUiState().view).toBe('redlines');
     expect(load(reviewed('view: simple')).getUiState().view).toBe('simple');
-    // With nothing to show, as well: a file that only says how it was left.
-    const plain = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\ntracking: everyone\nview: redlines\n-->\n`;
-    expect(load(plain).getUiState().view).toBe('redlines');
-    expect(load(plain.replace('view: redlines', 'view: simple')).getUiState().view).toBe('simple');
+  });
+
+  it('is Clean for a file with no changes or comments, whatever its ledger says or was used last', () => {
+    // A plain file, a new document, and a file whose ledger only says how it was left.
+    for (const markupView of ['redlines', 'simple'] as const) {
+      expect(load(PLAIN, { markupView }).getUiState().view).toBe('clean');
+      expect(load('', { markupView }).getUiState().view).toBe('clean');
+      for (const view of ['clean', 'redlines', 'simple']) {
+        const left = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\ntracking: everyone\nview: ${view}\n-->\n`;
+        const editor = load(left, { markupView });
+        expect(editor.getUiState().view, `${view} ${markupView}`).toBe('clean');
+        expect(editor.getUiState().hasRedlines).toBe(false);
+      }
+    }
+  });
+
+  it('is Clean for a new document that another was open before, whatever view that was in', () => {
+    const editor = load(reviewed('view: simple'));
+    expect(editor.getUiState().view).toBe('simple');
+    editor.setDoc('');
+    expect(editor.getUiState().view).toBe('clean');
+    editor.setDoc(reviewed('view: redlines'));
+    editor.setViewMode('raw');
+    editor.setDoc(PLAIN);
+    expect(editor.getUiState().view).toBe('clean');
+  });
+
+  it('goes to the remembered look, not the ledger’s, when a file opened in Clean gains redlines', () => {
+    const left = `${PLAIN}\n<!-- redlines\n${NOTE}\nversion: 1\nview: simple\n-->\n`;
+    const editor = load(left, { markupView: 'redlines' });
+    expect(editor.getUiState().view).toBe('clean');
+    caretBefore(editor, 'paragraph');
+    editor.setTracking(true);
+    type(editor, 'new ');
+    expect(editor.getUiState().hasRedlines).toBe(true);
+    expect(editor.getUiState().view).toBe('redlines');
+  });
+
+  it('is the ledger’s for a file that has only a comment', () => {
+    const commented = reviewed('view: simple').replace(
+      'A <!--ins k3x9-->new <!--/k3x9-->word,',
+      'A new word,',
+    );
+    const editor = load(commented, { markupView: 'redlines' });
+    expect(editor.getUiState().hasRedlines).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
+  it('is the ledger’s, or the remembered look, for a file that has only a highlight', () => {
+    const highlighted = '# Notes\n\nA <!--hl h6bz-->word<!--/h6bz--> here.\n';
+    expect(load(highlighted, { markupView: 'simple' }).getUiState().hasRedlines).toBe(true);
+    expect(load(highlighted, { markupView: 'simple' }).getUiState().view).toBe('simple');
+    const left = `${highlighted}\n<!-- redlines\n${NOTE}\nversion: 1\nview: clean\n-->\n`;
+    expect(load(left, { markupView: 'simple' }).getUiState().view).toBe('clean');
   });
 
   it('wins over the markup view the app remembered, which opens the files that have none', () => {
@@ -109,7 +159,7 @@ describe('the view a document opens in (format §5.6)', () => {
     expect(editor.getUiState().view).toBe('clean');
   });
 
-  it('is not Raw, which a ledger can’t ask for', () => {
+  it('is not Plain, which a ledger can’t ask for', () => {
     const editor = load(reviewed('view: raw'));
     expect(editor.getUiState().view).toBe('redlines');
   });
@@ -122,232 +172,237 @@ describe('the view a document opens in (format §5.6)', () => {
   });
 });
 
-describe('Track Changes, written to the document (format §5.6)', () => {
-  it('is written when it is turned on, and taken out when it is turned off', () => {
-    const editor = load(PLAIN, { saveTracking: true });
-    expect(editor.setTracking(true)).toBe(true);
+describe('Track Changes, recorded when the file is saved (format §5.6)', () => {
+  it('writes nothing when it is turned on or off, and is no edit, so the document is not edited', () => {
+    const told: string[] = [];
+    const editor = load(PLAIN, { saveTracking: true, onChange: (text) => told.push(text) });
+    editor.setTracking(true);
     expect(editor.getUiState().tracking).toBe(true);
+    expect(editor.getDoc()).toBe(PLAIN);
+    editor.setTracking(false);
+    expect(editor.getUiState().tracking).toBe(false);
+    editor.setTracking(true);
+    // The host hears of no change to the file, so nothing is edited and quitting asks nothing.
+    expect(told).toEqual([]);
+    expect(editor.getDoc()).toBe(PLAIN);
+    expect(undoDepth(editor.view.state)).toBe(0);
+    expect(editor.getUiState().undo).toBeNull();
+  });
+
+  it('is no step of its own: Undo has nothing to take back', () => {
+    const editor = load(PLAIN, { saveTracking: true });
+    editor.setTracking(true);
+    expect(editor.getUiState().canUndo).toBe(false);
+    expect(editor.undo()).toBe(false);
+    expect(editor.getUiState().tracking).toBe(true);
+  });
+
+  it('is written in no plain file at a save until a change gives it a ledger', () => {
+    const editor = load(PLAIN, { saveTracking: true });
+    editor.setTracking(true);
+    editor.recordTracking();
+    editor.recordView();
+    expect(editor.getDoc()).toBe(PLAIN);
+    expect(undoDepth(editor.view.state)).toBe(0);
+  });
+
+  it('is written at a save after a first tracked change, with the ledger that change made', () => {
+    const editor = load(PLAIN, { saveTracking: true });
+    editor.setTracking(true);
+    caretBefore(editor, 'paragraph');
+    type(editor, 'new ');
+    // The change made a ledger; the setting waits for the save.
+    expect(editor.getParsed().ledger.tracking).toBeUndefined();
+    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['ins']);
+    editor.recordTracking();
     expect(editor.getParsed().ledger.tracking).toBe('everyone');
     expect(editor.getDoc()).toContain('\ntracking: everyone\n');
-    expect(editor.getDoc().startsWith(PLAIN.trimEnd())).toBe(true);
-    expect(editor.setTracking(false)).toBe(true);
-    expect(editor.getUiState().tracking).toBe(false);
-    // Nothing is left of it: the file is as it was.
-    expect(editor.getDoc()).toBe(PLAIN);
+    // Opened again, as the file says: Track Changes is on.
+    const again = load(editor.getDoc(), { saveTracking: true });
+    expect(again.getUiState().tracking).toBe(true);
   });
 
   it('is the one line in a file that has a ledger', () => {
     const editor = load(reviewed(), { saveTracking: true });
     editor.setTracking(true);
+    expect(editor.getDoc()).toBe(reviewed());
+    editor.recordTracking();
+    expect(editor.getDoc()).toBe(reviewed('tracking: everyone'));
+  });
+
+  it('is taken out at a save made after turning it off in a tracked file', () => {
+    const editor = load(reviewed('tracking: everyone'), { saveTracking: true });
+    expect(editor.getUiState().tracking).toBe(true);
+    editor.setTracking(false);
+    // Turning it off is no edit: the file still says it.
+    expect(editor.getDoc()).toBe(reviewed('tracking: everyone'));
+    // An edit, untracked now, is why the file is saved.
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    editor.recordTracking();
+    expect(editor.getParsed().ledger.tracking).toBeUndefined();
+    expect(editor.getDoc()).not.toContain('tracking:');
+    expect(editor.getParsed().marks.map((mark) => mark.id)).toEqual(['k3x9', 'c8d2']);
+    // Opened again, as the file says: Track Changes is off.
+    const again = load(editor.getDoc(), { saveTracking: true });
+    expect(again.getUiState().tracking).toBe(false);
+  });
+
+  it('leaves a file that asks for it alone when nobody switched it, whatever the window has', () => {
+    const editor = load(reviewed('tracking: everyone'), { saveTracking: true, tracking: false });
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    editor.recordTracking();
+    expect(editor.getParsed().ledger.tracking).toBe('everyone');
+  });
+
+  it('is recorded as it was chosen last', () => {
+    const editor = load(reviewed(), { saveTracking: true });
+    editor.setTracking(true);
+    editor.setTracking(false);
+    editor.setTracking(true);
+    editor.recordTracking();
     expect(editor.getDoc()).toBe(reviewed('tracking: everyone'));
     editor.setTracking(false);
+    editor.recordTracking();
     expect(editor.getDoc()).toBe(reviewed());
   });
 
-  it('tells the host the file changed, so that the document is edited, once for each switch', () => {
-    const told: string[] = [];
-    const editor = load(PLAIN, { saveTracking: true, onChange: (text) => told.push(text) });
+  it('is joined to the newest step, which Undo takes back with it', () => {
+    const editor = load(reviewed(), { saveTracking: true });
     editor.setTracking(true);
-    expect(told).toEqual([editor.getDoc()]);
-    editor.setTracking(true);
-    expect(told).toHaveLength(1);
-    editor.setTracking(false);
-    expect(told).toEqual([expect.stringContaining('tracking: everyone'), PLAIN]);
-  });
-
-  it('is a step of its own, which Undo and Redo take back and bring back with the setting', () => {
-    const editor = load(PLAIN, { saveTracking: true });
-    editor.setTracking(true);
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    const typed = editor.getDoc();
+    editor.recordTracking();
+    expect(editor.getDoc()).not.toBe(typed);
     expect(undoDepth(editor.view.state)).toBe(1);
-    expect(editor.getUiState().undo).toBe('Track Changes');
-    expect(editor.undo()).toBe(true);
-    // The file and Track Changes are as they were, together.
-    expect(editor.getUiState().tracking).toBe(false);
-    expect(editor.getDoc()).toBe(PLAIN);
-    expect(editor.getUiState().redo).toBe('Track Changes');
-    expect(editor.redo()).toBe(true);
-    expect(editor.getUiState().tracking).toBe(true);
-    expect(editor.getParsed().ledger.tracking).toBe('everyone');
-    editor.setTracking(false);
-    expect(undoDepth(editor.view.state)).toBe(2);
     editor.undo();
-    expect(editor.getUiState().tracking).toBe(true);
+    expect(editor.getDoc()).toBe(reviewed());
+    expect(redoDepth(editor.view.state)).toBe(1);
+    // With every step taken back, the next save records it again.
+    editor.redo();
+    editor.recordTracking();
     expect(editor.getParsed().ledger.tracking).toBe('everyone');
   });
 
-  it('is apart from the typing around it', () => {
-    const editor = load(PLAIN, { saveTracking: true });
-    caretBefore(editor, 'paragraph');
+  it('waits for the next save when every step is taken back, which a change would put out of step', () => {
+    const editor = load(reviewed(), { saveTracking: true });
     editor.setTracking(true);
-    type(editor, 'a');
-    editor.setTracking(false);
-    type(editor, 'b');
-    expect(undoDepth(editor.view.state)).toBe(4);
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    editor.undo();
+    expect(redoDepth(editor.view.state)).toBe(1);
+    editor.recordTracking();
+    expect(editor.getDoc()).toBe(reviewed());
+    expect(redoDepth(editor.view.state)).toBe(1);
   });
 
-  it('adds no step when the file refuses it', () => {
-    const editor = load('Text\n\n```js\nlet x;\n', { saveTracking: true, onNotice: () => {} });
+  it('can be turned off in Plain, where typing is read-only while it is on', () => {
+    const editor = load(reviewed('tracking: everyone'), { saveTracking: true });
+    editor.setViewMode('raw');
+    editor.setTracking(false);
+    expect(editor.getUiState().tracking).toBe(false);
     editor.setTracking(true);
-    expect(undoDepth(editor.view.state)).toBe(0);
+    expect(editor.getUiState().tracking).toBe(true);
   });
 
   it('is never made into a tracked change of its own', () => {
     const editor = load(reviewed('tracking: everyone'), { saveTracking: true, tracking: true });
     editor.setTracking(false);
+    editor.recordTracking();
     expect(editor.getDoc()).toBe(reviewed());
     expect(editor.getParsed().marks.map((mark) => mark.id)).toEqual(['k3x9', 'c8d2']);
   });
 
-  it('can be turned off in Raw, where typing is read-only while it is on', () => {
-    const editor = load(reviewed('tracking: everyone'), { saveTracking: true });
-    editor.setViewMode('raw');
-    expect(editor.setTracking(false)).toBe(true);
-    expect(editor.getUiState().tracking).toBe(false);
-    expect(editor.getDoc()).toBe(reviewed());
-    expect(editor.setTracking(true)).toBe(true);
-    expect(editor.getDoc()).toBe(reviewed('tracking: everyone'));
-  });
-
-  it('stays in the ledger as tracked changes are made, and a switch after them keeps them', () => {
-    const editor = load(PLAIN, { saveTracking: true });
-    editor.setTracking(true);
-    caretBefore(editor, 'paragraph');
-    type(editor, 'new ');
-    expect(editor.getParsed().ledger.tracking).toBe('everyone');
-    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['ins']);
-    editor.setTracking(false);
-    expect(editor.getParsed().ledger.tracking).toBeUndefined();
-    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['ins']);
-  });
-
-  it('takes back and brings back in the order they were made, the file and Track Changes together', () => {
-    const editor = load(PLAIN, { saveTracking: true });
-    const states: { text: string; tracking: boolean }[] = [];
-    const note = () =>
-      states.push({ text: editor.getDoc(), tracking: editor.getUiState().tracking });
-    note();
-    editor.setTracking(true);
-    note();
-    caretBefore(editor, 'paragraph');
-    type(editor, 'new ');
-    note();
-    editor.setTracking(false);
-    note();
-    // Back through each state, without a refusal: no step is put out of step by another.
-    for (const state of states.slice(0, -1).reverse()) {
-      expect(editor.undo()).toBe(true);
-      expect(editor.getDoc()).toBe(state.text);
-      expect(editor.getUiState().tracking).toBe(state.tracking);
-    }
-    expect(editor.undo()).toBe(false);
-    for (const state of states.slice(1)) {
-      expect(editor.redo()).toBe(true);
-      expect(editor.getDoc()).toBe(state.text);
-      expect(editor.getUiState().tracking).toBe(state.tracking);
-    }
-  });
-
-  it('is written with its blank line in a document with no text, and the file keeps it', () => {
-    for (const start of ['', '\n']) {
-      const label = JSON.stringify(start);
-      const editor = load(start, { saveTracking: true });
-      editor.setTracking(true);
-      // What a save writes: the ledger after its blank line, though the caret is on an empty line.
-      const saved = editor.getDoc();
-      expect(saved.startsWith('\n\n<!-- redlines'), label).toBe(true);
-      // Opened again from the file, the first text typed has its place, and nothing is refused.
-      const notices: string[] = [];
-      const again = load(saved, { saveTracking: true, onNotice: (m) => notices.push(m) });
-      expect(again.getUiState().tracking, label).toBe(true);
-      again.view.dispatch({ selection: { anchor: 0 }, userEvent: 'select' });
-      type(again, 'Hello');
-      expect(notices, label).toEqual([]);
-      expect(
-        again.getParsed().marks.map((mark) => mark.kind),
-        label,
-      ).toEqual(['ins']);
-      expect(again.getDoc().startsWith('<!--ins '), label).toBe(true);
-    }
-  });
-
-  it('leaves a gap between blank lines as it was, when the caret is in it', () => {
-    const text = 'One\n\n\n\nTwo\n';
-    const editor = load(text, { saveTracking: true });
-    editor.view.dispatch({ selection: { anchor: text.indexOf('Two') - 2 }, userEvent: 'select' });
-    editor.setTracking(true);
-    expect(editor.getDoc()).toBe(applyChanges(text, trackingInFile(text, true)));
-    editor.setTracking(false);
-    expect(editor.getDoc()).toBe(text);
-  });
-
-  it('lets the first text be typed in a document with none, as Track Changes is turned on in it', () => {
+  it('is written with the first text typed in a document with none, which gets its ledger with its blank line', () => {
     for (const start of ['', '\n']) {
       const label = JSON.stringify(start);
       const notices: string[] = [];
       const editor = load(start, { saveTracking: true, onNotice: (m) => notices.push(m) });
-      expect(editor.setTracking(true), label).toBe(true);
+      editor.setTracking(true);
+      expect(editor.getDoc(), label).toBe(start);
       editor.view.dispatch({ selection: { anchor: 0 }, userEvent: 'select' });
       type(editor, 'Hello');
       expect(notices, label).toEqual([]);
       expect(editor.getParsed().warnings, label).toEqual([]);
-      expect(editor.getParsed().ledger.tracking, label).toBe('everyone');
       expect(
         editor.getParsed().marks.map((mark) => mark.kind),
         label,
       ).toEqual(['ins']);
+      editor.recordTracking();
+      expect(editor.getParsed().ledger.tracking, label).toBe('everyone');
       expect(editor.getDoc().startsWith('<!--ins '), label).toBe(true);
     }
   });
 
-  it('is refused where the file can’t take a ledger, with the reason, and stays off', () => {
-    const notices: string[] = [];
-    const unclosed = 'Text\n\n```js\nlet x;\n';
-    const editor = load(unclosed, { saveTracking: true, onNotice: (m) => notices.push(m) });
-    expect(editor.setTracking(true)).toBe(false);
-    expect(editor.getUiState().tracking).toBe(false);
-    expect(editor.getDoc()).toBe(unclosed);
-    expect(notices).toEqual([
-      "The end of this file is inside a code block or a comment that is never closed, so Redlines can't add its ledger. Close it first.",
-    ]);
-    // Turning it off has nothing to take out, and nothing to refuse.
-    expect(editor.setTracking(false)).toBe(true);
-    expect(notices).toHaveLength(1);
+  it('is left alone, and never why a save fails, where the file can’t take a ledger', () => {
+    for (const text of [
+      'Text\n\n```js\nlet x;\n',
+      'Body.\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\n-->\n',
+    ]) {
+      const notices: string[] = [];
+      const editor = load(text, { saveTracking: true, onNotice: (m) => notices.push(m) });
+      editor.setTracking(true);
+      expect(editor.getUiState().tracking).toBe(true);
+      expect(() => editor.recordTracking()).not.toThrow();
+      expect(editor.getDoc()).toBe(text);
+      expect(notices).toEqual([]);
+    }
   });
 
-  it('is refused where the ledger can’t be read', () => {
-    const notices: string[] = [];
-    const broken = 'Body.\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\n-->\n';
-    const editor = load(broken, { saveTracking: true, onNotice: (m) => notices.push(m) });
-    expect(editor.setTracking(true)).toBe(false);
-    expect(editor.getDoc()).toBe(broken);
-    expect(notices).toEqual([
-      "The ledger at the end of this file can't be read, so Redlines won't change it. Fix or remove it first.",
-    ]);
-  });
-
-  it('can be kept to the editor when the caller says so, as a preference for new documents is', () => {
+  it('is never recorded when the caller says it is the person’s own preference, as for new documents', () => {
     const editor = load(PLAIN, { saveTracking: true });
-    expect(editor.setTracking(true, { inFile: false })).toBe(true);
+    editor.setTracking(true, { inFile: false });
     expect(editor.getUiState().tracking).toBe(true);
     expect(editor.getDoc()).toBe(PLAIN);
-    expect(undoDepth(editor.view.state)).toBe(0);
-    // Typing then writes a ledger as it always did, and the file says nothing of Track Changes.
     editor.view.dispatch({
       selection: { anchor: PLAIN.indexOf('paragraph') },
       userEvent: 'select',
     });
     type(editor, 'new ');
+    editor.recordTracking();
     expect(editor.getParsed().ledger.tracking).toBeUndefined();
     expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['ins']);
   });
 
-  it('only changes the editor’s state, as before, when the host does not ask for the file', () => {
-    const editor = load(PLAIN);
-    expect(editor.setTracking(true)).toBe(true);
+  it('is never recorded when the host does not ask for the file', () => {
+    const editor = load(reviewed());
+    editor.setTracking(true);
     expect(editor.getUiState().tracking).toBe(true);
-    expect(editor.getDoc()).toBe(PLAIN);
-    expect(editor.setTracking(false)).toBe(true);
-    expect(editor.getDoc()).toBe(PLAIN);
+    editor.recordTracking();
+    expect(editor.getDoc()).toBe(reviewed());
+  });
+
+  it('forgets a choice when another file is loaded, which says what it says', () => {
+    const editor = load(reviewed(), { saveTracking: true });
+    editor.setTracking(true);
+    editor.setDoc(reviewed());
+    editor.recordTracking();
+    expect(editor.getDoc()).toBe(reviewed());
+  });
+
+  it('keeps a choice when the file is reloaded without asking for it, for the next save', () => {
+    const editor = load(reviewed(), { saveTracking: true });
+    editor.setTracking(true);
+    editor.reloadDoc(reviewed('history: full'));
+    expect(editor.getUiState().tracking).toBe(true);
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    editor.recordTracking();
+    expect(editor.getParsed().ledger.tracking).toBe('everyone');
+  });
+
+  it('gives up a choice that a reloaded file answers by asking for Track Changes itself', () => {
+    const editor = load(reviewed(), { saveTracking: true });
+    editor.setTracking(false);
+    editor.reloadDoc(reviewed('tracking: everyone', 'history: full'));
+    // The file newly asks, so the window follows it, and nothing is left to record.
+    expect(editor.getUiState().tracking).toBe(true);
+    caretBefore(editor, 'word');
+    type(editor, 'x');
+    editor.recordTracking();
+    expect(editor.getParsed().ledger.tracking).toBe('everyone');
   });
 
   it('is on when the file says so, whoever turned it on', () => {
@@ -373,7 +428,7 @@ describe('recording the view in the document (format §5.6)', () => {
     expect(editor.getDoc()).toBe(reviewed('view: redlines'));
   });
 
-  it('leaves the view the file had when the document is in Raw', () => {
+  it('leaves the view the file had when the document is in Plain', () => {
     for (const had of ['view: clean', 'view: redlines', 'view: simple']) {
       const editor = load(reviewed(had));
       editor.setViewMode('raw');
@@ -454,18 +509,20 @@ describe('recording the view in the document (format §5.6)', () => {
   });
 
   it('joins the newest step when steps can be redone, which it drops', () => {
-    const editor = load(reviewed(), { saveTracking: true });
-    editor.setTracking(true);
+    const editor = load(reviewed());
     caretBefore(editor, 'word');
     type(editor, 'x');
+    editor.recordView();
+    type(editor, 'y');
     editor.undo();
+    expect(undoDepth(editor.view.state)).toBe(1);
     expect(redoDepth(editor.view.state)).toBe(1);
     editor.setViewMode('clean');
     editor.recordView();
     expect(parse(editor.getDoc()).ledger.view).toBe('clean');
     expect(redoDepth(editor.view.state)).toBe(0);
     expect(undoDepth(editor.view.state)).toBe(1);
-    // The step is the switch's, with the view: taken back, the file is as it was.
+    // The step is the typing's, with the view: taken back, the file is as it was.
     editor.undo();
     expect(editor.getDoc()).toBe(reviewed());
   });

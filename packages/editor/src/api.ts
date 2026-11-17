@@ -1,28 +1,39 @@
 // The editor's public interface. Hosts (the desktop app, the React component, VS Code) and
 // plugins such as @redlines/review use only what is here.
 
+import type { UntrackedAsker } from './tracked/ask.ts';
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { Handle, MarkRange, Parsed, Range } from '@redlines/format';
+import type { Handle, MarkRange, Parsed, Range, Twin, TwinKind } from '@redlines/format';
 
 /**
- * How the document is shown (design §5.3): Clean, Redlines or Raw, and Redlines in one of its two
+ * How the document is shown (design §5.3): Clean, Redlines or Plain, and Redlines in one of its two
  * looks, the full markup (`'redlines'`) or the simple look (`'simple'`: deletions hidden,
- * insertions plain, change bars and comments kept). Simple is no view of its own: a click on a
- * change bar switches the two looks, and nothing else does, so a View menu lists three views
- * (`MenuView`).
+ * insertions in their author's color without the underline, change bars and comments kept). Simple is no view of its own: a click on a
+ * change bar, or `Editor.switchLook`, switches the two looks, so a View menu lists three views
+ * (`MenuView`) and a switch for the look.
  */
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
 /**
- * The views a View menu lists (design §5.3): Clean, Redlines and Raw. Redlines is the view in
+ * What a file is, from its extension (the host decides): Markdown has three views, Track Changes
+ * and a ledger; a Plain-only file (text or code) is text in Plain and nothing else: no marks are
+ * read or written, and the commands that make them are disabled with their reason.
+ */
+export type DocumentKind = 'markdown' | 'plain-only';
+
+/** The dialect of a Markdown file (format §9.1): GitHub's, or pandoc's in `.qmd` and `.Rmd`. */
+export type MarkdownDialect = 'gfm' | 'pandoc';
+
+/**
+ * The views a View menu lists (design §5.3): Clean, Redlines and Plain. Redlines is the view in
  * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
  */
 export type MenuView = 'clean' | 'redlines' | 'raw';
 
 /**
- * The look of Redlines that a click on a change bar chose last, the full markup (`'redlines'`) or
+ * The look of Redlines that a click on a change bar or `switchLook` chose last, the full markup (`'redlines'`) or
  * the simple look (`'simple'`). It is the look the editor shows where it picks Redlines for you.
  */
 export type MarkupView = 'simple' | 'redlines';
@@ -38,8 +49,10 @@ export interface Author {
 
 /** What the host's controls need to show. */
 export interface EditorUiState {
+  /** What the document is: a Plain-only document has no other view and no Track Changes. */
+  kind: DocumentKind;
   view: ViewMode;
-  /** The look of Redlines chosen last, with a click on a change bar, which an automatic switch shows. */
+  /** The look of Redlines chosen last, with a click on a change bar or `switchLook`, which an automatic switch shows. */
   markupView: MarkupView;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
@@ -57,10 +70,20 @@ export interface EditorUiState {
   /** The ids of the registered commands that say they are active here, in registered order. */
   activeCommands: readonly string[];
   /**
-   * The ids of the registered commands that can run here, in registered order: those that say so,
-   * and those with no `isEnabled`.
+   * The ids of the registered commands that can run here, in registered order: those with no
+   * `disabledReason` and those whose `disabledReason` says nothing here.
    */
   enabledCommands: readonly string[];
+  /**
+   * Why each registered command that can't run here can't, by id, in the words of the interface:
+   * what the thing is, then what to do ("The first item of a list can't be indented: there is no
+   * item to put it under."). A menu or toolbar draws the command grayed and shows this as its hover
+   * hint; a key with no menu item shows it as a notice. A command that can run is not in it, and
+   * every command that can't is: `enabledCommands` is every registered command that is not here. The
+   * Edit menu's Undo and Redo are not commands: their hints are under `edit.undo` and `edit.redo`,
+   * when there is more to say than "nothing to undo" (the file changed on disk).
+   */
+  disabledReasons: Readonly<Record<string, string>>;
   /**
    * The current title of each registered command whose title reads the state, by id: `Delete 2
    * Rows`. A command with a plain title is not in it.
@@ -72,6 +95,11 @@ export interface EditorUiState {
   redo: string | null;
   /** Whether there is a step to undo: the Edit menu's Undo is enabled only then. */
   canUndo: boolean;
+  /**
+   * Whether Accept All Changes and Stop Tracking has something to accept: a pending change in the
+   * selection, or with only a caret, in the document.
+   */
+  canAcceptAll: boolean;
   /** Whether there is a step to redo. */
   canRedo: boolean;
 }
@@ -89,10 +117,15 @@ export interface EditorCommand {
    * draws items from the registry follows it.
    */
   title: string | ((state: EditorState) => string);
-  /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
+  /**
+   * CodeMirror notation, such as 'Mod-b'. The core binds it. In the registry's list it is the key
+   * the command has now, which the person may have changed (`CommandKeys`).
+   */
   shortcut?: string;
+  /** Only in the registry's list, and only on a command whose key was changed: the key it came with, or "" for none. */
+  defaultShortcut?: string;
   /** Where a host with menus shows it. */
-  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'table' | 'view';
+  menu?: 'file' | 'edit' | 'insert' | 'format' | 'paragraph' | 'table' | 'view' | 'review';
   /** Items with different groups get a separator between them. */
   group?: string;
   /**
@@ -103,14 +136,45 @@ export interface EditorCommand {
   /**
    * Whether its key goes on to the core's binding when the command is disabled or did nothing, as
    * ⌘↩ does outside a table, where it is Return at the end of a block. Default: false, a key
-   * belongs to its command.
+   * belongs to its command. A function decides by the state: a table's ⌥↑ at the first row is
+   * disabled and still the table's, and outside a table it is the core's.
    */
-  keyFallsThrough?: boolean;
+  keyFallsThrough?: boolean | ((state: EditorState) => boolean);
+  /**
+   * The kinds of HTML block whose structure it changes (a heading's level, a list item's depth, a
+   * table's rows and columns). In HTML of one of these kinds that has an exact Markdown twin
+   * (#690), the command first converts the block to its twin, as one change, and then runs; in
+   * HTML of one that has none it is disabled, with the reason in its hint, and its own
+   * `disabledReason` is not asked.
+   */
+  structure?: readonly TwinKind[];
+  /**
+   * With Track Changes on, a pending conversion can't be acted on until it is decided (a block
+   * change can't start at a pending change). A command that can say what it would make of the
+   * twin gives it here, and the conversion is written as that, in one substitution; the command
+   * does not run. Null: the conversion is written as it is and the command runs after it.
+   */
+  twinAs?(twin: Twin): string | null;
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */
   isActive?(state: EditorState): boolean;
-  isEnabled?(state: EditorState): boolean;
+  /**
+   * Why the command can't run in `state`, as one sentence for people (what the thing is, then what
+   * to do), or undefined when it can. A disabled command is never run: its menu item and toolbar
+   * button are grayed with this as the hint, and its key says it as a notice. There is no
+   * `isEnabled`: a command that can't run always has a reason, so that a grayed command is never
+   * silent (hardening.md: a key that does nothing and says nothing is a bug).
+   */
+  disabledReason?(state: EditorState): string | undefined;
+}
+
+/** The person's own keys for the registry's commands. */
+export interface CommandKeys {
+  /** The key the command has now in CodeMirror's notation, or undefined for none; `fallback` is its own. */
+  keyOf(id: string, fallback: string | undefined): string | undefined;
+  /** Calls `listener` when a key changes. Returns a function that stops it. */
+  subscribe(listener: () => void): () => void;
 }
 
 export interface CommandRegistry {
@@ -140,9 +204,37 @@ export interface MetPerson {
   color: number;
 }
 
+/**
+ * Where the links of images being added will be written, held while the host saves the images
+ * (`EditorOptions.onImageFiles`, `Editor.imageSpot`). The spot follows the text around it, so what
+ * is written in the document meanwhile moves nothing.
+ */
+export interface ImageSpot {
+  /**
+   * Writes a link to each path, `![](path)` with the path as a link destination needs it written,
+   * at the spot: one after another, a space apart, and nothing else. They take the place of the text
+   * the selection held when a paste took the spot, but only while it is all still there: text
+   * written in it meanwhile stays, and the links go after it; text written at its edges stays
+   * outside. For a spot that held no text, the links go before what was written at it meanwhile. It
+   * is the person's own insertion, tracked while Track Changes is on, and one step for Undo, which
+   * the Edit menu calls Insert Image. The caret goes to the end of the links if it is still at the
+   * spot, and stays where the person put it otherwise; the preview draws the image all the same.
+   * Paths are as the document should reach the files, relative to it (`images/shot.png`). A spot is
+   * used once. Returns whether the links went in: when the document refuses them, or was replaced
+   * since, so that the spot is gone, the reason is said through `onNotice`.
+   */
+  insert(paths: readonly string[]): boolean;
+  /** Lets the spot go, when no image will be added. A spot that was used is let go already. */
+  release(): void;
+}
+
 export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
+  /** What the file is; default 'markdown'. `setDoc` takes the next file's. */
+  kind?: DocumentKind;
+  /** The Markdown dialect of the file, which decides how an image's size is written; default 'gfm'. */
+  dialect?: MarkdownDialect;
   author: Author;
   /**
    * Default: the view the ledger says (`view`, format §5.6), else the markup view when the
@@ -163,9 +255,10 @@ export interface EditorOptions {
    */
   tracking?: boolean;
   /**
-   * Whether turning Track Changes on or off is written to the document, as `tracking: everyone` in
-   * its ledger (format §5.6), so that the file remembers it, and is edited like by any change.
-   * Default: false, and `setTracking` changes only this editor's state, for a host with no file.
+   * Whether Track Changes, as the person switches it, is the document's to record, as `tracking:
+   * everyone` in its ledger when the host saves the file (`recordTracking`, format §5.6), so that
+   * the file remembers it. Default: false, and `setTracking` changes only this editor's state, for a
+   * host with no file.
    */
   saveTracking?: boolean;
   /**
@@ -179,7 +272,7 @@ export interface EditorOptions {
    * its own. `before` is the text of the block up to the word, for its language. The answer is the
    * corrected word, or null; it is made, as WebKit's corrections are, only if the word is still
    * exactly where it was. Asked only while `typing.spellCheck` is on, of a word in prose, and
-   * never in Raw. Default: none, and nothing is asked.
+   * never in Plain. Default: none, and nothing is asked.
    */
   correctWord?: (word: string, before: string) => Promise<string | null>;
   /**
@@ -211,6 +304,67 @@ export interface EditorOptions {
    */
   resolveImage?: (src: string) => string | null;
   /**
+   * The bytes of a local image's file (base64 and its MIME type), given the path as `resolveImage`
+   * is, or null when it can't be read. A copy embeds the images of the selection with them, since
+   * Word and Google Docs fail to load an address of the app's own. Default: none.
+   */
+  imageData?: (src: string) => Promise<{ mimeType: string; data: string } | null>;
+  /**
+   * The size in px of a local image's file, given the path as `resolveImage` is: read from the
+   * file's header, so that the page holds the image's room before it loads and doesn't move when
+   * it arrives. May answer later (a promise); null for a size not known. Default: none.
+   */
+  imageSize?: (src: string) =>
+    | { width: number; height: number }
+    | null
+    | Promise<{
+        width: number;
+        height: number;
+      } | null>;
+  /**
+   * Opens the file of a local image in another app, for a double-click on the image, and for the
+   * `image.edit` command (Edit Image in Preview): given the image's path as the document writes it,
+   * decoded and relative to the document (`img/a b.png`). The host knows where the document is and
+   * what may be opened. A remote image is never given: it has no file, and a double-click on it
+   * does nothing. Default: none, and a double-click does what it does anywhere in the text, and
+   * the command isn't registered.
+   */
+  openImage?: (src: string) => void;
+  /**
+   * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
+   * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
+   * to keep, as fractions of its width and height. Writes the copy beside the original, in the
+   * project's folder for images, never replacing a file, and answers with the copy's path as the
+   * document links it, or rejects with a sentence for the person. The editor points the image at the
+   * copy (one change, tracked with Track Changes on) and keeps its width and alignment. Default:
+   * none, and the command isn't registered.
+   */
+  cropImage?: (
+    src: string,
+    crop: { x: number; y: number; width: number; height: number },
+  ) => Promise<string>;
+  /**
+   * Called when image files are pasted into the document, or dropped on it, with the files and the
+   * spot their links will go to (`ImageSpot`). The host saves each file where the document can
+   * reach it, then writes the links with `spot.insert`, or lets the spot go. `pasted` tells
+   * clipboard data, which has no name of its own worth keeping, from files dropped. Only image
+   * files count, and a clipboard with HTML on it, such as an image copied in a browser, is left to
+   * the HTML (design §5.10), whose images keep their addresses. The editor says why it takes no
+   * image where it can't (Plain while Track Changes is on, code) through `onNotice`, and the host is
+   * not called. Default: none, and the browser does what it does with such a paste or a drop.
+   */
+  onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
+  /**
+   * Called when an image file of the project is dragged into the document from the sidebar
+   * (`PROJECT_IMAGE_TYPE` in the drag's data, holding the file's path), with that path. Returns the
+   * path to write for it, relative to the document as `ImageSpot.insert` takes it, or null when it
+   * can't be linked (the editor then writes nothing). The file is not copied: it is the project's
+   * own. While the drag is over the document a line shows the gap between blocks it will land at,
+   * and the link is written there as a block of its own. Default: none, and such a drag is left
+   * alone.
+   */
+  projectImageLink?: (dragged: string) => string | null;
+  /**
    * The people this machine has met, in the order of meeting, each with their author color
    * (design §5.5): a person keeps their color in every document. Default: none, and colors come
    * from handles alone, so the same people look the same in a document wherever it is opened.
@@ -230,10 +384,21 @@ export interface EditorOptions {
   onUiState?: (state: EditorUiState) => void;
   /**
    * Called with a short message, written for people, when the editor refuses an edit, such as a
-   * tracked change inside code, where its markers would not be read, typing in Raw while Track
+   * tracked change inside code, where its markers would not be read, typing in Plain while Track
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+  /** The person's own keys for the commands (`CommandKeys`); the commands' own until given. */
+  commandKeys?: CommandKeys;
+  /** Called with an error that CodeMirror caught in an extension, which it logs otherwise. */
+  onError?: (error: unknown) => void;
+  /**
+   * The alert of an edit that no mark can hold: an edit in the YAML front matter, and typing in Raw,
+   * with Track Changes on. The host shows a sheet that offers to make the edit without tracking
+   * (`ask`, answered `make` or `cancel`) and keeps "Don't ask again" (`skip`). The edit waits for the
+   * answer. Without it those edits are refused through `onNotice`.
+   */
+  askUntracked?: UntrackedAsker;
   /**
    * Called when Undo or Redo, by key or through `undo()` and `redo()`, finds nothing to take and
    * nothing to say: the host beeps, as the Mac does. The key is taken all the same, so that it
@@ -257,9 +422,9 @@ export interface AgentStep {
 export interface EditorTyping {
   /** The browser's spell check underlines. */
   spellCheck: boolean;
-  /** Curly quotes, and an em dash for two hyphens, except in code and in Raw. */
+  /** Curly quotes, and an em dash for two hyphens, except in code and in Plain. */
   smartPunctuation: boolean;
-  /** Closing brackets and backticks as you type them, except in code and in Raw. */
+  /** Closing brackets and backticks as you type them, except in code and in Plain. */
   closePairs: boolean;
 }
 
@@ -279,11 +444,16 @@ export interface Editor {
   /**
    * Replaces the whole document and clears the undo history, as when a file is opened. The
    * file's line ending is taken from the new string, and the view and Track Changes start over
-   * from their defaults: the view the ledger says (`view: clean`, `view: redlines` or
-   * `view: simple`, format §5.6), or else the markup view when the document has redlines and Clean
-   * when it has none, and tracking on when the file asks for it (`tracking: everyone`).
+   * from their defaults: Clean when the document has no redlines, whatever its ledger says; otherwise
+   * the view the ledger says (`view: clean`, `view: redlines` or `view: simple`, format §5.6), or
+   * else the markup view; and tracking on when the file asks for it (`tracking: everyone`).
    */
-  setDoc(doc: string): void;
+  setDoc(doc: string, kind?: DocumentKind, dialect?: MarkdownDialect): void;
+  /**
+   * Changes what the open document is, when its file's name changes (a rename, Save As): the
+   * document is read again as that kind, and its text stays as it is.
+   */
+  setKind(kind: DocumentKind, dialect?: MarkdownDialect): void;
   /**
    * Brings in a new version of the same file, such as one an agent changed on disk. Only the
    * lines that differ are replaced, each trimmed to the characters that differ, so the selection
@@ -294,7 +464,9 @@ export interface Editor {
    * is annotated `Transaction.remote` and the user event `reload`. The file's line ending is taken
    * from the new string. It is for changes on disk; an agent's edit is `applyAgentEdit`. The view
    * stays, even when the document loses its last redline, except that a document that gains
-   * redlines while shown Clean switches to Redlines.
+   * redlines while shown Clean switches to Redlines. Track Changes stays too, except that a file
+   * that newly asks everyone to track (`tracking: everyone`, format §5.6) turns it on, as opening
+   * such a file does, which writes nothing; a file that stops asking leaves it as it is.
    */
   reloadDoc(doc: string): void;
   /**
@@ -318,13 +490,22 @@ export interface Editor {
    */
   setViewMode(mode: ViewMode): void;
   /**
-   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Raw. Redlines is
-   * shown in the look that was shown last: the one a click on a change bar chose
+   * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Plain. Redlines is
+   * shown in the look that was shown last: the one a click on a change bar or `switchLook` chose
    * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
-   * chooses no look, and when Redlines is shown already, in either look, it does nothing: only a
-   * click on a change bar chooses a look.
+   * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
+   * on a change bar, or `switchLook`, chooses a look.
    */
   showView(view: MenuView): void;
+  /**
+   * Turns Redlines' simple look on or off, as a click on a change bar does and with the same
+   * effect: the full markup goes to the simple look and the simple look to the full markup, the
+   * look becomes the one chosen last (`EditorUiState.markupView`), and the line the person is
+   * looking at (the one with the caret when it is on the screen, else the first on it) stays where
+   * it was. It does nothing in Clean and Plain, which have no look. A host's View menu has it as a
+   * switch (design §5.3), so that the looks need no pointer.
+   */
+  switchLook(): void;
   /**
    * Changes the look of Redlines that an automatic switch shows, such as when the person chose
    * another in another window. It never changes the view that is shown: only a choice made here
@@ -334,28 +515,36 @@ export interface Editor {
   /**
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
    * drop becomes tracked changes by `author`, with the markers and ledger entries the format
-   * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Raw is
+   * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Plain is
    * read-only, where an edit says why through `onNotice`. While it is off, an edit is an edit of
    * the text itself (format §3.10): what you type joins no pending change, and what you delete is
    * gone, with the marks that have no text left; an edit with no legal form says why through
-   * `onNotice`. On or off, outside Raw, Backspace and Delete never delete a marker.
+   * `onNotice`. On or off, outside Plain, Backspace and Delete never delete a marker.
    *
-   * With `saveTracking`, the switch is written to the document (format §5.6): the ledger gains or
-   * loses `tracking: everyone`, in a step of its own that Undo takes back with Track Changes
-   * itself, and `onChange` hears of it. A file that can't take a ledger refuses it, says why
-   * through `onNotice`, and stays as it was.
+   * The switch changes the editor's state and nothing else: it makes no edit, so it never makes the
+   * document edited and has no step to undo, and it writes nothing to the file (format §5.6). With
+   * `saveTracking`, the host records it in the ledger as `tracking: everyone` when it saves the
+   * file for another reason (`recordTracking`).
    *
-   * `options.inFile` says whether this switch is written to the document: by default as the
+   * `options.inFile` says whether this switch is the document's to record: by default as the
    * `saveTracking` option says, and `false` keeps it to this editor, for a Track Changes that is a
    * person's own preference and not the file's (new documents that start tracked).
-   *
-   * @returns false when the file refused, and Track Changes is as it was.
    */
-  setTracking(on: boolean, options?: { inFile?: boolean }): boolean;
+  setTracking(on: boolean, options?: { inFile?: boolean }): void;
+  /**
+   * Writes Track Changes, as the person last chose it (`setTracking`), to the ledger: the line
+   * `tracking: everyone` goes in or comes out (format §5.6). For the host to call when it saves the
+   * file, with `recordView`. Nothing is recorded for a document where the person chose nothing, or
+   * chose it as a preference of their own. It never makes a ledger: a file with none, which a first
+   * change gives one, a ledger that holds nothing else and a ledger that can't be read are left as
+   * they are, and it is never why a save fails. It is no step of its own: it joins the newest step,
+   * which Undo takes back with it, and with every step taken back it waits for the next save.
+   */
+  recordTracking(): void;
   /**
    * Writes the view the document is in to its ledger, as `view: clean`, `view: redlines` or
-   * `view: simple` (format §5.6): for the host to call when it saves the file, so that the document
-   * opens in it. Raw leaves the view the file had. A view alone is no reason for a ledger, so a
+   * `view: simple` (format §5.6): for the host to call when it saves the file, so that a document
+   * that has redlines opens in it. Plain leaves the view the file had. A view alone is no reason for a ledger, so a
    * file with none gets none, and a ledger that can't be read is left as it is. It is
    * no step of its own: it joins the newest step, which Undo then takes back with it, and steps to
    * redo, which that drops, are gone. With every step taken back there is none to join, and it waits
@@ -382,6 +571,15 @@ export interface Editor {
    *   decide its kind.
    */
   accept(id: string | readonly string[]): void;
+  /**
+   * Accepts every pending change the selection touches, or with only a caret every change of the
+   * document, and turns Track Changes off, in one step that Undo takes back with the switch.
+   * Comments and highlights stay. Returns false, and does nothing, when there is nothing to
+   * accept (`EditorUiState.canAcceptAll`).
+   *
+   * @throws EditError when the format can't write the decision.
+   */
+  acceptAllAndStopTracking(): boolean;
   /** Rejects a pending change by its mark id, as `accept` does. */
   reject(id: string | readonly string[]): void;
   /**
@@ -404,10 +602,18 @@ export interface Editor {
    */
   pastePlain(text: string): void;
   /**
+   * The spot an image added now would go, for a host that has the images by other means than a
+   * paste or a drop in the page (the Insert Image command, a drop the app hands over): where the
+   * client point `at` is nearest between blocks, when given and over some text (an image lands as a
+   * block of its own, never inside another block), and otherwise the selection. Null
+   * when the editor takes no image there, which `onNotice` then says.
+   */
+  imageSpot(at?: { x: number; y: number }): ImageSpot | null;
+  /**
    * The word at a position of the document, as the host's spell checker is asked about it: letters
    * with an apostrophe inside, read from the text the page shows (a hidden marker inside the word
    * doesn't part it), with `before`, the block's text up to it. Null between words, for a word with
-   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Raw. The
+   * a digit in it, and where the Mac doesn't spell check: in code, a URL, front matter and Plain. The
    * formatting palette asks it for the word under a right-click.
    */
   wordAt(pos: number): { from: number; to: number; word: string; before: string } | null;
@@ -422,7 +628,7 @@ export interface Editor {
   pickCorrection(at: Range, replaced: string, text: string): boolean;
   /**
    * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
-   * reason is said through `onNotice` (Raw read-only, or the history started over by a reload), or
+   * reason is said through `onNotice` (Plain read-only, or the history started over by a reload), or
    * else `onNothingToUndo` is called. Returns whether it did or said something.
    */
   undo(): boolean;

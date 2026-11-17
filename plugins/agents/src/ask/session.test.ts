@@ -38,6 +38,9 @@ interface Options {
   /** With `moby`, the agents with a toolbox aren't there. */
   onlyMoby?: boolean;
   defaultAgent?: string;
+  /** The models Claude lists, and the one Preferences chose for it. */
+  claudeModels?: { id: string; name: string }[];
+  chosenModel?: string;
   doc?: string;
   /** The document's generation, which a test bumps when another document takes its place. */
   generation?: { value: number };
@@ -49,6 +52,7 @@ function setup(options: Options = {}) {
     relay,
     script: options.claude ?? answers('A lien is a claim.'),
     readLimit: options.claudeReads ?? 'folder',
+    ...(options.claudeModels ? { models: options.claudeModels } : {}),
     ...(options.claudeState ? { state: options.claudeState } : {}),
   });
   const codex = fakeProvider({
@@ -100,6 +104,7 @@ function setup(options: Options = {}) {
         },
       },
       ...(options.defaultAgent ? { defaultAgent: () => options.defaultAgent } : {}),
+      ...(options.chosenModel ? { chosenModel: () => options.chosenModel } : {}),
     },
     { quote: 'ships in April' },
   );
@@ -165,6 +170,19 @@ describe('an Ask', () => {
     expect(request.scope).toBe('document');
     expect(request.documentPath).toBe('/repo/plan.md');
     expect(request.author).toEqual({ handle: 'claude-ada', name: 'Claude', for: 'ada' });
+  });
+
+  it('keeps that the agent used the web with its answer, for the bubble to say (#529)', async () => {
+    const { session } = setup({
+      claude: async function* ({ tools }) {
+        await tools.initialize();
+        yield { type: 'web', allowed: true, text: 'Searching the web' };
+        yield { type: 'done', finalText: 'Per the source [1].', web: true };
+      },
+    });
+    session.ask('Is this true?');
+    await done(session);
+    expect(session.state.turns[0]).toMatchObject({ answer: 'Per the source [1].', web: true });
   });
 
   it('is a question about the selected text, in a prompt that says it changes nothing', async () => {
@@ -682,5 +700,58 @@ describe('askText', () => {
     expect(text.indexOf(trust)).toBeLessThan(text.indexOf('The new question: And?'));
     // The first question goes alone, with nothing to say of earlier answers.
     expect(askText('And?', [])).toBe('And?');
+  });
+});
+
+describe('the model an Ask runs (#507)', () => {
+  const MODELS = [
+    { id: 'opus', name: 'Opus' },
+    { id: 'sonnet', name: 'Sonnet' },
+  ];
+
+  it('knows who answers and which models it lists before a question is asked', async () => {
+    const { session } = setup({ claudeModels: MODELS });
+    await vi.waitFor(() => expect(session.state.choice).not.toBeNull());
+    expect(session.state.choice).toEqual({ agent: CLAUDE, models: MODELS, model: undefined });
+  });
+
+  it('starts at the model Preferences chose, when the agent lists it', async () => {
+    const { session, claude } = setup({ claudeModels: MODELS, chosenModel: 'sonnet' });
+    await vi.waitFor(() => expect(session.state.choice?.model).toBe('sonnet'));
+    session.ask('What?');
+    await done(session);
+    expect(lastRequest(claude).model).toBe('sonnet');
+  });
+
+  it('runs the model picked in the bubble, for this question and the follow-ups', async () => {
+    const { session, claude } = setup({ claudeModels: MODELS, chosenModel: 'sonnet' });
+    await vi.waitFor(() => expect(session.state.choice).not.toBeNull());
+    session.setModel('opus');
+    expect(session.state.choice?.model).toBe('opus');
+    session.ask('What?');
+    await done(session);
+    expect(lastRequest(claude).model).toBe('opus');
+    session.ask('And?');
+    await done(session);
+    expect(lastRequest(claude).model).toBe('opus');
+  });
+
+  it('runs the default when Default is picked over Preferences’ choice', async () => {
+    const { session, claude } = setup({ claudeModels: MODELS, chosenModel: 'sonnet' });
+    await vi.waitFor(() => expect(session.state.choice).not.toBeNull());
+    session.setModel(undefined);
+    session.ask('What?');
+    await done(session);
+    expect(lastRequest(claude).model).toBeUndefined();
+  });
+
+  it('names no model for an agent that lists none', async () => {
+    const { session, claude } = setup({ chosenModel: 'opus' });
+    await vi.waitFor(() => expect(session.state.choice).not.toBeNull());
+    expect(session.state.choice?.models).toEqual([]);
+    session.setModel('opus');
+    session.ask('What?');
+    await done(session);
+    expect(lastRequest(claude).model).toBeUndefined();
   });
 });
