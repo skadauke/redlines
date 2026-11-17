@@ -3,7 +3,7 @@
 
 import { parse as parseYaml } from 'yaml';
 import { isId } from './ids.ts';
-import { decodePayload } from './payload.ts';
+import { decodeText } from './payload.ts';
 import { scan } from './scan.ts';
 import type { Scan } from './scan.ts';
 import type {
@@ -166,7 +166,7 @@ function isMap(value: unknown): value is Raw {
 function decodeValue(value: string): string {
   return value
     .split('\n')
-    .map((line) => (line === '\\' ? '' : decodePayload(line)))
+    .map((line) => (line === '\\' ? '' : decodeText(line)))
     .join('\n');
 }
 

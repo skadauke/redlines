@@ -8,6 +8,7 @@
 
 import { type EditorState, StateField } from '@codemirror/state';
 import { EditorView, WidgetType } from '@codemirror/view';
+import { plainPayload } from '@redlines/format';
 import type { MarkRange } from '@redlines/format';
 import { colorClass, colorsOf } from '../tracked/colors.ts';
 import { isColDeletion, isColInsertion, parsedField, viewModeField } from '../tracked/field.ts';
@@ -56,7 +57,7 @@ export function colGhostsOf(state: EditorState): ColGhost[] {
       const line = doc.line(n);
       const mark = byLine.get(line.from);
       if (!mark) break;
-      const payload = mark.payload ?? '';
+      const payload = plainPayload(mark.payload ?? '');
       const found = POSITION.exec(payload);
       const all = payload.slice(found?.[0].length ?? 0).split('\n');
       ghosts.push({
