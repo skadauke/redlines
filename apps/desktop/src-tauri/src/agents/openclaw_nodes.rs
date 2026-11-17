@@ -469,6 +469,12 @@ mod tests {
                                         "old_str must match exactly once.".to_owned()
                                     }
                                 }
+                                "comment" => {
+                                    // A slow call: it waits on the window.
+                                    drop(doc);
+                                    std::thread::sleep(Duration::from_secs(4));
+                                    "Commented.".to_owned()
+                                }
                                 _ => "ok".to_owned(),
                             })
                         }
@@ -529,7 +535,7 @@ mod tests {
         // 1. A run that edits through the node: the stand-in model calls str_replace.
         let session = format!("agent:main:redlines-{:016x}", now_ms());
         let relay = window("edit");
-        let registration = runs.register(&session, &relay).unwrap();
+        let registration = runs.register(&session, &relay, &|| false).unwrap();
         let mut socket = open(&config());
         let outcome = ask(
             &mut socket,
@@ -568,7 +574,7 @@ mod tests {
         *document.lock().unwrap() = "Another teh typo.".to_owned();
         let bare = format!("redlines-{:016x}", now_ms() + 2);
         let relay = window("bare");
-        let registration = runs.register(&bare, &relay).unwrap();
+        let registration = runs.register(&bare, &relay, &|| false).unwrap();
         let mut again = open(&config());
         let outcome = ask(
             &mut again,
@@ -590,7 +596,7 @@ mod tests {
         // 2. A run that is stopped: its next call is refused, and the document is not touched.
         let session = format!("agent:main:redlines-{:016x}", now_ms() + 1);
         let relay = window("stopped");
-        let registration = runs.register(&session, &relay).unwrap();
+        let registration = runs.register(&session, &relay, &|| false).unwrap();
         let before = asked.lock().unwrap().len();
         let halt = Arc::new(AtomicBool::new(false));
         let waiting = {
@@ -620,6 +626,101 @@ mod tests {
             "no call reached the window"
         );
         assert_eq!(*document.lock().unwrap(), "A sentence with the typo.");
+        // 3. A follow-up prompt in the same session, with the registration held across both:
+        // OpenClaw offers the node's tools to the second run of a session as to the first.
+        *document.lock().unwrap() = "Third teh typo.".to_owned();
+        let session = format!("agent:main:redlines-{:016x}", now_ms() + 3);
+        let relay = window("follow-up");
+        let registration = runs.register(&session, &relay, &|| false).unwrap();
+        let mut socket_3 = open(&config());
+        let first = ask(
+            &mut socket_3,
+            &config(),
+            &session,
+            "EDIT: fix it.",
+            &run_key(),
+            &stop,
+        );
+        assert!(matches!(first, Ok(Outcome::Done(_))), "{first:?}");
+        assert_eq!(*document.lock().unwrap(), "Third the typo.");
+        *document.lock().unwrap() = "Fourth teh typo.".to_owned();
+        let second = ask(
+            &mut socket_3,
+            &config(),
+            &session,
+            "EDIT: and again.",
+            &run_key(),
+            &stop,
+        );
+        eprintln!(
+            "LIVE follow-up: {second:?}, document {:?}",
+            document.lock().unwrap()
+        );
+        assert!(matches!(second, Ok(Outcome::Done(_))), "{second:?}");
+        assert_eq!(*document.lock().unwrap(), "Fourth the typo.");
+        drop(registration);
+
+        // 4. A slow call and a fast one at the same time: the fast one is answered first, and the
+        // node's read loop keeps answering while the slow one waits.
+        let session = format!("agent:main:redlines-{:016x}", now_ms() + 4);
+        let relay = window("concurrent");
+        let registration = runs.register(&session, &relay, &|| false).unwrap();
+        // Another run's call, on its own line: one run's calls go one at a time, in order.
+        let other_session = format!("agent:main:redlines-{:016x}", now_ms() + 5);
+        let other_relay = window("concurrent-other");
+        let other_registration = runs
+            .register(&other_session, &other_relay, &|| false)
+            .unwrap();
+        let mut slow_socket = open(&config());
+        let mut fast_socket = open(&config());
+        let began = std::time::Instant::now();
+        let (slow, fast) = std::thread::scope(|scope| {
+            let slow = scope.spawn(|| {
+                let reply = invoke(&mut slow_socket, Some(&session), "comment");
+                (reply, began.elapsed())
+            });
+            std::thread::sleep(Duration::from_millis(500));
+            let fast = invoke(&mut fast_socket, Some(&other_session), "view");
+            let fast = (fast, began.elapsed());
+            (slow.join().unwrap(), fast)
+        });
+        eprintln!(
+            "LIVE concurrent: fast at {:?}, slow at {:?}",
+            fast.1, slow.1
+        );
+        assert_eq!(fast.0["ok"], true);
+        assert_eq!(slow.0["ok"], true);
+        assert!(fast.1 < slow.1, "the fast call was answered first");
+        assert!(fast.1 < Duration::from_secs(3));
+        drop(other_registration);
+        drop(registration);
+
+        // 5. Stop while registering: a window that never answers the handshake.
+        let silent = std::env::temp_dir().join(format!("rl-live-{}-silent", std::process::id()));
+        let _ = std::fs::remove_dir_all(&silent);
+        std::fs::create_dir_all(&silent).unwrap();
+        let listener = UnixListener::bind(silent.join("s")).unwrap();
+        std::thread::spawn(move || {
+            let held = listener.accept();
+            std::thread::sleep(Duration::from_secs(30));
+            drop(held);
+        });
+        let stopped = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stopped);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let began = std::time::Instant::now();
+        let refused = runs.register("redlines-0123", silent.join("s").to_str().unwrap(), &|| {
+            stopped.load(std::sync::atomic::Ordering::Relaxed)
+        });
+        eprintln!(
+            "LIVE stop while registering: {:?} after {:?}",
+            refused.is_err(),
+            began.elapsed()
+        );
+        assert!(refused.is_err() && began.elapsed() < Duration::from_secs(3));
         node.stop();
     }
 }

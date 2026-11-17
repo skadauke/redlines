@@ -1271,6 +1271,8 @@ class HistoryState {
       if (tr && done[i]!.meta.deleted?.length) done[i] = decidedBy(done[i]!, tr);
       // The change in the text from before this step.
       m = m.mapDesc(event.changes);
+      // The steps below keep the coordinates they had before the remote changes held in `mapped`.
+      if (event.mapped) m = m.mapDesc(event.mapped.invertedDesc);
     }
     return new HistoryState(
       tr ? staled(done, tr) : done,

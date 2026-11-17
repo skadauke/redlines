@@ -17,6 +17,11 @@ export interface TitleBarState {
   name: string;
   dirty: boolean;
   /**
+   * Where the document stands in a session with other windows, beside its name: "In 2 windows", or
+   * that edits are kept while the session can't be reached. Nothing for a document held alone.
+   */
+  sync?: string;
+  /**
    * Whether the document's file can be dragged out of the window: it has a file (an Untitled
    * document has none yet), and the app can hand it over (on the Mac). The icon beside the name
    * is shown for it.
@@ -528,7 +533,10 @@ export function createTitleBar(
   const update = (next: TitleBarState) => {
     state = next;
     titleName.textContent = next.name;
-    titleEdited.textContent = next.dirty ? ' — Edited' : '';
+    titleEdited.textContent = [next.dirty ? 'Edited' : '', next.sync ?? '']
+      .filter(Boolean)
+      .map((part) => ` — ${part}`)
+      .join('');
     // A document that has not been saved has no file to drag.
     docIcon.hidden = !next.fileDraggable;
     docIcon.setAttribute('aria-label', `${next.name}, document icon`);

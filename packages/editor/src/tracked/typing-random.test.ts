@@ -163,27 +163,28 @@ function randomTyping(
         const marker = blockMarkers.find(({ index, 0: m }) => index < a && b < index + m.length);
         const past = marker ? before.text.slice(marker.index + marker[0].length).trimEnd() : null;
         const rest = after.text.slice(caret).trimEnd();
+        // Typed text that is hidden where it stands, as spaces on a line of markers alone are, or
+        // that ends in line breaks into blank lines, has no place on screen: the caret goes after
+        // the blank lines, to the next text (#811).
+        const bare = (s: string) => s.replace(/^(?:[ \t>]*\n)+/, '');
+        const shown = (s: string) => s.replace(/[\s>]+$/, '');
+        // Only typed text that is blank, or ends in a line break, may leave blank lines between
+        // the caret and the typed text; any other must have the caret right after it.
+        const hiddenTyped = /^[\s>]*$/.test(typed) || typed.endsWith('\n');
+        const placed = hiddenTyped
+          ? shown(after.text.slice(0, caret)).endsWith(shown(typed)) &&
+            (rest === bare(tail) || rest === bare(joined))
+          : false;
         const ok =
-          after.text.slice(0, caret).endsWith(typed) &&
-          (rest === tail || rest === joined || rest === past);
+          placed ||
+          (after.text.slice(0, caret).endsWith(typed) &&
+            (rest === tail || rest === joined || rest === past));
         // A block that starts with spaces and then a marker gets the marker's own line with
         // the spaces in front of it, where format §3.3 wants them after it, and the editor hides
         // that line, so the caret can't stand after spaces typed there. That is how the format
         // places the marker, not where the caret goes; it is rare.
         const spaced = (s: string) => (s.match(/^[ \t]+(?:<!--[^\n]*?-->)+[ \t]*$/gm) ?? []).length;
-        // The same for a block inserted whole, whose opener stands on a line of its own (format
-        // §3.3), when the edit is made next to it: the caret may stay where the edit began (#811).
-        const ownLine = (s: string) => /^[ \t>]*<!--ins \w+-->$/m.test(s);
         if (!ok && spaced(editor.view.state.doc.toString()) > spaced(text)) excused++;
-        else if (!ok && ownLine(text)) excused++;
-        // Also on main, with the same files: a line break typed at the end of a block's text goes
-        // into the break after it, and a character typed on a blank line leaves the caret after
-        // the break that follows it (#811).
-        else if (
-          !ok &&
-          (typed.endsWith('\n') || (before.text[a - 1] === '\n' && before.text[b] === '\n'))
-        )
-          excused++;
         else if (!ok) {
           misses.push(
             `${JSON.stringify(text)}: ${JSON.stringify(before.text)} [${a}, ${b}) + ${JSON.stringify(typed)} -> ` +
@@ -243,3 +244,41 @@ it.each([
   },
   60_000,
 );
+
+/** Text typed where it can't be seen, next to a block inserted whole (#811): a space before an
+ * opener that stands on a line of its own, and at a quote's blank line. The caret goes after the
+ * line the space is hidden in, as far on as it can, never back where the edit began. */
+it.each([
+  {
+    name: 'before a block inserted whole',
+    doc: `Intro.\n\n<!--ins b2b2-->\n\nA new paragraph.<!--/b2b2-->\n\nEnd.${ledger('  b2b2: {by: bo, at: 2026-10-31T09:30Z}\n')}`,
+    at: 'A new',
+    offset: 0,
+    after: 'A new paragraph.\n\nEnd.',
+  },
+  {
+    name: 'at the blank line of a quote after a list',
+    doc: '- one\n- two\n\n> \n>\n> aba quote\n',
+    at: '> \n',
+    offset: 1,
+    after: '> aba quote',
+  },
+])('puts the caret after a space typed $name', ({ doc, at, offset, after: rest }) => {
+  const parent = document.createElement('div');
+  document.body.append(parent);
+  const editor = createEditor(parent, {
+    doc,
+    author: { handle: 'ada', name: 'Ada Lovelace' },
+    tracking: true,
+  });
+  open.push(editor);
+  const start = newestView(editor.getParsed().text);
+  const from = start.text.indexOf(at) + offset;
+  const source = start.map.toSource(from, 1);
+  editor.view.dispatch({ selection: { anchor: source }, userEvent: 'select' });
+  editor.view.dispatch(editor.view.state.replaceSelection(' '), { userEvent: 'input.type' });
+  const end = newestView(editor.getParsed().text);
+  const caret = end.map.fromSource(editor.view.state.selection.main.head);
+  expect(end.text.slice(caret).trimEnd()).toBe(rest);
+  expect(caret).toBeGreaterThan(from);
+});

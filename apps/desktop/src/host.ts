@@ -860,9 +860,12 @@ function createBrowserHost(): Host {
     // file or a line), so no tab is ever opened for either (`windowStart`). It can't be given text,
     // which it would lose without a word: the request is refused, as the app refuses what it can't
     // open. An empty text is none, as it is for the app.
-    openWindow: (_path, _line, text) => {
+    openWindow: (path, _line, text, session) => {
       if (text) return Promise.reject(new Error('A browser tab can’t be opened for text.'));
-      window.open(location.href);
+      // Another tab on the same document: it joins the session of this one (src/session-tabs.ts).
+      window.open(
+        session && path ? `${location.pathname}?join=${encodeURIComponent(path)}` : location.href,
+      );
       return Promise.resolve();
     },
     windowStart: () => Promise.resolve({ path: null, line: null, text: null }),

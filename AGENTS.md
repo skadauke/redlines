@@ -106,7 +106,7 @@ repo root.
   ([look-review.md](apps/desktop/journeys/look-review.md): the checklist, and how a lane uses it);
   `apps/desktop/scripts/app-windows` screenshots a built `Redlines.app`'s own windows (it needs
   Screen Recording for the terminal, once). Baselines are drawn by WebKit on macOS, as the app is;
-  a journey is a `tests/*.spec.ts` file in the package (not a vitest test)
+  a journey is a `tests/*.spec.ts` file in the package (not a vitest test). `apps/desktop/two-windows.html` (dev only) is the page twice, side by side, as two tabs of one session: `tests/tabs.spec.ts`
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
