@@ -2446,8 +2446,16 @@ it, one per line:
   would leave its end without its start: the operation with Track Changes on is a replacement of the
   table, which takes the comment's blocks into the unit (§3.12). Another column of the table, and the
   operation with Track Changes off, are written as they were. A table keeps at least one column:
-  deleting the last, or rejecting the insertion of the last, is refused ("Delete the table
-  instead."). With Track Changes off the columns go from the original as well, so the last column
+  the operation that deletes the last one is refused ("Delete the table instead."). A decision that
+  leaves a table with no column of its original is not (#477): when every column that is left is a
+  pending insertion, the table reads as inserted whole, with nothing as its original (the original
+  view has no table, and no view throws), and rejecting the last inserted column takes the table
+  away, with the blank line after it; a comment in it stays as a point where the table was. Where the
+  original column is a pending deletion, rejecting the last inserted column is the deletion of the
+  whole table (rule 6) in the mark of that deletion, with the original table as its payload:
+  accepting it gives no table, rejecting it the original, as deciding the column's deletion does, in
+  either order. With several deleted columns or another change pending in the table the decision
+  keeps its refusal ("A table keeps at least one column."), which no order reads alike yet. With Track Changes off the columns go from the original as well, so the last column
   that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
 - **Rule 6, deleting the table.** This is what the operation writes; an edit that merely covers the

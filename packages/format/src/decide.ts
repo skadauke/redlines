@@ -43,6 +43,7 @@ import type { PayloadFound } from './payload-marks.ts';
 import { tablesOfText } from './table.ts';
 import { colMarkIds, decideCols } from './table-cols.ts';
 import { isAlignMark, isAlignPoint } from './table-align.ts';
+import { wholeTableDeleted } from './table-bare.ts';
 import { decideRows, originalRowText, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, PayloadMarks, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalView, syntaxOnly } from './views.ts';
@@ -417,7 +418,12 @@ function decide(
   marks: readonly MarkRange[],
   action: Action,
 ): TextChange[] {
-  const changes = decideTiers(text, parsed, marks, action);
+  // Rejecting every inserted column of a table whose original column is a pending deletion (#477).
+  const bare =
+    action === 'reject' && parsed.marks.some((mark) => mark.kind === 'del' && isColMark(mark))
+      ? wholeTableDeleted(text, parsed, marks, (all) => decideTiers(text, parsed, all, 'reject'))
+      : undefined;
+  const changes = bare ?? decideTiers(text, parsed, marks, action);
   if (action !== 'accept' || changes.length === 0) return changes;
   if (!parsed.marks.some((mark) => isRowMove(mark) && mark.kind === 'ins')) return changes;
   return resyncMoves(text, changes);
