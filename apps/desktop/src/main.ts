@@ -106,6 +106,7 @@ import { createNotice } from './ui/notice.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
 import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
+import { tooBroadNotice } from './project-notice.ts';
 import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
 import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
@@ -732,8 +733,8 @@ const review = createReview(editor, {
         documentPath: () => controller.state.path,
         projectFolder: async (path) => {
           const root = await projectOf(path);
-          // As for images: a repository too broad to read all of is not the place to look.
-          return root.tooBroad ? dirname(path) : root.folder;
+          // As for images: a folder too broad to be a project is no place to look (#451).
+          return root.tooBroad ? null : root.folder;
         },
         realPath: (path) => invoke<string>('real_path', { path }),
         // A document opens in a window, and an image or a PDF in its default app; any other
@@ -945,6 +946,8 @@ async function showImages(path: string | null): Promise<void> {
     const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
     // Another file may have opened meanwhile.
     if (!allowed || doc?.path !== path) return;
+    // The home folder and what is above it is no project: only the document's own folder loads
+    // its images, which paste and crop write there (#451).
     imageFolder = root.tooBroad ? dirname(path) : root.folder;
     editor.refreshImages();
     imageWatch.settle();
@@ -962,7 +965,11 @@ async function showInSidebar(path: string | null): Promise<void> {
     return { folder: dirname(path), isRepo: false, tooBroad: false };
   });
   // Another file may have opened meanwhile.
-  if (doc?.path === path) sidebar.setDocument({ path, root });
+  if (doc?.path !== path) return;
+  sidebar.setDocument({ path, root });
+  // The home folder, or a folder above it, is no project (#451): say why there is no folder.
+  const notice = tooBroadNotice(root);
+  if (notice) notifications.show(notice);
 }
 
 /** Opens the document at `path` in the editor, in place of the one it shows. */
