@@ -176,7 +176,13 @@ function render(dir: string, name: string, format: Format, label: string): strin
     ],
     dir,
   );
-  if (run.status !== 0) throw new Error(`quarto render failed:\n${run.stderr.slice(-800)}`);
+  if (run.status !== 0) {
+    const tail = (text: string | null | undefined) =>
+      (text ?? '').trim().split('\n').slice(-8).join(' / ').replace(/\|/g, '/').slice(-600);
+    throw new Error(
+      `quarto render ${name} to ${format} failed: exit ${run.status ?? run.signal ?? run.error?.message}; stderr: ${tail(run.stderr)}; stdout: ${tail(run.stdout)}`,
+    );
+  }
   // `keep-typ` can leave the .typ next to the input instead of in the output folder (CI's first run
   // with Quarto 1.11.9 saw it for the include probe): bring it in, so every render reads its own folder.
   const typ = join(dir, name.replace(/\.qmd$/, '.typ'));
