@@ -741,6 +741,7 @@ class HistoryState {
           ? !this.isolated && lastEvent.owner?.group === event.owner.group
           : !lastEvent.owner &&
             lastEvent.meta.person === event.meta.person &&
+            !lastEvent.meta.touchedBy &&
             !lastChanges.empty &&
             (!userEvent || joinableUserEvent.test(userEvent)) &&
             ((!lastEvent.selectionsAfter.length &&
