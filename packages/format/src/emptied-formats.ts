@@ -78,6 +78,7 @@ export function emptiedFormats(text: string, edits: readonly TextChange[]): read
     if (previous && edit.from < previous.to) {
       merged[merged.length - 1] = {
         ...previous,
+        from: Math.min(previous.from, edit.from),
         to: Math.max(previous.to, edit.to),
         insert: previous.insert + edit.insert,
       };
