@@ -58,17 +58,15 @@ import {
   type TextChange,
   fineEdit,
   fineEdits,
-  fineFormat,
   trackedEdit,
-  trackedFormat,
   type UnitKind,
   unitsOf,
   untrackedEdit,
-  untrackedFormat,
   readsOtherAtBoundary,
   widenedFirstEdits,
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
+import { dialectFacet } from '../dialect.ts';
 import { lineChanges } from '../diff.ts';
 import {
   annotationsOfTransaction,
@@ -90,7 +88,9 @@ import {
   recording,
   replaying,
   type TypingIntent,
+  type Unnamed,
 } from './intent.ts';
+import { type FormatIntent, writeFormat } from './format-intent.ts';
 import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
@@ -178,7 +178,12 @@ export function contextFor(state: EditorState): EditContext {
   const author = state.facet(authorFacet);
   if (!author) throw new EditError('Track Changes needs to know who is editing.');
   const { now, random } = state.facet(editSourceFacet);
-  return { author, time: `${now().toISOString().slice(0, 16)}Z`, random };
+  return {
+    author,
+    time: `${now().toISOString().slice(0, 16)}Z`,
+    random,
+    dialect: state.facet(dialectFacet),
+  };
 }
 
 /**
@@ -194,15 +199,43 @@ export function blockFormatChanges(
   op: FormatOp,
   widening = false,
 ): TextChange[] {
+  return blockFormat(state, range, op, widening).changes;
+}
+
+/** `blockFormatChanges`, with the intent that wrote them, for the transaction that makes them. */
+export function blockFormat(
+  state: EditorState,
+  range: Range,
+  op: FormatOp,
+  widening = false,
+): { changes: TextChange[]; intent: Unnamed<FormatIntent> } {
   const text = state.doc.toString();
-  if (state.field(trackingField)) {
-    const write = widening ? trackedFormat : fineFormat;
-    return write(text, range, op, contextFor(state)).changes;
-  }
+  const tracking = state.field(trackingField);
   const { random } = state.facet(editSourceFacet);
   const editing = state.facet(authorFacet);
-  const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
-  return untrackedFormat(text, range, op, { random, author });
+  const author = editing ? { handle: editing.handle, name: editing.name } : null;
+  if (tracking) {
+    const ctx = contextFor(state);
+    return writeFormat(text, {
+      tracking,
+      ranges: [range],
+      op,
+      writer: widening ? 'tracked' : 'fine',
+      author: ctx.author,
+      time: ctx.time,
+      dialect: state.facet(dialectFacet),
+      ...(random ? { random } : {}),
+    });
+  }
+  return writeFormat(text, {
+    tracking,
+    ranges: [range],
+    op,
+    author,
+    time: '',
+    dialect: state.facet(dialectFacet),
+    ...(random ? { random } : {}),
+  });
 }
 
 /** A change of a transaction, in its start document's offsets. */
@@ -617,7 +650,12 @@ function trackEdits(
   replay?: Replay,
 ): Tracked {
   const base: EditContext = replay
-    ? { author: replay.author as Person, time: replay.time, random: replay.random }
+    ? {
+        author: replay.author as Person,
+        time: replay.time,
+        random: replay.random,
+        dialect: state.facet(dialectFacet),
+      }
     : contextFor(state);
   // Every id the format draws is kept, so that the edit can be derived again with the same ones.
   const drawing = recording(base.random);
@@ -745,7 +783,7 @@ function untrackEdits(
   const editing = replay ? replay.author : state.facet(authorFacet);
   const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
   const made = formatEdits(text, parsed, edits, backward, (doc, edit) =>
-    untrackedEdit(doc, edit, { random, author }),
+    untrackedEdit(doc, edit, { random, author, dialect: state.facet(dialectFacet) }),
   );
   return {
     ...made,

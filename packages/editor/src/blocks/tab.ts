@@ -10,12 +10,7 @@
 
 import { type ChangeSpec, EditorSelection, type EditorState } from '@codemirror/state';
 import { EditError, type FormatOp, widenedFirstEdits } from '@redlines/format';
-import {
-  blockFormatChanges,
-  caretKeptFromEnd,
-  contextFor,
-  trackingField,
-} from '../tracked/typing.ts';
+import { blockFormat, caretKeptFromEnd, contextFor, trackingField } from '../tracked/typing.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
 import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
 import { type Item, itemsAround, type KeyEdit, nothing } from './edits.ts';
@@ -189,14 +184,15 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
   const op: FormatOp = { kind: 'indent', by: outdent ? -1 : 1 };
   const range = { from: Math.min(first.at, from), to: Math.max(last.at, to) };
   let changes;
+  let intent;
   let widened = false;
   try {
     try {
-      changes = blockFormatChanges(state, range, op);
+      ({ changes, intent } = blockFormat(state, range, op));
     } catch (error) {
       // No fine form: the item or the list is replaced (format §3.12).
       if (!(error instanceof EditError)) throw error;
-      changes = blockFormatChanges(state, range, op, true);
+      ({ changes, intent } = blockFormat(state, range, op, true));
       widened = true;
     }
   } catch (error) {
@@ -212,6 +208,7 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
       selection: EditorSelection.single(caretKeptFromEnd(state, changes, head)),
       userEvent: 'indent',
       final: true,
+      intent,
     };
   }
   return {
@@ -219,6 +216,7 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
     selection: EditorSelection.single(head),
     userEvent: 'indent',
     final: true,
+    intent,
     ...kept,
   };
 }

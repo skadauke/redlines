@@ -12,7 +12,8 @@
 //!
 //! Tool calls go to a [`ToolHost`], which speaks MCP's JSON-RPC lines, so that the node needs no
 //! list of tools of its own and the tools stay the ones every agent has (`packages/agent-tools`).
-//! The wire's shapes are in `openclaw_protocol.rs`, and are unverified against a real Gateway.
+//! The wire's shapes are in `openclaw_protocol.rs`, checked against a live `openclaw@2026.11.5`
+//! Gateway on loopback (the `live_gateway` test, by hand).
 //! Secrets are given to the connection as [`Secret`]s and leave it only in the one frame that
 //! carries them; nothing here logs or reports one.
 
@@ -308,7 +309,10 @@ fn answer_call(
     }
     let params: Value =
         serde_json::from_str(params_json).map_err(|_| "The call isn’t JSON.".to_owned())?;
-    let name = params["name"]
+    if params["server"].as_str() != Some(protocol::SERVER) {
+        return Err("The call is for another server.".to_owned());
+    }
+    let name = params["tool"]
         .as_str()
         .ok_or("The call names no tool.")?
         .to_owned();
@@ -420,11 +424,6 @@ fn run(
         Ok(None) => return Ended::Dropped("The Gateway didn’t answer connect.".into()),
         Err(ended) => return ended,
     };
-    if protocol::is_newer(&payload) {
-        return Ended::Refused(Refusal::TooNew {
-            protocol: payload["protocol"].as_u64(),
-        });
-    }
     if !ok {
         let error = error.unwrap_or(protocol::WireError {
             code: String::new(),
@@ -951,7 +950,7 @@ mod tests {
                 socket,
                 json!({"type": "event", "event": "node.invoke.request", "payload": {
                 "id": "c1", "nodeId": "n", "command": "mcp.tools.call.v1",
-                "paramsJSON": "{\"name\":\"view\",\"arguments\":{}}"}}),
+                "paramsJSON": "{\"server\":\"redlines\",\"tool\":\"view\",\"arguments\":{}}"}}),
             );
             *got.lock().unwrap() = read_frame(socket, frames);
             // A command that is not the one this node has, and a tool that isn't there.
@@ -972,7 +971,7 @@ mod tests {
                 socket,
                 json!({"type": "event", "event": "node.invoke.request", "payload": {
                 "id": "c3", "nodeId": "n", "command": "mcp.tools.call.v1",
-                "paramsJSON": "{\"name\":\"nope\"}"}}),
+                "paramsJSON": "{\"server\":\"redlines\",\"tool\":\"nope\"}"}}),
             );
             let missing = read_frame(socket, frames).unwrap();
             assert_eq!(missing["params"]["ok"], false);
@@ -1127,13 +1126,32 @@ mod tests {
     }
 
     #[test]
+    fn a_call_for_another_server_or_no_tool_is_refused() {
+        let published = vec!["view".to_owned()];
+        for params in [
+            r#"{"server":"other","tool":"view"}"#,
+            r#"{"tool":"view"}"#,
+            r#"{"server":"redlines"}"#,
+            r#"{"server":"redlines","tool":""}"#,
+        ] {
+            assert!(
+                answer_call(&Tools, &published, COMMAND, params).is_err(),
+                "{params}"
+            );
+        }
+        let good = r#"{"server":"redlines","tool":"view"}"#;
+        assert!(answer_call(&Tools, &published, COMMAND, good).is_ok());
+    }
+
+    #[test]
     fn a_gateway_with_a_newer_protocol_is_said_to_be_newer() {
         let gateway = fake(vec![Box::new(|socket, frames| {
             greet(socket, "n");
             take_connect(socket, frames, "n");
             text(
                 socket,
-                json!({"type": "res", "id": "1", "ok": true, "payload": {"protocol": 99}}),
+                json!({"type": "res", "id": "1", "ok": false, "error": {"code": "INVALID_REQUEST",
+                    "message": "protocol mismatch", "details": {"maxProtocol": 99}}}),
             );
         })]);
         let run = Run::start(&gateway, Credential::Token(secret(TOKEN)), Some(TOKEN));
@@ -1282,5 +1300,67 @@ mod tests {
             })),
             json!({"state": "failed", "why": "tools-refused", "message": "off"})
         );
+    }
+
+    /// The live test: a real Gateway, by hand (docs/research/openclaw-connection.md, "First live
+    /// test"). `REDLINES_LIVE_GATEWAY=ws://127.0.0.1:PORT` and either `REDLINES_LIVE_TOKEN=...` or
+    /// `REDLINES_LIVE_CODE=<a setup code>`; optionally `REDLINES_LIVE_SEED` (64 hex digits: a new
+    /// device) and `REDLINES_LIVE_SECONDS` (default 60). Prints every event to stderr. Use
+    /// `rtk proxy cargo test live_gateway -- --ignored --nocapture` to see them.
+    #[test]
+    #[ignore = "needs a Gateway, see REDLINES_LIVE_GATEWAY"]
+    fn live_gateway() {
+        struct Six;
+        impl ToolHost for Six {
+            fn mcp(&self, request: &str) -> Option<String> {
+                let request: Value = serde_json::from_str(request).ok()?;
+                let tools: Value =
+                    serde_json::from_str(include_str!("openclaw-tools.json")).ok()?;
+                Some(
+                    match request["method"].as_str()? {
+                        "tools/list" => {
+                            json!({"jsonrpc": "2.0", "id": 1, "result": {"tools": tools}})
+                        }
+                        _ => json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [
+                        {"type": "text", "text": "No document is open (live test)."}],
+                        "isError": false}}),
+                    }
+                    .to_string(),
+                )
+            }
+        }
+        let Ok(address) = std::env::var("REDLINES_LIVE_GATEWAY") else {
+            return;
+        };
+        let first = match std::env::var("REDLINES_LIVE_CODE") {
+            Ok(code) => Credential::SetupCode(secret(&protocol::bootstrap_token(&code).unwrap())),
+            Err(_) => Credential::Token(secret(&std::env::var("REDLINES_LIVE_TOKEN").unwrap())),
+        };
+        let seed = std::env::var("REDLINES_LIVE_SEED").unwrap_or_else(|_| SEED.to_owned());
+        let seconds: u64 = std::env::var("REDLINES_LIVE_SECONDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+        let kept = Arc::new(Mutex::new(std::env::var("REDLINES_LIVE_DEVICE_TOKEN").ok()));
+        let device_token = Arc::clone(&kept);
+        let node = start(
+            Config {
+                target: target(&address, None).unwrap(),
+                identity: Identity::from_seed(&seed).unwrap(),
+                display_name: "Redlines live test".into(),
+                version: "0.2.0".into(),
+                timing: Timing::default(),
+            },
+            first,
+            Arc::new(Six),
+            Box::new(Memory(kept)),
+            Box::new(|event| eprintln!("LIVE {event:?}")),
+        );
+        std::thread::sleep(Duration::from_secs(seconds));
+        eprintln!(
+            "LIVE device token kept: {}",
+            device_token.lock().unwrap().is_some()
+        );
+        node.stop();
     }
 }

@@ -3,6 +3,7 @@
 // at. This is not a Markdown parser: it finds links, images, autolinks, entities, tags, escapes and
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
+import { isPandoc } from './dialect.ts';
 import { HTML_STARTS } from './block-read.ts';
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
 import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
@@ -315,8 +316,10 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
   // A shortcode has a colon, and an emoji has a surrogate, a variation selector, a joiner or a
   // keycap: the keystroke's cost is the same for the text that has none.
   const symbols = [ENTITY, MATH, ATTRIBUTES];
-  if (w.includes('@')) symbols.push(REFERENCES);
-  if (w.includes('^')) symbols.push(SUPERSCRIPT);
+  if (isPandoc()) {
+    if (w.includes('@')) symbols.push(REFERENCES);
+    if (w.includes('^')) symbols.push(SUPERSCRIPT);
+  }
   if (w.includes(':')) symbols.push(SHORTCODE);
   for (const re of symbols) {
     for (const m of w.matchAll(re)) inside(m.index, m.index + m[0].length, 'symbol');
@@ -606,7 +609,7 @@ export function inspectPlace(
     /^[ \t>]*-[ \t]*$/.test(lineText) &&
     splitOnLine(text, hidden, position);
   // A row of a table whose cells are all dashes is a row, not the delimiter row (format §3.7).
-  if (!around.joined && !ofSplit && DIV_FENCE_LINE.test(lineText)) {
+  if (isPandoc() && !around.joined && !ofSplit && DIV_FENCE_LINE.test(lineText)) {
     return { kind: 'refuse', reason: DIV_FENCE };
   }
   if (

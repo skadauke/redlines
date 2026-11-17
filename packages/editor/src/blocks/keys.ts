@@ -26,6 +26,7 @@ import {
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import { heldEditEffect, wasHeld } from '../tracked/ask.ts';
+import { recordedAs } from '../tracked/intent.ts';
 import {
   caretKeptFromEnd,
   probeAnnotation,
@@ -225,6 +226,7 @@ export function applyKeyEdit(
   }
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
   if (edit.open?.line) annotations.push(holdViewAnnotation.of(true));
+  if (edit.intent) annotations.push(recordedAs(edit.intent));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
   if (edit.widenFirst) annotations.push(widenFirstAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));

@@ -28,6 +28,7 @@
 // What cannot be put anywhere is refused with the code `no-legal-placement`; a change that would put
 // its markers inside code or an HTML comment, where nothing would read them, with `inside-code`.
 
+import { isPandoc, withDialect } from './dialect.ts';
 import { isAlignPayload } from './format-ops.ts';
 import {
   CONTAINER_PREFIX,
@@ -1081,7 +1082,7 @@ function tokenize(typed: string, linePrefix: string, where?: TypedAt): Token[] {
   }
   if (at < typed.length) tokens.push({ text: typed.slice(at) });
   if (where) wholeIndentedCode(tokens, linePrefix, where, eol);
-  if (where) wholeDivs(tokens, linePrefix, where);
+  if (where && isPandoc()) wholeDivs(tokens, linePrefix, where);
   return tokens;
 }
 
@@ -5184,7 +5185,7 @@ export function trackedEdits(
   edits: readonly TextChange[],
   ctx: EditContext,
 ): TrackedEdits {
-  return editsWidening(text, edits, ctx, true);
+  return withDialect(ctx.dialect, () => editsWidening(text, edits, ctx, true));
 }
 
 /**
@@ -5197,7 +5198,10 @@ export function widenedFirstEdits(
   edits: readonly TextChange[],
   ctx: EditContext,
 ): TrackedEdits {
-  return widenedAtOnce(text, edits, ctx) ?? editsWidening(text, edits, ctx, true);
+  return withDialect(
+    ctx.dialect,
+    () => widenedAtOnce(text, edits, ctx) ?? editsWidening(text, edits, ctx, true),
+  );
 }
 
 /** `trackedEdits` as marks at the grain of the edit only: what reads alike in every order, or the
@@ -5208,7 +5212,7 @@ export function fineEdits(
   edits: readonly TextChange[],
   ctx: EditContext,
 ): TrackedEdits {
-  return editsWidening(text, edits, ctx, false);
+  return withDialect(ctx.dialect, () => editsWidening(text, edits, ctx, false));
 }
 
 /** `trackedEdit` as marks at the grain of the edit only (see `fineEdits`). */

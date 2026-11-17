@@ -47,6 +47,7 @@ import { agentIntent, agentIntentAnnotation } from './tracked/agent-intent.ts';
 import { rebaseAgentEdit } from './tracked/agent-rebase.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
+export { dialectFacet } from './dialect.ts';
 export { inFrontMatter };
 export {
   type Container,
@@ -98,7 +99,8 @@ import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { imageInSelection } from './image-size.ts';
 import { CROP_NO_IMAGE, CROP_RAW, CROP_REMOTE, startCrop } from './image-crop.ts';
-import { dialectFacet, noticeFacet } from './image-size.ts';
+import { dialectFacet } from './dialect.ts';
+import { noticeFacet } from './image-size.ts';
 import { likelyParsing } from './likely/parse.ts';
 import {
   imageOpening,
@@ -259,13 +261,16 @@ export {
   setTrackingEffect,
   trackingField,
 } from './tracked/typing.ts';
-export { intentAnnotation, intentOf } from './tracked/intent.ts';
+export { editSourceFacet } from './tracked/typing.ts';
+export { intentAnnotation, intentOf, newIntentId, recordedAs } from './tracked/intent.ts';
+export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
+export type { FormatIntent, FormatRequest, FormatWriter } from './tracked/format-intent.ts';
 export { agentIntentAnnotation, agentIntentOf } from './tracked/agent-intent.ts';
 export type { AgentIntent } from './tracked/agent-intent.ts';
 export { anchorChanges, rebaseAgentEdit } from './tracked/agent-rebase.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
-export type { Intent, IntentEdit, TypingIntent } from './tracked/intent.ts';
+export type { Intent, IntentEdit, TypingIntent, Unnamed } from './tracked/intent.ts';
 export {
   UNTRACKED_DETAILS,
   UNTRACKED_TITLE,

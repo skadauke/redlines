@@ -191,11 +191,15 @@ class FakeHost implements Host {
  */
 function fakeEditor() {
   let doc = '';
+  const dialects: (string | undefined)[] = [];
   let onChange: (text: string) => void = () => {};
   return {
     getDoc: vi.fn(() => doc),
     getParsed: () => parse(doc),
-    setDoc: (text: string) => {
+    /** The dialect each document was given, which the name of its file says. */
+    dialects,
+    setDoc: (text: string, _kind?: string, dialect?: string) => {
+      dialects.push(dialect);
       doc = text;
       onChange(text);
     },
@@ -943,6 +947,18 @@ describe('DocumentController', () => {
     expect(editor.getDoc()).toBe('');
     expect(host.writes).toEqual([]);
     consoleError.mockRestore();
+  });
+
+  it('opens a .qmd, a .Rmd and a .md in their dialects (format §9.1)', async () => {
+    const { editor, controller } = setup({
+      '/a/talk.qmd': '# Talk\n',
+      '/a/report.Rmd': '# Report\n',
+      '/a/notes.md': '# Notes\n',
+    });
+    await controller.open('/a/talk.qmd');
+    await controller.open('/a/report.Rmd');
+    await controller.open('/a/notes.md');
+    expect(editor.dialects).toEqual(['pandoc', 'pandoc', 'gfm']);
   });
 
   it('opens no file that isn’t a document, and asks nothing of the one open', async () => {

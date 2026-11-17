@@ -11,6 +11,7 @@ import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@
 import type { FormatOp } from '@redlines/format';
 import { atomsOf, onlyHidden, pastHidden } from '../tracked/decorations.ts';
 import { authorFacet, bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
+import type { Unnamed } from '../tracked/intent.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { planCodeReturn } from './code.ts';
 import { BLANK } from './hidden.ts';
@@ -84,6 +85,8 @@ export interface KeyEdit {
    * markers and all: the tracked layer takes them as they are.
    */
   final?: boolean;
+  /** What the format was asked for, recorded beside the changes (tracked/intent.ts). */
+  intent?: Unnamed;
   /** The open empty paragraph goes with the caret's move, as an edit of its own. */
   close?: boolean;
   /**
