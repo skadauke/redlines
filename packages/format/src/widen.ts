@@ -102,7 +102,18 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
   if (!first || !last) throw new Untrackable('no-unit', 'There is no edit to write.');
   const spanFrom = first.from;
   const spanTo = Math.max(...sorted.map((edit) => edit.to));
-  const sourceFrom = view.map.toSource(spanFrom, 1);
+  let sourceFrom = view.map.toSource(spanFrom, 1);
+  // The end of the body, a point that the newest view's last line break stands at: the point is the
+  // one before the ledger, not the ledger's end (an item with no text, last in the file).
+  if (
+    spanFrom === spanTo &&
+    parsed.ledgerRange &&
+    sourceFrom > parsed.ledgerRange.from &&
+    // An opening fence that nothing closes is the code lane's, which keeps its refusal.
+    !sorted.some((edit) => /^[ \t]*(?:`{3,}|~{3,})/.test(edit.insert))
+  ) {
+    sourceFrom = Math.min(sourceFrom, view.map.toSource(spanFrom, -1));
+  }
   const sourceTo = Math.max(sourceFrom, view.map.toSource(spanTo, -1));
   if (
     sourceFrom < bodyStart(text) ||
