@@ -100,8 +100,6 @@ describe('a marker reads the first ledger after it (format §5.1)', () => {
 });
 
 describe('a new change writes its entry into the first ledger after it', () => {
-  const people = [ada, bo];
-
   it('writes it into the ledger of its own part, and leaves the others as they are', () => {
     const text = A + B + C;
     const at = text.indexOf('Beta') + 5;
@@ -117,7 +115,6 @@ describe('a new change writes its entry into the first ledger after it', () => {
     expect(Object.keys(second.ledger.marks).sort()).toEqual(['bbbb', 'nnnn']);
     expect(second.ledger.marks['nnnn']).toMatchObject({ by: 'bo' });
     expect(parse(after).warnings).toEqual([]);
-    expect(people).toBeDefined();
   });
 
   it('writes a change in the first part into the first ledger', () => {

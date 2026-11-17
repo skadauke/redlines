@@ -139,16 +139,58 @@ export function splitLedger(
     out[index]!.comments.push(thread);
     for (const handle of handlesOf(thread)) named[index]!.add(handle);
   }
+  // What a ledger lists of a person is its own as long as no edit changed the person: a handle
+  // that two parts spell differently stays so in each.
+  const read = mergeLedgers(current, starts, positions).people;
   for (const person of ledger.people) {
+    const same =
+      JSON.stringify(read.find((p) => p.handle === person.handle)) === JSON.stringify(person);
     let placed = false;
     out.forEach((target, index) => {
-      const listed = current[index]!.people.some((p) => p.handle === person.handle);
-      if (listed || named[index]!.has(person.handle)) {
-        target.people.push(person);
+      const own = current[index]!.people.find((p) => p.handle === person.handle);
+      if (own || named[index]!.has(person.handle)) {
+        target.people.push(own && same ? own : person);
         placed = true;
       }
     });
     if (!placed) out[lastIndex]!.people.push(person);
   }
+  // An entry that stands in a ledger its marker doesn't read is not read, and stays where it is
+  // until its mark goes. Every ledger but the last keeps the order its entries had.
+  out.forEach((target, index) => {
+    const was = current[index]!;
+    const marks: Ledger['marks'] = {};
+    const comments: Thread[] = [];
+    const shadowedMarks = Object.entries(was.marks).filter(
+      ([id]) => !Object.hasOwn(target.marks, id) && positions.has(id) && place(id) !== index,
+    );
+    const shadowedThreads = was.comments.filter(
+      (thread) =>
+        !target.comments.some((one) => one.id === thread.id) &&
+        positions.has(thread.id) &&
+        place(thread.id) !== index,
+    );
+    if (index === lastIndex) {
+      target.marks = { ...target.marks, ...Object.fromEntries(shadowedMarks) };
+      target.comments = [...target.comments, ...shadowedThreads];
+      return;
+    }
+    for (const id of Object.keys(was.marks)) {
+      if (Object.hasOwn(target.marks, id)) marks[id] = target.marks[id]!;
+      else {
+        const kept = shadowedMarks.find(([shadowed]) => shadowed === id);
+        if (kept) marks[id] = kept[1];
+      }
+    }
+    for (const [id, entry] of Object.entries(target.marks)) if (!(id in marks)) marks[id] = entry;
+    for (const thread of was.comments) {
+      const mine = target.comments.find((one) => one.id === thread.id);
+      if (mine) comments.push(mine);
+      else if (shadowedThreads.includes(thread)) comments.push(thread);
+    }
+    for (const thread of target.comments) if (!comments.includes(thread)) comments.push(thread);
+    target.marks = marks;
+    target.comments = comments;
+  });
   return out;
 }
