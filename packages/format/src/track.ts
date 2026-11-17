@@ -128,7 +128,12 @@ import {
   theirChange,
 } from './code-edit.ts';
 import { widenedAtOnce, widenedEdits } from './edits-widen.ts';
-import { atBlockBoundary, readsOtherMicromark } from './widen.ts';
+import {
+  atBlockBoundary,
+  atDelimiter,
+  delimiterBesideBreak,
+  readsOtherMicromark,
+} from './widen.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import { atWrappedLine, wrappedLineStart } from './wrapped-line.ts';
@@ -5286,13 +5291,16 @@ function editsWidening(
       }
       try {
         const written = editsOnce(text, edits, mode === 0 ? first : again(), mode);
-        if (widening && readsOtherAtBoundary(text, edits, written.changes)) {
+        if (
+          widening &&
+          (readsOtherAtBoundary(text, edits, written.changes) || delimiterBesideBreak(text, edits))
+        ) {
           // A write the format accepts that a reader of the file reads otherwise than the newest
           // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
           // can't be.
           let whole: ReturnType<typeof widenedAtOnce>;
           try {
-            whole = widenedAtOnce(text, edits, again());
+            whole = widenedAtOnce(text, edits, again(), false, true);
           } catch {
             // no unit holds it: the fine write stays
           }
@@ -5320,7 +5328,9 @@ export function readsOtherAtBoundary(
   edits: readonly TextChange[],
   changes: readonly TextChange[],
 ): boolean {
-  return atBlockBoundary(text, edits) && readsOtherMicromark(text, changes);
+  return (
+    (atBlockBoundary(text, edits) || atDelimiter(text, edits)) && readsOtherMicromark(text, changes)
+  );
 }
 
 /**

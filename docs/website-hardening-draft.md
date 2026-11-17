@@ -130,7 +130,6 @@ We would rather say it than have you find it.
   - numbered lists under Backspace (#292);
   - a deletion inside a blank line of a quote between two paragraphs, in a few shapes (#447), and a
     change in the break of your own pending line break there (#419);
-  - typing over one `*` of a pending bold's `**` (#299);
   - a bold change on a line that rejecting a pending deletion makes a link definition (#335), and
     typing at the end of a link reference definition (#262);
   - rejecting a row move with a comment in the moved row (#371);

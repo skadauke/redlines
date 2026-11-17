@@ -39,6 +39,8 @@ export interface BubbleHandlers {
   stop(): void;
   /** A model was picked in the list; undefined is the agent's default. */
   chooseModel?: (model: string | undefined) => void;
+  /** The field's text changed: the picker follows the agent it names (#837). */
+  typing?: (text: string) => void;
   consent(answer: AgentScope | 'no'): void;
   dismiss(): void;
   showLog?: (path: string) => void;
@@ -142,7 +144,10 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
     field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`;
     handlers.resized();
   };
-  field.addEventListener('input', size);
+  field.addEventListener('input', () => {
+    size();
+    handlers.typing?.(field.value);
+  });
   field.addEventListener('keydown', (event) => {
     // A key during composition belongs to the input method.
     if (event.isComposing || event.keyCode === 229) return;
