@@ -544,7 +544,7 @@ function itemDepth(state: EditorState, line: Line): number {
 
 /** A line that ends in a hard break: two spaces, or a backslash that no other backslash escapes
  * (`\\` is a backslash, no break, #291). */
-const HARD_BREAK_END = /(?<!\\)(?:\\\\)*(?:\\| {2,})$/;
+const HARD_BREAK_END = /(?:(?<!\\)(?:\\\\)*\\| {2,})$/;
 
 /** Why Return at the start of a nested list's first item, under the text of its item, is refused. */
 const NEEDS_BLANK_LINE =
