@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -51,6 +51,22 @@ describe('redlines import-docx', () => {
       expect(await run(['import-docx', docx, '-o', file], io)).toBe(1);
       await writeFile(join(folder, 'bad.docx'), 'not a zip');
       expect(await run(['import-docx', join(folder, 'bad.docx')], io)).toBe(1);
+    });
+  });
+});
+
+describe('redlines import-docx with pictures', () => {
+  it('writes the pictures beside the Markdown, where its links name them', async () => {
+    await inFolder(async (folder, io) => {
+      const docx = join(folder, 'pic.docx');
+      await copyFile(new URL('./picture.fixture.docx', import.meta.url), docx);
+      expect(await run(['import-docx', docx, '-o', join(folder, 'out', 'pic.md')], io)).toBe(0);
+      const markdown = await readFile(join(folder, 'out', 'pic.md'), 'utf8');
+      expect(markdown).toMatch(/!\[A dot\]\(media\/image1\.png\)/);
+      const png = await readFile(join(folder, 'out', 'media', 'image1.png'));
+      expect([...png.subarray(1, 4)]).toEqual([0x50, 0x4e, 0x47]);
+      // A second import to the same folder doesn't replace the picture.
+      expect(await run(['import-docx', docx, '-o', join(folder, 'out', 'again.md')], io)).toBe(1);
     });
   });
 });

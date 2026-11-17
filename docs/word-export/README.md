@@ -288,6 +288,12 @@ and `commentsIds.xml` for the durable ids written on export.
   without Node, doesn't carry the writer, and says so.
 - **File › Open .docx…** opens a Word or Google Docs file as a new, unsaved document (here while the
   window is untouched, else in a new window). The import report is a notification, never a dialog.
-  Pictures are not carried yet, and the report says how many. In the development page it is a file picker.
+  A file with pictures can't be unsaved (they are files beside the document, in the project's folder
+  for images), so, as adding an image to an unsaved document does, the save panel comes first: the
+  Markdown is saved where the person says, the pictures go into the images folder, each link points at
+  its file, and the saved document opens. When the panel is cancelled the document opens unsaved
+  without its pictures, and the card says so. Pictures that can't be carried (EMF, WMF) are counted
+  in the report. In the development page it is a file picker.
 - **`redlines import-docx <file.docx> [-o out.md]`** writes the Markdown beside the file, and never over
-  a file that is there.
+  a file that is there. The pictures go beside the Markdown
+  as `media/image1.png`, where its links name them, and never over a file that is there.

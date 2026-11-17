@@ -5,6 +5,7 @@ import {
   access,
   chmod,
   constants,
+  mkdir,
   readFile,
   realpath,
   rename,
@@ -12,6 +13,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { buffer } from 'node:stream/consumers';
 import { notUtf8 } from './files.ts';
 import type { CliIo } from './run.ts';
@@ -68,15 +70,16 @@ export const nodeIo: CliIo = {
   },
   now: () => new Date(),
   randomHex: (n) => randomBytes(n).toString('hex'),
-  writeBytes: (path, bytes) => writeFile(path, bytes),
+  writeBytes: async (path, bytes) => {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, bytes);
+  },
   readBytes: async (path) => new Uint8Array(await readFile(path)),
   async importDocx(bytes) {
     const { importDocx } = await import('@redlines/word');
     const result = importDocx(bytes);
     const notes = result.report.entries.map((entry) => entry.message);
-    const pictures = Object.keys(result.media).length;
-    if (pictures > 0) notes.push(`${pictures} picture(s) in the file are not in the Markdown.`);
-    return { markdown: result.markdown, notes };
+    return { markdown: result.markdown, notes, media: result.media };
   },
   async exportDocx(text) {
     // Loaded here and not in `run.ts`, so the program in the app, which has no Node, never holds it.
