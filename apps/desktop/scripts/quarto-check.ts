@@ -63,6 +63,8 @@ export function probe(engine: Engine): string {
   return [
     '---',
     'title: "Probe"',
+    // Typst refuses a reference to a heading that has no number (Quarto 1.11.9).
+    'number-sections: true',
     ...(engine === 'jupyter' ? ['jupyter: python3'] : []),
     '---',
     '',
