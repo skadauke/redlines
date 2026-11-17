@@ -574,7 +574,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   /** Applies a decision as one step to undo, apart from the typing around it. */
   const decide = (decision: 'accept' | 'reject', id: string | readonly string[]) => {
     const who = author;
-    const { random } = view.state.facet(editSourceFacet);
+    const { random, now } = view.state.facet(editSourceFacet);
     const made = writeReview(
       view.state.doc.toString(),
       {
@@ -585,7 +585,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       },
       {
         author: who,
-        time: `${new Date().toISOString().slice(0, 16)}Z`,
+        time: `${now().toISOString().slice(0, 16)}Z`,
         ...(random ? { random } : {}),
       },
     );

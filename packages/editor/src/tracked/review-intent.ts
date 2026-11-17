@@ -61,16 +61,27 @@ export type ReviewRequest =
       many?: true;
     };
 
-/** The mark as a person sees it: its kind, author and every character from its first marker to its
- * last, payloads and everything inside it included. */
+/**
+ * The mark as a person sees it: its kind, payload, author, time, note and group, and every
+ * character from its first marker to its last, with the text of an opener's carrier. A change to
+ * any of them makes it another mark to decide. It errs toward "changed": text between the segments
+ * of a mark that spans blocks counts, which asks a person to look again rather than decide blind.
+ */
 export function markSignature(text: string, mark: MarkRange): string {
   let from = Infinity;
   let to = 0;
   for (const segment of mark.segments) {
     from = Math.min(from, segment.open.from);
-    to = Math.max(to, segment.close?.to ?? Math.max(segment.content.to, segment.open.to));
+    to = Math.max(
+      to,
+      segment.close?.to ?? 0,
+      segment.content.to,
+      segment.open.to,
+      segment.carrier?.to ?? 0,
+    );
   }
-  return `${mark.kind}|${mark.entry.by}|${text.slice(from, to)}`;
+  const { by, at, note, group } = mark.entry;
+  return `${JSON.stringify([mark.kind, mark.payload ?? null, by, at, note ?? null, group ?? null])}|${text.slice(from, to)}`;
 }
 
 /** The signatures of the marks `ids` name in `text`; null for one that isn't there. */

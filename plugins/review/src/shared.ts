@@ -384,8 +384,9 @@ export function applyReview(
   request: ReviewRequest,
   userEvent: string,
 ): string | undefined {
-  const { author: person, time } = editContext(author);
-  const { random } = view.state.facet(editSourceFacet);
+  const { author: person } = editContext(author);
+  const { random, now } = view.state.facet(editSourceFacet);
+  const time = ledgerTime(now());
   const made = writeReview(view.state.doc.toString(), request, {
     author: person,
     time,
