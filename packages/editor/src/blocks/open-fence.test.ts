@@ -433,7 +433,7 @@ describe('a change elsewhere in a file that ends in a block that is never closed
       expect: {
         file: 'Some text.⏎⏎```js⏎let x = 1',
         refusal:
-          "The end of this file is inside a code block or a comment that is never closed, so Redlines can't add its ledger. Close it first.",
+          "The end of this file is inside a code block or a comment that is never closed, or a `<!--` with no `-->` of its own hides its ledger, so Redlines can't write the ledger. Close or remove the `<!--` first.",
       },
     },
     {

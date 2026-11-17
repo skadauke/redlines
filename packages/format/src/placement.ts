@@ -13,6 +13,7 @@ import {
   breakEnd,
   openerRange,
   carrierEnd,
+  closerRange,
   lineEnd,
   lineStart,
   lineStartKind,
@@ -202,7 +203,7 @@ function hiddenRanges(parsed: Parsed): Range[] {
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
       ranges.push(openerRange(segment));
-      if (segment.close) ranges.push(segment.close);
+      if (segment.close) ranges.push(closerRange(parsed.text, segment.close));
     }
   }
   return ranges.sort((a, b) => a.from - b.from);

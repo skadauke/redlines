@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fillPrintPage,
   imagesLoaded,
+  fitTableColumns,
   keepHeadingsWithNext,
   PRINT_ID,
   plainPageHtml,
@@ -61,6 +62,26 @@ describe('the print container', () => {
     expect(plainPageHtml('a < b && c')).toBe(
       '<div data-redlines><pre><code>a &lt; b &amp;&amp; c</code></pre></div>',
     );
+  });
+});
+
+describe('fitTableColumns', () => {
+  it('gives each column one share in every row, wide enough for its longest short word', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<table><thead><tr><th>Name</th><th>About</th></tr></thead><tbody>' +
+      '<tr><td>Row 39</td><td>' +
+      'a long sentence of words '.repeat(6) +
+      '</td></tr>' +
+      '<tr><td>Row 4</td><td>short</td></tr></tbody></table>';
+    fitTableColumns(root);
+    const grow = (cell: Element) => Number((cell as HTMLElement).style.flexGrow);
+    const cells = Array.from(root.querySelectorAll('tr')).map((row) => Array.from(row.children));
+    for (const column of [0, 1]) {
+      expect(new Set(cells.map((row) => grow(row[column]!))).size).toBe(1);
+    }
+    expect(grow(cells[0]![0]!)).toBeGreaterThanOrEqual(6);
+    expect(grow(cells[0]![1]!)).toBeGreaterThan(grow(cells[0]![0]!) * 3);
   });
 });
 

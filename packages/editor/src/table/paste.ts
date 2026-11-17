@@ -12,7 +12,7 @@
 // change.
 
 import { isolateHistory } from '@codemirror/commands';
-import { ChangeSet, EditorSelection, type EditorState } from '@codemirror/state';
+import { ChangeSet, EditorSelection, type EditorState, Transaction } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   applyChanges,
@@ -22,6 +22,8 @@ import {
   parse,
   readRowCells,
   type TextChange,
+  Untrackable,
+  widenedPaste,
 } from '@redlines/format';
 import {
   markupViewFacet,
@@ -29,11 +31,14 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from '../tracked/field.ts';
+import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
 import {
   authoredChanges,
+  contextFor,
   editSourceFacet,
   refusedEditEffect,
   trackingField,
+  untrackedChanges,
 } from '../tracked/typing.ts';
 import { cellOfRef, cellsOfRect, clearedCells, headCell, rectOf } from './cells.ts';
 import { type Cell, type Table, tablesField } from './model.ts';
@@ -179,7 +184,16 @@ export function pasteRange(view: EditorView, range: readonly (readonly string[])
   });
 }
 
-function write(view: EditorView, plan: Plan): boolean {
+/**
+ * The paste as one change, worked out on the text: the columns' insertion first, then the rows', with
+ * the values in them, then the edits to the cells that were there. `untracked` writes it as Track
+ * Changes off does, whatever the setting; the refusal is the message of what could not be written.
+ */
+function compute(
+  view: EditorView,
+  plan: Plan,
+  untracked: boolean,
+): { total: ChangeSet } | { why: string } {
   const { state } = view;
   const { table, extra } = plan;
   const extraCols = plan.extraCols ?? 0;
@@ -188,7 +202,7 @@ function write(view: EditorView, plan: Plan): boolean {
   let rows: ChangeSet = ChangeSet.empty(text0.length);
   let text1 = text0;
   let group: string | undefined;
-  const tracked = state.field(trackingField);
+  const tracked = state.field(trackingField) && !untracked;
   if (extra > 0 || extraCols > 0) {
     // The columns, the rows and the cell edits are one change, so they share one group, even for one.
     group =
@@ -203,8 +217,9 @@ function write(view: EditorView, plan: Plan): boolean {
       group,
       undefined,
       true,
+      untracked,
     );
-    if ('refusal' in insertion) return refuse(view, insertion.refusal);
+    if ('refusal' in insertion) return { why: insertion.refusal };
     rows = ChangeSet.of(
       insertion.changes.map(({ from, to, insert }) => ({ from, to, insert })),
       text0.length,
@@ -225,8 +240,9 @@ function write(view: EditorView, plan: Plan): boolean {
       group,
       text1,
       true,
+      untracked,
     );
-    if ('refusal' in insertion) return refuse(view, insertion.refusal);
+    if ('refusal' in insertion) return { why: insertion.refusal };
     // The new rows hold the values they are pasted: text in your own new row is its insertion.
     const first = table.rows.length - plan.top;
     let filled = false;
@@ -236,7 +252,7 @@ function write(view: EditorView, plan: Plan): boolean {
       return { ...change, insert: fillRows(change.insert, plan.range, first, plan.left) };
     });
     // Values are never dropped: if the rows are not where they are expected, the paste is refused.
-    if (!filled) return refuse(view, "Redlines can't add the rows this paste needs to this table.");
+    if (!filled) return { why: "Redlines can't add the rows this paste needs to this table." };
     const step = ChangeSet.of(
       changes.map(({ from, to, insert }) => ({ from, to, insert })),
       text1.length,
@@ -266,21 +282,84 @@ function write(view: EditorView, plan: Plan): boolean {
   let cells = ChangeSet.empty(text1.length);
   if (edits.length) {
     try {
-      cells = authoredChanges(state, text1, parse(text1), edits, group);
+      cells = untracked
+        ? untrackedChanges(state, text1, parse(text1), edits)
+        : authoredChanges(state, text1, parse(text1), edits, group);
     } catch (error) {
-      if (error instanceof EditError) return refuse(view, error.message);
+      if (error instanceof EditError) return { why: error.message };
       throw error;
     }
   }
-  const total = rows.compose(cells);
+  return { total: rows.compose(cells) };
+}
+
+/** The sheet's question for a paste that no tracked write holds. */
+const PASTE_UNTRACKED =
+  "This paste can't be tracked while another person's change is pending in the table. Make it without tracking?";
+
+function write(view: EditorView, plan: Plan): boolean {
+  const { state } = view;
+  const { table } = plan;
+  const tracked = state.field(trackingField);
+  let done = compute(view, plan, false);
+  // The rows and columns it needs, where the table's own rules refuse them (another person's change
+  // in the table): the table as a replacement, with the paste made in it (format §3.12).
+  if ('why' in done && tracked && (plan.extra > 0 || (plan.extraCols ?? 0) > 0)) {
+    try {
+      const wide = widenedPaste(
+        state.doc.toString(),
+        { table: table.from, range: plan.range, top: plan.top, left: plan.left },
+        contextFor(state),
+      );
+      done = { total: ChangeSet.of(wide.changes, state.doc.length) };
+    } catch (error) {
+      if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
+    }
+  }
+  // No tracked write holds it (another person's change in the table): the person is asked, and the
+  // paste is made without tracking, never refused (design: widen, alert or disable, §3.1).
+  let untracked = false;
+  if ('why' in done && tracked) {
+    const plain = compute(view, plan, true);
+    if (!('why' in plain)) {
+      done = plain;
+      untracked = true;
+    }
+  }
+  if ('why' in done) return refuse(view, done.why);
+  const total = done.total;
   if (total.empty) return true;
+  const annotations = [
+    trackedEditAnnotation.of(true),
+    clearedCells.of(true),
+    isolateHistory.of('full'),
+  ];
+  if (untracked) {
+    const asker = state.facet(untrackedAskFacet);
+    if (asker) {
+      // Held for the sheet: Make Edit makes the same paste without tracking, Cancel drops it.
+      view.dispatch({
+        effects: heldEditEffect.of({
+          reason: 'accept-pending',
+          words: { title: PASTE_UNTRACKED },
+          doc: state.doc,
+          changes: total,
+          selection: undefined,
+          annotations: [Transaction.userEvent.of('input.paste'), ...annotations],
+          scrollIntoView: true,
+        }),
+      });
+      return true;
+    }
+    annotations.push(untrackedAnswerAnnotation.of(true));
+  }
   view.dispatch({
     changes: total,
     userEvent: 'input.paste',
-    annotations: [trackedEditAnnotation.of(true), clearedCells.of(true), isolateHistory.of('full')],
+    annotations,
     // A tracked change made in Clean shows in the markup view, as typing's do.
     effects:
-      tracked && state.field(viewModeField) === 'clean'
+      tracked && !untracked && state.field(viewModeField) === 'clean'
         ? [setViewModeEffect.of(state.facet(markupViewFacet))]
         : [],
     scrollIntoView: true,

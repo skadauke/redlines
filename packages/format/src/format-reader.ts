@@ -544,9 +544,22 @@ export function paragraphsIn(reader: FormatReader, from: number, to: number): Ra
   const { text, hidden } = reader;
   const found: Range[] = [];
   let at = lineStart(text, from);
-  while (at < text.length && at <= to) {
+  // A caret on lines that hold only hidden markers and container syntax, in front of a paragraph's
+  // text, belongs to that paragraph: the search goes on to its first line (#420).
+  let reach = to;
+  let marked = false;
+  while (at < text.length && at <= reach) {
     let end = lineEnd(text, at);
-    if (!/^[ \t>]*\r?$/.test(visible(text, hidden, at, end).text)) {
+    const shown = visible(text, hidden, at, end).text;
+    if (/^[ \t>]*\r?$/.test(shown)) {
+      // A line with nothing at all on it ends the search: what follows is no part of the caret's.
+      if (marked && /^\s*$/.test(text.slice(at, end)) && at > to) break;
+      if (found.length === 0 && (marked || shown.length < end - at)) {
+        marked = true;
+        const next = text.indexOf('\n', end);
+        if (next !== -1) reach = Math.max(reach, next + 1);
+      }
+    } else {
       let paragraph = paragraphRange(text, hidden, at);
       // A closing fence takes no lazy line: what is under it is a paragraph of its own (rule 2).
       const fence = reader.verbatim.find(

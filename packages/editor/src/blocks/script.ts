@@ -508,7 +508,9 @@ function itemLines(body: string): number {
       if (!ends) continue;
       fence = null;
     }
-    if (/^(?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) count++;
+    // A line of three or more `-` or `*` (`- ---`, `* * *`) is a thematic break, not an item.
+    const thematic = /^(?:[ \t]*>)*[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/.test(line);
+    if (!thematic && /^(?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) count++;
     if (opens) {
       fence = opens;
       where = shape(line);

@@ -550,6 +550,39 @@ describe("an empty item of another person's pending split", () => {
   );
 });
 
+// The author's own pending split before an empty item, with another person's pending deletion on
+// the indented line after it (#465): the plain edit of the item's line went to the file unchecked
+// and made a line Markdown reads as code. It is checked by the format, and the list is replaced
+// where no fine write reads right.
+describe('an empty item of the author’s own split, with a pending change below it', () => {
+  const HIDES_OTHERS =
+    'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain with Track Changes off.';
+  scriptRows([
+    {
+      name: 'Shift-Tab, Track Changes on: every order of decisions reads the same',
+      doc:
+        '1. one⏎\t2. two<!--split k3x9-->⏎\t3. ‸⏎\t   * beta<!--del m4t7 q-->⏎⏎' +
+        '<!-- redlines⏎version: 1⏎people:⏎  ada: {name: Ada Lovelace}⏎  bo: {name: Bo Chen}⏎marks:⏎' +
+        '  k3x9: {by: ada, at: 2026-11-01T10:00Z}⏎  m4t7: {by: bo, at: 2026-11-01T10:00Z}⏎-->⏎',
+      keys: ['Shift-Tab'],
+      tc: true,
+      // Another person's pending change in the lines below can't be taken into a replacement of
+      // the list: the key says so, in the format's words, and the file stays as it is.
+      expect: {
+        file: '1. one⏎\t2. two<split>⏎\t3. ⏎\t   * beta<del q>',
+        refusal: HIDES_OTHERS,
+      },
+    },
+    {
+      name: 'Shift-Tab, Track Changes on, a sound write: made as it stands',
+      doc: '- one⏎  - two<split>⏎  - ‸⏎    - beta<del q>',
+      keys: ['Shift-Tab'],
+      tc: true,
+      expect: {},
+    },
+  ]);
+});
+
 // The caret at the end of an item's text with a block after it stays there (#508): the tracked
 // layer's closer and the line breaks after it make one hidden range, and the caret was taken to
 // its far end, the start of the next block, where the next letters went.

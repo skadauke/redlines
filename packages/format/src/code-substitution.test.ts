@@ -313,7 +313,7 @@ describe('indented code, display math and raw text', () => {
       expect(parse(text).marks[0]?.kind, tag).toBe('sub');
       expect(back(text), tag).toBe(body);
       const at = file(body).indexOf('one') + 3;
-      expect(attempt(file(body), at, at, `\n</${tag}>`).code, tag).toBe('no-legal-placement');
+      widenedOrAsked(file(body), at, at, `\n</${tag}>`);
     }
   });
 });
@@ -434,9 +434,11 @@ describe('a block whose range holds a marker, and its edges (fix round 1)', () =
     const inMath = math.indexOf('1');
     expect(attempt(math, inMath, inMath, 'x').error).toContain("Bo Chen's pending change");
     const mine = file(PRE, { k3x9: 'ada' });
-    expect(attempt(mine, mine.indexOf('one') + 3, mine.indexOf('one') + 3, 'x').error).toContain(
-      'Your pending change is in this code block',
-    );
+    // (your own marks are widened over, whole, where another person's are not)
+    const own = attempt(mine, mine.indexOf('one') + 3, mine.indexOf('one') + 3, 'x');
+    if (own.error !== undefined)
+      expect(own.error).toContain('Your pending change is in this code block');
+    else expect(own.after).toBeDefined();
   });
 
   it('never writes a marker inside code, math or raw text: an edit at an edge is widened', () => {

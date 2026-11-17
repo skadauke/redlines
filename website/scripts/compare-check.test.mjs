@@ -13,14 +13,14 @@ test('the page agrees with docs/design.md §4', () => {
 });
 
 test('a row the page calls built and §4 calls planned fails, by its name', () => {
-  const word = 'Word files with tracked changes, in and out';
+  const word = 'R Markdown and Quarto';
   const problems = compareRows(
     rows.map((r) => (r.feature === word ? { ...r, redlines: 'built' } : r)),
     PRODUCTS,
     table,
   );
   assert.equal(problems.length, 1);
-  assert.match(problems[0], /Word files with tracked changes, in and out/);
+  assert.match(problems[0], /R Markdown and Quarto/);
 });
 
 test('a row §4 lacks fails, by its name', () => {

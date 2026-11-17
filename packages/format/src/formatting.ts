@@ -27,6 +27,7 @@
 import {
   breakEnd,
   breakStart,
+  closerRange,
   frontMatterEnd,
   lineEnd,
   lineStart,
@@ -152,6 +153,9 @@ const REFERENCE =
   "This text has a reference, whose address is defined elsewhere in the file, so a link can't be changed or added here.";
 
 const DEFINES = 'This line defines a link.';
+/** How far above a paragraph a pending change is looked for, for one that brings back what makes
+ * its line a definition (the `[label]` that a deletion takes, with a blank line after it). */
+const ABOVE_A_DEFINITION = 200;
 
 const STRAY_TAG =
   'This text has a <sub> or <sup> tag without its pair. Select whole pairs of tags, or take the stray tag away in Plain first.';
@@ -1374,7 +1378,10 @@ function planFormat(
     // change does, and not the block it ends at the start of.
     const outside =
       forBlocks && from === to
-        ? paragraph.to < from || paragraph.from > to
+        ? paragraph.to < from ||
+          (paragraph.from > to &&
+            // Only hidden markers and container syntax between the caret and the paragraph (#420).
+            !/^[ \t>\r\n]*$/.test(visible(planning.text, planning.hidden, to, paragraph.from).text))
         : paragraph.to <= from || paragraph.from >= to;
     if (outside) continue;
     if (isRawParagraph(planning, paragraph)) {
@@ -1385,11 +1392,14 @@ function planFormat(
     // A definition is not text: formatting would leave the links it defines with none (format §2.6).
     const defined = definitionLines(planning, paragraph);
     if (defined && from <= defined.to && defined.from <= to) throw refused(DEFINES);
-    // Nor once the pending changes in it are rejected, which can make a line a definition again.
+    // Nor once the pending changes are rejected, which can make a line a definition again: the
+    // changes in it, and a deletion above it that brings back the `[label]` it starts with (#335).
     if (
       parsed.marks.some((mark) =>
         mark.segments.some(
-          (g) => g.open.from <= paragraph.to && paragraph.from <= (g.close ?? g.open).to,
+          (g) =>
+            g.open.from <= paragraph.to &&
+            paragraph.from - ABOVE_A_DEFINITION <= (g.close ?? g.open).to,
         ),
       )
     ) {
@@ -1947,7 +1957,7 @@ function withoutAnnotations(text: string): string {
     if (mark.kind !== 'cmt' && mark.kind !== 'hl') return [];
     return mark.segments.flatMap((segment) => {
       const gone: TextChange[] = [{ ...openerRange(segment), insert: '' }];
-      if (segment.close) gone.push({ ...segment.close, insert: '' });
+      if (segment.close) gone.push({ ...closerRange(text, segment.close), insert: '' });
       return gone;
     });
   });
@@ -2756,8 +2766,20 @@ function ownBlockEdit(
   if ([...near.values()].some(breaks)) return undefined;
   // Your own splits and the comments and highlights near it are what the typing of syntax into your
   // insertion has always stood next to. Anything else near, and your split after it, is tried.
+  // A split of yours between the lines of the block itself is not next to it but in it: parting the
+  // lines, it decides, rejected, how the second one joins the first (what is taken off its start),
+  // which a change of the lines' indentation changes (#870), so that it too is tried.
+  const within =
+    op.kind === 'indent' &&
+    markerRanges(parsed).some(
+      (marker) =>
+        marker.mark?.kind === 'split' &&
+        map.toSource(first, 1) <= marker.from &&
+        marker.to <= map.toSource(last, -1),
+    );
   const trial =
     neighbors.size > 0 ||
+    within ||
     [...near.values()].some(
       (mark) =>
         !(mark.kind === 'split' && mark.entry.by === me) &&

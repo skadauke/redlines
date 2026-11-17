@@ -8,7 +8,7 @@
 
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import type { EditorState, Line } from '@codemirror/state';
-import { type Parsed, readBlocks } from '@redlines/format';
+import { closerRange, type Parsed, readBlocks } from '@redlines/format';
 import { parsedField } from '../tracked/field.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -128,7 +128,7 @@ function markerSpans(state: EditorState): Span[] {
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
       spans.push(segment.open);
-      if (segment.close) spans.push(segment.close);
+      if (segment.close) spans.push(closerRange(parsed.text, segment.close));
     }
   }
   if (parsed.ledgerRange) spans.push(parsed.ledgerRange);
