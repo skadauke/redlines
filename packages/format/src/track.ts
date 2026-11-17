@@ -61,6 +61,7 @@ import {
   viewBreaks,
   withoutMarkers,
   HTML_START_7,
+  INCLUDE_LINE,
 } from './blocks.ts';
 import { readBlocks, sameBlocks } from './block-read.ts';
 import {
@@ -793,7 +794,8 @@ function joinSplits(plan: Plan, items: Item[], ownSplits: readonly SplitUnit[]):
  * after it on the line would make a paragraph, though the newest view reads it as a block (§3.3).
  */
 function closerGap(plan: Plan, piece: Piece, typing: Typing): string {
-  if (typing.trail !== '' || !HTML_START_7.test(typing.inner)) return '';
+  const include = isPandoc() && INCLUDE_LINE.test(typing.inner);
+  if (typing.trail !== '' || !(HTML_START_7.test(typing.inner) || include)) return '';
   const { text } = plan;
   const start = lineStart(text, piece.from);
   if (
@@ -1162,21 +1164,40 @@ const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
  * a line, with nothing after the text on its last line; anywhere else the text is written as it was.
  */
 function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
-  if (linePrefix !== '' || where.rest.trim() !== '') return;
+  if (where.rest.trim() !== '' || wholeTopDiv(tokens, linePrefix, where)) return;
+  // Typed text that ends in a bare fence line and is no div at the top level (a div closed
+  // wherever it opened, as in a quote or after text on its line): the closer stands alone on the
+  // line after it (#1088).
+  const last = tokens.at(-1);
+  if (
+    last &&
+    'text' in last &&
+    last.fence !== true &&
+    /(?:^|\n)[ \t>]*:{3,}[ \t]*$/.test(last.text)
+  ) {
+    const eol = last.text.includes('\r\n') ? '\r\n' : '\n';
+    tokens[tokens.length - 1] = { text: last.text + eol + linePrefix, fence: true };
+  }
+}
+
+/** The div at the top level that `wholeDivs` makes one piece: whether it did. */
+function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boolean {
+  if (linePrefix !== '') return false;
   const first = tokens.findIndex((token, i) => {
     if (!('text' in token) || token.fence === true) return false;
     const before = tokens[i - 1];
     const atLineStart = before === undefined ? where.prefix !== undefined : 'brk' in before;
     return atLineStart && DIV_FENCE_TYPED.test(token.text.split('\n')[0]?.replace(/\r$/, '') ?? '');
   });
-  if (first < 0) return;
+  if (first < 0) return false;
   const rest = tokens.slice(first);
-  if (rest.some((token) => 'brk' in token && token.prefix !== '')) return;
-  if (rest.some((token) => 'text' in token && token.fence === true)) return;
+  if (rest.some((token) => 'brk' in token && token.prefix !== '')) return false;
+  if (rest.some((token) => 'text' in token && token.fence === true)) return false;
   const text = rest.map((token) => ('text' in token ? token.text : token.brk)).join('');
   // The break after the last line is the one that the closer stands behind (format §3.3).
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   tokens.splice(first, rest.length, { text: /\n$/.test(text) ? text : text + eol, fence: true });
+  return true;
 }
 
 /** What the tokens write: breaks before the last text are in the insertion, those after it behind. */
