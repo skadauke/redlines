@@ -274,8 +274,12 @@ function canDecide(
 function keepsDecidable(text: string, edits: TrackedEdits): boolean {
   if (edits.changes.length === 0) return true;
   // The blocks the changes touch: up to the blank lines around them.
-  const start = Math.min(...edits.changes.map((change) => change.from));
-  const end = Math.max(...edits.changes.map((change) => change.to));
+  // The ledger's own change, at the end of the file, is no part of the body's blocks.
+  const body = parse(text).ledgerRange?.from ?? text.length;
+  const mine = edits.changes.filter((change) => change.from < body);
+  if (mine.length === 0) return true;
+  const start = Math.min(...mine.map((change) => change.from));
+  const end = Math.max(...mine.map((change) => change.to));
   const from = Math.max(0, text.lastIndexOf('\n\n', start - 1) + 1);
   const next = text.indexOf('\n\n', end);
   const to = next === -1 ? text.length : next;
