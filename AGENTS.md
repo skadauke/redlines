@@ -15,7 +15,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | Path                    | What it is                                                                |
 | ----------------------- | ------------------------------------------------------------------------- |
 | `packages/format`       | `@redlines/format`: types, ids and payload handling for the file format   |
-| `packages/collab`       | `@redlines/collab`: the session authority for multiuser editing (not wired in yet) |
+| `packages/collab`       | `@redlines/collab`: the session authority for multiuser editing, its hub, window client and transports (live between windows of the app) |
 | `packages/editor`       | `@redlines/editor`: the editor core                                       |
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
 | `packages/agent-process` | `@redlines/agent-process`: what the agent providers share               |
@@ -41,6 +41,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands, the grips and the +  |
 | `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
+| `plugins/sync`          | `@redlines/sync`: binds the editor to a session (pending edits, intents derived again, remote edits) |
 | `plugins/toolbar`       | `@redlines/toolbar`: the toolbar, from the title bar's wrench, on right-click and from the keyboard |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |
@@ -131,6 +132,10 @@ repo root.
   (`~/Library/Application Support/md.redlines.editor/recovery/`), never next to the file; saving or
   closing without saving deletes it, and so does a quit that asked about every document. A window
   that opens the document after a crash puts the edits back and says so in a notification
+- The Quarto check, in `apps/desktop`: `node scripts/quarto-check.ts` (Node 24; Quarto on the PATH)
+  renders a marked-up `.qmd` to HTML, Word and Typst and checks that the newest text comes out
+  ([docs/research/quarto-check.md](docs/research/quarto-check.md)). CI runs it in an optional
+  workflow (`quarto.yml`: the open Epic's schedule, and pull requests that touch Quarto code)
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
@@ -171,6 +176,14 @@ repo root.
   preview, register the app (`lsregister -f -R -trusted`, `pluginkit -a <the .appex>`) and run
   `qlmanage -p file.md`; the steps are in [docs/releasing.md](docs/releasing.md#the-quick-look-extension).
   The renderer's tests are ordinary Vitest tests (`apps/desktop/quicklook/src`).
+  The Finder thumbnails are a second extension, `RedlinesThumbnail.appex` (the same script builds,
+  signs and checks both, and `--check-app` reads both). What decides the picture Finder draws for a
+  `.md` file: Quick Look's thumbnail service asks every registered `com.apple.quicklook.thumbnail`
+  extension whose `QLSupportedContentTypes` the file's type conforms to; if one answers, its picture
+  is drawn, and the document icon of the default app (`document-types.plist`) is only what is drawn
+  when none does. So with Redlines as the default app and no thumbnail extension, Finder shows
+  Redlines' document icon, and with it, the page. `qlmanage -t` uses the old generators and never
+  asks the extension: to see Finder's picture, ask `QLThumbnailGenerator`.
 - Website: in `website/`, `npm ci`, `npm run embed` (builds the embed first), `npm test`,
   `npm run compare:check`, `npm run icons:check`, `npm run sync-release:check`, `npm run build` and
   `npm run test:e2e` (the browser smoke test of `out/`, in Chromium and WebKit) and `npm run perf`

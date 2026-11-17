@@ -29,6 +29,7 @@ import {
   indentReason,
   inFrontMatter,
   selectionInTable,
+  dialectFacet,
   setFold,
   setViewModeEffect,
   tablesOf,
@@ -459,6 +460,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         op,
         author: person,
         time: ledgerTime(new Date()),
+        dialect: view.state.facet(dialectFacet),
         ...sourceOf(),
       });
       return put(changes, userEvent, true, intent);
@@ -502,6 +504,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         ...(group === undefined ? {} : { group }),
         author: person,
         time: ledgerTime(new Date()),
+        dialect: view.state.facet(dialectFacet),
         ...sourceOf(),
       });
       return put(changes, userEvent, true, intent);

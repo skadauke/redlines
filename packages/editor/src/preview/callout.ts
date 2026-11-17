@@ -107,7 +107,7 @@ const ICONS: Record<string, string[]> = {
 
 const SVG = 'http://www.w3.org/2000/svg';
 
-function drawIcon(type: string): SVGSVGElement {
+export function drawIcon(type: string): SVGSVGElement {
   const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('class', 'rl-callout-icon');
   svg.setAttribute('viewBox', '0 0 16 16');
@@ -121,7 +121,7 @@ function drawIcon(type: string): SVGSVGElement {
 }
 
 /** The little chevron of the menu button. */
-function drawChevron(): SVGSVGElement {
+export function drawChevron(): SVGSVGElement {
   const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
   svg.setAttribute('aria-hidden', 'true');

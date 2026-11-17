@@ -178,6 +178,21 @@ describe('the checks the review asked for', () => {
     expect(decisionProblems(file).length).toBeGreaterThan(0);
   });
 
+  it('decides the marks that a decision frees, in the sampled orders (#808)', () => {
+    // A replacement holds Bo's marks in its old text (format §3.12): rejecting it frees them, and
+    // an order of decisions goes on until none is left, so that rejecting every mark reads as the
+    // original view and accepting every one as the newest.
+    const ids = 'cdfghjkm'.split('');
+    const olds = ids.map((c) => `w<!-\\-ins b${c}2${c}-\\->${c}<!-\\-/b${c}2${c}-\\->`);
+    const marks = ids.map((c) => `  b${c}2${c}: {by: bo, at: 2026-11-01T10:00Z}`);
+    const filler = ' padding'.repeat(30);
+    const file =
+      `<!--sub m2bd ${olds.join(' ')}${filler}-->\n\nnew text\n<!--/m2bd-->\n\n` +
+      `<!-- redlines\nversion: 1\nmarks:\n  m2bd: {by: ada, at: 2026-11-01T10:00Z}\n${marks.join('\n')}\n-->\n`;
+    expect(file.length).toBeGreaterThan(800);
+    expect(decisionProblems(file)).toEqual([]);
+  });
+
   it('reads raw HTML of the file the same on both sides (review N4)', () => {
     checkInvariants(
       runScript({

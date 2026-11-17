@@ -56,6 +56,9 @@ importers:
       '@redlines/code':
         specifier: workspace:*
         version: link:../../plugins/code
+      '@redlines/collab':
+        specifier: workspace:*
+        version: link:../../packages/collab
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor
@@ -80,6 +83,9 @@ importers:
       '@redlines/review':
         specifier: workspace:*
         version: link:../../plugins/review
+      '@redlines/sync':
+        specifier: workspace:*
+        version: link:../../plugins/sync
       '@redlines/tables':
         specifier: workspace:*
         version: link:../../plugins/tables
@@ -551,6 +557,24 @@ importers:
       '@codemirror/language':
         specifier: ^6.13.1
         version: 6.13.1
+
+  plugins/sync:
+    dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@redlines/collab':
+        specifier: workspace:*
+        version: link:../../packages/collab
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/format':
+        specifier: workspace:*
+        version: link:../../packages/format
 
   plugins/tables:
     dependencies:

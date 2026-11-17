@@ -51,7 +51,16 @@ const CR_LINES =
  * Pass the file's `scan` if you have it. */
 export function findLedger(text: string, scanned: Scan = scan(text)): LedgerSpan | null {
   const found = scanned.ledgers.at(-1);
-  if (!found) return null;
+  return found ? spanOf(text, found) : null;
+}
+
+/** Every ledger in the file, in order: a document joined from several files has one for each part
+ * (format §5.1). The last is the one `findLedger` gives. */
+export function findLedgers(text: string, scanned: Scan = scan(text)): LedgerSpan[] {
+  return scanned.ledgers.map((found) => spanOf(text, found));
+}
+
+function spanOf(text: string, found: Scan['ledgers'][number]): LedgerSpan {
   const front = text.slice(Math.max(0, found.start - 4), found.start);
   const breaks = (found.crLines ? CR_BLANK_LINE : BLANK_LINE).exec(front);
   const span: LedgerSpan = {

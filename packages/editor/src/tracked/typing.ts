@@ -66,6 +66,7 @@ import {
   widenedFirstEdits,
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
+import { dialectFacet } from '../dialect.ts';
 import { lineChanges } from '../diff.ts';
 import {
   annotationsOfTransaction,
@@ -178,7 +179,12 @@ export function contextFor(state: EditorState): EditContext {
   const author = state.facet(authorFacet);
   if (!author) throw new EditError('Track Changes needs to know who is editing.');
   const { now, random } = state.facet(editSourceFacet);
-  return { author, time: `${now().toISOString().slice(0, 16)}Z`, random };
+  return {
+    author,
+    time: `${now().toISOString().slice(0, 16)}Z`,
+    random,
+    dialect: state.facet(dialectFacet),
+  };
 }
 
 /**
@@ -218,6 +224,7 @@ export function blockFormat(
       writer: widening ? 'tracked' : 'fine',
       author: ctx.author,
       time: ctx.time,
+      dialect: state.facet(dialectFacet),
       ...(random ? { random } : {}),
     });
   }
@@ -227,6 +234,7 @@ export function blockFormat(
     op,
     author,
     time: '',
+    dialect: state.facet(dialectFacet),
     ...(random ? { random } : {}),
   });
 }
@@ -643,7 +651,12 @@ function trackEdits(
   replay?: Replay,
 ): Tracked {
   const base: EditContext = replay
-    ? { author: replay.author as Person, time: replay.time, random: replay.random }
+    ? {
+        author: replay.author as Person,
+        time: replay.time,
+        random: replay.random,
+        dialect: state.facet(dialectFacet),
+      }
     : contextFor(state);
   // Every id the format draws is kept, so that the edit can be derived again with the same ones.
   const drawing = recording(base.random);
@@ -771,7 +784,7 @@ function untrackEdits(
   const editing = replay ? replay.author : state.facet(authorFacet);
   const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
   const made = formatEdits(text, parsed, edits, backward, (doc, edit) =>
-    untrackedEdit(doc, edit, { random, author }),
+    untrackedEdit(doc, edit, { random, author, dialect: state.facet(dialectFacet) }),
   );
   return {
     ...made,
@@ -937,11 +950,22 @@ export function authoredChanges(
   edits: readonly TextChange[],
   group?: string,
 ): ChangeSet {
+  return authoredWrite(state, text, parsed, edits, group).changes;
+}
+
+/** `authoredChanges`, with the typing intent that wrote them, to record beside them. */
+export function authoredWrite(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+  group?: string,
+): { changes: ChangeSet; intent: Omit<TypingIntent, 'id'> } {
   const made = edits.map((edit): Edit => ({ ...edit, main: false }));
-  if (state.field(trackingField)) {
-    return trackEdits(state, text, parsed, made, false, group ?? made.length > 1).changes;
-  }
-  return untrackEdits(state, text, parsed, made, false).changes;
+  const done = state.field(trackingField)
+    ? trackEdits(state, text, parsed, made, false, group ?? made.length > 1)
+    : untrackEdits(state, text, parsed, made, false);
+  return { changes: done.changes, intent: done.intent! };
 }
 
 /** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
@@ -952,13 +976,24 @@ export function untrackedChanges(
   parsed: Parsed,
   edits: readonly TextChange[],
 ): ChangeSet {
-  return untrackEdits(
+  return untrackedWrite(state, text, parsed, edits).changes;
+}
+
+/** `untrackedChanges`, with the typing intent that wrote them. */
+export function untrackedWrite(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): { changes: ChangeSet; intent: Omit<TypingIntent, 'id'> } {
+  const done = untrackEdits(
     state,
     text,
     parsed,
     edits.map((edit): Edit => ({ ...edit, main: false })),
     false,
-  ).changes;
+  );
+  return { changes: done.changes, intent: done.intent! };
 }
 
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */

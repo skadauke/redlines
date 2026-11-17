@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "bundle": "rolldown -c rolldown.config.mjs",
+    "bundle": "rolldown -c rolldown.config.mjs && rolldown -c rolldown.thumbnail.config.mjs",
     "typecheck": "tsc"
   },
   "dependencies": {

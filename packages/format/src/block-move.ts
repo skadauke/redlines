@@ -7,6 +7,7 @@
 // tracked layer (`trackedEdits`, with one group for the marks) or plainly, so a move with Track
 // Changes on is one suggestion that is accepted or rejected whole, and reads alike in every order.
 
+import { withDialect } from './dialect.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
@@ -309,19 +310,21 @@ export function trackedBlockMove(
   gap: BlockGap,
   ctx: EditContext,
 ): { changes: TextChange[]; moved: Range } | undefined {
-  const plans = plansOf(text, run, gap);
-  const [plan] = plans;
-  if (!plan) return undefined;
-  const group = ctx.group ?? newId(idsIn(text), ctx.random);
-  for (const next of plans.filter((other) => !other.joins)) {
-    try {
-      return {
-        changes: trackedEdits(text, next.source, { ...ctx, group }).changes,
-        moved: next.moved,
-      };
-    } catch (error) {
-      if (!(error instanceof EditError)) throw error;
+  return withDialect(ctx.dialect, () => {
+    const plans = plansOf(text, run, gap);
+    const [plan] = plans;
+    if (!plan) return undefined;
+    const group = ctx.group ?? newId(idsIn(text), ctx.random);
+    for (const next of plans.filter((other) => !other.joins)) {
+      try {
+        return {
+          changes: trackedEdits(text, next.source, { ...ctx, group }).changes,
+          moved: next.moved,
+        };
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
     }
-  }
-  return { changes: widen(text, plan.view, ctx).changes, moved: plan.moved };
+    return { changes: widen(text, plan.view, ctx).changes, moved: plan.moved };
+  });
 }

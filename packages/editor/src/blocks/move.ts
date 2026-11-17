@@ -44,12 +44,15 @@ export function runOfSelection(state: EditorState): BlockRun | undefined {
   return blockRunAt(state.doc.toString(), { from, to });
 }
 
+/** The file's state and the changes that took the open paragraph back (`asFile`). */
+export type FileRead = { file: EditorState; back: ChangeSet | null };
+
 /**
  * The state as the file has it, with the empty paragraph that Return opened taken back, and the
  * changes that take it back; the state itself, with none, where nothing is open. Null where the
  * caret is in the empty paragraph itself, which is no block of the file and has nothing to move.
  */
-function asFile(state: EditorState): { file: EditorState; back: ChangeSet | null } | null {
+export function asFile(state: EditorState): { file: EditorState; back: ChangeSet | null } | null {
   const open = openBlock(state);
   if (!open) return { file: state, back: null };
   const { from, to } = state.selection.main;
@@ -99,7 +102,7 @@ export function moveRunTo(
   view: EditorView,
   run: BlockRun,
   gap: BlockGap,
-  read?: { file: EditorState; back: ChangeSet | null },
+  read?: FileRead,
 ): boolean {
   // The state the run is read in: the file's, with an empty paragraph taken back (`asFile`), and
   // the changes that did it, which the step makes first.
