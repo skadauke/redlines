@@ -225,9 +225,9 @@ The window, on the desktop:
   notice to try again (§8.5).
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
   in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close,
-  Export to Word… (a save panel, then a notification, never a dialog, that says what Word can't hold; in the
-  development page the file downloads), Print and Export as PDF. `redlines export-docx <file> [-o out.docx]` does the same
-  from the command line. A printed page is the document as it reads now, set as a document: every
+  Open .docx… (a Word or Google Docs file as a new, unsaved document, with its import report in a
+  notification), Export to Word… (a save panel, then a notification, never a dialog, that says what Word can't hold; in the
+  development page the file downloads), Print and Export as PDF. The Node command line (`pnpm redlines`) has `export-docx <file> [-o out.docx]` and `import-docx`; the program in the app does not carry them. A printed page is the document as it reads now, set as a document: every
   pending insertion as plain text and every pending deletion left out (the Original, when the
   window shows that), with no change bar, comment, note or highlight, none of the window around
   it, and nothing of the YAML front matter. It is black on white in every theme, in the theme's own
@@ -1309,8 +1309,8 @@ writes a `.docx` from a Redlines file (tracked changes, comments, replies, table
 splits, joins, moves, images and task lists, with the data a round trip needs, #834, #847, #845),
 reads a `.docx` with its revisions and comments (#840) and maps the result to Markdown with its
 marks and ledger (#866), and has Google Docs' differences (#838). File › Export to Word… calls
-the writer (#841); no command calls the reader yet, so File has no Open .docx…, and Copy for Word,
-PDF export and the Word round trip are still to be wired in; File › Print is built.
+the writer (#841) and File › Open .docx… the reader (#881; pictures are carried into the images folder after a save panel, #885); Copy for Word
+and the full Word round trip are still to be wired in; File › Print and Export as PDF are built.
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
@@ -1602,7 +1602,7 @@ without the editor.
 | `@redlines/react`      | `<RedlinesEditor>` for React, and a `<redlines-editor>` web component for other frameworks                                                 | Browsers                |
 | `@redlines/render`     | Static HTML rendering and pagination, for print, PDF, HTML export and previews                                                              | Browsers, Node          |
 | `@redlines/clipboard`  | HTML-to-Markdown conversion for paste, and the copy formats: Redlines' own, Word's HTML, generic HTML, Markdown, plain text                 | Browsers                |
-| `@redlines/word`       | Word (`.docx`) export (`exportDocx`), import (a reader that turns a `.docx` into blocks and runs with its revisions and comments, and a mapper from that model to Markdown with its marks and ledger) and the Google Docs differences (§5.10; [export](word-export/README.md)). A library with no command in the app yet, and kept out of the editor's bundle | Browsers, Node          |
+| `@redlines/word`       | Word (`.docx`) export (`exportDocx`), import (a reader that turns a `.docx` into blocks and runs with its revisions and comments, and a mapper from that model to Markdown with its marks and ledger) and the Google Docs differences (§5.10; [export](word-export/README.md)). File › Export to Word… and Open .docx… call it; it is kept out of the editor's bundle | Browsers, Node          |
 | `@redlines/collab`     | The collaboration server and its client protocol                                                                                           | Node; client in browsers |
 | `@redlines/mcp`        | The MCP server, for agents outside Redlines                                                                                                | Node                    |
 | `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |

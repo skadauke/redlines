@@ -3295,6 +3295,12 @@ comment that is never closed, new text that holds Redlines markup, an unknown id
 that matches nothing or several places, and, under the guard below, an edit whose unit holds another
 person's pending mark.
 
+**Block syntax.** A fine write at a block's syntax (a tag's `>`, a heading's space, right behind a
+bare marker) or in indented code above a list line is read with micromark first. If the file would
+read differently than the newest view, the unit is replaced whole instead, together with the block
+after it where nothing else holds the edit, and an HTML block's or a bare marker's closer is written
+after a blank line (#597, #588, part of #601; a shape of #601 is not covered).
+
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
 bullet outside), a list, a code block or a table. The edit is written as the replacement of the
 smallest of them that holds it and for which the file reads as its newest view with the replacement
