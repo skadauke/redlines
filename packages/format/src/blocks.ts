@@ -1423,3 +1423,7 @@ export function viewBreaks(text: string, mark: MarkRange, newest: DocView): numb
   }
   return breaks;
 }
+
+/** The seventh start of an HTML block: one whole open or closing tag of another name, alone on its line. */
+export const HTML_START_7 =
+  /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;

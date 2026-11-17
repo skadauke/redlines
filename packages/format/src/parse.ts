@@ -1,7 +1,14 @@
 // Parsing a file (format §2, §4, §5): the marks in the body, tied to the ledger. Markup that breaks
 // the rules is reported as a warning and left as text, so a file always opens (format §12).
 
-import { CONTAINER_PREFIX, carrierEnd, LineIndex, lineStart, markerEnd } from './blocks.ts';
+import {
+  CONTAINER_PREFIX,
+  carrierEnd,
+  HTML_START_7,
+  LineIndex,
+  lineStart,
+  markerEnd,
+} from './blocks.ts';
 import { isAlignPayload } from './format-ops.ts';
 import { emptyLedger, findLedger, readSpan } from './ledger-read.ts';
 import type { LedgerRead } from './ledger-read.ts';
@@ -61,6 +68,24 @@ function startsBlocks(opener: Extract<Marker, { type: 'open' }>, closer?: Marker
 }
 
 /**
+ * The length of the line break in front of a closer that stands alone on its line, under a line
+ * that is one whole tag (CommonMark's seventh kind of HTML block) after a blank line or the start
+ * of the file, with no container prefix; 0 for any other closer. `from` is where the text of the
+ * stretch starts.
+ */
+function closerBreak(body: string, closer: Marker, from: number): number {
+  if (closer.from === 0 || body[closer.from - 1] !== '\n') return 0;
+  const next = body.indexOf('\n', closer.to);
+  if (body.slice(closer.to, next === -1 ? body.length : next).trim() !== '') return 0;
+  const eol = body[closer.from - 2] === '\r' ? 2 : 1;
+  const lineEndAt = closer.from - eol;
+  const start = body.lastIndexOf('\n', lineEndAt - 1) + 1;
+  if (start < from || !HTML_START_7.test(body.slice(start, lineEndAt))) return 0;
+  const above = start === 0 ? '' : body.slice(body.lastIndexOf('\n', start - 2) + 1, start - 1);
+  return start === 0 || above.trim() === '' ? eol : 0;
+}
+
+/**
  * One stretch of a mark. `body` is the file without its ledger. The opener of a mark that starts a
  * block stands alone on its line, and the line break, blank line and prefix that follow it are its
  * `carrier`.
@@ -74,12 +99,15 @@ function segmentOf(
   const end = startsBlocks(opener, closer)
     ? carrierEnd(body, opener.from, opener.to, lines)
     : opener.to;
+  // A closer alone on the line after a tag that is alone on its line takes the line break in front
+  // of it as its own syntax (format §3.3): the tag is an HTML block that the closer can't share.
+  const gap = closer ? closerBreak(body, closer, end) : 0;
   const segment: Segment = {
     open: rangeOf(opener),
-    content: { from: opener.to, to: closer ? closer.from : opener.to },
+    content: { from: opener.to, to: closer ? closer.from - gap : opener.to },
   };
   if (end > opener.to) segment.carrier = { from: opener.to, to: end };
-  if (closer) segment.close = rangeOf(closer);
+  if (closer) segment.close = { from: closer.from - gap, to: closer.to };
   if (opener.payload !== undefined) segment.payload = opener.payload;
   return segment;
 }
