@@ -65,7 +65,10 @@ const type = (editor: Editor, from: number, to: number, insert: string) =>
   editor.view.dispatch({ changes: { from, to, insert }, userEvent: 'input.type' });
 
 const json = (changes: ChangeSet) => JSON.stringify(changes.toJSON());
-const typing = (intent: Intent): TypingIntent => intent;
+const typing = (intent: Intent): TypingIntent => {
+  if (intent.kind !== 'typing') throw new Error(`a ${intent.kind} intent`);
+  return intent;
+};
 
 describe('a recorded edit', () => {
   it('leaves the document as the format writes it, byte for byte', () => {
