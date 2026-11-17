@@ -92,6 +92,13 @@ export the exporter embeds what the importer needs to restore the source:
 - A **hidden bookmark** (`_rl_<blockId>`) around each block. Word keeps
   bookmarks whose names start with an underscore and hides them in its UI.
 
+Two things come back from the part beyond untouched blocks. A block that holds
+a picture the export could not embed was written as `[Image: alt]`; when that
+text is all Word still has, the block is restored with its `![alt](path)` link.
+A thread Word shows as done is resolved by the person and at the time the
+ledger recorded, when the thread is the same one (author, time and text), since
+Word keeps no resolver; otherwise it is resolved by its author at its time.
+
 Both behaviors are standard Word practice. Word for Mac keeps both through a
 tracked edit and a save, and after Accept All only the bookmark of a deleted
 paragraph is gone

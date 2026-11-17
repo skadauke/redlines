@@ -781,7 +781,9 @@ function wordsNextTo(
   table: TableRead,
 ): string | null {
   const next = neighboursOf(text, parsed, table);
-  if (error.code === 'unclosed-end' && next.fenceAfter) return NEXT_TO_WORDS.codeAfter;
+  if (error.code === 'unclosed-end' && next.fenceAfter) {
+    return next.fenceUnclosed ? NEXT_TO_WORDS.codeAfterUnclosed : NEXT_TO_WORDS.codeAfter;
+  }
   if (
     next.endsText &&
     ((error.code === 'inside-code' && next.indentedAbove) ||

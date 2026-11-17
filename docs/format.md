@@ -239,10 +239,13 @@ early, must stay on one line, and must not let other tools act on what it contai
 | a backtick                                                                   | `\x60`                           | knitr runs R code it finds in comments, deleted text included                                                      |
 | `\|`                                                                         | `\|`                             | An unescaped pipe splits a table cell, even inside a comment, and kramdown reads any line with one as a table row |
 | `{{` and `{%`                                                                | `{\{` and `{\%`                  | Liquid (Jekyll, GitHub Pages) runs them                                                                            |
-| a `\` before `-`, `n`, `x`, `\|`, `{`, `%`, `\`, a backtick or a line break  | `\\`                             | Keeps every escape unambiguous                                                                                     |
+| a `\` before `-`, `n`, `x`, `\|`, `{`, `%`, `\`, a backtick, a line break, U+2028 or U+2029  | `\\`                             | Keeps every escape unambiguous                                                                                     |
+| U+2028 and U+2029                                                            | `\u2028` and `\u2029`           | YAML 1.1 readers (PyYAML) take them for line breaks, which would split a value in the ledger                       |
 
 - A reader decodes left to right, after turning CRLF and CR into LF. The escapes are `\\`, `\n`,
-  `\-`, `\xHH`, `\|`, `\{` and `\%`. Any other backslash is literal, so Markdown escapes such as
+  `\-`, `\xHH`, `\u2028`, `\u2029`, `\|`, `\{` and `\%`. A backslash before the letters `u2028` or
+  `u2029` of the text is written `\\`, as one before `n` is (a file written before this rule that
+  holds those letters after one backslash reads as the separator). Any other backslash is literal, so Markdown escapes such as
   `\*` are kept as written. When a payload goes back into the text, as when a deletion is
   rejected, its line breaks are written as the rule on line breaks below says.
 - The file writes line breaks as its body has them: CRLF when the body has a CRLF, and when it has
@@ -252,7 +255,8 @@ early, must stay on one line, and must not let other tools act on what it contai
   take the same line breaks. A new ledger takes the line break that the file had before the edit
   that makes it, so that a change that takes the file's last CRLF out of the body leaves the
   ledger, and with it the file, CRLF.
-- **A line break keeps its own kind.** Rejecting a change gives the old text back byte for byte, so
+- **A line break keeps its own kind.** The editor writes it the same as the command line does (it
+  edits and decides the file's own text, not its LF-only document: #924). Rejecting a change gives the old text back byte for byte, so
   an LF in a CRLF file comes back as an LF, a CRLF in an LF file as a CRLF, and a CR alone as a CR.
   In a payload, `\n` is a line break of the file's kind, as it always was, so a file of one kind
   needs nothing more, and every file written before reads the same. A break of the other kind is
@@ -894,7 +898,10 @@ away.
   reads alike in both and is no reason. A numbered item that doesn't
   start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
   an item that has no item under it when its old sibling, numbered otherwise than 1, would become
-  its first child right under its text; and so is indenting
+  its first child right under its text; and so is outdenting one whose next item at its own
+  indentation a pending change empties in some reading of the file (the file, the newest view or the
+  original view), which would turn the text into a heading in the readings where it is empty
+  (#433); and so is indenting
   one right after text where it would not be the first of a new sublist, unless the sublist above it
   is numbered with the same delimiter, which it joins with the number it has. Indenting one that
   becomes the first of a new sublist writes `1.` (the mark keeps the old number, below). Changing
@@ -1170,14 +1177,14 @@ at the outer edge of a whole inline construct. A marker never goes:
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
 9. inside pandoc's `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written (§9.1; a
-   change there is a replacement of the pair; pandoc's `~x~` is not held, for GFM reads one tilde
-   as strikethrough, which takes marks); after or inside `{…}`
+   change there is a replacement of the pair; so is pandoc's `~x~`, in a pandoc file, where one
+   tilde is a subscript; in a `.md` file one tilde is GFM's strikethrough, which takes marks); after or inside `{…}`
    attributes; on `:::` lines (a fence line; a change there is a replacement of the div's
    paragraph, and a typed div is one insertion with no marker on a fence line, §9.4); before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
    or a digit and an emoji shortcode; or inside `{{< >}}`, a cross-reference (`@fig-x`, `@sec-x`, and the other kinds Quarto numbers), a
-   citation bracket (`[@a; @b]`, `[-@a]`) or `(\#fig:x)`. Three of these are pandoc's alone and
-   are held in a file of the pandoc dialect only (§9.1): `^x^`, the `:::` line, and the
+   citation bracket (`[@a; @b]`, `[-@a]`) or `(\#fig:x)`. Four of these are pandoc's alone and
+   are held in a file of the pandoc dialect only (§9.1): `^x^`, `~x~`, the `:::` line, and the
    cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. GitHub shows a
    shortcode as its emoji at the start of a text or after a space, and as written with a letter or
    a digit before it (`a:tent:`); a marker between the two would leave it at the start of a text,
@@ -1384,7 +1391,11 @@ The importer ships in April.
   the carrier of a change's opener reach further than it did, over the blank lines after a marker
   that it takes away, such as the closer of a block change whose text is all deleted: the opener
   would then start the next block, and rejecting its change would join its text to that block.
-  Such a decision is refused until the change is decided.
+  Such a decision is refused until the change is decided. An edit does not write the form that
+  leaves an opener with a carrier on a line that starts with white space of another change (a space
+  typed at the start of the line after a paragraph break inside another person's insertion): the
+  carrier would stay or go with the order of decisions. Such an edit is written as a replacement of
+  the block (§3.12) (#108).
 - At top level, a blank line follows the opener. In a tight list none does, because a blank line
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
@@ -3542,7 +3553,17 @@ blocks of the document's own flow, §3.7.)
   So is a move that leaves two lists side by side (a paragraph between them moved away, or a list
   moved up to one): the newest view reads them as one list and the marker between them in the file
   reads two, so no fine write is tried, and where no unit passes either, the person is asked (#883).
-- **Track Changes off.** The same two edits are made plain.
+- **Pending changes in the blocks.** Where the blocks a move takes out hold a pending change (an
+  insertion, deletion, replacement, split or format change, whoever made it), the move is written as
+  the widened replacement at once: the fine write would put the deletions among the markers of
+  another person's insertion, a mark on each line, and those read otherwise when some are decided
+  and others not (#1052). Where no unit holds the replacement, the fine write is tried after it.
+- **Track Changes off.** The same two edits are made plain, and the moved text is the file's own,
+  markers included, where the blocks hold a comment or a highlight: its markers go with it, so a
+  comment stays on the words it was on, and no marker is left alone on a line where it would split
+  a list (#1052). The text goes as it is written, taken out of the old place and put in at the new,
+  not typed (typed text may hold no markup). Where a mark reaches out of the blocks, the move is
+  written as typed text, and the marks that reach out keep a point where the text was.
 
 ### 3.15 HTML with a Markdown twin
 
@@ -3777,6 +3798,7 @@ frontmatter:
 | `frontmatter` | Pending changes to the YAML front matter (§3.8)                                                    |
 
 Defaults are never written. Unknown keys are kept and ignored, so later versions can add fields.
+A ledger whose `version` is not `1` is read with a warning, and the next write puts `version: 1`.
 
 ### 5.3 People
 
@@ -3836,13 +3858,15 @@ same values.
   written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
   and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
   `-\x2d`, a YAML escape, so that `--` never appears in the ledger.
-- The text of a comment and of a reply is always a literal block (`|-`). Text a person types may
+  A line break in a key is written `\n` (or `\r`), and U+2028 and U+2029 `\u2028` and `\u2029`, since a key is on one line.
+- The text of a comment and of a reply, and the quote a comment keeps of the text it covered, is
+  always a literal block (`|-`). Text a person types may
   start with `@`, contain `: ` or ` #`, or say `No`; as a plain or flow scalar, each of these broke
   or changed the value in every parser tested.
 - Other strings, a mark's `note` among them, are written inline: the entry of a mark is one line in
   flow style (§5.4, §5.7). A string is plain when it starts with a letter or `_`, holds only
   letters, digits, spaces and the punctuation `_ . @ / + ( ) = ! ' \ | * & % $ ~ ^ < > ; : -`, has
-  no `: ` and no space at its end, and is not a word such as `no` (§2.4). Any other string is
+  no `: `, and no `:` or space at its end, and is not a word such as `no` (§2.4). Any other string is
   quoted, because a `,`, `?`, `[`, `]`, `{`, `}` or `#` would end it early in some parser. Times
   are minute-precision strings, written plain (§2.4).
 - Values use the payload escapes (§2.5), except that a value may span lines inside a literal block.
@@ -3850,6 +3874,10 @@ same values.
   an HTML comment at a blank line, and a line holding only a literal `\` is written `\\`.
 - A literal block takes its indentation from its first line, so spaces at the start of that line
   are written `\x20`. Control characters, which YAML can't hold, are written `\xHH`.
+  A backslash right before a control character is written `\\`, so that its `\x` escape doesn't pair
+  with it. A line of only spaces and tabs is written with each of them as `\x20` or `\x09`, because
+  Markdown tools count such a line as blank and formatters trim it; the reader gives the spaces
+  back, with no rule of its own.
 - Because values never contain `--`, `-->` can't appear inside the ledger. The ledger never uses
   YAML document markers (`---`).
 
@@ -4312,7 +4340,8 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   ([research](research/syntax.md)), so a `.qmd` or `.Rmd` file rendered to Word through pandoc
   loses them; Redlines' own Word export keeps them (§10). A `~x~` or `^x^` that a `.qmd` or `.Rmd` file already has is kept as written:
   Redlines never writes either, never turns one into a tag, and doesn't read it as subscript or
-  superscript. A single `~x~` is read as GFM does, as strikethrough, in both dialects.
+  superscript. In a pandoc file `~x~` and `^x^` (no space inside) are atoms that no marker may
+  enter (§3.1, rule 9); in a `.md` file a single `~x~` is read as GFM does, as strikethrough.
 - **The dialect is a parameter of an edit.** The caller names it from the file's name
   (`dialectOfName`: `qmd` and `rmd` are pandoc's, every other name GitHub's) in the edit's context
   (`EditContext.dialect`, `UntrackedContext.dialect`), and it is GitHub's when left out. Rules that

@@ -13,6 +13,16 @@ export const EMPTY_ITEM = /^((?:[ \t]*>)*)([ \t]*)([-*+]|\d{1,9}[.)])[ \t]*$/;
 export const MARKER =
   /<!--(?:\/[a-z0-9]+|(?:split|ins|del|sub|fmt|cmt|hl) [a-z0-9]+(?: [^]*?)?)-->/g;
 
+/**
+ * A line above an empty item, split into its quote markers, the white space after them and the rest.
+ * A list item's marker in front of the first `>` is part of the quote's container (`- > - one`, an
+ * item that holds a quote), as the item's own indentation is on the line below (`  >   - `).
+ */
+const ABOVE = /^((?:[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+(?=[ \t]*>))?(?:[ \t]*>)*)([ \t]*)(.*)$/;
+
+/** The quote markers of a container prefix, with nothing else: `- >` and `  >` are one quote. */
+const quotesOf = (prefix: string) => prefix.replaceAll(/[^>]/g, '');
+
 /** The kind of list a marker starts: its bullet, or the delimiter of its number. */
 const kindOf = (marker: string) => (/^\d/.test(marker) ? marker.slice(-1) : marker);
 
@@ -40,11 +50,11 @@ export function unsoundEmptyItem(
   if (n < 2) return false;
   const indent = indentIn(quote, spaces);
   if (indent === 0) return underText(doc, n, quote);
-  const same = quote.replaceAll(/[ \t]/g, '');
+  const same = quotesOf(quote);
   for (let m = n - 1; m >= 1; m--) {
     const text = doc.line(m).text;
-    const above = /^((?:[ \t]*>)*)([ \t]*)(.*)$/.exec(text)!;
-    if (above[1]!.replaceAll(/[ \t]/g, '') !== same) return false;
+    const above = ABOVE.exec(text)!;
+    if (quotesOf(above[1]!) !== same) return false;
     if (above[3]!.trim() === '') {
       // Right after a blank line the item is fine; further up, blank lines among deeper lines
       // (the paragraphs of an item above) are part of what is read through.
@@ -87,15 +97,15 @@ const textLike = (line: string): boolean =>
  * (`- a⏎⏎  b⏎- `) or code, which only the item above it tells.
  */
 function underText(doc: Text, n: number, quote: string): boolean {
-  const same = quote.replaceAll(/[ \t]/g, '');
+  const same = quotesOf(quote);
   // The topmost line of the paragraph that the lines above make, below the nearest underline.
   let first: number | null = null;
   // An underline or a definition was met: the text above it is no part of the paragraph.
   let sealed = false;
   for (let m = n - 1; m >= 1; m--) {
-    const above = /^((?:[ \t]*>)*)([ \t]*)(.*)$/.exec(doc.line(m).text)!;
+    const above = ABOVE.exec(doc.line(m).text)!;
     // Another quote level: the lines below it may be its lazy lines, which no reading here tells.
-    if (above[1]!.replaceAll(/[ \t]/g, '') !== same) return false;
+    if (quotesOf(above[1]!) !== same) return false;
     const text = above[3]!;
     if (text.trim() === '') break;
     const deep = indentIn(above[1]!, above[2]!.length);

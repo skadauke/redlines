@@ -60,18 +60,42 @@ function lastOf<T>(tr: Transaction, type: StateEffectType<T>): StateEffect<T> | 
   return tr.effects.findLast((effect): effect is StateEffect<T> => effect.is(type));
 }
 
+/**
+ * Line breaks of another style than the file's that a change brings into the document, on the LFs
+ * that stand for them, in the document after the change: what rejecting a change gives back when
+ * its payload names a break's kind (format §2.5, #924).
+ */
+export interface BreakStyle {
+  at: number;
+  style: string;
+}
+export const addLineBreakStyles = StateEffect.define<readonly BreakStyle[]>({
+  map: (added, mapping) => added.map(({ at, style }) => ({ at: mapping.mapPos(at), style })),
+});
+
 const lineBreaks = StateField.define<RangeSet<LineBreak>>({
   create: () => RangeSet.empty,
   update(breaks, tr) {
     // Of several, as in the undo of a joined step, the last stands: the record before its first.
     const reset = tr.effects.length ? lastOf(tr, resetLineBreaks) : undefined;
     if (reset) return reset.value;
-    if (!tr.docChanged || !breaks.size) return breaks;
+    const added = tr.effects.filter((effect) => effect.is(addLineBreakStyles));
+    if (!tr.docChanged || !(breaks.size || added.length)) return breaks;
     // A line break replaced on its own keeps its range, now over the new text: keep only the
     // ranges that still stand on a single LF.
-    return breaks.map(tr.changes).update({
-      filter: (from, to) => to - from === 1 && tr.newDoc.sliceString(from, to) === '\n',
-    });
+    const kept = breaks.size
+      ? breaks.map(tr.changes).update({
+          filter: (from, to) => to - from === 1 && tr.newDoc.sliceString(from, to) === '\n',
+        })
+      : breaks;
+    const taken = new Set<number>();
+    for (let it = kept.iter(); it.value; it.next()) taken.add(it.from);
+    const adds = added
+      .flatMap((effect) => effect.value)
+      .filter(({ at }) => !taken.has(at) && tr.newDoc.sliceString(at, at + 1) === '\n')
+      .sort((a, b) => a.at - b.at)
+      .map(({ at, style }) => new LineBreak(style).range(at, at + 1));
+    return adds.length ? kept.update({ add: adds }) : kept;
   },
 });
 
@@ -95,7 +119,12 @@ const lineBreaksBack = invertedEffects.of((tr) => {
     const file = tr.startState.field(fileField);
     return file ? [setFile.of(file), resetLineBreaks.of(before)] : [resetLineBreaks.of(before)];
   }
-  if (tr.docChanged && before.size && tr.state.field(lineBreaks).size < before.size) {
+  const hasAdded = tr.effects.some((effect) => effect.is(addLineBreakStyles));
+  if (
+    tr.docChanged &&
+    (before.size || hasAdded) &&
+    (hasAdded || tr.state.field(lineBreaks).size !== before.size)
+  ) {
     return [resetLineBreaks.of(before)];
   }
   return [];
@@ -326,4 +355,39 @@ function textOf(
   let text = doc.line(1).text;
   for (let n = 2; n <= doc.lines; n++) text += breaks[n - 2]! + doc.line(n).text;
   return text;
+}
+
+/** The line break the file writes for a new one, or null when the editor has no file. */
+export function fileLineBreak(state: EditorState): string | null {
+  return state.field(fileField, false)?.lineBreak ?? null;
+}
+
+/**
+ * The file's text for the document in `state`, when it has a line break of another kind than the
+ * file's (a CRLF in an LF file, an LF in a CRLF file); null when every break is alike. The edit
+ * funnel writes on this text, so that a change that takes such a break out names its kind in its
+ * payload (format §2.5, #924). Not the text a save writes: the open paragraph stays.
+ */
+export function mixedFileText(state: EditorState, named = false): string | null {
+  const kept = state.field(lineBreaks, false);
+  // For a decision (`named`), a file with one kind of line break reads the same in both, but one
+  // whose payloads name a break's kind (`\x0a`) or whose format kind isn't its first break's does
+  // not: the break a change took out is not in the record any more.
+  if (!kept) return null;
+  if (!kept.size) {
+    const file = state.field(fileField, false);
+    // A file of one kind reads the same in both, unless a payload names a kind or the format's
+    // kind isn't the first break's.
+    if (
+      !named ||
+      !file ||
+      (file.formatBreak === file.lineBreak && !/\\x0[ad]/.test(state.doc.toString()))
+    ) {
+      return null;
+    }
+  }
+  const text = textOf(state, state.doc, kept, state.field(parsedField, false)?.ledgerRange ?? null);
+  // A CR alone is left to the old way: the format reads a body of CRs as one with a ledger it
+  // can't read (format §5.1), and its payload is not this issue's.
+  return /\r(?!\n)/.test(text) ? null : text;
 }

@@ -43,6 +43,7 @@ import {
   type Table,
   cellAt,
   endsBeforeNextCell,
+  shownCells,
   tablesField,
 } from './model.ts';
 import { isMissingStop, missingField } from './missing.ts';
@@ -71,10 +72,6 @@ function breaksIn(state: EditorState, cell: Cell): { from: number; to: number }[
   }));
 }
 
-/** The cells of a row that GFM shows. */
-const shownOf = (table: Table, row: Row): Cell[] =>
-  row.cells.filter((cell) => cell.col < table.columns);
-
 /**
  * The atoms of a table that its rows own, by where they start: the one in front of the first cell
  * (the first row's), the stretch from a cell's end to the next cell's text (the row of the first of
@@ -86,10 +83,10 @@ function atomsOf(state: EditorState, table: Table, rows: readonly Row[] | null):
   let lastRow: Row | undefined;
   for (let i = table.rows.length - 1; i >= 0 && !lastRow; i--) {
     const row = table.rows[i];
-    if (row && shownOf(table, row).length > 0) lastRow = row;
+    if (row && shownCells(table, row).length > 0) lastRow = row;
   }
   for (const row of rows ?? table.rows) {
-    const cells = shownOf(table, row);
+    const cells = shownCells(table, row);
     const first = cells[0];
     const last = cells.at(-1);
     if (!first || !last) continue;
@@ -115,7 +112,7 @@ function atomsOf(state: EditorState, table: Table, rows: readonly Row[] | null):
     } else {
       // Over the end of the row and the start of the next one that has a cell GFM shows.
       for (let k = row.index + 1; k < table.rows.length; k++) {
-        const next = table.rows[k] && shownOf(table, table.rows[k]!)[0];
+        const next = table.rows[k] && shownCells(table, table.rows[k]!)[0];
         if (!next) continue;
         if (next.textFrom > last.textTo) over(next.textFrom);
         break;
@@ -209,7 +206,7 @@ function shownIn(found: {
   cell: Cell;
 }): { table: Table; cell: Cell } | null {
   const { table, row } = found;
-  const shown = row.cells.filter((cell) => cell.col < table.columns);
+  const shown = shownCells(table, row);
   const cell = found.cell.col < table.columns ? found.cell : shown.at(-1);
   return cell ? { table, cell } : null;
 }

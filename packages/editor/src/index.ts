@@ -81,7 +81,15 @@ import {
   undoName,
   undoSayingWhy,
 } from './history/index.ts';
-import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
+import {
+  addLineBreakStyles,
+  fileLineBreak,
+  fileText,
+  type LoadedFile,
+  loadFile,
+  mixedFileText,
+} from './line-breaks.ts';
+import { FileView } from './tracked/file-view.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { quartoCites } from './preview/quarto-cites.ts';
@@ -684,8 +692,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     }));
     if (guarded.apply.length === 0) return { applied: [], skipped };
     const keep = guarded.apply.length === ids.length;
+    // A file with line breaks of more than one kind is decided on its own text, so that what a
+    // payload names comes back as it was (#924).
+    const file = mixedFileText(view.state, true);
+    const onFile = file !== null && text === view.state.doc.toString() ? new FileView(file) : null;
     const made = writeReview(
-      text,
+      onFile ? onFile.text : text,
       {
         ...op,
         ids: guarded.apply,
@@ -694,8 +706,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       { author: who, time, ...(random ? { random } : {}) },
     );
     if (!made.changes.length) return { applied: [], skipped };
+    const brought = onFile?.changesToDoc(made.changes, fileLineBreak(view.state) ?? '\n');
     view.dispatch({
-      changes: made.changes,
+      changes: brought ? brought.changes : made.changes,
+      ...(brought?.styles.length ? { effects: [addLineBreakStyles.of(brought.styles)] } : {}),
       annotations: [
         trackedEditAnnotation.of(true),
         isolateHistory.of('full'),

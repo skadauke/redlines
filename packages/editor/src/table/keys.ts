@@ -18,7 +18,7 @@ import { blockAt } from '../blocks/structure.ts';
 import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
-import { type Cell, type Row, type Table, cellAt } from './model.ts';
+import { type Cell, type Row, type Table, cellAt, shownCells } from './model.ts';
 import { missingCaret, missingCells, missingSpec, virtualCell } from './missing.ts';
 import {
   deleteCols,
@@ -120,7 +120,7 @@ function onEdgeLine(view: EditorView, cell: Cell, pos: number, first: boolean): 
 function neighbourCell(here: Here, down: boolean): Cell | null {
   const row = here.table.rows[here.row.index + (down ? 1 : -1)];
   if (!row) return null;
-  const shown = row.cells.filter((cell) => cell.col < here.table.columns);
+  const shown = shownCells(here.table, row);
   return (
     shown.find((cell) => cell.col === here.cell.col) ??
     missingCells(here.table, row).find((cell) => cell.col === here.cell.col) ??
@@ -335,7 +335,7 @@ function remove(view: EditorView, span: Span, forward: boolean): boolean {
 
 /** The cells of a row as the caret walks them: those GFM shows, then those the row lacks. */
 function walked(table: Table, row: Row): Cell[] {
-  return [...row.cells.filter((cell) => cell.col < table.columns), ...missingCells(table, row)];
+  return [...shownCells(table, row), ...missingCells(table, row)];
 }
 
 /** The cell after (before) the caret's in reading order, or null at the table's end (start). */
