@@ -233,7 +233,9 @@ function plainMove(
 /** The changes of a set, as the edits an intent records. */
 function changesOf(set: ChangeSet): TextChange[] {
   const out: TextChange[] = [];
-  set.iterChanges((from, to, _a, _b, inserted) => out.push({ from, to, insert: inserted.toString() }));
+  set.iterChanges((from, to, _a, _b, inserted) =>
+    out.push({ from, to, insert: inserted.toString() }),
+  );
   return out;
 }
 

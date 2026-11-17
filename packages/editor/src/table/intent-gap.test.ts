@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createEditor,
   deriveFormat,
+  deriveMove,
+  deriveWidenedPaste,
   deriveSteps,
   deriveTable,
   editSourceFacet,
@@ -82,6 +84,10 @@ function derived(seen: Seen): string {
       return applyChanges(text, deriveTable(text, intent).changes);
     case 'format':
       return applyChanges(text, deriveFormat(text, intent));
+    case 'move':
+      return deriveMove(before, intent).apply(before.doc).toString();
+    case 'widened-paste':
+      return applyChanges(text, deriveWidenedPaste(text, intent));
   }
 }
 

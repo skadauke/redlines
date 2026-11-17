@@ -62,12 +62,7 @@ export interface StepsIntent {
 }
 
 export type Intent =
-  | TypingIntent
-  | FormatIntent
-  | TableIntent
-  | StepsIntent
-  | MoveIntent
-  | WidenedPasteIntent;
+  TypingIntent | FormatIntent | TableIntent | StepsIntent | MoveIntent | WidenedPasteIntent;
 
 /** An intent with no id yet: what the writers make. */
 export type Unnamed<T = Intent> = T extends unknown ? Omit<T, 'id'> : never;
