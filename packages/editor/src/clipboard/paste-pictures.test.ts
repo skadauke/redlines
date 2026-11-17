@@ -35,6 +35,10 @@ describe('htmlToMarkdown, pictures with their bytes (Word)', () => {
     expect(htmlToMarkdown(WORD)).not.toContain('![');
   });
 
+  it('never takes a page’s own address for a picture placeholder', () => {
+    expect(htmlToMarkdown('<p>a <img src="redlines-picture:0" alt="x"> b</p>', sink())).toBe('a b');
+  });
+
   it('counts data that is no image as unreadable, and leaves it out', () => {
     const found = sink();
     const md = htmlToMarkdown('<p>a <img src="data:image/png;base64,AAAA"> b</p>', found);

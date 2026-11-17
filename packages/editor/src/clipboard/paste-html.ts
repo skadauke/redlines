@@ -301,6 +301,8 @@ function sniffImage(b: Uint8Array): { type: string; extension: string } | null {
 
 /** The picture in a `data:` address, or null when it isn't base64 data of an image. */
 function pictureOfDataUri(uri: string): PastedPicture | null {
+  // About 50 MB of bytes, the most the host takes (`MAX_IMAGE_BYTES`) and more than a paste holds.
+  if (uri.length > 70_000_000) return null;
   const match = /^data:image\/[a-z0-9.+-]+(?:;[^,;]*)*;base64,([\s\S]*)$/i.exec(uri);
   if (!match) return null;
   try {
@@ -336,6 +338,8 @@ function collect(node: Node, format: Format, runs: Run[]): void {
     const lazy = node.getAttribute('data-src') ?? node.getAttribute('data-original') ?? '';
     const given = (node.getAttribute('src') ?? '').trim();
     let src = given.startsWith('data:') ? lazy : (node.getAttribute('src') ?? lazy);
+    // A page's own address never reads as the placeholder of a picture to be saved.
+    if (/^\s*redlines-picture:/i.test(src)) src = '';
     // A picture whose bytes are in the HTML (Word's, Pages') is the host's to save, when the paste
     // asks for them: its link is a placeholder until the file is there (`withPictureLinks`).
     // An element may be read more than once (the converter measures before it writes): once counts.

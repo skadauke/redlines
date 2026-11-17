@@ -53,7 +53,8 @@ export function imagesBeside(file: string): (src: string) => Promise<Uint8Array 
       const root = await realpath(folder);
       const path = await realpath(resolve(folder, relative));
       if (!path.startsWith(root + sep)) return undefined;
-      if ((await stat(path)).size > MAX_PICTURE_BYTES) return undefined;
+      const info = await stat(path);
+      if (!info.isFile() || info.size > MAX_PICTURE_BYTES) return undefined;
       return new Uint8Array(await readFile(path));
     } catch {
       return undefined;

@@ -419,10 +419,29 @@ function savePicture(
  * saved is left out, and the person is told, never silently: the pictures that stay linked to a web
  * address are said to be so too.
  */
-async function pasteWithPictures(
+function pasteWithPictures(view: EditorView, markdown: string, found: PictureSink): void {
+  // The selection the person pasted at, which is where it goes if the document is as it was.
+  const start = { doc: view.state.doc, selection: view.state.selection };
+  // Pastes with pictures go one after another, so that the host never saves two at once.
+  const run = () => pasteWithPicturesNow(view, markdown, found, start);
+  if (!found.pictures.length) {
+    void run();
+    return;
+  }
+  const next = (pictureQueues.get(view) ?? Promise.resolve()).then(run);
+  pictureQueues.set(
+    view,
+    next.catch(() => undefined),
+  );
+}
+
+const pictureQueues = new WeakMap<EditorView, Promise<void>>();
+
+async function pasteWithPicturesNow(
   view: EditorView,
   markdown: string,
   found: PictureSink,
+  start: { doc: EditorState['doc']; selection: EditorState['selection'] },
 ): Promise<void> {
   const notice = view.state.facet(noticeFacet);
   const save = view.state.facet(imageSaverFacet);
@@ -448,6 +467,10 @@ async function pasteWithPictures(
     const path = paths[index];
     return path ? pathDestination(path) : null;
   });
+  // The document is as it was: the paste goes where it was made, not where the caret has gone.
+  if (view.state.doc === start.doc && !view.state.selection.eq(start.selection)) {
+    view.dispatch({ selection: start.selection });
+  }
   if (text) pasteMarkdown(view, text);
   if (parts.length) notice?.(parts.join(' '));
 }
