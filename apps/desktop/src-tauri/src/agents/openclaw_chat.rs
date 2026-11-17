@@ -159,8 +159,10 @@ pub fn connect_operator(
 pub enum Outcome {
     /// The agent's answer, whole.
     Done(String),
-    /// The run was stopped, here or at the Gateway.
+    /// The run was stopped, and the Gateway said so (`aborted`).
     Cancelled,
+    /// The run was asked to stop and the Gateway never said it had: it may still be going.
+    Lost,
 }
 
 /// A name for a run that no other has: it is the run's id in the Gateway's events, and makes a
@@ -201,7 +203,7 @@ pub fn ask(
             let _ = send(socket, chat_abort_request("3", session_key, key));
         }
         if aborted_at.is_some_and(|at| at.elapsed() >= ABORT_GRACE) {
-            return Ok(Outcome::Cancelled);
+            return Ok(Outcome::Lost);
         }
         match socket.read() {
             Ok(Message::Text(text)) => {

@@ -21,6 +21,7 @@ use super::acp::{AcpAgent, AcpAgents, Bridge};
 use super::acp_gate::Conversation;
 use super::log::RunInfo;
 use super::openclaw_agent::{Talk, serve};
+use super::openclaw_tools::RunTools;
 use super::process::{Input, RunMessage, Runs, Spec, Started};
 use super::which::is_clean_path;
 
@@ -199,6 +200,7 @@ impl AcpRuns {
         bridge: Bridge,
         bundled: &str,
         talk: Talk,
+        tools: Arc<RunTools>,
         window_open: impl Fn() -> bool,
         send: impl Fn(RunMessage) + Send + Sync + 'static,
     ) -> Result<Started, String> {
@@ -206,7 +208,11 @@ impl AcpRuns {
             return Err("Redlines runs an agent only for an absolute folder.".to_owned());
         }
         let shared = Arc::new(Shared {
-            conversation: Mutex::new(Conversation::new(bundled, folder).for_bridge(Some(bridge))),
+            conversation: Mutex::new(
+                Conversation::new(bundled, folder)
+                    .for_bridge(Some(bridge))
+                    .with_gateway_tools(),
+            ),
             id: OnceLock::new(),
             ended: AtomicBool::new(false),
         });
@@ -229,7 +235,7 @@ impl AcpRuns {
                 }
                 send(message);
             },
-            move |lines, link| serve(lines, link, &talk),
+            move |lines, link| serve(lines, link, &talk, &tools),
         )?;
         let _ = shared.id.set(started.id);
         self.running().insert(

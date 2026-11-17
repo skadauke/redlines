@@ -243,6 +243,25 @@ describe('createMacAgents', () => {
     expect(provider.requests).toHaveLength(1);
   });
 
+  it('opens a relay for an agent with no toolbox whose tools reach it through a node', async () => {
+    const relay = fakeRelay();
+    const provider = fakeProvider({
+      relay,
+      id: 'moby',
+      name: 'Moby',
+      readLimit: 'machine',
+      toolbox: false,
+      nodeTools: true,
+      script: replies('Done.'),
+    });
+    const agents = createMacAgents([provider], relay);
+    expect((await agents.list())[0]).toMatchObject({ toolbox: false, nodeTools: true });
+    const events = await collect(agents.run('moby', request, tools, new AbortController().signal));
+    expect(events.at(-1)).toMatchObject({ type: 'done' });
+    // The relay is the run's: opened for it, and closed when it is over.
+    expect(relay.counts()).toEqual({ opened: 1, closed: 1 });
+  });
+
   it('passes on a failure of an agent with no toolbox, and looks again at the agents', async () => {
     const relay = fakeRelay();
     const provider = fakeProvider({
