@@ -1077,7 +1077,10 @@ at the outer edge of a whole inline construct. A marker never goes:
    insertion (`Start <!--ins k3x9-->Hello **there**<!--/k3x9-->middle`, #81). The line around the
    change is read with its markers and without them, and the change is written as it is only where
    the same delimiters pair, and every run that no pair uses up opens and closes as it did; else the
-   change takes the character on one side, or on both.
+   change takes the character on one side, or on both. A deletion is read the same way, with
+   nothing written in its place: deleting the first or last word inside `**`, `*` or `~~` leaves a
+   space next to the delimiter in the newest view, where it doesn't flank, but a marker there would
+   make it flank, so the deletion takes that space too (`**a b<!--del k3x9  c-->**`, #814).
    Where another mark stands against the change, with nothing between, its markers and its text
    come and go with its decisions: the change is written as it is typed only where the paragraph
    reads alike in the file and after every order of accepting and rejecting the marks that touch
