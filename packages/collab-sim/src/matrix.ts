@@ -19,6 +19,15 @@ export const MATRIX: Cell[] = [
   { name: 'hot/c2/5', workload: 'hot', strategy: 'c2', clients: 5 },
   { name: 'typical/c2/5', workload: 'typical', strategy: 'c2', clients: 5 },
   { name: 'hot/c2/online', workload: 'hot', strategy: 'c2', offlineP: 0 },
+  // One person alone, as a baseline for what the format does by itself.
+  ...WORKLOADS.filter((w) => w !== 'review').map((workload) => ({
+    name: `solo/${workload}`,
+    workload,
+    strategy: 'c2' as const,
+    clients: 1,
+    ops: 60,
+    offlineP: 0,
+  })),
   // The no-host replay merge.
   ...WORKLOADS.map((workload) => ({
     name: `${workload}/replay`,

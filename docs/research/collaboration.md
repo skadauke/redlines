@@ -222,9 +222,9 @@ vitest.
 
 Method:
 
-- Sessions: 4 clients (3 and 5 where said), 20 operations each, one to three seconds apart. The
-  network is seeded: latency 5–225 ms, 2% of messages held up 0.4–3 s, a dropped connection for a
-  third of the clients, and an offline period of 2–8 s for 40%. Messages on a link arrive in order;
+- Sessions: 4 clients (3 and 5 where said), 20 operations each, 0.3–2.5 s apart. The
+  network is seeded: latency 5–225 ms, 2% of messages held up 0.4–3 s, a dropped connection of 0.1–1 s for
+  30% of the clients, and an offline period of 2–8 s for 40%. Messages on a link arrive in order;
   those in flight when it drops are lost. A client that comes back asks for what it missed.
 - The authority is a log with a snapshot after every update. It never reads a mark. Three rules:
   - c1: a push made on an older version is rejected;
@@ -243,8 +243,8 @@ Method:
   deriving it again gives the same ids. A client derives again against the newest confirmed text
   whenever its push is rejected, and a push waits until the client has seen the version the
   authority said was newest.
-- Operations: typing, deleting and substituting (also across someone's insertion, which 30% of the
-  runs start on), bold, accept and reject by id with the guard, range and point comments,
+- Operations: typing, deleting and substituting (also across someone's insertion, which about a third of the
+  runs start on once someone has typed in the paragraph), bold, accept and reject by id with the guard, range and point comments,
   and replies. Not modeled: blocks, tables, moves, links, resolve and likes, undo.
 - Workloads as before: hot (everyone in one paragraph), typical (80% in one's own paragraph),
   spread (anywhere, now and then across a paragraph break) and review (the owner makes two thirds of
@@ -266,8 +266,9 @@ Method:
   - every comment and reply is in the ledger once, with its author;
   - every copy has the text of the authority's version at every version.
 - Scale: 200 sessions per row, the same seeds in every row. In each cell, the first number is the
-  share of sessions corrupted at the end (text lost, duplicated, left untracked, revived or
-  misattributed at any point, or invalid markup in the final text); the second, the share in which
+  share of sessions corrupted at the end (at any point, text lost, swallowed,
+  duplicated, left untracked, revived or misattributed, a decision that moved more than its mark, a
+  ledger that lost a comment or reply, or a copy that differed; or invalid markup in the final text); the second, the share in which
   invalid markup was confirmed at any point. Two words with no space between them are counted
   apart as "joined" and are not corruption (below). The whole matrix takes about an hour on three
   cores.
@@ -288,9 +289,10 @@ point of the design.
 **c1 and c2 are alike, and neither is the problem.** c-naive corrupts every session: its rebased
 pushes carry a whole-ledger replacement made on an older ledger, which overwrites other people's
 entries, and positions mapped through marked-up text. Every session confirms markup with no ledger
-entry, comments missing from the ledger or an edit left untracked. c1 and c2 corrupt 7.5–15% of sessions, the same share
-under both, and what they corrupt is not concurrency. **One person editing alone, 60 operations,
-100 sessions, with the same code:**
+entry, comments missing from the ledger or an edit left untracked. c1 and c2 corrupt 7.5–15% of sessions, the same
+share under both, so the rebase rule isn't what corrupts them. Two kinds of failure are in that:
+one the format does on its own, and one that needs two people. **One person editing alone** (cells
+`solo/…` of the matrix: 60 operations, 100 sessions, the same code) shows the first:
 
 | Workload | Corrupted at end / invalid at any point |
 | -------- | --------------------------------------- |
@@ -299,12 +301,14 @@ under both, and what they corrupt is not concurrency. **One person editing alone
 | spread   | 10% / 14%                               |
 
 Every one of those is the body not reading as the newest view in micromark (`render`), with
-nobody else in the session. The format has gaps that only show with many pending changes of
-different people near each other, and a session's length matters more than who is in it. For
+nobody else in the session. It is a gap of the format that shows once many changes are pending
+in one place, and the longer a session, the more of them. With four people and 20 operations each
+it is 3% of hot sessions, 18% of typical and 6% of spread; the typical workload is where it
+matters. In the hot workload the corruption is almost all the second kind, below. For
 example, a person deleting words inside bold text that another person typed leaves
 `**<!--del …--> ed007**`, in which the first `**` is followed by a space, so it opens no emphasis.
-Five clients in the typical workload corrupt 19% of sessions against 15% for four, and fewer
-clients fewer (hot: 7.0%, 8.5%, 9.5% for 3, 4, 5), so the part that concurrency adds is small.
+Five clients in the typical workload corrupt 19% of sessions against 15% for four, and the hot
+workload 7.0%, 8.5% and 9.5% for 3, 4 and 5, so the number of people adds little.
 
 The failures that need two people:
 
@@ -321,37 +325,40 @@ The failures that need two people:
   person's insertion, and the ledger then says that person typed it. Reject that insertion and the
   word goes with it.
 - Two sessions out of 800 (the same seed, in the typical and spread rows) confirmed an edit that
-  left the original view changed and a mark without a ledger entry. They are rare, they happen under
-  c1 and c2 alike, and the seed reproduces them.
+  left the original view changed and a mark without a ledger entry. They are rare, they showed under c2
+  only (not under c1 in 200 sessions), and the seed reproduces them. A decided mark that came back
+  (typical, one session of 200) is the one failure of this kind that shows under both rules.
 - No session lost, swallowed or duplicated text under c1 or c2. The words a person deleted were
   gone, and the words they didn't delete stayed.
 
 **Joined words.** In 25–52% of sessions two words end up with no space between them in a view
 (`u005ed002`). It happens alone as well: a word typed after a deleted word lands after the deletion
 and the deletion keeps the space, so deciding the two the other way round reads as one word. It is
-not corruption by the oracle (the text is all there), and it is the largest of the gaps that the
-format spec doesn't say anything about.
+not corruption by the oracle (the text is all there), and it is the most frequent event of the
+matrix, and a gap the format spec doesn't say anything about.
 
 **Turned-away edits.** Of what people did, 10–14% was turned away while deriving, and 86–90% was
 confirmed. The reasons, in every row:
 
 - A bold change near another person's pending format change: "decide the other change first"
-  (`no-legal-placement`). It is by far the largest (about 1,100–1,700 per 200 sessions, mostly in
-  the hot paragraph): once two people have bold changes in one paragraph, nobody else can bold there.
+  (`no-legal-placement`). It is by far the largest (1,100–1,700 per 200 sessions in every row): it
+  refuses a bold change next to another person's pending one, so in a paragraph where two people have
+  bold changes pending, nobody else can bold.
 - A deletion or substitution whose words someone else has deleted meanwhile: nothing left.
-- A deletion or typing next to a change that can't take it (`no-legal-placement`, `inside-code`).
+- A deletion or typing next to a change that can't take it (`no-legal-placement`).
 - A typed word whose anchors are all gone.
 
 Multiuser §4.2 asks that nothing be turned away; today's library turns away about one edit in ten.
 
 **Decisions and the guard.** Review sessions: 10.0% / 3.0% corrupted with the guard and 11.5% / 4.0%
 without it under c2 (c1: 10.0% / 3.0% and 9.5% / 3.5%), which is no difference at 200 sessions. The
-guard turned away 141 more decisions per 200 sessions under c2. The earlier study found the guard
-essential, because its accepts and rejects acted by inverse edits. Here they act on the mark by id,
-and the library decides the mark's current text, so a stale decision decides what is there now. The
-guard is still the only thing that stops a person deciding something they haven't seen.
+guard turned away 141 more decisions (221 against 80, of every cause) per 200 sessions under c2. The earlier study found the guard
+essential, with accepts and rejects that acted by inverse edits. Here they act on the mark by id,
+and (reading the code) decide the mark's current text, so a stale decision decides what is there now. The
+guard still tells a person that what they were about to decide has changed.
 
-**Speed.** Pushes confirmed in a median 350–415 ms, p95 4.1–4.7 s (the spikes and offline periods).
+**Speed.** Pushes confirmed in a median 350–466 ms and a p95 of 4.1–4.7 s (set by the offline periods and
+spikes of the network).
 c2 was faster than c1 by 8–25% in the median.
 
 ### The ledger
@@ -368,7 +375,7 @@ under c1):
 | spread   | 93.7% | 40.7% | 96.0% | 8.4%  | 84.6% |
 | review   | 94.7% | 40.7% | 96.6% | 8.8%  | 85.0% |
 
-- Four in five updates change the ledger (typing in one's own insertion is the exception), and 86–97%
+- 78–95% of updates change the ledger, and 86–97%
   of the pushes that do and were made on an older version collide with another push's ledger
   change. The prediction holds.
 - In the typical, spread and review workloads, where people are mostly in different places, the
@@ -387,7 +394,7 @@ under c1):
   depend on what has happened, so two rows of one seed are different sessions.
 - Unique words, paragraphs of plain words, bold as the only format, no tables, lists, links,
   moves, undo, resolve or likes, three to five clients, about 20 operations each.
-- Every number is a share of 200 sessions, so a 0 means likely below 1.5%.
+- Every number is a share of 200 sessions, so a 0 means that the rate is probably below 1.5%.
 - Offline periods are 2–8 s. Longer ones aren't tried.
 - The oracle checks words and markup. It can't say that a word was placed where the person meant,
   only that it is where its author's change says.
