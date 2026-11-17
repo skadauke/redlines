@@ -1019,17 +1019,13 @@ export function decisionProblems(
       problems.push(`${set || 'no decisions'} reads ${[...results].map(notation).join(' or ')}`);
     }
   }
-  // The outcomes of every decision made the one way, whatever marks the decisions freed.
+  // The outcomes where every decision was made the one way. A decision may remove marks that were
+  // not decided (those inside a replacement's old text), so the set need not name every mark.
   const allWays = (how: 'a' | 'r') => {
     const found: string[] = [];
     for (const [set, results] of outcomes) {
       const tokens = set.split(' ').filter(Boolean);
-      if (
-        tokens.every((token) => token.startsWith(how)) &&
-        all.every((id) => tokens.includes(`${how}${id}`))
-      ) {
-        found.push(...results);
-      }
+      if (tokens.every((token) => token.startsWith(how))) found.push(...results);
     }
     return found;
   };
