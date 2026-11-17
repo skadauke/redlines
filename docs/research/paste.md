@@ -156,8 +156,12 @@ at its start.
     pasted screenshot is, and linked from the Markdown; one that can't be saved is left out and said
     in a notice. Word's other copy of the picture, a `file:` address in its temporary folder, is
     never read: the page's text could name any file;
-  - a Google Docs picture is an `https://` address of Google's (`googleusercontent.com`) that stays
-    linked, with a notice that it isn't saved: the app has no way to fetch it;
+  - a Google Docs picture is an `https://` address on Google's image servers
+    (`lh<n>[-xx].googleusercontent.com`) that the page can't fetch. The app fetches it
+    (`fetch_remote_image`: `https` on those hosts only, no cookies, 20 s, 20 MB, an image by its
+    content type and its first bytes) and the bytes are saved like any pasted picture. A picture that
+    can't be fetched or saved stays linked to its address, with a notice, never dropped; a plain
+    browser tab, which has no such command, links them all;
   - lazy-loaded placeholders are replaced with the real source;
   - undoing the paste deletes the files it created.
 

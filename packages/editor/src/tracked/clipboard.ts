@@ -30,12 +30,13 @@ import { documentHtml } from '../clipboard/document-html.ts';
 import { imageReader, imageResolver, sourceOf } from '../preview/image.ts';
 import {
   type PictureSink,
+  encodeUrl,
   htmlToMarkdown,
   htmlToRange,
   withPictureLinks,
 } from '../clipboard/paste-html.ts';
 import { noticeFacet } from '../image-size.ts';
-import { destination as pathDestination, imageSaverFacet } from '../images.ts';
+import { destination as pathDestination, imageFetcherFacet, imageSaverFacet } from '../images.ts';
 import { place } from '../clipboard/place.ts';
 import { pasteListItems } from '../blocks/keys.ts';
 import { LOOKS_LIKE_ITEMS } from '../blocks/paste.ts';
@@ -445,10 +446,33 @@ async function pasteWithPicturesNow(
 ): Promise<void> {
   const notice = view.state.facet(noticeFacet);
   const save = view.state.facet(imageSaverFacet);
+  const fetchImage = view.state.facet(imageFetcherFacet);
+  // What each picture is linked by: the saved file's path, or, for a picture fetched by its address
+  // that couldn't be fetched or saved, the address itself (never dropped).
   const paths: (string | null)[] = [];
-  if (save) for (const picture of found.pictures) paths.push(await savePicture(save, picture));
+  // The pictures that stay linked to their address after all: fetched ones that failed.
+  let stayed = 0;
+  if (save) {
+    for (const picture of found.pictures) {
+      if (picture.url === undefined) {
+        paths.push(await savePicture(save, picture));
+        continue;
+      }
+      let path: string | null = null;
+      try {
+        const fetched = fetchImage ? await fetchImage(picture.url) : null;
+        if (fetched) path = await savePicture(save, fetched);
+      } catch {
+        path = null;
+      }
+      if (path === null) stayed++;
+      paths.push(path ?? picture.url);
+    }
+  }
   if (!view.dom.isConnected) return;
-  const left = found.pictures.length - paths.filter((path) => path !== null).length;
+  const left = found.pictures.filter(
+    (picture, index) => picture.url === undefined && paths[index] == null,
+  ).length;
   const parts: string[] = [];
   if (left || found.unreadable) {
     const count = left + found.unreadable;
@@ -458,14 +482,17 @@ async function pasteWithPicturesNow(
         : `${count === 1 ? 'A picture' : `${count} pictures`} in the paste ${count === 1 ? 'wasn’t' : 'weren’t'} added: this window can’t save pictures.`,
     );
   }
-  if (found.linked) {
+  const linked = found.linked + stayed;
+  if (linked) {
     parts.push(
-      `${found.linked === 1 ? 'A picture stays' : `${found.linked} pictures stay`} linked to ${found.linked === 1 ? 'its' : 'their'} web address: ${found.linked === 1 ? 'it isn’t' : 'they aren’t'} saved in the document’s images folder.`,
+      `${linked === 1 ? 'A picture stays' : `${linked} pictures stay`} linked to ${linked === 1 ? 'its' : 'their'} web address: ${linked === 1 ? 'it isn’t' : 'they aren’t'} saved in the document’s images folder.`,
     );
   }
   const text = withPictureLinks(markdown, (index) => {
     const path = paths[index];
-    return path ? pathDestination(path) : null;
+    if (!path) return null;
+    // A picture that stayed linked keeps its address, written as a pasted address is.
+    return path === found.pictures[index]?.url ? encodeUrl(path) : pathDestination(path);
   });
   // The document is as it was: the paste goes where it was made, not where the caret has gone.
   if (view.state.doc === start.doc && !view.state.selection.eq(start.selection)) {
@@ -548,6 +575,9 @@ export function clipboard(): Extension {
           pictures: [],
           unreadable: 0,
           linked: 0,
+          fetch:
+            view.state.facet(imageFetcherFacet) !== undefined &&
+            view.state.facet(imageSaverFacet) !== undefined,
           read: new Map(),
         };
         const markdown = pastedMarkdown(data, lastCopied, pictures);
