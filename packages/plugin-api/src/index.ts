@@ -329,6 +329,13 @@ export interface AgentProvider {
    * changes nothing in the document. Without it, the agent has the toolbox.
    */
   toolbox?: false;
+  /**
+   * `true` for a `toolbox: false` agent whose tools reach it anyway: an OpenClaw agent through its
+   * Gateway, which calls Redlines' tools as a node. The host opens the run's relay and hands the
+   * agent no program to start; the tools work for as long as the run is live, and the agent is
+   * told so in its prompt.
+   */
+  nodeTools?: true;
   /** The models the agent can be told to run, none for an agent that chooses its own (#530). */
   models?: readonly AgentModel[];
   /**
@@ -350,6 +357,8 @@ export interface AgentInfo {
   readLimit: 'folder' | 'machine';
   /** `false` for an agent that answers in text and has no toolbox (`AgentProvider.toolbox`). */
   toolbox?: false;
+  /** `true` when its tools reach it through a node (`AgentProvider.nodeTools`). */
+  nodeTools?: true;
   /** The models it can run (`AgentProvider.models`); absent when it chooses its own (#530). */
   models?: readonly AgentModel[];
   /** `true` when the agent can look at a picture (`AgentProvider.seesImages`). */

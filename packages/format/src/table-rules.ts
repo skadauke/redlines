@@ -12,6 +12,7 @@
 //    at its start, which a row with markers must not leave bare.
 
 import {
+  blankAt,
   bodyStart,
   lineEnd,
   lineStart,
@@ -84,7 +85,7 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
     tables ??= tablesIn(text, parsed);
     for (const table of tables) {
       if (!inTable(table, edit)) continue;
-      if (edit.from <= table.from && edit.to >= table.to && edit.to > edit.from) continue;
+      if (coversTable(table, edit)) continue;
       // A blank line written before the table or after it only moves it: Return at the first
       // pipe or at the end of the last row.
       if (edit.from === edit.to && edit.from === table.from && /(?:\r?\n){2}$/.test(edit.insert)) {
@@ -129,11 +130,7 @@ export function assertRowsStay(
   const brings = (insert: string) => insert.replace(/<!--[\s\S]*?-->/g, '');
   const count = (s: string, pattern: RegExp) => s.match(pattern)?.length ?? 0;
   const inRows = (change: TextChange, tables: readonly TableRead[]) =>
-    tables.some(
-      (table) =>
-        inTable(table, change) &&
-        !(change.from <= table.from && change.to >= table.to && change.to > change.from),
-    );
+    tables.some((table) => inTable(table, change) && !coversTable(table, change));
   for (const pattern of [/\|/g, /\n/g]) {
     const typed = edits.reduce((sum, edit) => sum + count(edit.insert, pattern), 0);
     const written = changes.reduce((sum, change) => sum + count(brings(change.insert), pattern), 0);
@@ -178,7 +175,7 @@ export function leadingPipeAt(text: string, edit: TextChange, parsed?: Parsed): 
     if (edit.from < table.from || edit.from > table.to) continue;
     // A deletion of the whole table is a deletion of a block, with its marker in front of the block
     // after it: nothing stands at the start of the table's first row, and the pipe is no use.
-    if (edit.from <= table.from && edit.to >= table.to && edit.to > edit.from) continue;
+    if (coversTable(table, edit)) continue;
     const row = table.rows.find((r) => r.from <= edit.from && edit.from <= r.to);
     const cell = row?.cells[0];
     if (!row || !cell || row.leadingPipe) continue;
@@ -878,9 +875,10 @@ export function commentHasNoPlace(parsed: Parsed, by: string): string {
   return `${nameOf(parsed, by)}'s comment is in this table, and no text next to it can keep it. Delete the comment first, or turn off Track Changes.`;
 }
 
-/** Whether the line that starts at `start` is blank. */
-const blankAt = (text: string, start: number): boolean =>
-  /^[ \t]*$/.test(text.slice(start, lineEnd(text, start)));
+/** Whether a change takes out the whole table (and something): the edit of a block, not of its rows. */
+function coversTable(table: TableRead, change: Range): boolean {
+  return change.from <= table.from && change.to >= table.to && change.to > change.from;
+}
 
 /**
  * Where a point comment of a table that is deleted whole may stand, in the order to try them (format

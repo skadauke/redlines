@@ -82,6 +82,8 @@ import {
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { quartoCites } from './preview/quarto-cites.ts';
+import { quartoRefs } from './preview/quarto-refs.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
@@ -171,6 +173,7 @@ export {
   joinsNewestStep,
   redo,
   redoDepth,
+  remoteStep,
   undo,
   undoDepth,
 } from './history/index.ts';
@@ -182,6 +185,7 @@ export {
   calloutOf,
   type CalloutMenuRequest,
 } from './preview/callout.ts';
+export { QUARTO_CALLOUTS } from './preview/divs.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export {
@@ -283,6 +287,10 @@ export type {
 export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
 export { deriveTable, writeTable } from './table/intent.ts';
 export { deriveSteps } from './table/paste-intent.ts';
+export { deriveMove, writeMove } from './blocks/move-intent.ts';
+export type { MoveIntent, MoveRequest } from './blocks/move-intent.ts';
+export { deriveWidenedPaste, writeWidenedPaste } from './table/widened-paste.ts';
+export type { WidenedPasteIntent, WidenedPasteRequest } from './table/widened-paste.ts';
 export type { TableIntent, TableRequest, TableWriter, WrittenTable } from './table/intent.ts';
 export type { FormatIntent, FormatRequest, FormatWriter } from './tracked/format-intent.ts';
 export { agentIntentAnnotation, agentIntentOf } from './tracked/agent-intent.ts';
@@ -426,6 +434,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableMouse(),
     tableReach(),
     tableWidths(),
+    quartoRefs(),
+    quartoCites(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],

@@ -90,6 +90,8 @@ export function fakeProvider(options: {
   readLimit?: 'folder' | 'machine';
   /** `false` for an agent that answers in text and has no toolbox, as an OpenClaw agent. */
   toolbox?: false;
+  /** `true` for an agent with no toolbox whose tools reach it through a Gateway's node. */
+  nodeTools?: true;
   /** The models it lists, as a provider's `models`. */
   models?: AgentProvider['models'];
   /** Whether it can look at a picture the toolbox shows it. Default: no. */
@@ -103,6 +105,7 @@ export function fakeProvider(options: {
     name: options.name ?? 'Claude',
     readLimit: options.readLimit ?? 'folder',
     ...(options.toolbox === false ? { toolbox: false as const } : {}),
+    ...(options.nodeTools === true ? { nodeTools: true as const } : {}),
     ...(options.models ? { models: options.models } : {}),
     ...(options.seesImages === true ? { seesImages: true as const } : {}),
     requests: [],
@@ -113,7 +116,7 @@ export function fakeProvider(options: {
       provider.requests.push(request);
       // An agent with no toolbox has no line to connect to: calling a tool is an error.
       const connection =
-        options.toolbox === false
+        options.toolbox === false && options.nodeTools !== true
           ? toolClient(() => Promise.reject(new Error('This agent has no toolbox.')))
           : options.relay.connect(tools);
       return provider.script({ request, tools: connection, signal });

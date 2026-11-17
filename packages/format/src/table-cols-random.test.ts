@@ -189,6 +189,7 @@ function expectMergeDecided(label: string, text: string) {
   let hidden = 0;
   let without = 0;
   let noOriginals = 0;
+  let widenedTogether = 0;
   const walk = (current: string, path: string) => {
     if (seen.has(current) || noOriginal(current)) return;
     seen.add(current);
@@ -271,7 +272,17 @@ function expectMergeDecided(label: string, text: string) {
         }
         // Deciding another change leaves the alignment change pending, and read: the mark survives a column that
         // leaves, where a scan that pairs the halves of code spans and comments across the cells could hide it.
-        if (point !== undefined && id !== point) {
+        // Rejecting the last inserted column of a table that a pending deletion of a column keeps is the deletion
+        // of the whole table, which holds the table's other changes in its payload; where no unit holds them (the
+        // table is the whole text) the decision is widened to the table's changes, and the alignment change goes
+        // with it (#891, #936).
+        const together =
+          how === 'reject' &&
+          point !== undefined &&
+          !parse(next).marks.some((m) => m.id === point) &&
+          parse(current).marks.some((m) => m.id === id && m.kind === 'ins' && m.payload === 'col');
+        if (together) widenedTogether++;
+        if (point !== undefined && id !== point && !together) {
           named('the alignment change is not kept', () =>
             expect(
               pendingPoint(next)?.id,
@@ -284,7 +295,7 @@ function expectMergeDecided(label: string, text: string) {
     }
   };
   walk(text, '');
-  return { states: seen.size, lost, kept, hidden, without, noOriginals };
+  return { states: seen.size, lost, kept, hidden, without, noOriginals, widenedTogether };
 }
 
 describe('rows and columns, random', () => {

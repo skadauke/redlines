@@ -14,9 +14,12 @@ vi.mock('@redlines/format', async (importOriginal) => {
   };
 });
 
+import { EditorView } from '@codemirror/view';
 import {
   createEditor,
   type Editor,
+  type Intent,
+  intentOf,
   moveRunTo,
   runOfSelection,
   type UntrackedAnswer,
@@ -32,7 +35,10 @@ afterEach(() => {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 const DOC = Array.from({ length: 12 }, (_, i) => `P${i}.`).join('\n\n') + '\n';
 
+const intents: Intent[] = [];
+
 function load(answers: UntrackedAnswer[], asking = true) {
+  intents.length = 0;
   const asked: UntrackedReason[] = [];
   const parent = document.createElement('div');
   document.body.append(parent);
@@ -51,6 +57,14 @@ function load(answers: UntrackedAnswer[], asking = true) {
           },
         }
       : {}),
+    extensions: [
+      EditorView.updateListener.of((update) => {
+        for (const tr of update.transactions) {
+          const intent = intentOf(tr);
+          if (intent) intents.push(intent);
+        }
+      }),
+    ],
   });
   open.push(editor);
   editor.view.dispatch({ selection: { anchor: 1 } });
@@ -75,6 +89,9 @@ describe('a move that reaches too many blocks to be tracked', () => {
     expect(asked).toEqual(['accept-pending']);
     expect(view(editor).endsWith('P0.\n')).toBe(true);
     expect(editor.getParsed().marks).toEqual([]);
+    // The move made without tracking is recorded as the plain edits it was.
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({ kind: 'typing', tracking: false });
   });
 
   it('writes nothing on Cancel', async () => {

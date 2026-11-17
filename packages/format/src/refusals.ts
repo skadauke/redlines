@@ -599,12 +599,6 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'no fine form reads alike in every order: written as a replacement of its unit (format §3.12)',
   ],
   [
-    'packages/format/src/table-cols.ts',
-    'A table keeps at least one column.',
-    'disable',
-    'inventory #110; since #477 only where rejecting the last inserted column would leave more than one deleted column, or another change, pending in the table',
-  ],
-  [
     'packages/format/src/table-diff.ts',
     'diff.refused',
     'widen',

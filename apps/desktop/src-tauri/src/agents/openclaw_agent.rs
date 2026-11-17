@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 
 use super::acp::AcpAgent;
 use super::openclaw_chat::Outcome;
+use super::openclaw_tools::{Registration, RunTools};
 use super::process::ThreadRun;
 
 /// Sends a message into a session and gives the agent's answer: the session's key, the text, and
@@ -66,8 +67,10 @@ fn prompt_text(params: &Value) -> String {
 }
 
 /// Speaks the protocol to a window until it stops the run or goes away. `talk` is the Gateway.
-pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk) {
+pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc<RunTools>) {
     let cancel = AtomicBool::new(false);
+    // The run's hold on its tools (`openclaw_tools.rs`): ended with the run, and by Stop or cancel.
+    let mut hold: Option<Registration> = None;
     let (done_in, done) = mpsc::channel::<(Value, Result<Outcome, String>)>();
     std::thread::scope(|scope| {
         let mut key: Option<String> = None;
@@ -75,10 +78,25 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk) {
         loop {
             if link.stopped() {
                 cancel.store(true, Ordering::Relaxed);
+                if let Some(held) = &hold {
+                    held.end();
+                }
             }
             if let Ok((id, outcome)) = done.try_recv() {
                 busy = false;
                 cancel.store(false, Ordering::Relaxed);
+                // One run is one prompt: the tools end with it, and a second prompt in this session
+                // would have none.
+                // The run is over at the Gateway when it said so (its final event, `aborted` or
+                // an error event): the thread's next run may have its tools. A run it never
+                // reported on may still be going, and its thread waits for a deadline instead.
+                if matches!(outcome, Ok(Outcome::Lost) | Err(_)) {
+                    if let Some(held) = hold.take() {
+                        held.leave();
+                    }
+                } else {
+                    hold = None;
+                }
                 match outcome {
                     Ok(Outcome::Done(text)) => {
                         if !text.trim().is_empty() {
@@ -95,7 +113,7 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk) {
                         }
                         link.say(reply(&id, json!({"stopReason": "end_turn"})));
                     }
-                    Ok(Outcome::Cancelled) => {
+                    Ok(Outcome::Cancelled | Outcome::Lost) => {
                         link.say(reply(&id, json!({"stopReason": "cancelled"})));
                     }
                     Err(message) => link.say(failure(&id, -32603, &message)),
@@ -113,6 +131,9 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk) {
                 // The window has let go of the run: what is running is told to stop.
                 Err(RecvTimeoutError::Disconnected) => {
                     cancel.store(true, Ordering::Relaxed);
+                    if let Some(held) = &hold {
+                        held.end();
+                    }
                     if !busy {
                         return;
                     }
@@ -132,6 +153,17 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk) {
                 (Some("session/new"), Some(id)) => {
                     match message["params"]["_meta"]["sessionKey"].as_str() {
                         Some(session) => {
+                            // The relay the window opened for this run's tools, if it did: the
+                            // gate has checked that it is the window's own.
+                            if let Some(socket) = message["params"]["_meta"]["tools"].as_str() {
+                                match tools.register(session, socket) {
+                                    Ok(registered) => hold = Some(registered),
+                                    Err(why) => {
+                                        link.say(failure(&id, -32603, &why));
+                                        continue;
+                                    }
+                                }
+                            }
                             key = Some(session.to_owned());
                             link.say(reply(&id, json!({"sessionId": SESSION})));
                         }
@@ -166,6 +198,11 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk) {
                     // next one before it began.
                     if busy {
                         cancel.store(true, Ordering::Relaxed);
+                        // Stop ends the run's tool access at once, before the Gateway has
+                        // finished stopping the run; the thread's next run waits for that.
+                        if let Some(held) = &hold {
+                            held.end();
+                        }
                     }
                 }
                 (Some(_), Some(id)) => link.say(failure(&id, -32601, "Method not found")),
@@ -199,6 +236,7 @@ mod tests {
 
     /// Starts a run served by `talk` and gives its input and what the window hears.
     fn start(runs: &Runs, folder: &Path, talk: Talk) -> (super::super::process::Input, Heard, u32) {
+        let tools = Arc::new(RunTools::default());
         let heard: Heard = Arc::default();
         let sink = Arc::clone(&heard);
         let (started, input) = runs
@@ -208,7 +246,7 @@ mod tests {
                 &info(),
                 "OpenClaw Gateway",
                 move |message| sink.lock().unwrap().push(message),
-                move |lines, link| serve(lines, link, &talk),
+                move |lines, link| serve(lines, link, &talk, &tools),
             )
             .unwrap();
         (input, heard, started.id)
@@ -306,6 +344,114 @@ mod tests {
                 "You are an editor.\n\nFix the spelling.".to_owned()
             )
         );
+    }
+
+    #[test]
+    fn a_runs_tools_live_from_its_session_until_it_is_cancelled() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let folder = TempFolder::new("gw-tools");
+        let socket = folder.path().join("s");
+        let listener = UnixListener::bind(&socket).unwrap();
+        // The window's relay: answers the handshake, and then only listens.
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut writer = stream;
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                if message["method"] == "initialize" {
+                    let _ = writeln!(
+                        writer,
+                        "{}",
+                        json!({"jsonrpc": "2.0", "id": message["id"], "result": {}})
+                    );
+                }
+                line.clear();
+            }
+        });
+        let runs = Runs::default();
+        let tools = Arc::new(RunTools::default());
+        let talk: Talk = Arc::new(|_, _, stop| {
+            while !stop.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(Outcome::Cancelled)
+        });
+        let heard: Heard = Arc::default();
+        let sink = Arc::clone(&heard);
+        let (_, input) = runs
+            .start_thread(
+                "main",
+                folder.path(),
+                &info(),
+                "OpenClaw Gateway",
+                move |message| sink.lock().unwrap().push(message),
+                {
+                    let tools = Arc::clone(&tools);
+                    move |lines, link| serve(lines, link, &talk, &tools)
+                },
+            )
+            .unwrap();
+        input
+            .send(&input_of(
+                json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}}),
+            ))
+            .unwrap();
+        input
+            .send(&input_of(
+                json!({"jsonrpc": "2.0", "id": 1, "method": "session/new", "params": {
+                    "cwd": "/x", "mcpServers": [],
+                    "_meta": {"sessionKey": KEY, "tools": socket.to_str().unwrap()}}}),
+            ))
+            .unwrap();
+        wait_for(&heard, |l| l.iter().any(|m| m["id"] == 1));
+        assert!(tools.is_live(KEY));
+        input
+            .send(&input_of(
+                json!({"jsonrpc": "2.0", "id": 2, "method": "session/prompt",
+                "params": {"sessionId": "gateway", "prompt": [{"type": "text", "text": "Hi"}]}}),
+            ))
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(tools.is_live(KEY), "live while the prompt runs");
+        input
+            .send(&input_of(
+                json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "gateway"}}),
+            ))
+            .unwrap();
+        wait_for(&heard, |l| l.iter().any(|m| m["id"] == 2));
+        assert!(!tools.is_live(KEY), "cancel ends the tool access");
+    }
+
+    #[test]
+    fn a_run_whose_tools_cant_start_doesnt_open_a_session() {
+        let folder = TempFolder::new("gw-tools");
+        let runs = Runs::default();
+        let tools = Arc::new(RunTools::default());
+        let talk: Talk = Arc::new(|_, _, _| panic!("no session, no message"));
+        let heard: Heard = Arc::default();
+        let sink = Arc::clone(&heard);
+        let (_, input) = runs
+            .start_thread(
+                "main",
+                folder.path(),
+                &info(),
+                "OpenClaw Gateway",
+                move |message| sink.lock().unwrap().push(message),
+                move |lines, link| serve(lines, link, &talk, &tools),
+            )
+            .unwrap();
+        input
+            .send(&input_of(
+                json!({"jsonrpc": "2.0", "id": 1, "method": "session/new", "params": {
+                    "cwd": "/x", "mcpServers": [],
+                    "_meta": {"sessionKey": KEY, "tools": "/nonexistent/rl/s"}}}),
+            ))
+            .unwrap();
+        wait_for(&heard, |l| l.iter().any(|m| m["id"] == 1));
+        assert!(lines(&heard)[0]["error"]["message"].is_string());
     }
 
     #[test]
