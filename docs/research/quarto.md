@@ -285,7 +285,27 @@ one above them only where stated.
 Dependencies: Q1 first; Q5 can start at once; Q2, Q3 and Q4 after Q1; Q7 after Q2; Q11 after #915
 merges; Q15 after Q4 and Q5. Phases 2 and 3 run in parallel once Q2 is in; Phases 4 and 5 last. About 9 hours of lane time, 3 to 4 elapsed.
 
-## Open questions for Stephan
+## Decisions
+
+Stephan asked the coordinator to decide the six questions (2026-11-17, Epic #930). The answers:
+
+1. **`.qmd` is first-class.** It opens and saves like `.md` and gets Quick Look, with Quarto's rules
+   active for `.qmd` files only. `.md` keeps the plain rules, through a dialect switch in the format
+   library.
+2. **Callouts share the alert box:** one component, with Quarto's five types, its title and its
+   collapse.
+3. **Cross-references get chips:** a small chip with the target's label and number when it
+   resolves, and plain text when it doesn't.
+4. **Includes aren't inline by default:** a collapsed block shows the included file's name and an
+   Open button, and expands to a read-only preview.
+5. **The review copy is Redlines' own Word export,** which keeps the marks. Quarto's docx render
+   is for the final output.
+6. **CI installs a pinned Quarto** in an optional job, on the epic branch's scheduled run and on
+   PRs that touch Quarto code, not on every PR.
+
+The questions as asked, kept for the record:
+
+### Open questions (answered above)
 
 1. **Is `.qmd` a first-class file type for v1, or a "works, no drawing" one?** Phase 0 is needed
    either way (bugs against the spec); Phases 2 to 5 are the work of making it first-class.
