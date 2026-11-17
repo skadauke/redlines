@@ -85,6 +85,7 @@ import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
 import {
   intentAnnotation,
   newIntentId,
+  recordedAs,
   recording,
   replaying,
   type TypingIntent,
@@ -815,9 +816,16 @@ export function deriveIntent(state: EditorState, intent: TypingIntent): ChangeSe
     time: intent.time,
     random: replaying(intent),
   };
-  const text = state.doc.toString();
-  const parsed = state.field(parsedField);
-  return (
+  const revert = intent.revert
+    ? ChangeSet.of(
+        intent.revert.map(({ from, to, insert }) => ({ from, to, insert })),
+        state.doc.length,
+      )
+    : null;
+  // The text the edits were made to: the start text, or with a composition taken back.
+  const text = revert ? revert.apply(state.doc).toString() : state.doc.toString();
+  const parsed = revert ? parse(text, state.field(parsedField)) : state.field(parsedField);
+  const made = (
     intent.tracking
       ? trackEdits(
           state,
@@ -831,6 +839,7 @@ export function deriveIntent(state: EditorState, intent: TypingIntent): ChangeSe
         )
       : untrackEdits(state, text, parsed, intent.edits, intent.backward, replay)
   ).changes;
+  return revert ? revert.compose(made) : made;
 }
 
 /**
@@ -1364,6 +1373,7 @@ function finishComposition(view: EditorView): void {
   const effects: StateEffect<unknown>[] = [composedEffect.of(null)];
   let changes = back;
   let selection: SelectionRange | undefined;
+  let intent: Unnamed<TypingIntent> | undefined;
   const inRaw = state.field(viewModeField) === 'raw';
   const asker = state.facet(untrackedAskFacet);
   /** The composition taken back, and held for the sheet (design §3.1). */
@@ -1430,6 +1440,12 @@ function finishComposition(view: EditorView): void {
       return;
     }
     changes = back.compose(made.changes);
+    if (made.intent) {
+      intent = {
+        ...made.intent,
+        revert: [{ from: pending.from, to: pending.to, insert: pending.replaced }],
+      };
+    }
     if (made.caret !== null) selection = EditorSelection.cursor(made.caret);
     if (tracking && !kept && suggests(state, base, edits, made.changes)) {
       effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
@@ -1442,7 +1458,11 @@ function finishComposition(view: EditorView): void {
     changes,
     selection,
     effects,
-    annotations: [trackedEditAnnotation.of(true), Transaction.userEvent.of('input.type.compose')],
+    annotations: [
+      trackedEditAnnotation.of(true),
+      Transaction.userEvent.of('input.type.compose'),
+      ...(intent ? [recordedAs(intent)] : []),
+    ],
   });
 }
 
