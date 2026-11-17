@@ -367,7 +367,7 @@ function joinsLists(siblings: readonly Unit[], first: number, last: number, g: n
   });
 }
 
-/** Whether a change writes a marker inside a fenced code block, past its opening fence: a move takes
+/** Whether a change writes a marker inside a code unit (a fenced block, indented code, a raw HTML block), past its first line: a move takes
  * whole blocks, and a marker there is read as the code's own text. */
 function insideCode(text: string, changes: readonly TextChange[]): boolean {
   const code: Range[] = [];
