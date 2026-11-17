@@ -827,10 +827,11 @@ const pointer: Check[] = [
       const problems: Problem = {};
       const aboveEnd = endOf(editor, 'Before the deleted paragraph.');
       const belowStart = at(editor, 'After the deleted paragraph.');
-      const keyed = async (key: string, altKey = false) => {
+      const keyed = async (key: string, altKey = false, shiftKey = false) => {
         const event = new KeyboardEvent('keydown', {
           key,
           altKey,
+          shiftKey,
           bubbles: true,
           cancelable: true,
         });
@@ -838,16 +839,16 @@ const pointer: Check[] = [
         await frames();
         return event.defaultPrevented;
       };
-      // ⌥↓ goes to the end of the paragraph the caret is in, then to the end of the next one's, past
-      // the struck block; ⌥↑ goes to the start of that paragraph, then of the one before it. The
-      // paragraph keys are the Mac's.
+      // ⇧⌥↓ extends to the end of the paragraph the caret is in, then to the end of the next one's,
+      // past the struck block; ⇧⌥↑ to the start of that paragraph, then of the one before it. (⌥↓
+      // and ⌥↑ alone move the block since 4b3b72da.) The paragraph keys are the Mac's.
       if (/Mac/.test(navigator.platform)) {
         const belowEnd = endOf(editor, 'After the deleted paragraph.');
         const aboveStart = at(editor, 'Before the deleted paragraph.');
         await place(editor, aboveEnd - 6);
         const seen: number[] = [];
         for (const down of [true, true, false, false]) {
-          await keyed(down ? 'ArrowDown' : 'ArrowUp', true);
+          await keyed(down ? 'ArrowDown' : 'ArrowUp', true, true);
           seen.push(head(editor));
         }
         const wanted = [aboveEnd, belowEnd, belowStart, aboveStart];
