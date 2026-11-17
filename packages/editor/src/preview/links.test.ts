@@ -5,7 +5,8 @@ import { forceParsing } from '@codemirror/language';
 import { showTooltip } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
-import { linkDestination, openableAddress } from './links.ts';
+import corpus from './link-addresses.json' with { type: 'json' };
+import { linkDestination, openableAddress, visibleFormat } from './links.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -83,6 +84,17 @@ function commandClick(target: Element, more: MouseEventInit = {}): void {
   mouse(target, 'mousedown', { metaKey: true, clientX: 5, clientY: 5, ...more });
   mouse(target, 'mouseup', { metaKey: true, clientX: 5, clientY: 5, ...more });
 }
+
+describe('the shared list of addresses (also read by links.rs)', () => {
+  it('opens each of opens as it is, and nothing of refuses', () => {
+    for (const address of corpus.opens) {
+      expect(openableAddress(address), JSON.stringify(address)).toBe(address);
+    }
+    for (const address of corpus.refuses) {
+      expect(openableAddress(address), JSON.stringify(address)).toBeNull();
+    }
+  });
+});
 
 describe('the addresses that open (design §5.2)', () => {
   it('are web and mail addresses, whatever the case of the scheme', () => {
@@ -554,5 +566,30 @@ describe('on a page that is not a Mac’s (design §5.2)', () => {
     mouse(link, 'mousemove', { clientX: 5, clientY: 5 });
     vi.advanceTimersByTime(400);
     expect(document.querySelector('.rl-link-hint')?.textContent).toContain('Ctrl-click to open');
+  });
+});
+
+describe('the hint shows format characters (#380)', () => {
+  it('writes them as code points and leaves the rest as it is', () => {
+    expect(visibleFormat('https://example.org/a\u202Eb\u200Bc')).toBe(
+      'https://example.org/a<U+202E>b<U+200B>c',
+    );
+    expect(visibleFormat('https://example.org/é?x=1')).toBe('https://example.org/é?x=1');
+  });
+});
+
+describe('a reference link finds its definition (#380)', () => {
+  const at = (doc: string, text: string, n = 1) => {
+    const editor = load(doc);
+    const state = editor.view.state;
+    return linkDestination(state, doc.indexOf(text) + n);
+  };
+  it('at the end of a long document, as soon as it is loaded', () => {
+    const doc = `${'Filler paragraph.\n\n'.repeat(4000)}See [the docs][docs].\n\n[docs]: https://example.org/docs\n[A]: <https://example.org/a>\n`;
+    expect(at(doc, 'the docs')).toBe('https://example.org/docs');
+  });
+  it('the first definition of a label counts', () => {
+    const doc = 'See [x][k].\n\n[k]: https://one.org\n[K]: https://two.org\n';
+    expect(at(doc, 'x]')).toBe('https://one.org');
   });
 });
