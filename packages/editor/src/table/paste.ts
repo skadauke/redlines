@@ -316,9 +316,9 @@ function write(view: EditorView, plan: Plan): boolean {
   }
   if ('why' in done) return refuse(view, done.why);
   const total = done.total;
-  // One write is its own intent; several, each on the text the one before left, are steps.
+  // One write is its own intent (rows that are filled need the steps' derive); several, each on the text the one before left, are steps.
   const intent: StepsIntent | TypingIntent | TableIntent | undefined =
-    done.steps.length === 1
+    done.steps.length === 1 && !(done.steps[0]?.kind === 'table' && done.steps[0].filled)
       ? done.steps[0]
       : done.steps.length
         ? { kind: 'steps', id: newIntentId(), steps: done.steps }
