@@ -50,16 +50,15 @@ pub const NOT_LIVE: &str = "This call is not part of a live Redlines run, so it 
     any document. Redlines' tools work only inside a run that a person started in Redlines, until \
     they stop it.";
 
-/// The agent a session key without one is filed under at the Gateway: its default agent, `main`
-/// unless the person configured another (seen live: a run started with the bare
-/// `redlines-0123456789abcdef` is reported as `agent:main:redlines-0123456789abcdef`).
+/// The agent a session key without one is filed under at the Gateway when nothing better is known:
+/// its default agent, `main` unless the person configured another. The Gateway reports the key it
+/// really filed the run under in the run's `chat` events, and `RunTools::adopt` takes it from
+/// there, so a Gateway whose default agent isn't `main` is matched too.
 const DEFAULT_AGENT: &str = "main";
 
-/// The key a session is matched on, whole: `agent:<id>:<name>`. A bare key is the default agent's;
-/// one that names an agent keeps it, so a call from one agent's session never acts for another's
-/// that shares the name after the agent. (If the person's default agent isn't `main`, a run
-/// started with a bare key isn't matched by the Gateway's reports, and its calls are refused:
-/// that fails closed.)
+/// The key a session is matched on, whole: `agent:<id>:<name>`. A bare key is the default agent's,
+/// `main` until the Gateway says otherwise; one that names an agent keeps it, so a call from one
+/// agent's session never acts for another's that shares the name after the agent.
 fn canonical(key: &str) -> String {
     let named = key.strip_prefix("agent:").is_some_and(|rest| {
         rest.split_once(':')
@@ -70,6 +69,24 @@ fn canonical(key: &str) -> String {
     } else {
         format!("agent:{DEFAULT_AGENT}:{key}")
     }
+}
+
+/// The drain a new run in `session` must wait for: that of its own key, and, for a bare session,
+/// of the same session under any agent the Gateway filed an earlier run of it under (waiting for
+/// more than needed costs a moment; waiting for less would let a late call meet the next run).
+fn drain_of(
+    draining: &HashMap<String, Drain>,
+    session: &str,
+    key: &str,
+) -> Option<(String, Instant)> {
+    let bare = canonical(session) != session;
+    draining
+        .iter()
+        .filter(|(found, _)| {
+            found.as_str() == key || (bare && found.ends_with(&format!(":{session}")))
+        })
+        .map(|(found, drain)| (found.clone(), drain.until))
+        .max_by_key(|(_, until)| *until)
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -85,6 +102,9 @@ struct Line {
     turn: Condvar,
     /// The same socket, for ending the line from outside a call.
     control: UnixStream,
+    /// The other keys the run's calls come under: the canonical key the Gateway reported for a
+    /// run started with a bare key (`RunTools::adopt`).
+    aliases: Mutex<Vec<String>>,
 }
 
 /// A run's calls, by ticket. A call that gives up before its turn leaves its ticket in `gave_up`,
@@ -245,19 +265,23 @@ impl Registration {
     /// waiting is let go.
     pub fn end(&self) {
         let mut live = locked(&self.tools.live);
-        if live
-            .get(&self.key)
-            .is_some_and(|line| Arc::ptr_eq(line, &self.line))
-        {
-            live.remove(&self.key);
-            // Until `finish` or the deadline, the thread's next run waits.
-            locked(&self.tools.draining).insert(
-                self.key.clone(),
-                Drain {
-                    owner: Arc::as_ptr(&self.line) as usize,
-                    until: Instant::now() + SETTLE_TIMEOUT,
-                },
-            );
+        let mut keys = vec![self.key.clone()];
+        keys.extend(locked(&self.line.aliases).iter().cloned());
+        for key in keys {
+            if live
+                .get(&key)
+                .is_some_and(|line| Arc::ptr_eq(line, &self.line))
+            {
+                live.remove(&key);
+                // Until `finish` or the deadline, the thread's next run waits.
+                locked(&self.tools.draining).insert(
+                    key,
+                    Drain {
+                        owner: Arc::as_ptr(&self.line) as usize,
+                        until: Instant::now() + SETTLE_TIMEOUT,
+                    },
+                );
+            }
         }
         drop(live);
         let _ = self.line.control.shutdown(Shutdown::Both);
@@ -268,12 +292,8 @@ impl Registration {
     pub fn finish(&self) {
         self.end();
         let mut draining = locked(&self.tools.draining);
-        if draining
-            .get(&self.key)
-            .is_some_and(|drain| drain.owner == Arc::as_ptr(&self.line) as usize)
-        {
-            draining.remove(&self.key);
-        }
+        let owner = Arc::as_ptr(&self.line) as usize;
+        draining.retain(|_, drain| drain.owner != owner);
         drop(draining);
         self.tools.settled.notify_all();
     }
@@ -324,24 +344,19 @@ impl RunTools {
     ) -> Result<Registration, String> {
         {
             let key = canonical(session);
-            let key = key.as_str();
             let deadline = Instant::now() + wait;
             let mut draining = locked(&self.draining);
-            while let Some(drain) = draining.get(key) {
+            while let Some((found, until)) = drain_of(&draining, session, &key) {
                 let now = Instant::now();
-                if drain.until <= now {
-                    draining.remove(key);
-                    break;
+                if until <= now {
+                    draining.remove(&found);
+                    continue;
                 }
                 if stopped() {
                     return Err(STOPPED.to_owned());
                 }
-                let left = drain
-                    .until
-                    .min(deadline)
-                    .saturating_duration_since(now)
-                    .min(LOOK);
-                if left.is_zero() || drain.until.min(deadline) <= now {
+                let left = until.min(deadline).saturating_duration_since(now).min(LOOK);
+                if left.is_zero() || until.min(deadline) <= now {
                     // This wait has run out: the old run's calls are refused as the new one
                     // isn't registered yet, and the next ones are the new run's.
                     break;
@@ -379,6 +394,7 @@ impl RunTools {
             queue: Mutex::default(),
             turn: Condvar::new(),
             control,
+            aliases: Mutex::default(),
         });
         let key = canonical(session);
         let mut live = locked(&self.live);
@@ -392,6 +408,34 @@ impl RunTools {
             line,
             settles: true,
         })
+    }
+
+    /// Learns the key the Gateway filed a run under. A run started with a bare key is filed under
+    /// the Gateway's default agent, which isn't always `main`; its `chat` events carry the key it
+    /// really has (`agent:<id>:<session>`), and its calls come under that. From then on the run is
+    /// found by that key too, and by no other agent's. A key that isn't the run's own session under
+    /// some agent is ignored, and so is one that another run holds.
+    pub fn adopt(&self, session: &str, reported: &str) {
+        let own = canonical(session);
+        let Some(rest) = reported.strip_prefix("agent:") else {
+            return;
+        };
+        let named_ok = rest
+            .split_once(':')
+            .is_some_and(|(id, name)| !id.is_empty() && name == session);
+        // A session that names its agent has its key already; the report can only repeat it.
+        if !named_ok || own == session || own == reported {
+            return;
+        }
+        let mut live = locked(&self.live);
+        let Some(line) = live.get(&own).cloned() else {
+            return;
+        };
+        if live.contains_key(reported) {
+            return;
+        }
+        locked(&line.aliases).push(reported.to_owned());
+        live.insert(reported.to_owned(), line);
     }
 
     /// Whether a run is live in this session.
@@ -417,6 +461,14 @@ impl RunTools {
         let Some(line) = line else {
             return refused(NOT_LIVE);
         };
+        // A run whose key the Gateway has told is reached by that key alone: the guess made
+        // before is some other agent's session now.
+        if let aliases = locked(&line.aliases)
+            && !aliases.is_empty()
+            && !aliases.contains(&session)
+        {
+            return refused(NOT_LIVE);
+        }
         let answered = line.ask_in_turn(request["params"].clone(), CALL_TIMEOUT);
         // A run that ended while the call waited is a run that is not live.
         let still_live = locked(&self.live)
@@ -557,6 +609,42 @@ mod tests {
                 "{other}"
             );
         }
+    }
+
+    #[test]
+    fn a_bare_key_run_is_found_by_the_key_its_gateway_files_it_under() {
+        // A Gateway whose default agent is `moby`: the run's events carry that key.
+        let temp = folder("moby-default");
+        let (socket, _window) = window(&temp);
+        let tools = Arc::new(RunTools::default());
+        let held = tools.register("redlines-0a", &socket, &|| false).unwrap();
+        tools.adopt("redlines-0a", "agent:moby:redlines-0a");
+        assert_ne!(
+            text(&call(&tools, Some("agent:moby:redlines-0a"), "view")),
+            NOT_LIVE
+        );
+        // Not another agent's session of the same name, nor the guess made before.
+        for other in [
+            "agent:main:redlines-0a",
+            "agent:zed:redlines-0a",
+            "redlines-0b",
+        ] {
+            assert_eq!(
+                text(&call(&tools, Some(other), "view")),
+                NOT_LIVE,
+                "{other}"
+            );
+        }
+        // What the Gateway reports is taken only as this run's own session under some agent.
+        tools.adopt("redlines-0a", "agent:zed:redlines-0b");
+        tools.adopt("redlines-0a", "redlines-0a");
+        assert!(!tools.is_live("agent:zed:redlines-0b"));
+        // Ending the run ends the key it was found by, and the thread's next run waits for it.
+        held.end();
+        assert!(!tools.is_live("agent:moby:redlines-0a"));
+        assert!(locked(&tools.draining).contains_key("agent:moby:redlines-0a"));
+        held.finish();
+        assert!(locked(&tools.draining).is_empty());
     }
 
     #[test]

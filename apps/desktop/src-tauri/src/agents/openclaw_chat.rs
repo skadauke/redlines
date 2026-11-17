@@ -179,6 +179,7 @@ pub fn run_key() -> String {
 
 /// Sends `message` into the session `session_key` and follows the run until the agent's answer.
 /// When `stop` is set the run is aborted at the Gateway and this ends with `Cancelled`.
+#[cfg(test)]
 pub fn ask(
     socket: &mut Socket,
     config: &Config,
@@ -186,6 +187,20 @@ pub fn ask(
     message: &str,
     key: &str,
     stop: &AtomicBool,
+) -> Result<Outcome, String> {
+    ask_seen(socket, config, session_key, message, key, stop, &|_| {})
+}
+
+/// `ask`, telling `seen` the session key the Gateway reports on the run's events (the key it
+/// filed the session under, which for a bare key names its default agent).
+pub fn ask_seen(
+    socket: &mut Socket,
+    config: &Config,
+    session_key: &str,
+    message: &str,
+    key: &str,
+    stop: &AtomicBool,
+    seen: &dyn Fn(&str),
 ) -> Result<Outcome, String> {
     let timing = config.timing;
     let ended_text = |ended: Ended| match ended {
@@ -208,7 +223,13 @@ pub fn ask(
         match socket.read() {
             Ok(Message::Text(text)) => {
                 last_heard = Instant::now();
-                match protocol::parse(text.as_str()) {
+                let incoming = protocol::parse(text.as_str());
+                if let Incoming::Chat(event) = &incoming
+                    && event.run_id == key
+                {
+                    seen(&event.session_key);
+                }
+                match incoming {
                     Incoming::Response {
                         id,
                         ok: false,
