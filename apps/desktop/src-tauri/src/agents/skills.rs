@@ -352,7 +352,9 @@ pub fn install(kind: Kind, home: &Path) -> Result<Written, String> {
 /// Keeps `old` as a backup in `folder`: as `SKILL.md.bak`, or, where something is there already
 /// that isn't a copy of `old`, as the first of `SKILL.md.bak.1`, `SKILL.md.bak.2`, … that is free,
 /// so that no update loses what an earlier one kept (a folder or a link of that name is passed
-/// over, not replaced). A backup that holds `old` already is the backup: nothing is written.
+/// over, not replaced). A backup that holds `old` already, among the names from the first up to
+/// the first free one, is the backup: nothing is written. (Two updates at the same instant could
+/// take the same free name, and the later would replace the earlier backup.)
 fn keep_backup(folder: &Path, old: &str) -> io::Result<()> {
     for number in 0..10_000u32 {
         let name = match number {
