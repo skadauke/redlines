@@ -7,12 +7,17 @@ import { applyChanges } from './changes.ts';
 import { expectSound, readsAsNewest } from './oracle.ts';
 import { ada, context, file } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
+import { newestView, originalView } from './views.ts';
 
 describe('replacing a lone image by a lone tag, Track Changes on', () => {
   it.each([
     'One.\n\n![A cat](a.png)\n\nTwo.',
     '![A cat](a.png)\n\nTwo.',
     'One.\n\n![A cat](a.png)',
+    '![A cat](a.png)',
+    '![A cat](a.png)\n',
+    'One.\n\n![A cat](a.png)\n',
+    'One.\r\n\r\n![A cat](a.png)\r\n\r\nTwo.',
   ])('%j puts the closer on the line after the tag', (body) => {
     const before = file(body);
     const from = body.indexOf('!');
@@ -22,8 +27,13 @@ describe('replacing a lone image by a lone tag, Track Changes on', () => {
       before,
       trackedEdit(before, { from, to, insert }, context(ada, ['m2bd', 'n8fx'])),
     );
-    expect(after).toMatch(/<img [^>]*>\n<!--\/m2bd-->/);
+    expect(after).toMatch(/<img [^>]*>\r?\n<!--\/m2bd-->/);
     expect(readsAsNewest(after)).toBe(true);
     expectSound(body, after);
+    // The line break in front of the closer is its syntax: no view gains it.
+    expect(newestView(after).text).toBe(
+      newestView(file(body.replace('![A cat](a.png)', insert))).text,
+    );
+    expect(originalView(after).text).toBe(originalView(before).text);
   });
 });

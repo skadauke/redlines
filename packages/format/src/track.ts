@@ -58,6 +58,7 @@ import {
   underlineOfBreak,
   viewBreaks,
   withoutMarkers,
+  HTML_START_7,
 } from './blocks.ts';
 import { readBlocks, sameBlocks } from './block-read.ts';
 import {
@@ -1869,9 +1870,6 @@ const HTML_START = [
   /^<!\[CDATA\[/,
   new RegExp(`^</?(?:${HTML_BLOCK_TAGS})(?:[ \\t>]|/>|$)`, 'i'),
 ];
-/** The seventh: one whole open or closing tag of another name, alone on its line. */
-const HTML_START_7 =
-  /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
 
 /**
  * Whether a line, past its container prefix, starts an HTML block, where a marker is not read: one

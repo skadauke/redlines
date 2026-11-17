@@ -4,7 +4,7 @@
 // gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
 // changes; block format changes, table marks and moves are kept as they are.
 
-import { breakEnd, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
+import { breakEnd, closerRange, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
   commitEdit,
@@ -219,11 +219,11 @@ function decisionChanges(
       // Accepting keeps the new text and drops the markers, the old text and the marks in it, but a
       // comment in it stays, as a point comment where the new text starts (format §3.12).
       changes.push(...acceptedOpener(parsed, mark, index, segment));
-      if (close) remove(close);
+      if (close) remove(closerRange(text, close));
     } else {
       // Accepting keeps the text and drops the markers; a highlight is dismissed either way.
       remove(open);
-      if (close) remove(close);
+      if (close) remove(closerRange(text, close));
     }
   }
   return changes;

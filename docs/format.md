@@ -1186,7 +1186,8 @@ middle of a paragraph it splits the paragraph.
 - The new text of a substitution that is a whole tag alone on its line, at the start of the file or after a blank line (CommonMark's
   seventh kind of HTML block: an image given a size is written as `<img …>`), has its closer on the
   next line, because a closer after the tag on its line would make the line a paragraph, which the
-  newest view doesn't read (#628).
+  newest view doesn't read (#628). That line break is the closer's syntax: the views, accepting and rejecting take
+  it away with the closer, and no view has it as text: a document gains no line break from where this marker stands.
 
 A tracked insertion never stands between a list marker and the space after it. A marker with no
 space after it (`-` or `2.` alone on its line) is an empty item to Markdown, but `-<!--ins x--> a<!--/x-->`
