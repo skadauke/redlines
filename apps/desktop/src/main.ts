@@ -19,7 +19,7 @@ import {
   defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
-import { codeFileHighlight, codeLanguages } from '@redlines/code';
+import { codeFileHighlight, codeLanguagesFor } from '@redlines/code';
 import {
   createEditor,
   editorDocumentHtml,
@@ -440,7 +440,14 @@ const editor = createEditor(element('#editor'), {
     settings = { ...settings, people: meetPeopleInSettings(handles, settings.people) };
     editor.setPeople(settings.people);
   },
-  codeLanguages,
+  // A chunk's `{r}` in a .qmd or .Rmd file is read for its language.
+  codeLanguages: codeLanguagesFor(() => {
+    try {
+      return controller.state.path;
+    } catch {
+      return null; // the controller is made after the editor
+    }
+  }),
   // ⌘-click on a link opens its address (http, https or mailto: the editor lets no other through)
   // in the default browser or mail app, which only the app can run; a browser tab opens it itself.
   openLink: (address) => {
@@ -614,7 +621,7 @@ const documentData = createDocumentData(
 );
 
 /** The @ picker for a box that asks an agent: a comment's, and the question of an Ask. */
-const attachAgentPicker = (field: HTMLTextAreaElement) => {
+const attachAgentPicker = (field: HTMLTextAreaElement, agentsOnly = false) => {
   void lookForAgents();
   return attachPicker(field, {
     getParsed: () => editor.getParsed(),
@@ -622,6 +629,7 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
     me: author.handle,
     // The default agent comes first in the list (#528).
     agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
+    agentsOnly,
   });
 };
 
@@ -1054,7 +1062,8 @@ const ask = createAsk(editor, {
   // The model the bubble's list starts at: Preferences' choice for the agent (#530, #507).
   chosenModel: (agent) => loadSettings().agentModels[agent],
   notice: (message) => notice.flash(message),
-  attachToField: attachAgentPicker,
+  // Only agents: an @ of a person means nothing in a question to an agent.
+  attachToField: (field) => attachAgentPicker(field, true),
   showThread: (thread) => review.showThread(thread),
   // Where the rail shows its notes, it lays the bubble out among them, level with the selection,
   // and the notes make room for it; elsewhere (narrow window, Clean, no comments) Ask hangs the

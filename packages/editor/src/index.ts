@@ -313,6 +313,16 @@ export {
   rederiveMove,
 } from './tracked/rederive-other.ts';
 export type { AnchoredFormat, AnchoredMove } from './tracked/rederive-other.ts';
+export {
+  anchorPaste,
+  anchorReview,
+  anchorTable,
+  rederivePaste,
+  rederiveReview,
+  rederiveSteps,
+  rederiveTable,
+} from './tracked/rederive-tables.ts';
+export type { AnchoredPaste, AnchoredReview, AnchoredTable } from './tracked/rederive-tables.ts';
 export type { Intent, IntentEdit, StepsIntent, TypingIntent, Unnamed } from './tracked/intent.ts';
 export {
   UNTRACKED_DETAILS,

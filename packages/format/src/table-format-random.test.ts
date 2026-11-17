@@ -424,10 +424,7 @@ describe('a rectangle of cells made bold or italic, random', () => {
               throw new Error(`${String(error)}\n${state}`, { cause: error });
             }
           });
-          // Not where a person typed over a character of a pending format's syntax (a replacement
-          // whose old text is `*`): micromark reads the marked file's `**` otherwise there, whatever
-          // made the format change (#299). Take this out when #299 is fixed.
-          if (!structure && !/<!--sub \w{4} [^>]*[*_~`]/.test(state)) {
+          if (!structure) {
             named('an order reads otherwise than its view', () => {
               try {
                 expectEveryOrderRead(label, state);
