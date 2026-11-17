@@ -805,6 +805,17 @@ describe('title bar', () => {
     bar.update({ ...BASE, dirty: true });
     expect(title?.textContent).toBe('launch-plan.md — Edited');
   });
+
+  it('says beside the name that the document is in several windows, or that edits are kept', () => {
+    const { root, bar } = setup();
+    const title = root.querySelector('.rl-title');
+    bar.update({ ...BASE, sync: 'In 2 windows' });
+    expect(title?.textContent).toBe('launch-plan.md — In 2 windows');
+    bar.update({ ...BASE, dirty: true, sync: 'Offline: your edits are kept' });
+    expect(title?.textContent).toBe('launch-plan.md — Edited — Offline: your edits are kept');
+    bar.update({ ...BASE });
+    expect(title?.textContent).toBe('launch-plan.md');
+  });
 });
 
 describe('the bar floating over the page', () => {
