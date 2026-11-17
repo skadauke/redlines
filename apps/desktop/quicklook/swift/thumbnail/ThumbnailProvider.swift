@@ -16,6 +16,9 @@ private struct Loaded {
     let fonts: ThumbnailFonts
 }
 
+/// One script context is shared, and JavaScriptCore's is used by one thread at a time.
+private let scriptLock = NSLock()
+
 private let loaded: Result<Loaded, Error> = Result {
     let bundle = Bundle(for: ThumbnailProvider.self)
     guard let script = bundle.url(forResource: "thumbnail", withExtension: "js") else {
@@ -35,7 +38,10 @@ final class ThumbnailProvider: QLThumbnailProvider {
         do {
             let read = try PreviewText.read(request.fileURL, maxBytes: ThumbnailPage.maxBytes)
             let have = try loaded.get()
-            let blocks = try ThumbnailPage.blocks(from: have.renderer.string(text: read.text))
+            scriptLock.lock()
+            let json: String
+            do { json = try have.renderer.string(text: read.text); scriptLock.unlock() } catch { scriptLock.unlock(); throw error }
+            let blocks = try ThumbnailPage.blocks(from: json)
             if blocks.isEmpty { throw Empty() }
             let size = ThumbnailPage.contextSize(maximum: request.maximumSize)
             let reply = QLThumbnailReply(contextSize: size, currentContextDrawing: {

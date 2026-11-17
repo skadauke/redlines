@@ -21,6 +21,9 @@ export const MAX_BLOCKS = 40;
 export const MAX_TEXT = 4000;
 /** The most of a paragraph, of a quote, of an item and of a cell that is kept, in characters. */
 const MAX_PARAGRAPH = 360;
+// What is read of a paragraph before its marks are taken out: the text is clipped to a few hundred
+// characters after, and the patterns that take marks out are slow on a very long run of one line.
+const MAX_INPUT = 2000;
 const MAX_CELL = 40;
 /** The most lines of a code block, and rows and columns of a table, that are kept. */
 const MAX_CODE_LINES = 6;
@@ -113,12 +116,12 @@ export function blocksOf(text: string): Block[] {
   let paragraph: string[] = [];
   let quote: string[] = [];
   const flushParagraph = () => {
-    const words = plain(paragraph.join(' '));
+    const words = plain(paragraph.join(' ').slice(0, MAX_INPUT));
     paragraph = [];
     if (words) push({ kind: 'paragraph', text: clip(words, MAX_PARAGRAPH) }, words.length);
   };
   const flushQuote = () => {
-    const words = plain(quote.join(' '));
+    const words = plain(quote.join(' ').slice(0, MAX_INPUT));
     quote = [];
     if (words) push({ kind: 'quote', text: clip(words, MAX_PARAGRAPH) }, words.length);
   };
@@ -179,7 +182,7 @@ export function blocksOf(text: string): Block[] {
     // A line of = or - under a paragraph makes it a heading.
     const setext = SETEXT.exec(line);
     if (setext && paragraph.length > 0) {
-      const words = plain(paragraph.join(' '));
+      const words = plain(paragraph.join(' ').slice(0, MAX_INPUT));
       paragraph = [];
       if (words) {
         push(

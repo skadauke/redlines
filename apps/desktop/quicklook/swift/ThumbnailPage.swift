@@ -24,6 +24,8 @@ struct ThumbnailBlock: Decodable, Equatable {
 final class ThumbnailFonts {
     private let directory: URL?
     private var loaded: [String: NSFont] = [:]
+    // Finder asks for thumbnails on several threads at once, and they share these fonts.
+    private let lock = NSLock()
 
     init(directory: URL?) {
         self.directory = directory
@@ -40,6 +42,8 @@ final class ThumbnailFonts {
     ]
 
     func font(_ face: Face, size: CGFloat) -> NSFont {
+        lock.lock()
+        defer { lock.unlock() }
         let key = "\(face)-\(size)"
         if let font = loaded[key] { return font }
         var font: NSFont?
