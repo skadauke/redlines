@@ -18,7 +18,22 @@ export type {
   PushContext,
   PushRefusal,
 } from './authority.ts';
-export { changedRanges, mapFootprint, readFootprint, touches } from './footprint.ts';
+export { SyncClient } from './client.ts';
+export type { Rederived, SyncOptions, SyncState } from './client.ts';
+export { Hub } from './hub.ts';
+export type { NoticeListener } from './hub.ts';
+export { memoryTransport } from './memory.ts';
+export { Replica } from './replica.ts';
+export type { Pending } from './replica.ts';
+export type { Call, Notice, Reply, Transport } from './wire.ts';
+export type { DurableLog } from './wal.ts';
+export {
+  changedRanges,
+  declareFootprint,
+  mapFootprint,
+  readFootprint,
+  touches,
+} from './footprint.ts';
 export type { Footprint } from './footprint.ts';
 export * from './protocol.ts';
 export { MemoryLog } from './wal.ts';
