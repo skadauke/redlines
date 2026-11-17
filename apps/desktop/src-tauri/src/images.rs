@@ -693,6 +693,27 @@ mod tests {
     }
 
     #[test]
+    fn hands_the_page_one_picture_to_crop_and_nothing_else() {
+        let folder = folder("crop-image");
+        make(
+            &folder,
+            &["repo/.gi\u{74}/", "repo/docs/plan.md", "other/owl.png"],
+        );
+        let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+        fs::write(folder.join("repo/cat.png"), png).unwrap();
+        fs::write(folder.join("other/owl.png"), png).unwrap();
+        let app = tauri::test::mock_app();
+        let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
+        allow_shown(&images, &projects);
+        projects.show(&folder.join("repo/docs/plan.md"));
+        let at = |name: &str| crop_image(&images, &folder.join(name).to_string_lossy());
+        assert_eq!(at("repo/cat.png").unwrap().mime_type, "image/png");
+        assert!(at("other/owl.png").is_err());
+        assert!(at("repo/gone.png").unwrap_err().contains("isn’t there"));
+        assert!(crop_image(&images, "repo/cat.png").is_err());
+    }
+
+    #[test]
     fn tells_which_images_were_saved_again_by_a_stamp_and_only_for_those_the_page_may_load() {
         let folder = folder("stamps");
         make(
