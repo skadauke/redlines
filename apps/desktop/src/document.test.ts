@@ -2178,12 +2178,12 @@ describe('a document in a session of windows', () => {
     controller.followSession('/docs/plan.md');
     editor.setDoc('Saved text\n');
     controller.sessionLoaded();
-    const link = session(false);
-    controller.enterSession(link);
+    const save = vi.fn(() => Promise.resolve<string | null>('Saved text\n'));
+    controller.enterSession(session(false, { save }));
     editor.type('Saved text\nand more\n');
     expect(state()?.dirty).toBe(true);
     expect(await controller.save()).toBe(true);
-    expect(link.save).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledOnce();
     expect(host.writes).toEqual([]);
     // What the leader wrote is the file's text now, and the window has more typed since.
     expect(state()?.dirty).toBe(true);
