@@ -698,7 +698,7 @@ function failure(
 
 /** The syntax of a block's first line, up to where an edit starts. */
 const SYNTAX_PREFIX =
-  /^(?:#{1,6}[ \t]*|[-*+][ \t]*|\d{1,9}[.)][ \t]*|<[^\s>]*|`{3,}[^`]*|~{3,}.*)$/;
+  /^(?:#{1,6}[ \t]*|[-*+][ \t]*|\d{1,9}[.)][ \t]*|<[^\s>]*|`{3,}[^`]*|~{3,}.*|\[[^\]\n]*\]:.*)$/;
 const LIST_LINE = /^[ \t>]*(?:\d{1,9}[.)]|[-*+])(?:[ \t]|$)/;
 
 /**
@@ -717,6 +717,7 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     // A key typed into an empty line (a block start typed into an empty paragraph or item) is the
     // typed-syntax code's, not this check's.
     const typed =
+      !/^[ \t]*\[[^\]\n]*\]:/.test(prefix) &&
       edit.from === edit.to &&
       edit.insert !== '' &&
       !/[\n\t]/.test(edit.insert) &&
@@ -725,6 +726,8 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
       !typed &&
       prefix !== '' &&
       SYNTAX_PREFIX.test(prefix) &&
+      // (a link definition only where a key is typed in it, #262)
+      (edit.from === edit.to || !/^\[[^\]\n]*\]:/.test(prefix)) &&
       ((edit.insert.includes('\n') && (edit.from < edit.to || !/[ \t]$/.test(prefix))) ||
         !/[ \t]$/.test(prefix))
     ) {

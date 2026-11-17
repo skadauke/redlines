@@ -55,6 +55,16 @@ function trailingSyntax(text: string, at: number, floor: number): number {
 /** A line of a link reference definition or of a footnote's, after its container prefix. */
 const DEFINITION = /^(?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t]))*\[\^?[^\]\n]+\]:/;
 
+/** The underline of a setext heading, after its container prefix. */
+const SETEXT_UNDERLINE = /^[ \t>]*(?:=+|-+)[ \t]*\r?$/;
+
+/** Whether the line above `underline` is words a heading can hold: not a definition, a comment or HTML. */
+function isHeadingText(text: string, markers: readonly MarkerRange[], underline: number): boolean {
+  const above = lineStart(text, underline - 1);
+  const line = visibleText(text, markers, above, lineEnd(text, above));
+  return line.trim() !== '' && !DEFINITION.test(line) && !/^[ \t>]*</.test(line);
+}
+
 /** The line of a GitHub alert that names its type, which takes nothing after it (`> [!NOTE]`). */
 const ALERT = /^[ \t>]*\[![A-Za-z]+\]/;
 
@@ -78,10 +88,25 @@ function wrappedParagraph(
   marker: boolean,
 ): Range | undefined {
   if (lineStartKind(text, from, markers) !== 'continuation') return undefined;
-  const paragraph = paragraphRange(text, markers, from);
+  let paragraph = paragraphRange(text, markers, from);
+  let underlined = false;
+  // A paragraph under a setext heading starts at the underline, which belongs to the heading: its
+  // first line is the one after (#469).
+  if (
+    paragraph.from > 0 &&
+    SETEXT_UNDERLINE.test(text.slice(paragraph.from, lineEnd(text, paragraph.from))) &&
+    isHeadingText(text, markers, paragraph.from)
+  ) {
+    const next = nextLineStart(text, paragraph.from);
+    // (the line right under the underline is a paragraph's first line: it is covered as before)
+    if (next <= paragraph.to && lineStart(text, from) !== next) {
+      paragraph = { from: next, to: paragraph.to };
+      underlined = true;
+    }
+  }
   const first = paragraph.from;
   const lead = first + prefixLength(text.slice(first, lineEnd(text, first)));
-  if (lineStartKind(text, lead, markers) !== 'block') return undefined;
+  if (!underlined && lineStartKind(text, lead, markers) !== 'block') return undefined;
   // What the lines are made of: no definition, no delimiter row of a table (a row without pipes at
   // its edges goes on a table), and no line above this one that only names the type of an alert.
   const above = lineStart(text, from) - 1;
@@ -142,8 +167,23 @@ export function wrappedLineStart(
   to: number,
   { marker }: { marker: boolean },
 ): number | undefined {
+  // A line made only of an insertion: the range starts after its opener and ends in front of its
+  // closer, and takes them (#469).
+  if (from < to && from > lineStart(text, from)) {
+    const open = markers.find((m) => m.role === 'open' && m.to === from);
+    if (open && visibleText(text, markers, lineStart(text, from), open.from).trim() === '') {
+      for (let again = markers.find((m) => m.role === 'close' && m.from === to); again;) {
+        to = again.to;
+        again = markers.find((m) => m.role === 'close' && m.from === to);
+      }
+      from = open.from;
+    }
+  }
   // Most deletions are inside a line: text in front of the range on its line is no prefix.
-  if (from >= to || !CONTAINER_PREFIX.test(text.slice(lineStart(text, from), from))) {
+  if (
+    from >= to ||
+    !CONTAINER_PREFIX.test(visibleText(text, markers, lineStart(text, from), from))
+  ) {
     return undefined;
   }
   const floor = bodyStart(text);
