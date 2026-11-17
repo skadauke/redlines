@@ -23,3 +23,5 @@ export type { Footprint } from './footprint.ts';
 export * from './protocol.ts';
 export { MemoryLog } from './wal.ts';
 export type { EpochRecord, UpdateRecord, WalRecord, WriteAheadLog } from './wal.ts';
+export { markDigest, markSpan, reviewCheck, seenDigests, snapshotOf } from './review.ts';
+export type { DecidedRecord, MarkSnapshot } from './review.ts';

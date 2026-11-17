@@ -21,6 +21,7 @@ const people: Record<string, Identity> = {
   ada: { handle: 'ada', name: 'Ada', role: 'owner' },
   bo: { handle: 'bo', name: 'Bo', role: 'editor' },
   cy: { handle: 'cy', name: 'Cy', role: 'commenter' },
+  dee: { handle: 'dee', name: 'Dee', role: 'editor' },
   vi: { handle: 'vi', name: 'Vi', role: 'viewer' },
 };
 
@@ -242,7 +243,7 @@ describe('push', () => {
     const { authority } = make();
     join(authority, 'ada');
     join(authority, 'bo');
-    join(authority, 'cy');
+    join(authority, 'dee');
     // Ada inserts 10 characters at the start; Cy's push at version 0 touches the end paragraph.
     ok(
       authority.push('ada', {
@@ -256,9 +257,9 @@ describe('push', () => {
       authority.push('bo', { version: 0, epoch: 1, updates: [edit('bo', BASE.length, end, 'E')] }),
     );
     // Cy's two-update push, on version 0: the second update applies after the first.
-    const first = edit('cy', BASE.length, 25, 'M');
-    const second = edit('cy', BASE.length + 1, 25, 'N');
-    const reply = authority.push('cy', { version: 0, epoch: 1, updates: [first, second] });
+    const first = edit('dee', BASE.length, 25, 'M');
+    const second = edit('dee', BASE.length + 1, 25, 'N');
+    const reply = authority.push('dee', { version: 0, epoch: 1, updates: [first, second] });
     expect(code(reply)).toBe('ok');
     expect(authority.text).toContain('NM');
   });
