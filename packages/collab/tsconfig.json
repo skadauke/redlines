@@ -1,0 +1,9 @@
+{
+  // Pure TypeScript: no DOM and no Node APIs, so that it runs in Node, a browser and the desktop
+  // app. Node's types are for the tests.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

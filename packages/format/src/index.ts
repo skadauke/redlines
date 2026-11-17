@@ -56,6 +56,19 @@ export type {
 export { fineFormat, trackedFormat, trackedFormatRanges, untrackedFormat } from './formatting.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
+export {
+  applyLedgerOp,
+  applyLedgerOps,
+  emptyLedgerMap,
+  ledgerEntries,
+  ledgerMapOf,
+  ledgerOfMap,
+  setLedgerEntries,
+  writeLedger,
+} from './ledger-map.ts';
+export type { LedgerMap, LedgerOp, LedgerSettings } from './ledger-map.ts';
+export { mergeLedgers, renameMarkId } from './ledger-merge.ts';
+export type { LedgerMerge, LedgerMergeOptions, LedgerRename, MergeSide } from './ledger-merge.ts';
 export { recordTracking, setView } from './settings.ts';
 export {
   fineEdit,

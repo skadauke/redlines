@@ -15,12 +15,14 @@ and [docs/format.md](docs/format.md) (the file format).
 | Path                    | What it is                                                                |
 | ----------------------- | ------------------------------------------------------------------------- |
 | `packages/format`       | `@redlines/format`: types, ids and payload handling for the file format   |
+| `packages/collab`       | `@redlines/collab`: the session authority for multiuser editing (not wired in yet) |
 | `packages/editor`       | `@redlines/editor`: the editor core                                       |
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
 | `packages/agent-process` | `@redlines/agent-process`: what the agent providers share               |
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
 | `packages/word`         | `@redlines/word`: Word (.docx) export, import and Google Docs' export normalizer; not in the editor bundle |
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
+| `packages/collab-sim`   | `@redlines/collab-sim`: the session simulation harness: seeded live sessions over the real format library, with an oracle (research tooling, not shipped; `REDLINES_FUZZ=<n>` for the larger run, `pnpm --filter @redlines/collab-sim matrix` for the matrix) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `apps/desktop/quicklook` | `@redlines/quicklook`: the Quick Look preview in the app: the renderer (TypeScript, run in JavaScriptCore) and the Swift extension (`swift/`) |

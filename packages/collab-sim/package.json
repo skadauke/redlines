@@ -1,0 +1,20 @@
+{
+  "name": "@redlines/collab-sim",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The session simulation harness: seeded live sessions over the real format library, with an oracle. Research tooling, not shipped.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "matrix": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts",
+    "yjs": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/yjs-cli.ts"
+  },
+  "dependencies": {
+    "@redlines/format": "workspace:*",
+    "yjs": "13.6.33"
+  }
+}
