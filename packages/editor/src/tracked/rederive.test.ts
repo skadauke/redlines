@@ -152,6 +152,11 @@ describe('placing an intent again', () => {
   });
 });
 
+/** `base` with Bo's insertion of the first `word` in it, ledger and all. */
+const bos = (base: string, word: string) =>
+  base.replace(` ${word}`, ` <!--ins b2b2-->${word}<!--/b2b2-->`).trimEnd() +
+  '\n\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo Chen}\nmarks:\n  b2b2: {by: bo, at: 2026-10-31T09:30Z}\n-->\n';
+
 describe('placing intents again at random', () => {
   it('never changes the original, and always reads back', () => {
     const words = 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu'.split(' ');
@@ -170,17 +175,19 @@ describe('placing intents again at random', () => {
     let placed = 0;
     let failed = 0;
     for (let i = 0; i < 120; i++) {
-      const tracking = i % 3 !== 0;
+      const tracking = i % 3 !== 0 || i % 4 === 3;
       const base = paragraphs();
       // Someone else's change: a word inserted, or a paragraph dropped, or two words replaced.
       const lines = base.trimEnd().split('\n\n');
-      const kind = i % 3;
+      const kind = i % 4;
       const newer =
         kind === 0
           ? `${pick(words)} ${base}`
           : kind === 1
             ? `${lines.filter((_, k) => k !== 1).join('\n\n')}\n`
-            : base.replace(pick(words), 'changed');
+            : kind === 2
+              ? base.replace(pick(words), 'changed')
+              : bos(base, pick(words));
       const x = Math.floor(next() * base.length);
       const y = next() < 0.5 ? x : Math.min(base.length, x + Math.floor(next() * 8));
       const text = y > x && next() < 0.5 ? '' : pick(words);
@@ -198,9 +205,14 @@ describe('placing intents again at random', () => {
       const applied = result.changes.apply(other.view.state.doc).toString();
       expect(parse(applied).warnings, applied).toEqual([]);
       if (tracking) expect(originalView(applied).text).toBe(originalView(newer).text);
+      // Bo's insertion, if any, is as he wrote it, and what was typed is still there.
+      const bo = newer.match(/<!--ins b2b2-->.*?<!--\/b2b2-->/)?.[0];
+      if (bo) expect(applied).toContain(bo);
+      if (text) expect(visible(applied)).toContain(text);
     }
     expect(placed).toBeGreaterThan(60);
     // The format may still refuse where it refuses the first time; it is rare.
     expect(failed).toBeLessThan(placed / 5);
+    expect(failed).toBeLessThan(30);
   });
 });

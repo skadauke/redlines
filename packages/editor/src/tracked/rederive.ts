@@ -79,7 +79,7 @@ function score(text: string, part: Part, p: number, end: number): number {
   return n + m;
 }
 
-function occurrences(text: string, needle: string, cap = 400): number[] {
+function occurrences(text: string, needle: string, cap = 5000): number[] {
   const found: number[] = [];
   if (!needle) return found;
   for (
@@ -108,6 +108,8 @@ function best(candidates: number[], fit: (p: number) => number, near: number): n
 
 /** Where an insertion goes among the words of the newest text, and whether its words were found. */
 function placeInsertion(text: string, part: Part): { at: number; found: boolean } {
+  // Nothing was kept around the edit (an empty text): there is nothing to find, and nothing lost.
+  if (!part.before && !part.after) return { at: Math.min(part.at, text.length), found: true };
   const a = part.before.slice(-8);
   const b = part.after.slice(0, 8);
   const both: number[] = [];
@@ -117,7 +119,8 @@ function placeInsertion(text: string, part: Part): { at: number; found: boolean 
     const at = p + a.length;
     (b && text.startsWith(b, at) ? both : first).push(at);
   }
-  for (const p of occurrences(text, b)) if (!a || !text.startsWith(a, p - a.length)) second.push(p);
+  for (const p of occurrences(text, b))
+    if (!a || !(p >= a.length && text.startsWith(a, p - a.length))) second.push(p);
   const pool = both.length ? both : first.length ? first : second;
   const at = best(pool, (p) => score(text, part, p, p), part.at);
   // Words that fit on one side only count when they fit well: half of all the words kept.
@@ -152,11 +155,15 @@ export function rederiveIntent(state: EditorState, anchored: AnchoredIntent): Re
     let to: number;
     if (part.removed) {
       const end = (p: number) => p + part.removed.length;
-      const at = best(
-        occurrences(view.text, part.removed),
-        (p) => score(view.text, part, p, end(p)),
-        part.at,
-      );
+      const found = occurrences(view.text, part.removed);
+      const top = best(found, (p) => score(view.text, part, p, end(p)), part.at);
+      // Other words in its place don't do: the text must be the only one like it, or fit its words.
+      const at =
+        top !== null &&
+        (found.length === 1 ||
+          score(view.text, part, top, end(top)) * 2 >= part.before.length + part.after.length)
+          ? top
+          : null;
       if (at !== null) {
         from = at;
         to = end(at);
@@ -183,10 +190,16 @@ export function rederiveIntent(state: EditorState, anchored: AnchoredIntent): Re
       main: edit.main,
     });
   });
-  // Edits that now overlap or fall out of order can't be written together; the later ones go.
+  // Edits that now overlap can't be written together; the later ones go (the filter widens only a
+  // single edit, and refuses the rest, as it does for the first time).
   placed.sort((x, y) => x.from - y.from || x.to - y.to);
-  const kept = placed.filter((edit, i) => i === 0 || edit.from >= placed[i - 1]!.to);
-  if (kept.length < placed.length) notices.push('Part of your edit fell on text that changed.');
+  const kept: IntentEdit[] = [];
+  for (const edit of placed) if (!kept.length || edit.from >= kept.at(-1)!.to) kept.push(edit);
+  if (kept.length < placed.length) {
+    notices.push('Part of your edit fell on text that changed.');
+    // The caret follows the main edit; with it gone, the last one kept.
+    if (!kept.some((edit) => edit.main)) kept[kept.length - 1] = { ...kept.at(-1)!, main: true };
+  }
   if (!kept.length) return { ok: true, changes: ChangeSet.empty(text.length), notices, moved };
   const derive = (widening: boolean | 'first') => ({
     ...intent,
