@@ -122,7 +122,7 @@ import {
   NOT_CODE,
   theirChange,
 } from './code-edit.ts';
-import { widenedEdits } from './edits-widen.ts';
+import { widenedAtOnce, widenedEdits } from './edits-widen.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import { atWrappedLine, wrappedLineStart } from './wrapped-line.ts';
@@ -5048,16 +5048,7 @@ export function widenedFirstEdits(
   edits: readonly TextChange[],
   ctx: EditContext,
 ): TrackedEdits {
-  try {
-    return widenedEdits(
-      text,
-      edits,
-      ctx,
-      new EditError('Written as a replacement of its unit.', 'no-legal-placement'),
-    );
-  } catch {
-    return editsWidening(text, edits, ctx, true);
-  }
+  return widenedAtOnce(text, edits, ctx) ?? editsWidening(text, edits, ctx, true);
 }
 
 /** `trackedEdits` as marks at the grain of the edit only: what reads alike in every order, or the

@@ -57,10 +57,10 @@ export function widensEditHere(text: string, from: number, to: number): boolean 
 
 /** Whether the range is in a `$$` pair. */
 function inDisplayMath(text: string, from: number, to: number): boolean {
-  const fences = [...text.matchAll(/^[ \t>]*\$\$/gm)].map((m) => m.index!);
+  const fences = [...text.matchAll(/^[ \t>]*\$\$/gm)].map((m) => m.index);
   for (let i = 0; i + 1 < fences.length; i += 2) {
     const open = fences[i]!;
-    const end = text.indexOf('\n', fences[i + 1]!);
+    const end = text.indexOf('\n', fences[i + 1]);
     if (from <= (end < 0 ? text.length : end) && open <= to) return true;
   }
   return fences.length % 2 === 1 && (fences.at(-1) ?? 0) <= to;

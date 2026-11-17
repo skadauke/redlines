@@ -972,8 +972,6 @@ const BELOW_CHANGES =
 /** The key's words where the line below would become text of the item, and the format refuses nothing. */
 const ABSORBED =
   "This item can't go up a level: the line after it would read as part of its text, since a number other than 1, an empty item or an underline can't start a block right under text. Put a blank line between them first.";
-const NUMBERED_IN_CONTAINER =
-  "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
 
 describe('Numbered items that would become text (walk seeds 332, 511, 887)', () => {
   scriptRows([

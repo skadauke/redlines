@@ -27,8 +27,23 @@ export function widenedEdits(
   if (!(first instanceof EditError) || tierOfCode(first.code) !== 'widen') throw first;
   // An edit on a line that is only syntax is the editor's to answer (a key takes another form).
   if (first.message === SYNTAX_ONLY) throw first;
-  if (edits.length === 0) throw first;
-  if (edits.some((edit) => !widensEditHere(text, edit.from, edit.to))) throw first;
+  const done = widenedAtOnce(text, edits, ctx);
+  if (!done) throw first;
+  return done;
+}
+
+/**
+ * `edits` as one replacement of the unit that holds them, with no fine write tried first: for a key
+ * whose fine form the format accepts though a reader of the file reads it otherwise than the newest
+ * view. Undefined where the place is not widened or no unit holds the change.
+ */
+export function widenedAtOnce(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+): TrackedEdits | undefined {
+  if (edits.length === 0) return undefined;
+  if (edits.some((edit) => !widensEditHere(text, edit.from, edit.to))) return undefined;
   try {
     const view = newestView(text);
     const made = edits.map((edit) => ({
@@ -39,7 +54,7 @@ export function widenedEdits(
     const done = widen(text, made, ctx);
     return { changes: done.changes, markIds: [done.id], extendedIds: [] };
   } catch (error) {
-    if (error instanceof Untrackable || error instanceof EditError) throw first;
+    if (error instanceof Untrackable || error instanceof EditError) return undefined;
     throw error;
   }
 }
