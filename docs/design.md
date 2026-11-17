@@ -2233,7 +2233,9 @@ old file as `SKILL.md.bak` (a copy edited by hand reads as older, and is replace
 this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
 in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
 The Claude Code skill is also a plugin, and this repository a marketplace for it
-(`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
+(`.claude-plugin/marketplace.json`). Claude Code loads both a plugin's skill and a personal one, so
+someone who has both sees it listed twice (`redlines` and `redlines:redlines`); the app installs the
+copy only, never the plugin, and the Claude Code row says to keep one. Publishing the skill on ClawHub, OpenClaw's registry, is its
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks
