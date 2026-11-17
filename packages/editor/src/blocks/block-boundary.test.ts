@@ -62,6 +62,55 @@ const rows: Script[] = [
     tc: true,
     expect: {},
   },
+  {
+    name: '#262: a letter at the end of a link reference definition',
+    doc: '[a]: http://x‸⏎',
+    keys: [{ type: 'y' }],
+    tc: true,
+    expect: {},
+  },
+  {
+    name: '#262 quote: a quote at the end of a link reference definition',
+    doc: '[a]: http://x‸⏎',
+    keys: [{ type: '"' }],
+    tc: true,
+    expect: {},
+  },
+  {
+    name: '#469 1: delete a whole wrapped line under a setext heading, Track Changes off',
+    doc: 'Title⏎===⏎two⏎[three]⏎four⏎',
+    keys: ['Backspace'],
+    tc: false,
+    expect: { file: 'Title⏎===⏎two⏎four⏎' },
+  },
+  {
+    name: '#469 1: the same with Track Changes on',
+    doc: 'Title⏎===⏎two⏎[three]⏎four⏎',
+    keys: ['Backspace'],
+    tc: true,
+    expect: {},
+  },
+  {
+    name: '#469 2: delete a line that is only an insertion',
+    doc: 'a⏎<ins>[two]</ins>⏎three⏎',
+    keys: ['Backspace'],
+    tc: true,
+    expect: { newest: 'a⏎three⏎' },
+  },
+  {
+    name: '#469 2: the same with Track Changes off',
+    doc: 'a⏎<ins>[two]</ins>⏎three⏎',
+    keys: ['Backspace'],
+    tc: false,
+    expect: { file: 'a⏎three⏎' },
+  },
+  {
+    name: '#120 1: a bare Enter in a list after your own split',
+    doc: '- one‸⏎  two⏎',
+    keys: ['Enter', 'ArrowDown', 'Home', 'Backspace'],
+    tc: true,
+    expect: {},
+  },
 ];
 
 scriptRows(rows, 20000);

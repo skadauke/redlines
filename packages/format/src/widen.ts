@@ -697,7 +697,7 @@ function failure(
 
 /** The syntax of a block's first line, up to where an edit starts. */
 const SYNTAX_PREFIX =
-  /^(?:#{1,6}[ \t]*|[-*+][ \t]*|\d{1,9}[.)][ \t]*|<[^\s>]*|`{3,}[^`]*|~{3,}.*)$/;
+  /^(?:#{1,6}[ \t]*|[-*+][ \t]*|\d{1,9}[.)][ \t]*|<[^\s>]*|`{3,}[^`]*|~{3,}.*|\[[^\]\n]*\]:.*)$/;
 const LIST_LINE = /^[ \t>]*(?:\d{1,9}[.)]|[-*+])(?:[ \t]|$)/;
 
 /**

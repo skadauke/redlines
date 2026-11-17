@@ -351,9 +351,10 @@ describe('deleting all the text of a wrapped line (#427)', () => {
       const label = JSON.stringify(body);
       expect(plain(file(body), from, to), label).toBe(file(body.slice(0, from) + body.slice(to)));
     }
+    // A line under a setext heading's underline is a wrapped line like any other (#469).
     const under = 'Title\n=====\nline two\nline three';
     const { from, to } = at(under, 'line three');
-    expect(plain(file(under), from, to)).toBe(file('Title\n=====\nline two\n'));
+    expect(plain(file(under), from, to)).toBe(file('Title\n=====\nline two'));
   });
 
   it('writes a deletion of a line that holds the changes of other people', () => {
@@ -515,7 +516,6 @@ describe('what the rule takes more of, and what it leaves alone (the review of #
       ['<!-- one\ntwo\nthree -->', 'two'],
       ['- a\n  ```\n  x\n  ```\n  b\n  c', 'b'],
       ['a | b\n--|--\nc | d\ntext one\ntext two', 'text one'],
-      ['Title\n=====\nline two\nline three', 'line three'],
       ['<div>\nfoo\nbar\n</div>', 'bar'],
       ['    code one\n    code two\n    code three', 'code two'],
     ];
