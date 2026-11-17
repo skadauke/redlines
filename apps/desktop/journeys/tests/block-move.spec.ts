@@ -65,7 +65,9 @@ test.describe('moving blocks @blocks', () => {
       await expect(line, 'one drop line while dragging').toHaveCount(1);
       const box = (await line.boundingBox())!;
       const last = await j.pointOf('Last paragraph.');
-      expect(Math.abs(box.y - last.y), 'the line is by the block it lands above').toBeLessThan(30);
+      expect(Math.abs(box.y - last.y), 'the line is by the block it lands above').toBeLessThan(
+        30 * j.options.textSize,
+      );
       await j.shot(`drag-line-${scheme}`);
       await page.mouse.up();
       await j.settle();

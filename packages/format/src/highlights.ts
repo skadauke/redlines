@@ -4,7 +4,10 @@
 // comment's go (anchors.ts), and accepting or rejecting it, which dismisses it and leaves the text
 // (decide.ts), is how it is taken away.
 
+import { eolOf } from './changes.ts';
 import { withDialect } from './dialect.ts';
+import { aroundFences } from './div-ends.ts';
+import { awayFromIncludes, type AroundInclude } from './include.ts';
 import { anchorRange, assertRange, checkAnchor, withinBody } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
@@ -133,18 +136,27 @@ export function addHighlight(
     const wanted = withinBody(text, parsed, range);
     if (wanted.from === wanted.to) throw new EditError(NO_TEXT, 'empty-range');
     const markers = markerRanges(parsed);
-    let placed: Range;
-    try {
-      placed = anchorRange(text, parsed, markers, wanted, HIGHLIGHT_WORDS);
-    } catch (error) {
-      // Where a marker can't go is told in words that every edit shares, which say why but not what
-      // to do (format §3.1): a highlight says that too.
-      if (error instanceof EditError && error.code === 'no-legal-placement') {
-        throw new EditError(`${error.message} ${SELECT_OTHER}`, error.code);
+    // An end on a `:::` fence goes to the whole div, or into its body (div-ends.ts); an end on the
+    // line of a Quarto include goes around it (include.ts).
+    const fenced = aroundFences(text, wanted);
+    let around: AroundInclude;
+    if (fenced.whole) around = fenced.whole;
+    else {
+      let placed: Range;
+      try {
+        placed = anchorRange(text, parsed, markers, fenced.inner, HIGHLIGHT_WORDS);
+      } catch (error) {
+        // Where a marker can't go is told in words that every edit shares, which say why but not what
+        // to do (format §3.1): a highlight says that too.
+        if (error instanceof EditError && error.code === 'no-legal-placement') {
+          throw new EditError(`${error.message} ${SELECT_OTHER}`, error.code);
+        }
+        throw error;
       }
-      throw error;
+      around = fenced.apply(awayFromIncludes(text, placed));
     }
-    const { from, to } = placed;
+    const placed: Range = { from: around.from, to: around.to };
+    const { from, to } = around;
     // The ends moved together, or what is between them is not text of the newest view: the range was
     // white space between blocks, or lines, or markers, or a deletion, and nothing that reads.
     if (from === to || !coversText(text, from, to)) throw new EditError(NO_TEXT, 'empty-range');
@@ -157,9 +169,14 @@ export function addHighlight(
     addPerson(ledger, ctx.author);
     ledger.marks[id] = entry;
 
+    const eol = eolOf(text, parsed.ledgerRange);
     const anchors: TextChange[] = [
-      { from, to: from, insert: `<!--hl ${id}-->` },
-      { from: to, to, insert: `<!--/${id}-->` },
+      { from, to: from, insert: `<!--hl ${id}-->${around.openerLine ? eol : ''}` },
+      {
+        from: to,
+        to,
+        insert: `${around.closerLine ? eol : ''}<!--/${id}-->`,
+      },
     ];
     const changes = commitEdit(text, anchors, ledger, {
       parsed,

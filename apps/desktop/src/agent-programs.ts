@@ -32,6 +32,11 @@ export interface AcpAgent {
   args: string[];
   /** Set for OpenClaw's bridge, which has no toolbox: the OpenClaw agent, if one was named. */
   bridge?: { agent?: string };
+  /**
+   * Set for an OpenClaw connection that can chat (agents/openclaw_chat.rs): no program stands
+   * behind it, and the host answers it from the Gateway.
+   */
+  gateway?: boolean;
 }
 
 /** A program and its arguments as the person allowed them: a word with a space in it is quoted. */
@@ -58,5 +63,5 @@ export const acpAgents = {
 export async function listedAcpAgents(): Promise<AcpAgent[]> {
   const all = await acpAgents.list();
   const shown = new Set(openClawAgents(all).map(({ id }) => id));
-  return all.filter(({ id }) => shown.has(id));
+  return all.filter(({ id, gateway }) => gateway === true || shown.has(id));
 }

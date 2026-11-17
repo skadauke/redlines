@@ -1897,6 +1897,31 @@ design they follow.
 
   Who looked at what is never stored in the file.
 
+### 7.1a One document in several windows
+
+File › Open in Another Window shows the document in a second window of the app, and the two are
+one session on one Mac, with no network, no account and no invitation.
+
+- **One window leads.** It runs the authority (the TypeScript in `packages/collab`) and is the
+  only one that writes the file. The others are its clients: they take the text from it, send
+  their edits to it, and ask it to save. They never read, watch or write the file.
+- **The app keeps the order of leaders.** It says which window leads (`src-tauri/src/session.rs`),
+  counts the epochs and keeps the authority's write-ahead log. When the leading window closes,
+  the next one takes over from the log, in a new epoch, with what was confirmed. A leader that was
+  replaced and is slow to learn it can't write the log: its appends name its epoch.
+- **Save is once, after a pause.** The leader saves when the log has been quiet for a second and
+  its own edits are confirmed. Save in another window asks the leader. A window closes without a
+  question when the authority has everything it made; the leader that closes writes the file first.
+- **A person who works alone is untouched.** A document has no session until it is opened in a
+  second window, and a session with one window left works as it did: the file is byte for byte what
+  the editor writes.
+- **What is built,** and what is not: a window's edits go to the authority one at a time, and an
+  edit that someone else's change touched is derived again on the newest text, among its words
+  (§5.13's intents). Typing, deleting and replacing are placed again; a command that has no intent
+  to place yet (a few table operations) is kept if it still fits, and otherwise taken back, with a
+  notice. There is no host-less design: the replay merge the research tested is not built (its
+  verdict is in [research](research/collaboration.md)).
+
 ### 7.2 Inviting people
 
 A live session needs an authority that every participant can reach. From the desktop app, there
@@ -2204,7 +2229,7 @@ when a login shell can't find the `redlines` command, which the skill runs, and 
 where the command line is installed; Install Skill doesn't install it itself, which may ask for an
 administrator's password. Each copy ends with the version it has (`<!-- redlines-skill 1 -->`), and
 the app carries its own, so that an installed copy that is older shows Update Skill, which keeps the
-old file as `SKILL.md.bak` (a copy edited by hand reads as older, and is replaced). Only a copy of
+old file as `SKILL.md.bak`, or as the next free `SKILL.md.bak.1`, `.2` …, so that no earlier backup is lost (a copy edited by hand reads as older, and is replaced). Only a copy of
 this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
 in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
 The Claude Code skill is also a plugin, and this repository a marketplace for it

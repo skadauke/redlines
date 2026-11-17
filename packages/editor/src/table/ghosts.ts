@@ -8,7 +8,7 @@
 
 import { type EditorState, type Extension, StateField, type Range } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
-import { readRowCells } from '@redlines/format';
+import { plainPayload, readRowCells } from '@redlines/format';
 import type { MarkRange } from '@redlines/format';
 import { colorClass, colorsOf } from '../tracked/colors.ts';
 import { isRowDeletion, parsedField, viewModeField } from '../tracked/field.ts';
@@ -57,7 +57,7 @@ export function ghostsOf(state: EditorState): Ghost[] {
       const line = doc.line(n);
       const mark = byLine.get(line.from);
       if (!mark) break;
-      const payload = mark.payload ?? '';
+      const payload = plainPayload(mark.payload ?? '');
       const found = POSITION.exec(payload);
       const text = payload.slice(found?.[0].length ?? 0);
       const read = readRowCells(text, 0, text.length).cells;

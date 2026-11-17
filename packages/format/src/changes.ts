@@ -1,4 +1,5 @@
 import { findLedger } from './ledger-read.ts';
+import { LF_IN_CRLF, LITERAL_FFFF } from './payload.ts';
 import type { Range, TextChange } from './types.ts';
 
 /**
@@ -58,13 +59,15 @@ export function inEol(s: string, eol: Eol): string {
  * kind, so that rejecting gives the file back byte for byte (format §2.5).
  */
 export function restoredPayload(payload: string, eol: Eol): string {
-  return payload.replace(/\uffff|\r\n|\r|\n/g, (found) =>
-    found === '\uffff' ? '\n' : found === '\n' ? eol : found,
+  return payload.replace(/\uffff[ab]|\r\n|\r|\n/g, (found) =>
+    found === LF_IN_CRLF ? '\n' : found === LITERAL_FFFF ? '\uffff' : found === '\n' ? eol : found,
   );
 }
 
 /** A payload's text with every line break an LF, as the views and the checks that compare it with
  * other text read it. */
 export function plainPayload(payload: string): string {
-  return payload.replace(/\uffff|\r\n?/g, '\n');
+  return payload.replace(/\uffff[ab]|\r\n?/g, (found) =>
+    found === LITERAL_FFFF ? '\uffff' : '\n',
+  );
 }

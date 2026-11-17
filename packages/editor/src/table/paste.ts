@@ -23,7 +23,6 @@ import {
   readRowCells,
   type TextChange,
   Untrackable,
-  widenedPaste,
 } from '@redlines/format';
 import {
   markupViewFacet,
@@ -33,48 +32,21 @@ import {
 } from '../tracked/field.ts';
 import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
 import {
-  authoredChanges,
+  authoredWrite,
   contextFor,
   editSourceFacet,
   refusedEditEffect,
   trackingField,
-  untrackedChanges,
+  untrackedWrite,
 } from '../tracked/typing.ts';
 import { cellOfRef, cellsOfRect, clearedCells, headCell, rectOf } from './cells.ts';
 import { type Cell, type Table, tablesField } from './model.ts';
 import { planned } from './ops.ts';
-
-/** Fills the cells of the rows that an insertion writes with the values of `range`, from row `first`
- * of the range on. */
-function fillRows(
-  insert: string,
-  range: readonly (readonly string[])[],
-  first: number,
-  col: number,
-) {
-  const lines = insert.split(/(?<=\n)/);
-  let row = first;
-  return lines
-    .map((piece) => {
-      const eol = /\r?\n$/.exec(piece)?.[0] ?? '';
-      const line = piece.slice(0, piece.length - eol.length);
-      if (!line.startsWith('|')) return piece;
-      const values = range[row++] ?? [];
-      const cells = readRowCells(line, 0, line.length).cells;
-      let out = line;
-      for (let j = values.length - 1; j >= 0; j--) {
-        const cell = cells[col + j];
-        const value = values[j];
-        if (!cell || !value) continue;
-        // Spaces between the value and the pipes, where the row has none there.
-        const before = line[cell.textFrom - 1] === ' ' ? '' : ' ';
-        const after = line[cell.textFrom] === ' ' ? '' : ' ';
-        out = out.slice(0, cell.textFrom) + before + value + after + out.slice(cell.textFrom);
-      }
-      return out + eol;
-    })
-    .join('');
-}
+import { fillRows } from './paste-intent.ts';
+import { intentAnnotation, newIntentId } from '../tracked/intent.ts';
+import type { StepsIntent, TypingIntent, Unnamed } from '../tracked/intent.ts';
+import type { TableIntent } from './intent.ts';
+import { type WidenedPasteIntent, writeWidenedPaste } from './widened-paste.ts';
 
 /** The cell of a row at a column, if the row has it. */
 const cellAtCol = (table: Table, row: Table['rows'][number], col: number): Cell | undefined =>
@@ -193,7 +165,7 @@ function compute(
   view: EditorView,
   plan: Plan,
   untracked: boolean,
-): { total: ChangeSet } | { why: string } {
+): { total: ChangeSet; steps: StepsIntent['steps'] } | { why: string } {
   const { state } = view;
   const { table, extra } = plan;
   const extraCols = plan.extraCols ?? 0;
@@ -202,6 +174,11 @@ function compute(
   let rows: ChangeSet = ChangeSet.empty(text0.length);
   let text1 = text0;
   let group: string | undefined;
+  const steps: (TypingIntent | TableIntent)[] = [];
+  const named = <T extends object>(intent: T): T & { id: string } => ({
+    ...intent,
+    id: newIntentId(),
+  });
   const tracked = state.field(trackingField) && !untracked;
   if (extra > 0 || extraCols > 0) {
     // The columns, the rows and the cell edits are one change, so they share one group, even for one.
@@ -220,6 +197,7 @@ function compute(
       untracked,
     );
     if ('refusal' in insertion) return { why: insertion.refusal };
+    if (insertion.intent) steps.push(named<Unnamed<TableIntent>>(insertion.intent));
     rows = ChangeSet.of(
       insertion.changes.map(({ from, to, insert }) => ({ from, to, insert })),
       text0.length,
@@ -253,6 +231,14 @@ function compute(
     });
     // Values are never dropped: if the rows are not where they are expected, the paste is refused.
     if (!filled) return { why: "Redlines can't add the rows this paste needs to this table." };
+    if (insertion.intent) {
+      steps.push(
+        named({
+          ...insertion.intent,
+          filled: { range: plan.range, first, col: plan.left },
+        }),
+      );
+    }
     const step = ChangeSet.of(
       changes.map(({ from, to, insert }) => ({ from, to, insert })),
       text1.length,
@@ -282,15 +268,17 @@ function compute(
   let cells = ChangeSet.empty(text1.length);
   if (edits.length) {
     try {
-      cells = untracked
-        ? untrackedChanges(state, text1, parse(text1), edits)
-        : authoredChanges(state, text1, parse(text1), edits, group);
+      const written = untracked
+        ? untrackedWrite(state, text1, parse(text1), edits)
+        : authoredWrite(state, text1, parse(text1), edits, group);
+      cells = written.changes;
+      steps.push(named<Omit<TypingIntent, 'id'>>(written.intent));
     } catch (error) {
       if (error instanceof EditError) return { why: error.message };
       throw error;
     }
   }
-  return { total: rows.compose(cells) };
+  return { total: rows.compose(cells), steps };
 }
 
 /** The sheet's question for a paste that no tracked write holds. */
@@ -302,16 +290,21 @@ function write(view: EditorView, plan: Plan): boolean {
   const { table } = plan;
   const tracked = state.field(trackingField);
   let done = compute(view, plan, false);
+  let widened: WidenedPasteIntent | undefined;
   // The rows and columns it needs, where the table's own rules refuse them (another person's change
   // in the table): the table as a replacement, with the paste made in it (format §3.12).
   if ('why' in done && tracked && (plan.extra > 0 || (plan.extraCols ?? 0) > 0)) {
     try {
-      const wide = widenedPaste(
-        state.doc.toString(),
-        { table: table.from, range: plan.range, top: plan.top, left: plan.left },
-        contextFor(state),
-      );
-      done = { total: ChangeSet.of(wide.changes, state.doc.length) };
+      const ctx = contextFor(state);
+      const wide = writeWidenedPaste(state.doc.toString(), {
+        paste: { table: table.from, range: plan.range, top: plan.top, left: plan.left },
+        author: ctx.author,
+        time: ctx.time,
+        ...(ctx.dialect === undefined ? {} : { dialect: ctx.dialect }),
+        ...(ctx.random ? { random: ctx.random } : {}),
+      });
+      widened = { ...wide.intent, id: newIntentId() };
+      done = { total: ChangeSet.of(wide.changes, state.doc.length), steps: [] };
     } catch (error) {
       if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
     }
@@ -328,11 +321,20 @@ function write(view: EditorView, plan: Plan): boolean {
   }
   if ('why' in done) return refuse(view, done.why);
   const total = done.total;
+  // One write is its own intent (rows that are filled need the steps' derive); several, each on the text the one before left, are steps.
+  const intent: StepsIntent | TypingIntent | TableIntent | WidenedPasteIntent | undefined = widened
+    ? widened
+    : done.steps.length === 1 && !(done.steps[0]?.kind === 'table' && done.steps[0].filled)
+      ? done.steps[0]
+      : done.steps.length
+        ? { kind: 'steps', id: newIntentId(), steps: done.steps }
+        : undefined;
   if (total.empty) return true;
   const annotations = [
     trackedEditAnnotation.of(true),
     clearedCells.of(true),
     isolateHistory.of('full'),
+    ...(intent ? [intentAnnotation.of(intent)] : []),
   ];
   if (untracked) {
     const asker = state.facet(untrackedAskFacet);

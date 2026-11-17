@@ -43,14 +43,14 @@ pub enum Credential {
 }
 
 impl Credential {
-    fn kind(&self) -> &'static str {
+    pub(super) fn kind(&self) -> &'static str {
         match self {
             Credential::Token(_) => "token",
             Credential::SetupCode(_) => "bootstrapToken",
         }
     }
 
-    fn secret(&self) -> &Secret {
+    pub(super) fn secret(&self) -> &Secret {
         match self {
             Credential::Token(secret) | Credential::SetupCode(secret) => secret,
         }
@@ -96,7 +96,7 @@ impl Identity {
         format!("{}-{}", &id[..3], &id[3..6])
     }
 
-    fn sign(&self, text: &str) -> String {
+    pub(super) fn sign(&self, text: &str) -> String {
         URL_SAFE_NO_PAD.encode(self.key.sign(text.as_bytes()).to_bytes())
     }
 }
@@ -105,6 +105,13 @@ impl Identity {
 /// nothing when the tools can't answer now.
 pub trait ToolHost: Send + Sync {
     fn mcp(&self, request: &str) -> Option<String>;
+
+    /// The same for a call that came from the run of an agent, which the Gateway names by the
+    /// session it runs in (`None` for a call made outside any run, such as `openclaw nodes invoke`).
+    /// A host that doesn't tell runs apart answers as `mcp` does.
+    fn mcp_in(&self, request: &str, _session: Option<&str>) -> Option<String> {
+        self.mcp(request)
+    }
 }
 
 /// Why a connection gave up, in the terms of the sheet's failure cards.
@@ -195,21 +202,21 @@ pub struct Config {
 }
 
 /// How one connection ended.
-enum Ended {
+pub(super) enum Ended {
     Stopped,
     Dropped(String),
     Refused(Refusal),
     ToolsRefused(String),
 }
 
-fn now_ms() -> u64 {
+pub(super) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |since| since.as_millis() as u64)
 }
 
 /// Waits for the next frame of text within `until`, sending nothing, or says how it ended.
-fn next_frame(
+pub(super) fn next_frame(
     socket: &mut Socket,
     until: Instant,
     stop: &AtomicBool,
@@ -242,7 +249,7 @@ fn next_frame(
     }
 }
 
-fn set_poll(socket: &mut Socket, poll: Duration) {
+pub(super) fn set_poll(socket: &mut Socket, poll: Duration) {
     if let tungstenite::stream::MaybeTlsStream::Plain(stream) = socket.get_mut() {
         let _ = stream.set_read_timeout(Some(poll));
     } else if let tungstenite::stream::MaybeTlsStream::Rustls(stream) = socket.get_mut() {
@@ -250,7 +257,7 @@ fn set_poll(socket: &mut Socket, poll: Duration) {
     }
 }
 
-fn send(
+pub(super) fn send(
     socket: &mut WebSocket<impl std::io::Read + std::io::Write>,
     text: String,
 ) -> Result<(), Ended> {
@@ -260,7 +267,7 @@ fn send(
 }
 
 /// Waits for the response to the request `id`, passing over other frames.
-fn response_to(
+pub(super) fn response_to(
     socket: &mut Socket,
     id: &str,
     until: Instant,
@@ -299,6 +306,7 @@ fn answer_call(
     published: &[String],
     command: &str,
     params_json: &str,
+    session: Option<&str>,
 ) -> Result<(String, String), String> {
     if command != COMMAND {
         return Err(format!("This node has no command {command}."));
@@ -327,7 +335,7 @@ fn answer_call(
     })
     .to_string();
     let reply = host
-        .mcp(&request)
+        .mcp_in(&request, session)
         .ok_or("The Redlines tools aren’t available right now.")?;
     let reply: Value =
         serde_json::from_str(&reply).map_err(|_| "The tools gave no answer.".to_owned())?;
@@ -470,8 +478,15 @@ fn run(
                         node_id,
                         command,
                         params_json,
+                        session_key,
                     } => {
-                        let answered = answer_call(host, &published, &command, &params_json);
+                        let answered = answer_call(
+                            host,
+                            &published,
+                            &command,
+                            &params_json,
+                            session_key.as_deref(),
+                        );
                         let frame = match &answered {
                             Ok((tool, result)) => {
                                 emit(Event::Called { tool: tool.clone() });
@@ -1135,12 +1150,12 @@ mod tests {
             r#"{"server":"redlines","tool":""}"#,
         ] {
             assert!(
-                answer_call(&Tools, &published, COMMAND, params).is_err(),
+                answer_call(&Tools, &published, COMMAND, params, None).is_err(),
                 "{params}"
             );
         }
         let good = r#"{"server":"redlines","tool":"view"}"#;
-        assert!(answer_call(&Tools, &published, COMMAND, good).is_ok());
+        assert!(answer_call(&Tools, &published, COMMAND, good, None).is_ok());
     }
 
     #[test]

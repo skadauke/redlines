@@ -329,6 +329,8 @@ export function formatLabel(ops: readonly FormatOp[]): string {
         return BLOCK_NAMES[op.to];
       case 'callout':
         return `Alert: ${calloutName(op.type)}`;
+      case 'callout-title':
+        return op.title === null ? 'No callout title' : 'Callout title';
       case 'indent':
         return op.by > 0 ? 'Indent' : 'Outdent';
       case 'check':

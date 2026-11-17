@@ -53,6 +53,8 @@ import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
+import { joinSession, type Session } from './session.ts';
+import { tauriSessionPorts } from './session-tauri.ts';
 import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
@@ -212,6 +214,47 @@ function askAboutThisWindow(): Promise<boolean> {
   });
 }
 
+/** This document's session, when it is in several windows (src/session.ts). */
+let session: Session | null = null;
+
+/** Joins the session of the document at `path`, as its leader when there is none yet. */
+async function beginSession(path: string, follow = false): Promise<void> {
+  session = await joinSession(tauriSessionPorts(), editor, {
+    path,
+    follow,
+    person: { handle: author.handle, name: author.name },
+    // The leader writes the file, for every window of the document.
+    diskText: () => controller.diskText,
+    save: async () => ((await controller.save()) ? controller.diskText : null),
+    onSaved: (text) => controller.savedBySession(text),
+    onLoaded: () => controller.sessionLoaded(),
+    onLead: () => controller.becameLeader(),
+    notice: (message) => notice.flash(message),
+  });
+  controller.enterSession(session);
+}
+
+/** Takes this window out of its session, as when it opens another document. */
+async function endSession(): Promise<void> {
+  const ended = session;
+  session = null;
+  controller.leaveSession();
+  await ended?.stop();
+}
+
+/** Another window with this document's text, kept in step with this one's: a session. */
+async function openAnotherWindow(): Promise<void> {
+  const path = controller.state.path;
+  if (!isTauri || path === null) return;
+  try {
+    if (!session) await beginSession(path);
+    await host.openWindow(path, undefined, undefined, true);
+  } catch (error) {
+    console.error('Could not open another window on this document', error);
+    notice.flash('Couldn’t open another window on this document.');
+  }
+}
+
 const openInNewWindow = (path?: string, line?: number) =>
   host.openWindow(path, line).catch((error: unknown) => {
     console.error('Could not open a new window', error);
@@ -225,6 +268,13 @@ const openInNewWindow = (path?: string, line?: number) =>
 let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
+
+/** The file that an include names, as the open document writes it: null where it is none. */
+function includedFile(path: string): string | null {
+  const document = imageDocument;
+  const project = imageFolder ?? (isTauri ? null : '');
+  return document && project !== null ? localImagePath(path, document, project) : null;
+}
 
 /** The size of each local image file, read from its header once and kept until it is saved again. */
 const imageSizes = createImageSizes((paths) => host.imageSizes(paths));
@@ -391,6 +441,24 @@ const editor = createEditor(element('#editor'), {
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
     return file === null ? null : imageSizes.of(file);
   },
+  // An include of a Quarto document (`{{< include _part.qmd >}}`) is read and opened as a file of
+  // its own, as a local image is found: relative to the document, and only inside its project (a
+  // browser tab's one folder in memory has no path of its own).
+  includes: {
+    read: async (path) => {
+      const file = includedFile(path);
+      if (file === null) return null;
+      try {
+        return await host.read(file);
+      } catch {
+        return null;
+      }
+    },
+    open: (path) => {
+      const file = includedFile(path);
+      if (file !== null) void controller.open(file);
+    },
+  },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).
   openImage: isTauri || import.meta.env.DEV ? (src) => openImageInPreview(src) : undefined,
@@ -478,13 +546,14 @@ const agents =
           ...(isTauri
             ? {
                 more: async () =>
-                  (await listedAcpAgents()).map(({ id, name, program, args, bridge }) =>
+                  (await listedAcpAgents()).map(({ id, name, program, args, bridge, gateway }) =>
                     createAcpProvider(processes, {
                       id,
                       name,
                       command: program,
                       args,
                       ...(bridge === undefined ? {} : { bridge }),
+                      ...(gateway === true ? { gateway: true as const } : {}),
                     }),
                   ),
               }
@@ -738,6 +807,8 @@ function showDocument(state: DocumentState): void {
     runs.documentReplaced();
     wordCount.refresh();
   }
+  // Another document took this window: it leaves the document's session.
+  if (session && state.path !== session.path) void endSession();
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
@@ -864,7 +935,7 @@ const runs = createRuns({
     read: () => editor.getDoc(),
     parsed: () => editor.getParsed(),
     save: () => controller.save(),
-    applyAgentEdit: (next, step) => controller.applyAgentEdit(next, step),
+    applyAgentEdit: (next, step, base) => controller.applyAgentEdit(next, step, base),
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
@@ -1366,6 +1437,7 @@ const commands: MenuCommands = {
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
   rename: renameDocument,
+  openAnotherWindow: () => void openAnotherWindow(),
   revealInFinder: () => {
     if (doc?.path) {
       void host.reveal(doc.path).catch((error: unknown) => {
@@ -1616,6 +1688,8 @@ if (isTauri) {
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else {
+      // The others go on: the next window leads the session, and none is left with a stale caret.
+      await endSession();
       // Closed without saving, or with nothing unsaved: no copy is kept of it.
       recovery?.discard();
       runs.stopAll();
@@ -1626,9 +1700,17 @@ if (isTauri) {
   // to show what it was opened for.
   const start = await host.windowStart().catch((error: unknown) => {
     console.error('Could not ask what this window was opened for', error);
-    return { path: null, line: null, text: null };
+    return { path: null, line: null, text: null, session: false };
   });
-  if (start.path === null) {
+  if (start.session && start.path !== null) {
+    // Another window on a document: its text is the session's, which the window's leader gives.
+    controller.followSession(start.path);
+    await beginSession(start.path, true).catch(async (error: unknown) => {
+      // The window that showed it closed first: this one holds the file on its own.
+      console.error('Could not join the session', error);
+      await controller.open(start.path!);
+    });
+  } else if (start.path === null) {
     // A window opened for text starts with an Untitled document that holds it, unsaved.
     await (start.text ? controller.createWith(start.text) : controller.create());
   } else {
@@ -1797,6 +1879,14 @@ if (import.meta.env.DEV && import.meta.env['VITE_PALETTE_CHECK']) {
   void import('./palette-check.ts').then(({ runPaletteCheck }) =>
     runPaletteCheck(editor, { ask: !isTauri }),
   );
+}
+
+// Debug only (sync-check.ts): one document in two windows, side by side, in WebKit.
+if (
+  import.meta.env.DEV &&
+  (import.meta.env['VITE_SYNC_CHECK'] || new URLSearchParams(location.search).has('sync-check'))
+) {
+  void import('./sync-check.ts').then(({ runSyncCheck }) => runSyncCheck());
 }
 
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.

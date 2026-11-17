@@ -19,10 +19,13 @@ mod allowed;
 pub mod connections;
 pub mod gateway;
 mod latest;
+mod log;
 pub mod node;
+mod openclaw_agent;
+mod openclaw_chat;
 mod openclaw_nodes;
 mod openclaw_protocol;
-mod log;
+mod openclaw_tools;
 mod process;
 mod question;
 mod reach;
@@ -43,17 +46,17 @@ pub use process::Runs;
 pub use which::Programs;
 
 use acp::{AcpAgent, AcpAgents, Found};
-use connections::{Change, Connections, Kind, NewConnection, Secret, View};
-use openclaw_nodes::Nodes;
 use acp_runs::AcpRuns;
 use allowed::Agent;
+use connections::{Change, Connections, Kind, NewConnection, Secret, View};
 use log::RunInfo;
+use openclaw_nodes::Nodes;
 use process::{ExecOutput, RunMessage, Spec, Started};
 use relay::Relays;
 use setup::{Outcome, Setups};
 
 /// What the windows hear when the list of ACP agents changes, to look for agents again.
-const ACP_AGENTS_CHANGED: &str = "acp-agents-changed";
+pub(crate) const ACP_AGENTS_CHANGED: &str = "acp-agents-changed";
 
 /// What the windows hear when an OpenClaw connection is added, changed or removed.
 const OPENCLAW_CHANGED: &str = "openclaw-connections-changed";
@@ -178,8 +181,28 @@ pub fn agent_stop(app: AppHandle, webview: Webview, id: u32) -> Result<(), Strin
 
 /// The Agent Client Protocol agents the person added.
 #[tauri::command(async)]
-pub fn acp_agents(app: AppHandle) -> Vec<AcpAgent> {
-    app.state::<AcpAgents>().list()
+pub fn acp_agents(app: AppHandle) -> Vec<openclaw_agent::Listed> {
+    let mut listed: Vec<openclaw_agent::Listed> = app
+        .state::<AcpAgents>()
+        .list()
+        .into_iter()
+        .map(|agent| openclaw_agent::Listed {
+            agent,
+            gateway: false,
+        })
+        .collect();
+    // An OpenClaw connection that can chat is an agent too: it answers from its Gateway.
+    let taken: Vec<String> = listed.iter().map(|one| one.agent.id.clone()).collect();
+    listed.extend(
+        openclaw_nodes::chat_agents(&app)
+            .into_iter()
+            .filter(|agent| !taken.contains(&agent.id))
+            .map(|agent| openclaw_agent::Listed {
+                agent,
+                gateway: true,
+            }),
+    );
+    listed
 }
 
 /// Adds an Agent Client Protocol agent, as a name and a command, or changes the one of that name,
@@ -299,7 +322,9 @@ pub fn openclaw_node_connect(
         .filter(|code| !code.trim().is_empty())
         .map(Secret::new)
         .transpose()
-        .map_err(|_| "That doesn’t look like a setup code: it is one line with no spaces.".to_owned())?;
+        .map_err(|_| {
+            "That doesn’t look like a setup code: it is one line with no spaces.".to_owned()
+        })?;
     app.state::<Nodes>()
         .connect(&app, &handle, code, &this_mac_name())
 }
@@ -347,6 +372,27 @@ pub fn acp_start(
     let bundled = programs.bundled().ok_or_else(|| {
         "Redlines won't start an agent: it can't find its own program.".to_owned()
     })?;
+    // An agent of the person's own list is a program; failing that, an OpenClaw connection that
+    // can chat is a Gateway.
+    if app.state::<AcpAgents>().get(&agent).is_none()
+        && let Some((bridge, talk)) = openclaw_nodes::chat_for(&app, &agent)
+    {
+        return app.state::<AcpRuns>().start_gateway(
+            &app.state::<Runs>(),
+            owner,
+            &log_folder(&app)?,
+            &log,
+            &cwd,
+            bridge,
+            bundled,
+            talk,
+            app.state::<Nodes>().tools(),
+            || app.get_webview_window(owner).is_some(),
+            move |message| {
+                let _ = on_line.send(message);
+            },
+        );
+    }
     let launch = acp_runs::spec_for(&app.state::<AcpAgents>(), &agent, &cwd, log)?;
     let environment = programs.environment_for(Path::new(&launch.spec.program));
     app.state::<AcpRuns>().start(

@@ -8,6 +8,7 @@ import {
   CHANGED_ON_DISK,
   DELETED_ON_DISK,
   DocumentController,
+  type DocumentSession,
   NOT_WATCHED,
   TRACKING_FOR_EVERYONE,
   type DocumentState,
@@ -212,6 +213,7 @@ function fakeEditor() {
       expect(step.group).toBeTruthy();
       doc = text;
       onChange(text);
+      return { rebased: false, dropped: [] };
     }),
     /** Records the view in the file's ledger, which a save asks for: nothing, unless a test says. */
     recordView: vi.fn(() => {}),
@@ -1121,6 +1123,16 @@ describe('the view a save records (format §5.6)', () => {
     await controller.applyAgentEdit('One agent\n', { group: 'run-1', agent: 'Claude' });
     expect(editor.recordView).not.toHaveBeenCalled();
     expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'One agent\n' }]);
+  });
+
+  it('places an agent’s edit on a document that moved since its tool read it, and leaves the file', async () => {
+    const { host, editor, controller } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    const step = { group: 'run-1', agent: 'Claude' };
+    // Someone typed after the tool read 'Zero\n': the edit is placed, not written as it is.
+    await controller.applyAgentEdit('Zero agent\n', step, 'Zero\n');
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith('Zero agent\n', step, 'Zero\n');
+    expect(host.writes).toEqual([]);
   });
 });
 
@@ -2176,6 +2188,147 @@ describe('a run, with the live editor and the file', () => {
     release();
     await vi.waitFor(() => expect(runs.isLive()).toBe(false));
     editor.destroy();
+  });
+});
+
+describe('a document in a session of windows', () => {
+  const session = (leading: boolean, over: Partial<DocumentSession> = {}): DocumentSession => ({
+    leading,
+    confirmed: true,
+    members: 2,
+    save: vi.fn(() => Promise.resolve<string | null>('Saved text\n')),
+    ...over,
+  });
+
+  it('asks the leader to save, and never writes the file itself', async () => {
+    const { host, editor, controller, state } = setup();
+    controller.followSession('/docs/plan.md');
+    editor.setDoc('Saved text\n');
+    controller.sessionLoaded();
+    const save = vi.fn(() => Promise.resolve<string | null>('Saved text\n'));
+    controller.enterSession(session(false, { save }));
+    editor.type('Saved text\nand more\n');
+    expect(state()?.dirty).toBe(true);
+    expect(await controller.save()).toBe(true);
+    expect(save).toHaveBeenCalledOnce();
+    expect(host.writes).toEqual([]);
+    // What the leader wrote is the file's text now, and the window has more typed since.
+    expect(state()?.dirty).toBe(true);
+    editor.type('Saved text\n');
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('says so when the leader could not save', async () => {
+    const { controller, editor, state } = setup();
+    controller.followSession('/docs/plan.md');
+    editor.setDoc('One\n');
+    controller.sessionLoaded();
+    controller.enterSession(session(false, { save: () => Promise.resolve(null) }));
+    editor.type('Two\n');
+    expect(await controller.save()).toBe(false);
+    expect(state()?.notice).toContain('Couldn’t save');
+  });
+
+  it('does not watch the file, or take what the leader wrote as a change on disk', async () => {
+    const { host, controller, editor, state } = setup();
+    controller.followSession('/docs/plan.md');
+    editor.setDoc('One\n');
+    controller.sessionLoaded();
+    controller.enterSession(session(false));
+    await settle();
+    expect(host.watchers.size).toBe(0);
+    host.files.set('/docs/plan.md', 'Written by the leader\n');
+    await controller.externalChange();
+    expect(state()?.notice).toBeNull();
+  });
+
+  it('compares text with its line breaks as the session keeps them', () => {
+    const { controller, editor, state } = setup();
+    controller.followSession('/docs/plan.md');
+    editor.setDoc('A\nB\n');
+    controller.sessionLoaded();
+    controller.enterSession(session(false));
+    controller.savedBySession('A\r\nB\r\n');
+    expect(state()?.dirty).toBe(false);
+    editor.type('A\nC\n');
+    expect(state()?.dirty).toBe(true);
+  });
+
+  it('closes without a question when the authority has everything the window made', async () => {
+    const { host, controller, editor } = setup();
+    controller.followSession('/docs/plan.md');
+    editor.setDoc('One\n');
+    controller.sessionLoaded();
+    controller.enterSession(session(false));
+    editor.type('One\nTwo\n');
+    expect(await controller.confirmDiscard()).toBe(true);
+    expect(host.asked).toBe(0);
+  });
+
+  it('asks as ever while edits are on their way to the authority', async () => {
+    const { host, controller, editor } = setup();
+    host.choice = 'cancel';
+    controller.followSession('/docs/plan.md');
+    editor.setDoc('One\n');
+    controller.sessionLoaded();
+    controller.enterSession(session(false, { confirmed: false }));
+    editor.type('One\nTwo\n');
+    expect(await controller.confirmDiscard()).toBe(false);
+    expect(host.asked).toBe(1);
+  });
+
+  it('writes the file before the leader closes, with other windows left, and asks nothing', async () => {
+    const { host, controller, editor } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    controller.enterSession(session(true));
+    editor.type('One\nTwo\n');
+    expect(await controller.confirmDiscard()).toBe(true);
+    expect(host.asked).toBe(0);
+    expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'One\nTwo\n' }]);
+  });
+
+  it('asks when the leader’s save did not happen, and does not close on it', async () => {
+    const { host, controller, editor } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    controller.enterSession(session(true));
+    editor.type('One\nTwo\n');
+    // The file changed elsewhere meanwhile, and the person says no to overwriting it.
+    host.files.set('/docs/plan.md', 'Elsewhere\n');
+    host.overwriteChoice = 'cancel';
+    host.choice = 'cancel';
+    expect(await controller.confirmDiscard()).toBe(false);
+    expect(host.writes).toEqual([]);
+    expect(host.asked).toBe(1);
+  });
+
+  it('keeps what the leader says the file holds when the session’s text arrives after it', () => {
+    const { controller, editor, state } = setup();
+    controller.followSession('/docs/plan.md');
+    controller.enterSession(session(false));
+    controller.savedBySession('Old\n');
+    editor.setDoc('Old\nand an unsaved edit\n');
+    controller.sessionLoaded();
+    expect(state()?.dirty).toBe(true);
+  });
+
+  it('keeps a file’s CRLF line breaks in a window that has the session’s LF text', () => {
+    const { controller, editor, state } = setup();
+    controller.followSession('/docs/plan.md');
+    controller.enterSession(session(false));
+    editor.setDoc('A\nB\n');
+    controller.savedBySession('A\r\nB\r\n');
+    expect(editor.reloadDoc).toHaveBeenCalledWith('A\r\nB\r\n');
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('asks as ever when the leader is alone in its session', async () => {
+    const { host, controller, editor } = setup({ '/docs/plan.md': 'One\n' });
+    host.choice = 'cancel';
+    await controller.open('/docs/plan.md');
+    controller.enterSession(session(true, { members: 1 }));
+    editor.type('One\nTwo\n');
+    expect(await controller.confirmDiscard()).toBe(false);
+    expect(host.asked).toBe(1);
   });
 });
 
