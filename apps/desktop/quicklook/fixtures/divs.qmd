@@ -1,0 +1,25 @@
+---
+title: "Divs"
+---
+
+::: {.callout-warning title="Mind the gap"}
+A callout with a title, and a list:
+
+- one
+- two
+:::
+
+::: {.columns}
+::: {.column width="50%"}
+Left.
+:::
+::: {.column width="50%"}
+Right.
+:::
+:::
+
+````
+::: {.callout-tip}
+Not a callout: this is code.
+:::
+````

@@ -22,7 +22,7 @@ back as `images`.
 - `markdown.ts`: micromark with GitHub's extensions. HTML comments (the markers, and any note an
   author left) are not shown, an image is its alt text unless the extension loaded its file
   (`<img src="cid:…">`, which Quick Look answers from the attachments of its reply), the options of
-  an R Markdown or Quarto chunk are kept as a line over its code, and a table sits in a box that
+  an R Markdown or Quarto chunk are kept as a line over its code, a Quarto callout (`::: {.callout-note}`, `divs.ts`) is a quiet labelled box and any other div its text, and a table sits in a box that
   scrolls. Raw HTML draws as GitHub draws it (`src/html.ts`, over the list in `@redlines/format`): its allowed elements and a few attributes, rebuilt from tokens and never passed through, GFM's nine escaped tags as text, a chip for what GitHub drops and nothing shows, no script, no style and no load. `<details>` is WebKit's own: closed unless the file says `open`, and a click opens it without script.
 - `summary.ts`: what waits in a file: the changes, counted as suggestions as the review bar counts
   them, and the open comment threads, and who made them.

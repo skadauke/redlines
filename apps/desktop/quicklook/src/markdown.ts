@@ -5,7 +5,7 @@
 // as text or dropped. A preview has no script and no network, so it draws no image from a server. A
 // link keeps its address, which only a click would load, and a `javascript:` address is gone.
 //
-// Four things are changed from micromark's own HTML:
+// Six things are changed from micromark's own HTML:
 //
 // - An HTML comment is not shown: the markers of a file that Redlines wrote are such comments, and
 //   so is any note an author left in the text (GitHub and a copy hide them too).
@@ -17,6 +17,8 @@
 // - A chunk of R Markdown or Quarto, a fence whose info string is written in braces
 //   (```` ```{r setup, include=FALSE} ````), keeps what is in the braces as a plain line over its code,
 //   where micromark would take the first word for the language and drop the rest.
+// - A Pandoc div's fences (`::: {.callout-note}`) are blocks of their own: a callout is a quiet box
+//   under its label, and any other div is its text (divs.ts).
 // - A table sits in a box that scrolls, so that a wide one doesn't widen the page.
 // - A list item says whether it starts with a task's box, and whether its list is loose, in classes:
 //   the style sheet doesn't have to find that out with a selector that an engine may not know.
@@ -24,6 +26,7 @@
 import { micromark } from 'micromark';
 import { gfm, gfmHtml } from 'micromark-extension-gfm';
 import type { CompileContext, HtmlExtension } from 'micromark-util-types';
+import { markDivs } from './divs.ts';
 import { Html } from './html.ts';
 
 /** Whether a fence's info string is written in braces, as a chunk's is, and Pandoc's attributes. */
@@ -207,11 +210,12 @@ function classOfItems(html: string): string {
 /** micromark's HTML of Markdown `source`, with nothing changed: where its images are. */
 function rawHtml(source: string): string {
   const html = new Html();
-  const drawn = micromark(source, {
+  const divs = markDivs(source);
+  const drawn = micromark(divs.text, {
     extensions: [gfm()],
     htmlExtensions: [gfmHtml(), extension(html)],
   });
-  return drawn + html.end();
+  return divs.finish(drawn + html.end());
 }
 
 /** The local images that Markdown `source` links to (`localImageSources`). */

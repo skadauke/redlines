@@ -26,5 +26,5 @@ plt.hist(penguins["bill_length_mm"])
 The mean bill is `r round(mean(penguins$bill_length_mm, na.rm = TRUE), 1)` mm long, as @fig-bills shows.
 
 ::: {.callout-note}
-A callout, which a preview shows as the text it holds.
+A callout, which a preview shows as a quiet box under its label.
 :::
