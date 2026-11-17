@@ -116,10 +116,11 @@ Only when your person asks for a Word file, or gives you one.
 
 - `redlines export-docx <file>` writes the document as a `.docx` beside it, with its tracked changes
   and comments as Word's, or where `-o <out.docx>` says. A picture that lies beside the file, by its
-  relative path, goes into it.
+  relative path, goes into it. Without `-o` it never writes over a `.docx` that is there: it refuses
+  and says so. Only `-o <the file>` replaces one, so pass it only when your person wants that.
 - `redlines import-docx <file.docx>` writes the Markdown beside the `.docx`, or where `-o <out.md>`
   says, with its pictures in a `media` folder next to it. It never writes over a file that is there.
 
 Both print the path they wrote, and say on stderr what Word or Markdown can't hold.
 
-<!-- redlines-skill 4 -->
+<!-- redlines-skill 5 -->

@@ -25,7 +25,7 @@ interface Host {
   remove(path: string): void | Promise<void>;
   readStdin(): string | Promise<string>;
   /** The bytes of a file, for a .docx or a picture. */
-  readBytes(path: string): Uint8Array;
+  readBytes(path: string, max?: number): Uint8Array;
   /** Writes a file of bytes, and the folders above it that aren't there yet. */
   writeBytes(path: string, bytes: Uint8Array): void;
   /** Evaluates the Word half of the program (`quickjs-word.ts`), which sets `__redlinesWord`. It is
@@ -73,7 +73,8 @@ function ioOf(host: Host): CliIo {
     remove: async (path) => host.remove(path),
     readStdin: () => decoded('Standard input', () => host.readStdin()),
     randomHex: (n) => host.randomHex(n),
-    readBytes: (path) => attempt(() => host.readBytes(path)),
+    readBytes: (path, max) =>
+      attempt(() => (max === undefined ? host.readBytes(path) : host.readBytes(path, max))),
     writeBytes: (path, bytes) => attempt(() => host.writeBytes(path, bytes)),
     importDocx: (bytes) => word().importDocx(bytes),
     exportDocx: (text, images) => word().exportDocx(text, images),
