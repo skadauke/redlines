@@ -21,6 +21,7 @@ import {
   setCurrentChange,
   setViewModeEffect,
   viewModeField,
+  dialectFacet,
 } from '@redlines/editor';
 import { addComment, EditError, type MarkRange, type Parsed, rejectReason } from '@redlines/format';
 import { authorLine, byline, colorClass } from './people.ts';
@@ -592,7 +593,7 @@ class Panel {
         view.state.doc.toString(),
         range,
         text,
-        editContext(ctx.author),
+        editContext(ctx.author, view.state.facet(dialectFacet)),
       );
       applyEdit(view, changes, 'review.comment');
     } catch (failure) {

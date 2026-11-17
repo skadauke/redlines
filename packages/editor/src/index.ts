@@ -44,6 +44,7 @@ import {
 import { followText } from './anchor.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
+export { dialectFacet } from './dialect.ts';
 export { inFrontMatter };
 export {
   type Container,
@@ -95,7 +96,8 @@ import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { imageInSelection } from './image-size.ts';
 import { CROP_NO_IMAGE, CROP_RAW, CROP_REMOTE, startCrop } from './image-crop.ts';
-import { dialectFacet, noticeFacet } from './image-size.ts';
+import { dialectFacet } from './dialect.ts';
+import { noticeFacet } from './image-size.ts';
 import { likelyParsing } from './likely/parse.ts';
 import {
   imageOpening,
