@@ -27,6 +27,7 @@
 import {
   breakEnd,
   breakStart,
+  closerRange,
   frontMatterEnd,
   lineEnd,
   lineStart,
@@ -1956,7 +1957,7 @@ function withoutAnnotations(text: string): string {
     if (mark.kind !== 'cmt' && mark.kind !== 'hl') return [];
     return mark.segments.flatMap((segment) => {
       const gone: TextChange[] = [{ ...openerRange(segment), insert: '' }];
-      if (segment.close) gone.push({ ...segment.close, insert: '' });
+      if (segment.close) gone.push({ ...closerRange(text, segment.close), insert: '' });
       return gone;
     });
   });

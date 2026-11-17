@@ -58,6 +58,7 @@ import {
   underlineOfBreak,
   viewBreaks,
   withoutMarkers,
+  HTML_START_7,
 } from './blocks.ts';
 import { readBlocks, sameBlocks } from './block-read.ts';
 import {
@@ -769,6 +770,24 @@ function joinSplits(plan: Plan, items: Item[], ownSplits: readonly SplitUnit[]):
   return moved;
 }
 
+/**
+ * The line break that a closer takes in front of it where the new text is a whole tag alone on its
+ * line, at the start of a block: that is CommonMark's seventh kind of HTML block, which a closer
+ * after it on the line would make a paragraph, though the newest view reads it as a block (§3.3).
+ */
+function closerGap(plan: Plan, piece: Piece, typing: Typing): string {
+  if (typing.trail !== '' || !HTML_START_7.test(typing.inner)) return '';
+  const { text } = plan;
+  const start = lineStart(text, piece.from);
+  if (
+    text.slice(start, piece.from).trim() !== '' ||
+    text.slice(piece.to, lineEnd(text, piece.to)).trim() !== ''
+  )
+    return '';
+  if (start > 0 && text.slice(lineStart(text, start - 1), start).trim() !== '') return '';
+  return plan.eol + text.slice(start, piece.from);
+}
+
 /** A replacement that is one run of text with no marker in it. */
 function replaceOne(plan: Plan, piece: Piece, typing: Typing): TextChange {
   if (piece.container?.own) {
@@ -780,7 +799,7 @@ function replaceOne(plan: Plan, piece: Piece, typing: Typing): TextChange {
   return {
     from: piece.from,
     to: piece.to,
-    insert: `<!--sub ${id} ${old}-->${typing.inner}<!--/${id}-->${typing.trail}`,
+    insert: `<!--sub ${id} ${old}-->${typing.inner}${closerGap(plan, piece, typing)}<!--/${id}-->${typing.trail}`,
   };
 }
 
@@ -1851,9 +1870,6 @@ const HTML_START = [
   /^<!\[CDATA\[/,
   new RegExp(`^</?(?:${HTML_BLOCK_TAGS})(?:[ \\t>]|/>|$)`, 'i'),
 ];
-/** The seventh: one whole open or closing tag of another name, alone on its line. */
-const HTML_START_7 =
-  /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
 
 /**
  * Whether a line, past its container prefix, starts an HTML block, where a marker is not read: one
@@ -2608,6 +2624,31 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
             grow(...way);
           } else refuse(againstWords());
         }
+      }
+    }
+    // A deletion that leaves a space on the inner side of a delimiter (`**a b ⟦c⟧**`) is read
+    // by the markers as a delimiter next to punctuation, which pairs, where the newest view's
+    // delimiter next to a space does not (format §3.1, rule 5, #814): it takes the character on
+    // one side, or both, that leaves the emphasis as the newest view reads it.
+    if (
+      content === '' &&
+      from < to &&
+      typing.trail === '' &&
+      [text[from - 1], text[to]].some((c) => c !== undefined && DELIMITERS.test(c)) &&
+      !markers.some((m) => m.role !== 'ledger' && m.to >= from - 1 && m.from <= to + 1) &&
+      !emphasisKept(plan, from, to, '', '')
+    ) {
+      const l = stepLeft(text, markers, from);
+      const r = stepRight(text, markers, to);
+      const room = (a: number, b: number) => !/[\r\n]/.test(text.slice(a, b)) && a !== b;
+      const ways: [number, number][] = [];
+      const blank = (a: number, b: number) => /^\s+$/.test(text.slice(a, b));
+      if (room(l, from) && blank(l, from)) ways.push([l, to]);
+      if (room(to, r) && blank(to, r)) ways.push([from, r]);
+      const way = ways.find(([a, b]) => emphasisKept(plan, a, b, '', ''));
+      if (way) {
+        [from, to] = way;
+        continue;
       }
     }
     // Nor may it follow an unescaped backslash, which would escape it (format §3.1): the change

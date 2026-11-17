@@ -3,15 +3,16 @@
 // only the ledger; deleting a thread removes both. Where the anchor's markers go is the same for a
 // highlight (anchors.ts).
 
-import { openerRange } from './blocks.ts';
+import { closerRange, openerRange } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, markerRanges, visibleText, workingLedger } from './edit-support.ts';
+import type { MarkerRange } from './edit-support.ts';
 import { anchorRange, assertRange, checkAnchor } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import { commentAcrossRows } from './table-rules.ts';
+import { commentAcrossRows, pastRowMark } from './table-rules.ts';
 import { applyChanges } from './changes.ts';
 import type { EditContext, Ledger, Parsed, Range, TextChange, Thread } from './types.ts';
 
@@ -62,7 +63,9 @@ export function addComment(
   assertRange(text, range);
   const parsed = parse(text);
   const markers = markerRanges(parsed);
-  const { from, to } = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
+  let placed = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
+  placed = pastPendingRowMarks(text, parsed, markers, placed);
+  const { from, to } = placed;
   const point = from === to;
 
   const id = newId(idsIn(text), ctx.random);
@@ -90,6 +93,30 @@ export function addComment(
   });
   refuseAcrossMovedRows(applyChanges(text, changes), id);
   return { changes, id };
+}
+
+/**
+ * `placed`, with an end that would stand in front of the mark of an inserted or moved row, at the
+ * start of its first cell, or between the mark and its space, moved past the mark and its space:
+ * there it hides the mark from the table, and the row could not be decided. The comment then
+ * covers the mark, which is no text, and the row stays decidable in every order.
+ */
+function pastPendingRowMarks(
+  text: string,
+  parsed: Parsed,
+  markers: readonly MarkerRange[],
+  placed: Range,
+): Range {
+  if (!text.includes(' row-->')) return placed;
+  let { from, to } = placed;
+  for (const table of readTables(text, parsed)) {
+    from = pastRowMark(table, text, from);
+    to = pastRowMark(table, text, to);
+  }
+  if (from === placed.from && to === placed.to) return placed;
+  // Where the ends are now, the rules of every anchor hold again.
+  const range = { from, to: Math.max(from, to) };
+  return anchorRange(text, parsed, markers, range, COMMENT_WORDS);
 }
 
 /**
@@ -187,7 +214,7 @@ export function deleteThread(text: string, threadId: string): TextChange[] {
   const removals: TextChange[] = [];
   for (const segment of anchor?.segments ?? []) {
     removals.push({ ...openerRange(segment), insert: '' });
-    if (segment.close) removals.push({ ...segment.close, insert: '' });
+    if (segment.close) removals.push({ ...closerRange(text, segment.close), insert: '' });
   }
   return commitEdit(text, removals, ledger, { parsed, removes: true, keeps: 'both' });
 }

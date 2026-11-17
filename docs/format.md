@@ -1077,7 +1077,10 @@ at the outer edge of a whole inline construct. A marker never goes:
    insertion (`Start <!--ins k3x9-->Hello **there**<!--/k3x9-->middle`, #81). The line around the
    change is read with its markers and without them, and the change is written as it is only where
    the same delimiters pair, and every run that no pair uses up opens and closes as it did; else the
-   change takes the character on one side, or on both.
+   change takes the character on one side, or on both. A deletion is read the same way, with
+   nothing written in its place: deleting the first or last word inside `**`, `*` or `~~` leaves a
+   space next to the delimiter in the newest view, where it doesn't flank, but a marker there would
+   make it flank, so the deletion takes that space too (`**a b<!--del k3x9  c-->**`, #814).
    Where another mark stands against the change, with nothing between, its markers and its text
    come and go with its decisions: the change is written as it is typed only where the paragraph
    reads alike in the file and after every order of accepting and rejecting the marks that touch
@@ -1180,6 +1183,11 @@ middle of a paragraph it splits the paragraph.
 - A closer alone on a line, with no text after it, starts no line of a paragraph: the line is an
   HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
   break that a change brings at the end of the document (§3.1, 4), which the ledger follows.
+- The new text of a substitution that is a whole tag alone on its line, at the start of the file or after a blank line (CommonMark's
+  seventh kind of HTML block: an image given a size is written as `<img …>`), has its closer on the
+  next line, because a closer after the tag on its line would make the line a paragraph, which the
+  newest view doesn't read (#628). That line break is the closer's syntax: the views, accepting and rejecting take
+  it away with the closer, and no view has it as text: a document gains no line break from where this marker stands.
 
 A tracked insertion never stands between a list marker and the space after it. A marker with no
 space after it (`-` or `2.` alone on its line) is an empty item to Markdown, but `-<!--ins x--> a<!--/x-->`
@@ -2416,7 +2424,11 @@ it, one per line:
   rejected (a moved row does not leave: it goes back with its comments, "Moving rows", below),
   becomes a point comment at the start of the text of the first cell of the row below, or at the end
   of the text of the last cell of the row above for the last row (and where the row below has no
-  pipe at its start, which could not hold the marker, there too). A comment with a part that stays
+  pipe at its start, which could not hold the marker, there too). A point at the end of a cell's text
+  that ends in an unescaped backslash goes in front of the backslash, since after it the backslash
+  would escape the marker and the file would read otherwise than its newest view: the comment moves
+  by one character, and nothing is escaped or added (#476; an escaped backslash, an even run of them,
+  stays in front of the point). A comment with a part that stays
   loses only the part in the row, and one with an end in the row keeps its other end, the end that
   left standing where the point goes. A highlight has no point form and goes.
 - **Rules 3 and 4 for columns.** A column with another person's pending change in it, and a column
@@ -2427,7 +2439,8 @@ it, one per line:
   delete fold into the deletion. A comment in a column that leaves the table, deleted or rejected,
   becomes a point comment at the start of the text of the cell after it in the same row, or at the
   end of the text of the cell before it for the last column (in front of the mark of an alignment
-  change that ends that cell, rule 5); a comment in a moved column moves with it, both ways. A
+  change that ends that cell, rule 5, and in front of an unescaped backslash that ends the text, as
+  for a row); a comment in a moved column moves with it, both ways. A
   comment that starts above the table, on a line of its own because a marker can't
   start the line of a header without a leading pipe, and ends in a column that moves or is deleted,
   would leave its end without its start: the operation with Track Changes on is a replacement of the
@@ -2510,6 +2523,10 @@ it, one per line:
   moved to the top is the new header, the delimiter row following it in every state. Accepting a move
   takes the marker and the deletion line away; rejecting it moves the row itself back, with what was
   typed in it since and its comments, and takes the deletion line away. Either half decides both.
+  Accepting a change in the moved row (another person's typing, say) writes the kept copy again, as the
+  row now reads with the changes still pending in it rejected, so that the original view, and the row
+  that rejecting the move gives back, hold the accepted text: the typing travels with the row, either
+  half rejects, and accepting the typing and rejecting the move read the same in either order (#475).
   A comment or a highlight in the row goes with it: a range in a cell, a range across two cells or a
   point. At the new place it stands in the row where it stood. Rejecting the move gives the row back
   with it, in the same place, and nothing of it stays behind. The kept copy below the table holds
@@ -3547,6 +3564,12 @@ front matter in R Markdown and Quarto.
   marker belongs to the first ledger after it. The editor always writes one.
 - The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
   (§2.1).
+- A `<!--` with no `-->` of its own, anywhere in the text, opens a comment that runs to the first
+  `-->` after it, and in a file with a ledger that is the ledger's own. A reader (and every other
+  renderer) then finds no ledger and no marks, though the ledger is in the file. Redlines refuses
+  every edit that writes a change or a ledger in such a file, a tracked edit or a table operation, with "Close or remove the `<!--` first.", so that the file keeps exactly
+  one ledger, and the `<!--` stays text until its owner closes or removes it. Once the comment is
+  closed, or removed, the ledger is read again and edits write as they always do.
 
 ### 5.2 Keys
 

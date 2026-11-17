@@ -809,7 +809,17 @@ function wordsNextTo(
   ) {
     return NEXT_TO_WORDS.codeBefore;
   }
-  return error.message === SELF_CHECK && next.underText ? NEXT_TO_WORDS.underText : null;
+  if (error.code === 'inside-code' && next.indentedAbove && next.indentedBelow) {
+    return NEXT_TO_WORDS.codeBetween;
+  }
+  if (error.message.startsWith("A heading's closing #s") && next.headingAbove) {
+    return NEXT_TO_WORDS.underHeading;
+  }
+  if (error.message === SELF_CHECK) {
+    if (next.underText) return NEXT_TO_WORDS.underText;
+    if (next.htmlBelow) return NEXT_TO_WORDS.htmlBelow;
+  }
+  return null;
 }
 
 /**
