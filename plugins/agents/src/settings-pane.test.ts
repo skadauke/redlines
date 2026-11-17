@@ -1305,7 +1305,11 @@ describe('the Redlines skill', () => {
     const waiting = row(container, 'Claude').querySelector(
       'button[aria-label^="Install the Redlines"]',
     );
-    expect((waiting as HTMLButtonElement).disabled).toBe(true);
+    // Not disabled, which would take the focus from it; a second press does nothing.
+    expect((waiting as HTMLButtonElement).disabled).toBe(false);
+    expect(waiting?.getAttribute('aria-disabled')).toBe('true');
+    (waiting as HTMLButtonElement).click();
+    expect(claude.install).toHaveBeenCalledTimes(1);
     await settle();
     expect(words(container)).toContain('Redlines skill installed in ~/.claude/skills/redlines.');
     expect(words(container)).not.toContain('Installing');
@@ -1328,7 +1332,7 @@ describe('the Redlines skill', () => {
     renderAgentsPane(container, deps);
     await settle();
     expect(words(container)).toContain(
-      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one.',
+      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak.',
     );
     expect(buttons(container)).toEqual(['Check Again', 'Update Skill']);
     press(container, 'Update Skill');
@@ -1552,6 +1556,8 @@ describe('the Redlines skill', () => {
     )!;
     install.focus();
     install.click();
+    // While it writes, the focus stays on the button.
+    expect(document.activeElement).toBe(install);
     await settle();
     expect(row(container, 'Claude').contains(document.activeElement)).toBe(true);
     expect(document.activeElement?.textContent).toBe('Check Again');

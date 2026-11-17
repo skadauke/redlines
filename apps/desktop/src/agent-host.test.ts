@@ -1,7 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { acpAgentEdits, agentSetup, setupResult } from './agent-preferences.ts';
-import { acpAgents, commandLine, createProcesses, createRelay } from './agent-host.ts';
+import {
+  acpAgents,
+  commandLine,
+  createProcesses,
+  createRelay,
+  listedAcpAgents,
+} from './agent-host.ts';
 
 // The app's Rust side, which a test does not have. A channel is a holder for `onmessage`; the test
 // takes the channel out of the call and plays Rust's part.
@@ -117,6 +123,24 @@ describe('createProcesses', () => {
       ['acp_agent_add', { name: 'Gemini', command: 'gemini --experimental-acp' }],
       ['acp_agent_remove', { id: 'gemini' }],
     ]);
+  });
+
+  it('lists in the picker only the agents Preferences shows, so that each can be removed', async () => {
+    const openClaw = {
+      id: 'openclaw',
+      name: 'OpenClaw',
+      program: '/bin/openclaw',
+      args: ['acp', '--url', 'wss://gateway', '--token-file', '/tmp/token'],
+      bridge: {},
+    };
+    const old = {
+      id: 'gemini',
+      name: 'Gemini',
+      program: '/bin/gemini',
+      args: ['--experimental-acp'],
+    };
+    vi.mocked(invoke).mockResolvedValue([old, openClaw]);
+    expect((await listedAcpAgents()).map(({ id }) => id)).toEqual(['openclaw']);
   });
 
   it('turns channel messages into an async iterable and ends it', async () => {

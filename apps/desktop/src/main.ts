@@ -41,7 +41,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { watchAgentsChanged } from './agent-changes.ts';
-import { acpAgents, createProcesses, createRelay, homeAccess, homeReach } from './agent-host.ts';
+import {
+  acpAgents,
+  createProcesses,
+  createRelay,
+  homeAccess,
+  homeReach,
+  listedAcpAgents,
+} from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
@@ -471,7 +478,7 @@ const agents =
           ...(isTauri
             ? {
                 more: async () =>
-                  (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
+                  (await listedAcpAgents()).map(({ id, name, program, args, bridge }) =>
                     createAcpProvider(processes, {
                       id,
                       name,
