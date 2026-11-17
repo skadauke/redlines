@@ -9,6 +9,7 @@ import {
   applyChanges,
   commentOnQuote,
   describeEdits,
+  dialectOfName,
   newestView,
   originalView,
   parse,
@@ -32,6 +33,8 @@ export interface Input {
   /** The options that were given. An option without a value, such as `--review`, has an empty one. */
   flags: ReadonlyMap<string, string>;
   now: Date;
+  /** The file's name or path, which says its dialect (format §9.1). */
+  file?: string;
 }
 
 /** What a command gives back. */
@@ -115,7 +118,8 @@ function contextOf(text: string, input: Input): EditContext {
     author.for = handleOf(person);
     checkAgent(parse(text).ledger.people, handle, author.for);
   }
-  return { author, time: minute(input.now), note: optional(input, 'note') };
+  const dialect = input.file === undefined ? undefined : dialectOfName(input.file);
+  return { author, time: minute(input.now), note: optional(input, 'note'), dialect };
 }
 
 /** The text of a comment or a reply, which can't be empty. */

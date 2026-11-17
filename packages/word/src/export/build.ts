@@ -6,7 +6,7 @@
 // micromark (blocks.ts). An atom lies in a mark when its source offsets lie in the mark's content,
 // since every marker is a token of its own and so ends an atom.
 
-import { parse } from '@redlines/format';
+import { parse, plainPayload } from '@redlines/format';
 import type { Ledger, MarkRange, Segment, Thread } from '@redlines/format';
 import {
   AlignmentType,
@@ -381,7 +381,7 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
       if (mark.kind !== 'del' && mark.kind !== 'sub') continue;
       if (mark.kind === 'del' && TABLE_MARK.test(mark.payload ?? '')) continue;
       for (const segment of mark.segments)
-        collect(markdownBlocks(segment.payload ?? mark.payload ?? ''));
+        collect(markdownBlocks(plainPayload(segment.payload ?? mark.payload ?? '')));
     }
     for (const src of wanted) {
       const got = await loadImage(src, options.images);
@@ -552,7 +552,7 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
     if (mark.kind !== 'del' && mark.kind !== 'sub') continue;
     if (mark.kind === 'del' && TABLE_MARK.test(mark.payload ?? '')) continue;
     for (const segment of mark.segments) {
-      const old = segment.payload ?? mark.payload ?? '';
+      const old = plainPayload(segment.payload ?? mark.payload ?? '');
       if (old === '') continue;
       items.push({
         pos: segment.open.from,

@@ -21,7 +21,14 @@ import {
   reply,
   resolve,
 } from '@redlines/format';
-import type { EditContext, MarkRange, Person, Range, TextChange } from '@redlines/format';
+import type {
+  EditContext,
+  MarkdownDialect,
+  MarkRange,
+  Person,
+  Range,
+  TextChange,
+} from '@redlines/format';
 import { recording, replaying } from './intent.ts';
 
 export type ReviewOp =
@@ -51,6 +58,8 @@ export interface ReviewIntent {
   author: Person;
   time: string;
   drawn: readonly (readonly number[])[];
+  /** The dialect the file was written in (§9.1); GitHub's when absent. */
+  dialect?: MarkdownDialect;
 }
 
 /** What a caller asks of a review action. A decision's `seen` is read from `text` when not given. */
@@ -115,10 +124,20 @@ function signaturesOf(text: string, ids: readonly string[]): (string | null)[] {
 export function writeReview(
   text: string,
   request: ReviewRequest,
-  who: { author: Person; time: string; random?: (n: number) => Uint8Array },
+  who: {
+    author: Person;
+    time: string;
+    random?: (n: number) => Uint8Array;
+    dialect?: MarkdownDialect;
+  },
 ): { changes: TextChange[]; id?: string; intent: Omit<ReviewIntent, 'id'> } {
   const drawing = recording(who.random);
-  const ctx: EditContext = { author: who.author, time: who.time, random: drawing.random };
+  const ctx: EditContext = {
+    author: who.author,
+    time: who.time,
+    random: drawing.random,
+    ...(who.dialect === undefined ? {} : { dialect: who.dialect }),
+  };
   let changes: TextChange[];
   let id: string | undefined;
   let op: ReviewOp;
@@ -176,6 +195,7 @@ export function writeReview(
       author: who.author,
       time: who.time,
       drawn: drawing.drawn,
+      ...(who.dialect === undefined ? {} : { dialect: who.dialect }),
     },
   };
 }
@@ -296,6 +316,7 @@ export function deriveReview(
     author: intent.author,
     time: intent.time,
     random: replaying(intent),
+    ...(intent.dialect === undefined ? {} : { dialect: intent.dialect }),
   });
   return {
     ok: true,

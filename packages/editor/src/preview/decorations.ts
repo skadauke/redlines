@@ -26,6 +26,7 @@ import { dialectFacet, imageOfNode } from '../image-size.ts';
 import { htmlBreak, htmlChip, htmlElement, htmlHeading, htmlWbr } from './html-draw.ts';
 import { htmlBlock, htmlBlocks, openedField } from './html-block.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
+import { quartoCallouts } from './quarto-callout.ts';
 import { readTree, spacings } from './spacing.ts';
 import {
   inWindow,
@@ -830,5 +831,5 @@ const hardBreakCaret = Prec.highest(
 
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
-  return [previewField, hardBreakCaret, htmlBlocks()];
+  return [previewField, hardBreakCaret, htmlBlocks(), quartoCallouts()];
 }

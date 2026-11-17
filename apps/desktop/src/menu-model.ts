@@ -22,6 +22,8 @@ export interface MenuCommands {
   /** Turns the title bar's file name into a field for the new name (Save As without a file). */
   rename(): void;
   revealInFinder(): void;
+  /** Opens the document in another window, which shows the same text as this one (a session). */
+  openAnotherWindow(): void;
   print(): void;
   exportPdf(): void;
   /** Saves the document as a Word file, through a save panel (File › Export to Word…). */
@@ -389,6 +391,11 @@ export function appMenuModel(
         {
           text: 'Reveal in Finder',
           action: () => commands.revealInFinder(),
+          enabled: (state) => state.hasFile,
+        },
+        {
+          text: 'Open in Another Window',
+          action: () => commands.openAnotherWindow(),
           enabled: (state) => state.hasFile,
         },
         SEPARATOR,

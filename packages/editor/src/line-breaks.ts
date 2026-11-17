@@ -232,6 +232,10 @@ function blankBreak(kept: string | undefined, blank: string): string {
 /**
  * The file's text for the document in `state`: with the empty paragraph Return opened taken back
  * (`blocks/open.ts`), since the file never gets it.
+ *
+ * This is the synced text (docs/research/multiuser.md §7): what a session's authority holds, what
+ * an agent's tool reads and writes (`Editor.applyAgentEdit`'s `base` is a `fileText`), and what is
+ * saved. The file's own line breaks stay (CRLF is CRLF), and the open empty paragraph is not in it.
  */
 export function fileText(state: EditorState): string {
   const back = takeBackChanges(state);

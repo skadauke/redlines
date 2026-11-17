@@ -1,6 +1,6 @@
 // @ts-nocheck
 import {Facet, ChangeSet, ChangeDesc, StateField, Annotation, EditorState, StateEffect,
-        Transaction, combineConfig, Extension} from "@codemirror/state"
+        Transaction, combineConfig, type Extension} from "@codemirror/state" // Redlines: `Extension` is a type, which a browser's module loader can't import as a value
 
 // Redlines: this is upstream's collab.ts (see upstream.ts) with one fix: receiveUpdates and
 // rebaseUpdates take the updates one at a time. The diff against upstream.ts is the fix.
