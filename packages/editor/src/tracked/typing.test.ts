@@ -445,10 +445,10 @@ describe('tracked typing', () => {
     expect(notices).toEqual([]);
   });
 
-  it('makes typing, Enter and Backspace inside code a substitution of the block, and refuses them in indented code of an item (#153)', () => {
+  it('makes typing, Enter and Backspace inside code a substitution of the block, in indented code of an item too (#153, lane R5)', () => {
     for (const [doc, refused] of [
       ['Steps:\n\n    make all\n    make test\n\nDone.\n', false],
-      ['- Steps:\n\n      make all\n      make test\n\n  Done.\n', true],
+      ['- Steps:\n\n      make all\n      make test\n\n  Done.\n', false],
       ['Steps:\n\n```\nmake all\nmake test\n```\n\nDone.\n', false],
     ] as const) {
       const notices: string[] = [];

@@ -73,8 +73,8 @@ export const REFUSALS: readonly RefusalEntry[] = [
   [
     'packages/editor/src/blocks/code.ts',
     'KEEP_CODE',
-    'widen',
-    'a refusal the inventory counted by its constant, or a message of the same kind: written as a replacement of its unit (format §3.12)',
+    'disable',
+    'Shift-Tab has nothing to take here, with Track Changes on or off: the four columns that make code stay (lane R5)',
   ],
   ['packages/editor/src/blocks/edits.ts', 'NEEDS_BLANK_AFTER_HARD_BREAK', 'widen', 'inventory #3'],
   ['packages/editor/src/blocks/edits.ts', 'THEIR_SPLIT', 'widen', 'inventory #1'],
@@ -84,12 +84,6 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/editor/src/blocks/joins.ts', 'SETEXT_JOIN', 'widen', 'inventory #11'],
   ['packages/editor/src/blocks/joins.ts', 'DEEP_AT_START', 'alert', 'inventory #6'],
   ['packages/editor/src/blocks/joins.ts', 'FIRST_NUMBERED', 'widen', 'inventory #10'],
-  [
-    'packages/editor/src/blocks/joins.ts',
-    'NESTED_CODE',
-    'widen',
-    'a refusal the inventory counted by its constant, or a message of the same kind: written as a replacement of its unit (format §3.12)',
-  ],
   [
     'packages/editor/src/blocks/joins.ts',
     'deleted',
