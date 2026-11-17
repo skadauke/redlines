@@ -4604,6 +4604,29 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
       );
     }
   }
+  // A segment of another person's mark that the edit made, whose text starts with a line break on
+  // the line of a block's prefix (`2. ⏎> beta` cut after the prefix), has the same carrier, and the
+  // break is in no view (#430). It is written as a replacement of the unit instead.
+  const afterPrefix = (text: string, open: { from: number }) => {
+    const line = text.slice(text.lastIndexOf('\n', open.from - 1) + 1, open.from);
+    return /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(line.replace(/<!--[^]*?-->/g, ''));
+  };
+  const carriers = (marks: Parsed['marks'], text: string) =>
+    new Map(
+      marks.map((mark) => [
+        mark.id,
+        mark.segments.filter((s) => s.carrier && s.open && afterPrefix(text, s.open)).length,
+      ]),
+    );
+  const carried = carriers(plan.parsed.marks, plan.text);
+  for (const [id, count] of carriers(parsed.marks, after)) {
+    if (count > (carried.get(id) ?? Infinity)) {
+      throw new EditError(
+        'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
+        'no-legal-placement',
+      );
+    }
+  }
   // Each break is read as long as it was written. It is not when the line it follows has another
   // prefix in the new text than in the old, because another change was made on the way.
   const limit = parsed.ledgerRange?.from;
