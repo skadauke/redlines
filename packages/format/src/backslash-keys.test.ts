@@ -114,6 +114,11 @@ describe('keys right after a hard break’s backslash (#235)', () => {
         'a two path<!--sub m2bd \\  \\npath\\-->\\\\  \npath\\\n<!--/m2bd-->',
       ],
       [
+        'a two path‸\\  \npath\\\n',
+        { insert: '\\' },
+        'a two path<!--sub m2bd \\  \\npath\\\\\\n-->\\\\  \npath\\\n<!--/m2bd-->',
+      ],
+      [
         '- a\n  a two path‸\\  \n  path\\',
         { insert: '\\' },
         '- a\n  a two path<!--sub m2bd \\  \\n  path\\-->\\\\  \n  path\\\n<!--/m2bd-->',
