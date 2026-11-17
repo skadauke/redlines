@@ -145,10 +145,13 @@ intents through Redlines' tracking filter, in a fixed order, could merge any num
 authority while the file stays the truth. Nothing like it has been tried with marks, and the
 session harness of §6 can test it.
 
-**The collaboration package is frozen.** `@codemirror/collab`, which the design names, is small and
-stable. Its last release was 6.1.1, in September 2023, and its GitHub repository was archived in
-April 2026. Redlines should vendor it, with the fix collaboration.md found: rebase and receive one
-update at a time, on both sides.
+**The collaboration package moved, and it is stable.** `@codemirror/collab`, which the design names, is
+small, and its last release was 6.1.1, in September 2023. It was not discontinued. On 15 April 2026
+CodeMirror moved all its repositories off GitHub to its own server, `code.haverbeke.berlin`, to
+depend less on GitHub, and archived the GitHub copies with links to the new place
+([the announcement](https://discuss.codemirror.net/t/codemirrors-migration-to-forgejo/9706)).
+Redlines should still vendor it, to carry the fix collaboration.md found (rebase and receive one
+update at a time, on both sides) until that fix is upstream.
 
 ## 4. The design
 
@@ -570,7 +573,8 @@ Merging and authorities:
 - [Peritext](https://www.inkandswitch.com/peritext/): rich text in a CRDT (Ink & Switch, 2021).
 - [Eg-walker](https://arxiv.org/abs/2409.14252): replaying plain edits to merge (2024, EuroSys
   2025).
-- [`@codemirror/collab`](https://github.com/codemirror/collab): archived notice. Also
+- [`@codemirror/collab`](https://code.haverbeke.berlin/codemirror/collab), moved from GitHub in April 2026.
+  Also
   [its design](https://marijnhaverbeke.nl/blog/collaborative-editing-cm.html) and
   [the rebase discussion](https://discuss.codemirror.net/t/question-when-peer-networks-differ-during-collaborative-editing/7008).
 - [Fencing tokens](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html),
