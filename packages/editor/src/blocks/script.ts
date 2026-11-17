@@ -726,12 +726,12 @@ const CODE_LINE = /^(?: {4,}|\t)(?![-*+][ \t]|\d{1,9}[.)][ \t]|>)\S/;
  * code, where blank lines are content, no paragraph break: the lines on both sides are code, or the
  * line above closes a fence and the one below is code.
  */
-function inIndentedCode(lines: string[], next: number, fenceClose: boolean): boolean {
+function inIndentedCode(lines: string[], next: number): boolean {
   if (!CODE_LINE.test(lines[next] ?? '')) return false;
   let above = next - 1;
   while (above >= 0 && BLANK.test(lines[above] ?? '')) above--;
   if (above < 0) return false;
-  return CODE_LINE.test(lines[above] ?? '') || (fenceClose && FENCE.test(lines[above] ?? ''));
+  return CODE_LINE.test(lines[above] ?? '') || FENCE.test(lines[above] ?? '');
 }
 
 /**
@@ -750,7 +750,7 @@ export function emptyParagraphs(body: string): string[] {
   let runStart = 0;
   const endRun = (atEnd: boolean, next = -1) => {
     const atStart = runStart === 0;
-    if (next >= 0 && inIndentedCode(lines, next, true)) run = 0;
+    if (next >= 0 && inIndentedCode(lines, next)) run = 0;
     if (run >= 3 || (run >= 2 && (atStart || atEnd))) {
       found.push(`an empty paragraph at line ${runStart + 1} (${run} blank lines)`);
     }
@@ -795,7 +795,7 @@ export function strayBlankLines(body: string): string[] {
   const matter =
     lines[0] === '---' ? lines.findIndex((l, i) => i > 0 && /^(?:---|\.\.\.)$/.test(l)) : -1;
   const end = (i: number) => {
-    if (run === 2 && i - run > 0 && i > matter && !inIndentedCode(lines, i, true)) {
+    if (run === 2 && i - run > 0 && i > matter && !inIndentedCode(lines, i)) {
       found.push(`a stray blank line at line ${i}`);
     }
     run = 0;
