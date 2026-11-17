@@ -250,6 +250,14 @@ function rowDecorations(
     }).range(row.from),
   );
   const last = row.cells.length - 1;
+  // A cell that is its pipe alone (`||`): a ghost in front of it stands before it, outside the mark that ends
+  // in front of the ghost.
+  const pipeAlone = (at: number) => {
+    const cell = row.cells[at];
+    return (
+      cell !== undefined && cell.to === cell.from + 1 && state.sliceDoc(cell.from, cell.to) === '|'
+    );
+  };
   row.cells.forEach((cell, i) => {
     const shown = cell.col < table.columns;
     const here = shown ? ghosts.filter((ghost) => ghost.position === i) : [];
@@ -266,10 +274,13 @@ function rowDecorations(
         cell.col + behind - here.length,
         table.aligns,
       );
-      if (state.sliceDoc(cell.from, cell.from + 1) === '|') {
+      const piped = state.sliceDoc(cell.from, cell.from + 1) === '|';
+      if (piped && !pipeAlone(i)) {
         out.push(Decoration.replace({ widget }).range(cell.from, cell.from + 1));
         start = cell.from + 1;
-      } else if (i === 0) {
+      } else if (piped || i === 0) {
+        // (A cell that is its pipe alone, `||`, would have no mark left if the ghost took the pipe, and
+        // its filler would stand in the next cell: the ghost stands before it, and the cell keeps its pipe.)
         out.push(Decoration.widget({ widget, side: -1 }).range(cell.from));
         before = true;
       }
@@ -290,7 +301,9 @@ function rowDecorations(
           inclusive: true,
           // (a ghost before or after the cell is not in it)
           inclusiveStart: !before,
-          inclusiveEnd: !(appended === 'end' && i === shownCount - 1),
+          inclusiveEnd:
+            !(appended === 'end' && i === shownCount - 1) &&
+            !(pipeAlone(i + 1) && ghosts.some((ghost) => ghost.position === i + 1)),
           attributes: {
             ...(added ? { 'data-mark': added.id } : {}),
             role: row.header ? 'columnheader' : 'cell',
@@ -331,7 +344,20 @@ function rowDecorations(
   if (lacking > 0) {
     const caret = caretOf();
     const here = caret?.row.from === row.from ? caret.cell.col : -1;
-    for (let col = row.cells.length; col < table.columns; col++) {
+    for (let col = row.cells.length; col <= table.columns; col++) {
+      // A deleted column that comes back past the row's last cell stands among the cells the row lacks, in
+      // its place: before the missing cell of its column, or after the last.
+      const back = col > shownCount ? ghosts.filter((ghost) => ghost.position === col) : [];
+      if (back.length > 0) {
+        const visual = col + ghosts.filter((ghost) => ghost.position < col).length;
+        out.push(
+          Decoration.widget({
+            widget: new GhostColsWidget(back, row.index, visual, table.aligns),
+            side: 0.5 + col - row.cells.length,
+          }).range(row.to),
+        );
+      }
+      if (col === table.columns) break;
       const widget = new MissingCellWidget(
         col,
         col + ghosts.filter((ghost) => ghost.position <= col).length,
