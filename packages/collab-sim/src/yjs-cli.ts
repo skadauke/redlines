@@ -32,7 +32,8 @@ async function main(): Promise<void> {
   const workers = Number(flag('workers', '2'));
   const only = flag('only', '');
   const out = flag('out', '');
-  const cells = YCELLS.filter((cell) => cell.name.includes(only));
+  const not = flag('not', '\u0000');
+  const cells = YCELLS.filter((cell) => cell.name.includes(only) && !cell.name.includes(not));
   const chunk = 10;
   const jobs: { name: string; from: number; to: number }[] = [];
   for (const cell of cells) {
@@ -41,7 +42,7 @@ async function main(): Promise<void> {
     }
   }
   const results: YResults = Object.fromEntries(
-    cells.map((c) => [c.name, { plain: [], yarray: [], ylamport: [] } as CellRuns]),
+    cells.map((c) => [c.name, { plain: [], yarray: [], ylamport: [] }]),
   );
   let next = 0;
   let done = 0;
@@ -70,7 +71,9 @@ async function main(): Promise<void> {
         for (const arm of ARMS) cell[arm].push(...part[arm]);
         done++;
         if (done % 10 === 0) {
-          console.error(`${done}/${jobs.length} jobs, ${Math.round((Date.now() - started) / 1000)} s`);
+          console.error(
+            `${done}/${jobs.length} jobs, ${Math.round((Date.now() - started) / 1000)} s`,
+          );
         }
         resolve();
       });

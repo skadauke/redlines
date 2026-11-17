@@ -75,7 +75,8 @@ test('deleting a prefix drops its content with gc, and keeps it without', () => 
   const size = (gc: boolean): number => {
     const d = new Y.Doc({ gc });
     const arr = d.getArray<{ words: string }>('log');
-    for (let n = 0; n < 500; n++) arr.push([{ words: 'some words that an intent holds '.repeat(4) + n }]);
+    for (let n = 0; n < 500; n++)
+      arr.push([{ words: 'some words that an intent holds '.repeat(4) + n }]);
     const before = Y.encodeStateAsUpdate(d).length;
     arr.delete(0, 490);
     return Y.encodeStateAsUpdate(d).length / before;

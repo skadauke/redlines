@@ -26,9 +26,23 @@ export const YCELLS: YCell[] = [
   { name: 'hot/5', workload: 'hot', clients: 5 },
   { name: 'typical/5', workload: 'typical', clients: 5 },
   { name: 'hot/online', workload: 'hot', offlineP: 0 },
-  // Long offline periods: 20-40 s of a 56 s session, so a replica makes 15-30 intents alone.
-  { name: 'hot/long', workload: 'hot', ops: 40, offlineP: 0.7, offlineMs: [20_000, 40_000] },
-  { name: 'typical/long', workload: 'typical', ops: 40, offlineP: 0.7, offlineMs: [20_000, 40_000] },
+  // Long offline periods: 15-30 s of a 42 s session, so a replica makes 10-20 intents alone.
+  {
+    name: 'hot/long',
+    workload: 'hot',
+    clients: 3,
+    ops: 30,
+    offlineP: 0.7,
+    offlineMs: [15_000, 30_000],
+  },
+  {
+    name: 'typical/long',
+    workload: 'typical',
+    clients: 3,
+    ops: 30,
+    offlineP: 0.7,
+    offlineMs: [15_000, 30_000],
+  },
 ];
 
 export interface RunSummary {
@@ -204,7 +218,16 @@ export function changeTable(results: YResults): string {
     ...ARMS.map((a) => {
       const r = runs[a];
       const n = total(r, (x) => x.intents);
-      return `${pct(total(r, (x) => x.applied), n)}; ${pct(total(r, (x) => x.vanished), n)} / ${pct(total(r, (x) => x.appeared), n)}`;
+      return `${pct(
+        total(r, (x) => x.applied),
+        n,
+      )}; ${pct(
+        total(r, (x) => x.vanished),
+        n,
+      )} / ${pct(
+        total(r, (x) => x.appeared),
+        n,
+      )}`;
     }),
   ]);
   return table(
@@ -225,13 +248,7 @@ export function latencyTable(results: YResults): string {
       return [msOf(quantile(l, 0.5)), msOf(quantile(l, 0.95)), msOf(quantile(l, 0.99))];
     }),
   ]);
-  return table(
-    [
-      'Cell',
-      ...ARMS.flatMap((a) => [`${NAMES[a]}: median`, 'p95', 'p99']),
-    ],
-    rows,
-  );
+  return table(['Cell', ...ARMS.flatMap((a) => [`${NAMES[a]}: median`, 'p95', 'p99'])], rows);
 }
 
 /** Bytes sent per session, and the size of the log at the end. */
@@ -273,7 +290,10 @@ export function offlineTable(results: YResults): string {
       ...ARMS.map((a) => {
         const r = runs[a];
         const merges = total(r, (x) => x.merges);
-        return `${pct(total(r, (x) => x.rewrites), merges)}; ${(total(r, (x) => x.rederived) / Math.max(1, r.length)).toFixed(0)}`;
+        return `${pct(
+          total(r, (x) => x.rewrites),
+          merges,
+        )}; ${(total(r, (x) => x.rederived) / Math.max(1, r.length)).toFixed(0)}`;
       }),
       String(total(runs.yarray, (x) => x.heldBack)),
       String(Math.round(mean(runs.yarray, (x) => x.duplicates))),

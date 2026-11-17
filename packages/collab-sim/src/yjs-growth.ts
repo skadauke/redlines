@@ -45,11 +45,12 @@ const mkOp = (n: number, who: number): YOp => {
 };
 
 const heap = (): number => {
-  (gc as () => void)();
-  (gc as () => void)();
+  gc();
+  gc();
   return process.memoryUsage().heapUsed;
 };
-const kb = (b: number): string => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`);
+const kb = (b: number): string =>
+  b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`;
 const ms = (t: number): string => `${t.toFixed(0)} ms`;
 
 const row = (...c: string[]): string => `| ${c.join(' | ')} |`;
@@ -90,22 +91,24 @@ function build(count: number, writers: number, asString: boolean): Y.Doc {
   for (const n of [100, 1_000, 10_000, 100_000]) {
     const json = JSON.stringify(Array.from({ length: n }, (_, i) => mkOp(i, i % 4)));
     const h0 = heap();
-    let plain: YOp[] | null = JSON.parse(json) as YOp[];
+    const plain: YOp[] = JSON.parse(json) as YOp[];
     const plainHeap = heap() - h0;
     void plain.length;
-    plain = null;
     const results: string[] = [];
     for (const [writers, asString] of [
       [1, false],
       [4, false],
       [4, true],
     ] as const) {
-      let built: Y.Doc | null = build(n, writers, asString);
-      const update = Y.encodeStateAsUpdate(built);
-      const sv = Y.encodeStateVector(built).length;
-      built = null;
+      const { update, sv } = (() => {
+        const built = build(n, writers, asString);
+        return {
+          update: Y.encodeStateAsUpdate(built),
+          sv: Y.encodeStateVector(built).length,
+        };
+      })();
       const before = heap();
-      let fresh: Y.Doc | null = new Y.Doc();
+      const fresh: Y.Doc = new Y.Doc();
       const t1 = performance.now();
       Y.applyUpdate(fresh, update);
       const loaded = performance.now() - t1;
@@ -114,13 +117,21 @@ function build(count: number, writers: number, asString: boolean): Y.Doc {
       fresh.getArray('log').toArray();
       const listed = performance.now() - t2;
       results.push(`${kb(update.length)} / ${kb(live)} / ${sv} B / ${ms(loaded)} / ${ms(listed)}`);
-      fresh = null;
     }
     rows.push([String(n), `${kb(json.length)} / ${kb(plainHeap)}`, ...results]);
   }
-  out.push('Growth. Each cell: encoded size / live heap / state vector / time to load that update into a new doc / time to list the array.', '');
+  out.push(
+    'Growth. Each cell: encoded size / live heap / state vector / time to load that update into a new doc / time to list the array.',
+    '',
+  );
   emit(
-    ['Intents', 'Plain log (JSON / heap)', 'Y.Array, one writer', 'Y.Array, four writers (turns of 25)', 'Y.Array of JSON strings, four writers'],
+    [
+      'Intents',
+      'Plain log (JSON / heap)',
+      'Y.Array, one writer',
+      'Y.Array, four writers (turns of 25)',
+      'Y.Array of JSON strings, four writers',
+    ],
     rows,
   );
 }
@@ -149,7 +160,16 @@ function build(count: number, writers: number, asString: boolean): Y.Doc {
     ]);
   }
   out.push('Compaction by deleting all but the last 100 of 10,000 intents.', '');
-  emit(['Y.Doc', 'Update before', 'Update after the delete', 'Left in the array', 'State vector, bytes'], rows);
+  emit(
+    [
+      'Y.Doc',
+      'Update before',
+      'Update after the delete',
+      'Left in the array',
+      'State vector, bytes',
+    ],
+    rows,
+  );
 }
 
 // 3. A concurrent intent whose origin was in the deleted prefix.
@@ -182,7 +202,10 @@ function build(count: number, writers: number, asString: boolean): Y.Doc {
       JSON.stringify(bb.toArray()),
     ]);
   }
-  out.push('A replica pushes after the last intent of a prefix while another replica deletes the prefix.', '');
+  out.push(
+    'A replica pushes after the last intent of a prefix while another replica deletes the prefix.',
+    '',
+  );
   emit(['Compaction', 'Array at the compactor', 'Array at the writer'], rows);
 }
 
