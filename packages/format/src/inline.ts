@@ -445,6 +445,8 @@ function changesFlanking(
   index: number,
   around: Around,
   marked: (i: number) => boolean,
+  markedByCloser: (i: number) => boolean,
+  beforeFormat: boolean,
 ): boolean {
   const left =
     around.before !== undefined ? [...around.before].slice(-WINDOW) : charsBefore(v, index);
@@ -476,18 +478,25 @@ function changesFlanking(
     // A marker that stands beyond the run reads as punctuation to it as well.
     const outer =
       around.before === undefined && marked(index - run) ? '>' : at > 0 ? left[at - 1] : undefined;
-    if (differs(does(last, outer, first), does(last, outer, '<'))) return true;
+
     if (last !== '_' && isWord(first) && isWord(outer)) return true;
+    // A `_` after a letter or digit is held by the old rule, except where a cell's pipe follows it:
+    // there it stays the closer it is, and the marker stands before the pipe (#490).
+    if (last === '_' && first !== '|' && isWord(outer)) return true;
   }
   if (isDelimiter(first)) {
     let at = 0;
     while (at < right.length - 1 && right[at + 1] === first) at++;
     const outer = (
-      around.after === undefined ? marked(index + at + 1) : around.afterMarks?.has(at + 1)
+      around.after === undefined ? markedByCloser(index + at + 1) : around.afterMarks?.has(at + 1)
     )
       ? '<'
       : right[at + 1];
-    if (differs(does(first, last, outer), does(first, '>', outer))) return true;
+    // Only a run right after a word character is changed by a marker (a run after a space or a line
+    // start is no different after `>`); right before another person's format change, the opener it
+    // hides is theirs to decide (#484), and the old rule applies.
+    if (isWord(last) && !beforeFormat && differs(does(first, last, outer), does(first, '>', outer)))
+      return true;
     if (first !== '_' && isWord(last) && isWord(outer)) return true;
   }
   return false;
@@ -733,7 +742,15 @@ export function inspectPlace(
   }
   // Whether a marker stands between the characters before and after `i` of the paragraph.
   const marked = (i: number) => offsetAt(i) - (i === 0 ? range.from - 1 : offsetAt(i - 1)) > 1;
-  if (changesFlanking(v, index, around, marked)) return { kind: 'flank' };
+  // Whether the marker that stands there is a closer: a run in front of an opener is not read as
+  // before punctuation by the edit that holds to the mark's own rules.
+  const markedByCloser = (i: number) =>
+    marked(i) && text.slice(offsetAt(i - 1), offsetAt(i)).includes('<!--/');
+  const beforeFormat = hidden.some(
+    (h) => h.from === position && text.startsWith('<!--fmt', h.from),
+  );
+  if (changesFlanking(v, index, around, marked, markedByCloser, beforeFormat))
+    return { kind: 'flank' };
 
   const kind = around.joined ? 'inline' : lineStartKind(text, position, hidden);
   if (kind === 'block') return { kind: 'block' };
