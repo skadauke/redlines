@@ -2513,8 +2513,15 @@ it, one per line:
   original column is a pending deletion, rejecting the last inserted column is the deletion of the
   whole table (rule 6) in the mark of that deletion, with the original table as its payload:
   accepting it gives no table, rejecting it the original, as deciding the column's deletion does, in
-  either order. With several deleted columns or another change pending in the table the decision
-  keeps its refusal ("A table keeps at least one column."), which no order reads alike yet. With Track Changes off the columns go from the original as well, so the last column
+  either order. Another change pending in the table (a row inserted, moved or deleted, an alignment
+  change) stays pending in the payload of that deletion (§3.12), as in the deletion of a table that
+  holds another person's changes, and is decided there by its id. Where no unit holds the table with
+  those changes in it (it is the whole text, and the closer of a replacement would stand alone), the
+  decision is widened to the table's changes, which are all rejected with it. With several deleted columns (maybe
+  by different people) no one deletion can carry the table, since accepting it would decide the
+  others'; the decision is widened to the table's columns, and rejecting the last inserted column
+  rejects those deletions too, which brings the table back with its columns. Nothing is refused, and
+  the order of decisions makes no difference (#891). With Track Changes off the columns go from the original as well, so the last column
   that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
 - **Rule 6, deleting the table.** This is what the operation writes; an edit that merely covers the
