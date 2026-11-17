@@ -333,7 +333,10 @@ export interface EditorOptions {
    * copy (one change, tracked with Track Changes on) and keeps its width and alignment. Default:
    * none, and the command isn't registered.
    */
-  cropImage?: (src: string, crop: { x: number; y: number; width: number; height: number }) => Promise<string>;
+  cropImage?: (
+    src: string,
+    crop: { x: number; y: number; width: number; height: number },
+  ) => Promise<string>;
   /**
    * Called when image files are pasted into the document, or dropped on it, with the files and the
    * spot their links will go to (`ImageSpot`). The host saves each file where the document can

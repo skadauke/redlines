@@ -291,6 +291,8 @@ export const MENUS: readonly MenuSpec[] = [
       // agents' plugin's (#553): the item appears when its command, `image.altText`, is registered,
       // and says "Added" when the image has alt text.
       one({ command: 'image.edit', icon: 'preview', label: 'Edit in Preview' }),
+      // Crop… is the editor's own (#624), where the host can write a cropped copy.
+      one({ command: 'image.crop', icon: 'crop', label: 'Crop…' }),
       one({
         command: 'image.altText',
         icon: 'alt-text',

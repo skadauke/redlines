@@ -54,10 +54,10 @@ const STYLE_ID = 'rl-crop-style';
 const STYLE = `
 .rl-crop { position: absolute; z-index: 30; overflow: hidden; touch-action: none; user-select: none; }
 .rl-crop-box { position: absolute; box-sizing: border-box; cursor: move; border: 1px solid #fff;
-  outline: 1px solid rgba(0, 0, 0, 0.6); box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 0 100vmax rgba(0, 0, 0, 0.5);
   background-image: linear-gradient(to right, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.55) calc(33.33% - 0.5px), rgba(255, 255, 255, 0.55) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgba(255, 255, 255, 0.55) calc(66.66% - 0.5px), rgba(255, 255, 255, 0.55) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)),
     linear-gradient(to bottom, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.55) calc(33.33% - 0.5px), rgba(255, 255, 255, 0.55) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgba(255, 255, 255, 0.55) calc(66.66% - 0.5px), rgba(255, 255, 255, 0.55) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)); }
-.rl-crop-box:focus-visible { outline: 2px solid #fff; }
+.rl-crop-box:focus-visible { outline: 2px solid var(--rl-ink); outline-offset: 2px; }
 .rl-crop-handle { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; box-sizing: border-box;
   background: #fff; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.35); }
 .rl-crop-handle[data-side='nw'], .rl-crop-handle[data-side='se'] { cursor: nwse-resize; }
@@ -168,7 +168,7 @@ export function startCrop(
     return made;
   };
   const cancel = button('Cancel', false, () => close(true));
-  const done = button('Done', true, () => apply());
+  const done = button('Done', true, () => void apply());
   bar.append(size, cancel, done);
   view.scrollDOM.append(root, bar);
 
@@ -344,8 +344,7 @@ export function startCrop(
   doc.addEventListener('keydown', onKey, true);
   doc.addEventListener('pointerdown', onPress, true);
   win.addEventListener('resize', place);
-  const observer =
-    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place());
+  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place());
   observer?.observe(img);
   place();
   box.focus({ preventScroll: true });

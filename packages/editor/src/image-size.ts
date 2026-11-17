@@ -625,8 +625,7 @@ export function srcEdit(state: EditorState, image: ImageElement, src: string): T
     while (node && node.name !== 'Image') node = node.parent;
     const url = node?.getChild('URL');
     if (!node || !url) return null;
-    insert =
-      state.sliceDoc(image.from, url.from) + address + state.sliceDoc(url.to, image.to);
+    insert = state.sliceDoc(image.from, url.from) + address + state.sliceDoc(url.to, image.to);
   }
   return insert === state.sliceDoc(image.from, image.to)
     ? null

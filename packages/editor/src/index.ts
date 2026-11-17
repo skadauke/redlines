@@ -807,7 +807,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
           if (imageInSelection(state) === null) return CROP_NO_IMAGE;
           return localImageAt(state) === null ? CROP_REMOTE : undefined;
         },
-        run: ({ view }) => startCrop(view, cropImage, (message) => options.onNotice?.(message)) !== null,
+        run: ({ view }) =>
+          startCrop(view, cropImage, (message) => options.onNotice?.(message)) !== null,
       },
     ]);
   }
