@@ -31,6 +31,7 @@ import {
   probeAnnotation,
   refusedEditEffect,
   trackingField,
+  widenFirstAnnotation,
 } from '../tracked/typing.ts';
 import {
   type KeyEdit,
@@ -225,6 +226,7 @@ export function applyKeyEdit(
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
   if (edit.open?.line) annotations.push(holdViewAnnotation.of(true));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
+  if (edit.widenFirst) annotations.push(widenFirstAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
   if (edit.range) annotations.push(caretAnnotation.of({ range: edit.range }));
   else if (edit.caretBefore !== undefined) {

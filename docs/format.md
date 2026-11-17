@@ -3242,10 +3242,10 @@ and so have the lists (`edits-widen.ts`, `widen-scope.ts`: a typed, pasted or ke
 or block change in a list item, which `trackedEdits` and `trackedFormat` write as a replacement of
 the item or the list when no fine form reads alike in every order, and keep their refusal when
 the unit's old text would hold another person's pending change: some order of decisions would not
-read as the original, #808), and so has code (a typed, pasted or key edit in a fenced or indented
-block, display math or raw text, and a key that moves the lines under an item that leaves its
-list, with the same guard); the blocks follow. Until a writer calls it, it still refuses, in the words of
-its own section.
+read as the original, #808), and so have the blocks (the same two, in a paragraph, a heading or a
+quote) and code (a typed, pasted or key edit in a fenced or indented block, display math or raw
+text, and a key that moves the lines under an item that leaves its list, with the same guard).
+Until a writer calls it, it still refuses, in the words of its own section.
 
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
 bullet outside), a list, a code block or a table. The edit is written as the replacement of the
@@ -3297,6 +3297,18 @@ says nothing of them: they are blank only where the item that holds it is loose.
 Markdown reads as the item's own indented code, or as an HTML block that runs to the next blank
 line, is code, and no unit is written around it. A person's pending split or change that stops the
 fine write is kept in the old text.
+
+**In a block** (a paragraph, a heading, an alert, a quote's paragraph) a typed, pasted or key edit,
+and a change of the block's type, that no fine form writes so that every order of decisions reads
+alike is the replacement of the block, or of the quote that holds it. This takes the places where
+the fine forms refused today: a type typed in front of a block after another person's break, a join
+or a split next to another person's change, a join that has to write text again that holds another
+person's mark, a block change beside pending changes, and a join of a block whose text another
+person deleted. A key whose fine form the format accepts, although a reader of the file reads it
+otherwise than the newest view (the join of a paragraph onto a setext heading, at the top level, and
+the blank line that keeps a numbered item apart, in a list or a quote), is written as the
+replacement at once (`widenedFirstEdits`). Display math, code and raw HTML are the code's (§3.5),
+not the block's, and a join onto a setext heading inside a list or a quote is still refused.
 
 **The closer** stands at the end of the new text's last line, except where a marker there would
 read otherwise: after a closing fence, a table, a bare list marker or an emphasis delimiter or

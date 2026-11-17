@@ -123,11 +123,11 @@ describe('the linked issues', () => {
         doc: 'alpha <split>⏎⏎‸beta',
         others: 'bo',
         keys: [{ type: '## x' }],
-        // Still refused, #107 open: the block insertion would read differently by the order.
+        // Untracked, still refused. Tracked, written as a replacement of the block, which holds
+        // bo's break in front of it in neither order: the guard of #808 doesn't see it (#107, open).
         off: { refusal: SELF_CHECK },
-        on: {
-          refusal:
-            "This edit would leave bo's line break right next to your insertion, and deciding one would change the other. Decide bo's line break first.",
+        skipOn: {
+          decisions: "The replacement holds the block and not bo's break in front of it (#107).",
         },
       },
       {
