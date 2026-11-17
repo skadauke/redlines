@@ -195,6 +195,31 @@ blockquote > * + * {
   margin-top: var(--rl-space-loose);
 }
 
+/* A Quarto callout (divs.ts): a quiet box under its label, in the page's grays, as a quote is. */
+.rl-callout {
+  padding: 8px 14px 10px;
+  border: 1px solid var(--rl-rule);
+  border-left-width: 3px;
+  border-radius: 4px;
+}
+.rl-callout-label {
+  margin: 0;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.rl-callout-body {
+  margin-top: 4px;
+}
+.rl-callout-body > * {
+  margin: 0;
+}
+.rl-callout-body > * + * {
+  margin-top: var(--rl-space-loose);
+}
+
 hr {
   border: 0;
   border-top: 1px solid var(--rl-rule);
