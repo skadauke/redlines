@@ -190,30 +190,6 @@ pub fn print_window(window: WebviewWindow) -> Result<(), String> {
     window.print().map_err(|error| error.to_string())
 }
 
-<<<<<<< HEAD
-/// The file in the app's data folder that holds the folders the person chose in Preferences.
-const CHOSEN_FILE: &str = "folders.json";
-
-/// The folders the person chose with the folder panel (`choose_folder`), kept for the next launch.
-/// `folder_exists` answers of these and of what a sidebar shows, and of no other path.
-#[derive(Default)]
-pub struct ChosenFolders(Remembered);
-
-/// Makes the chosen folders known to the app, those of the last launches included.
-pub fn set_up(app: &AppHandle) {
-    let chosen = match app.path().app_data_dir() {
-        Ok(folder) => ChosenFolders(Remembered::load(folder.join(CHOSEN_FILE))),
-        Err(_) => ChosenFolders::default(),
-    };
-    app.manage(chosen);
-}
-
-/// Whether `path` is a folder that is there, and is one the person chose in Preferences or one a
-/// sidebar shows, or is inside one, by what it really is (links followed, hidden names refused).
-/// The save panel starts in the default folder for new documents only while it is there: the folder
-/// may have been moved or deleted since Preferences chose it (`src/host.ts`). It tells nothing of
-/// any other path, which gets the same `false` as a missing one: a window can't ask about the disk.
-=======
 /// Asks where to save the window's printed page as a PDF, with the system's save panel as a sheet of
 /// the window, starting from `name` in `folder` when that is a folder that is there, and writes it
 /// there, paginated as the print dialog would (`src/pdf.rs`). The page makes itself ready first
@@ -295,10 +271,28 @@ fn pdf_name(name: &str) -> String {
     format!("{stem}.pdf")
 }
 
-/// Whether `path` is a folder that is there. The save panel starts in the default folder for new
-/// documents only while it is: the folder may have been moved or deleted since Preferences chose
-/// it (`src/host.ts`). It tells nothing of what the folder holds.
->>>>>>> 3fb65002 (Print and Export as PDF: the document as clean HTML, set for paper)
+/// The file in the app's data folder that holds the folders the person chose in Preferences.
+const CHOSEN_FILE: &str = "folders.json";
+
+/// The folders the person chose with the folder panel (`choose_folder`), kept for the next launch.
+/// `folder_exists` answers of these and of what a sidebar shows, and of no other path.
+#[derive(Default)]
+pub struct ChosenFolders(Remembered);
+
+/// Makes the chosen folders known to the app, those of the last launches included.
+pub fn set_up(app: &AppHandle) {
+    let chosen = match app.path().app_data_dir() {
+        Ok(folder) => ChosenFolders(Remembered::load(folder.join(CHOSEN_FILE))),
+        Err(_) => ChosenFolders::default(),
+    };
+    app.manage(chosen);
+}
+
+/// Whether `path` is a folder that is there, and is one the person chose in Preferences or one a
+/// sidebar shows, or is inside one, by what it really is (links followed, hidden names refused).
+/// The save panel starts in the default folder for new documents only while it is there: the folder
+/// may have been moved or deleted since Preferences chose it (`src/host.ts`). It tells nothing of
+/// any other path, which gets the same `false` as a missing one: a window can't ask about the disk.
 #[tauri::command(async)]
 pub fn folder_exists(app: AppHandle, path: String) -> bool {
     let shown = app.state::<crate::project::Projects>().folders();
