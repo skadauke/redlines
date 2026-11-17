@@ -287,7 +287,7 @@ function joinsLists(siblings: readonly Unit[], first: number, last: number, g: n
     return (
       unit.kind === 'list' &&
       next?.kind === 'list' &&
-      siblings.indexOf(next) !== siblings.indexOf(unit) + 1
+      Math.abs(siblings.indexOf(next) - siblings.indexOf(unit)) !== 1
     );
   });
 }
