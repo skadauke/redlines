@@ -4,7 +4,12 @@
 // while a column is pending deleted), and the refusal is told to the person.
 
 import { isolateHistory } from '@codemirror/commands';
-import { ChangeSet, EditorSelection, type EditorState } from '@codemirror/state';
+import {
+  ChangeSet,
+  EditorSelection,
+  type EditorState,
+  type TransactionSpec,
+} from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   EditError,
@@ -233,6 +238,25 @@ export function deleteTable(view: EditorView): boolean {
   const touched = touchedRows(view.state);
   if (!touched) return false;
   return perform(view, { kind: 'deleteTable', table: touched.table.from }, 'table.delete.table');
+}
+
+/** Delete Table as a transaction spec of a state's own, for a filter or a key that has no view: the
+ * deletion with Track Changes' rules, or the refusal as a notice (#471). */
+export function deleteTableSpec(state: EditorState, table: number): TransactionSpec {
+  const done = plannedIn(state, { kind: 'deleteTable', table });
+  if ('refusal' in done) return { effects: refusedEditEffect.of(done.refusal) };
+  const changes = ChangeSet.of(coalesced(state.doc.toString(), done.changes), state.doc.length);
+  return {
+    changes,
+    selection: EditorSelection.cursor(done.caret),
+    userEvent: 'table.delete.table',
+    annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+    effects:
+      state.field(trackingField) && state.field(viewModeField) === 'clean'
+        ? [setViewModeEffect.of(state.facet(markupViewFacet))]
+        : [],
+    scrollIntoView: true,
+  };
 }
 
 /** Moves rows `first` to `last` of `table` to the boundary `to` (0 above the header, the number of
