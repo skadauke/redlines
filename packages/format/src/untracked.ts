@@ -39,7 +39,7 @@ export { nameOf } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { ANY_HTML, markersInIndentedCode, readsAlike } from './indented-code.ts';
-import { inspectPlace } from './inline.ts';
+import { DELIMITER_ROW, inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
 import { assertPointsRead } from './align-point.ts';
@@ -457,26 +457,52 @@ export function untrackedEditHalf(
   return edited(text, edit, ctx, true);
 }
 
-/** The characters that a cell's new text may add around the old text's: format syntax, which the old
- * rows do not have. */
-const SYNTAX_CHARS = /[*_~]/g;
+/** Format syntax, which a cell's new text may have more of than its old text. */
+const SYNTAX = /[*_~]/;
 
 /**
- * The changes of a plain typing in a cell of the new rows of a table replacement (a `sub` whose old text
- * is the table's old rows, as a pending alignment change writes it): the typing, and the same typing in
- * the cell of the old rows that it stands for, in the payload. The cells of the two correspond one to
- * one, and only the delimiter row differs. Null where no old cell corresponds (the delimiter row, a cell
- * that holds a marker, a replacement that added or rewrote the cell beyond format syntax, rows that are
- * not as many in both, text with a character that needs care): that typing goes on as it did, and
- * takes the alert where it splits the replacement where the old rows can not follow.
+ * Where each offset of the new cell's text is in the old cell's: the two read alike but for format
+ * syntax, which either may have more of. The runs of syntax that both have are walked together, so that
+ * the same side of one is the same side in both; a run that only one has is skipped. Null where the
+ * texts differ in anything else.
  */
-function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[] | null {
-  if (/[`<\\\r\n]/.test(edit.insert)) return null;
+function cellMap(now: string, old: string): number[] | null {
+  const map: number[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < now.length || j < old.length) {
+    const a = now[i];
+    const b = old[j];
+    if (a !== undefined && b !== undefined && SYNTAX.test(a) === SYNTAX.test(b)) {
+      if (!SYNTAX.test(a) && a !== b) return null;
+      map[i++] = j++;
+    } else if (a !== undefined && SYNTAX.test(a)) map[i++] = j;
+    else if (b !== undefined && SYNTAX.test(b)) j++;
+    else return null;
+  }
+  map[now.length] = j;
+  return map;
+}
+
+/**
+ * The changes of an edit with Track Changes off in a cell of the new rows of a table replacement (a `sub`
+ * whose old text is the table's old rows, as a pending alignment change writes it): the edit, and the same
+ * edit in the cell of the old rows that it stands for, in the payload. It belongs to both views. The cells
+ * of the two correspond one to one, and only the delimiter row differs; the cell's text is placed by the
+ * text, and by the runs of format syntax around it, and not by offsets.
+ *
+ * Null where the edit is not in such a replacement. `'alert'` where it is and no old cell corresponds,
+ * the one case that keeps the alert: the delimiter row, a cell with a marker in it, a cell that the
+ * replacement added or rewrote beyond format syntax, rows that are not as many in both copies, text
+ * typed that would cut a cell or needs care (a pipe, a backtick, a backslash, `<`, a line break), a
+ * cell's padding when it has text, and a deletion that takes only part of the syntax of a pair.
+ */
+function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[] | 'alert' | null {
   for (const mark of parsed.marks) {
     if (mark.kind !== 'sub') continue;
     for (const segment of mark.segments) {
       const { open, close, payload } = segment;
-      if (!close || payload === undefined || !payload.includes('|')) continue;
+      if (!close || payload === undefined) continue;
       if (edit.from < open.to || edit.to > close.from) continue;
       const lines = payload.split('\n');
       const rows: { from: number; to: number }[] = [];
@@ -485,40 +511,43 @@ function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[]
         if (text.slice(at, end).trim() !== '') rows.push({ from: at, to: end });
         at = end + 1;
       }
-      if (rows.length !== lines.length) continue;
+      // A table in both copies: a header, a delimiter row, and more.
+      const isTable = (line: string | undefined) =>
+        line !== undefined && DELIMITER_ROW.test(line) && line.includes('|');
+      const under = rows[1];
+      if (!isTable(under && text.slice(under.from, under.to)) || !isTable(lines[1])) continue;
+      if (rows.length !== lines.length || /[`<\\|\r\n]/.test(edit.insert)) return 'alert';
       const k = rows.findIndex((row) => row.from <= edit.from && edit.to <= row.to);
       const row = rows[k];
       const old = lines[k];
-      if (!row || old === undefined || k === 1) continue;
-      const line = text.slice(row.from, row.to);
-      if (line.includes('<!--')) continue;
+      if (!row || old === undefined || k === 1) return 'alert';
+      if (text.slice(row.from, row.to).includes('<!--')) return 'alert';
       const mine = readLine(text, row.from, row.to).cells;
       const kept = readLine(old, 0, old.length).cells;
       const i = mine.findIndex((c) => c.contentFrom <= edit.from && edit.to <= c.contentTo);
       const cell = mine[i];
       const was = kept[i];
-      if (!cell || !was || mine.length !== kept.length) continue;
-      const content = text.slice(cell.contentFrom, cell.contentTo);
-      const before = old.slice(was.contentFrom, was.contentTo);
-      if (content.replace(SYNTAX_CHARS, '') !== before.replace(SYNTAX_CHARS, '')) continue;
-      // The place in the old cell: after as many of its characters that are not syntax as the new
-      // cell has before the edit.
-      const counted = (side: string) => side.replace(SYNTAX_CHARS, '').length;
-      const place = (from: number) => {
-        let want = counted(content.slice(0, from - cell.contentFrom));
-        let at = 0;
-        while (want > 0 && at < before.length) {
-          if (!/[*_~]/.test(before[at] ?? '')) want--;
-          at++;
-        }
-        return at;
-      };
-      const a = place(edit.from);
-      const b = place(edit.to);
-      const base = was.contentFrom;
+      if (!cell || !was || mine.length !== kept.length) return 'alert';
+      const raw = text.slice(cell.contentFrom, cell.contentTo);
+      const rawOld = old.slice(was.contentFrom, was.contentTo);
+      const now = raw.trim();
+      const before = rawOld.trim();
+      // Cells that are padded differently read alike: they are placed from where their text starts.
+      const start = cell.contentFrom + (raw.length - raw.trimStart().length);
+      const oldStart = was.contentFrom + (rawOld.length - rawOld.trimStart().length);
+      const blank = now === '';
+      if (!blank && (edit.from < start || edit.to > start + now.length)) return 'alert';
+      const map = cellMap(now, before);
+      if (!map) return 'alert';
+      const rel = (at: number) => Math.min(Math.max(at - start, 0), now.length);
+      const a = oldStart + (map[rel(edit.from)] ?? 0);
+      const b = oldStart + (map[rel(edit.to)] ?? 0);
+      // A deletion takes the same syntax out of both copies, or none is made.
+      const syntax = (side: string) => side.replace(/[^*_~]/g, '');
+      if (syntax(text.slice(edit.from, edit.to)) !== syntax(old.slice(a, b))) return 'alert';
       const rewritten = [
         ...lines.slice(0, k),
-        old.slice(0, base + a) + edit.insert + old.slice(base + b),
+        old.slice(0, a) + edit.insert + old.slice(b),
         ...lines.slice(k + 1),
       ].join('\n');
       const sub = `<!--sub ${mark.id} ${encodePayload(rewritten)}-->`;
@@ -530,7 +559,7 @@ function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[]
         accept(done, mark.id);
         reject(done, mark.id);
       } catch (error) {
-        if (error instanceof EditError) continue;
+        if (error instanceof EditError) return 'alert';
         throw error;
       }
       return changes;
@@ -599,8 +628,9 @@ function edited(
   // Text typed in a cell of the new rows of a replacement whose old text is a table (an alignment change
   // pending, or the old rows of a rewritten table) belongs to both views: it is written in the cell of
   // the old rows as well (#955), as a plain edit in a move's copy is (`table-move-edit.ts`).
-  const both = typed === '' || half ? null : inOldRows(text, parsed, { from, to, insert: typed });
-  if (both) return both;
+  const both = half ? null : inOldRows(text, parsed, { from, to, insert: typed });
+  if (Array.isArray(both)) return both;
+  const cutOff = both === 'alert';
   // So does an edit away from every mark, which is most of them.
   const away = awayFromMarks(text, parsed, markers, { from, to, insert: typed });
   if (away) return away;
@@ -889,6 +919,13 @@ function edited(
   const changes = joined(separate);
   const name = named ? nameOf(parsed, named, ctx.author) : 'the change next to it';
 
+  const cannotSplit = () =>
+    new EditError(
+      `Text can't be typed here with Track Changes off: it would split ${name} where Markdown can't hold its hidden marks, such as at the start of a line or inside a link. ${wayAround(named)}`,
+      'no-legal-placement',
+    );
+  // In a table's replacement where no cell of the old rows corresponds (`inOldRows`).
+  if (cutOff) throw cannotSplit();
   if (created.length > 0 || ahead) {
     // The markers around the typed text must stand where format §3.1 and §3.2 allow them.
     const mid = applyChanges(text, changes);
@@ -897,10 +934,7 @@ function edited(
     const close = inspectPlace(mid, hidden, ahead ? startOf(closing) : startOf(insertion));
     const open = inspectPlace(mid, hidden, typedAt + typed.length);
     if (close.kind !== 'ok' || (openers !== '' && open.kind !== 'ok' && open.kind !== 'block')) {
-      throw new EditError(
-        `Text can't be typed here with Track Changes off: it would split ${name} where Markdown can't hold its hidden marks, such as at the start of a line or inside a link. ${wayAround(named)}`,
-        'no-legal-placement',
-      );
+      throw cannotSplit();
     }
   }
 
