@@ -81,6 +81,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/editor/src/blocks/edits.ts', 'NEEDS_BLANK_LINE', 'widen', 'inventory #2'],
   ['packages/editor/src/blocks/joins.ts', 'ABSORBED', 'widen', 'inventory #8'],
   ['packages/editor/src/blocks/joins.ts', 'BELOW_CHANGES', 'widen', 'inventory #7'],
+  ['packages/editor/src/blocks/joins.ts', 'SETEXT_JOIN', 'widen', 'inventory #11'],
   ['packages/editor/src/blocks/joins.ts', 'DEEP_AT_START', 'alert', 'inventory #6'],
   ['packages/editor/src/blocks/joins.ts', 'FIRST_NUMBERED', 'widen', 'inventory #10'],
   [
@@ -89,8 +90,6 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'widen',
     'a refusal the inventory counted by its constant, or a message of the same kind: written as a replacement of its unit (format §3.12)',
   ],
-  ['packages/editor/src/blocks/joins.ts', 'NUMBERED_IN_CONTAINER', 'widen', 'inventory #9'],
-  ['packages/editor/src/blocks/joins.ts', 'SETEXT_JOIN', 'widen', 'inventory #11'],
   [
     'packages/editor/src/blocks/joins.ts',
     'deleted',

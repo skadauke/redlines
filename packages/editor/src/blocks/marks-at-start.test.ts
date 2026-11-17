@@ -77,14 +77,19 @@ describe('a join with a block that starts with another person’s insertion', ()
         doc: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two',
         keys: ['Delete'],
         off: { caret: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two', refusal: REWRITE },
-        on: { caret: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two', refusal: REWRITE },
+        // Kept while another person's mark is in the text the replacement would hold (#808).
+        on: {
+          caret: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two',
+          refusal:
+            'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
+        },
       },
       {
         name: 'Delete before an item whose only text is the other person’s deletion: refused, naming them',
         doc: '- one‸⏎- <del x>⏎- two',
         keys: ['Delete'],
         off: { caret: '- one‸⏎- <del x>⏎- two', refusal: ONLY_DELETED },
-        on: { caret: '- one‸⏎- <del x>⏎- two', refusal: ONLY_DELETED },
+        on: { caret: '- one‸⏎- <del x>⏎- two' },
         skip: { render: 'The starting document reads that way: its item is empty to micromark.' },
       },
       {
@@ -92,7 +97,7 @@ describe('a join with a block that starts with another person’s insertion', ()
         doc: '- one⏎- <del x>⏎- ‸two',
         keys: ['Backspace'],
         off: { caret: '- one⏎- <del x>⏎- ‸two', refusal: ONLY_DELETED },
-        on: { caret: '- one⏎- <del x>⏎- ‸two', refusal: ONLY_DELETED },
+        on: { caret: '- one⏎- <del x>⏎‸- two' },
         skip: { render: 'The starting document reads that way: its item is empty to micromark.' },
       },
       {

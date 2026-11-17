@@ -122,7 +122,7 @@ import {
   NOT_CODE,
   theirChange,
 } from './code-edit.ts';
-import { widenedEdits } from './edits-widen.ts';
+import { widenedAtOnce, widenedEdits } from './edits-widen.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import { atWrappedLine, wrappedLineStart } from './wrapped-line.ts';
@@ -5036,6 +5036,19 @@ export function trackedEdits(
   ctx: EditContext,
 ): TrackedEdits {
   return editsWidening(text, edits, ctx, true);
+}
+
+/**
+ * `trackedEdits` for an edit that a key knows no fine form reads right for, though the format's
+ * own check accepts one (a reader of the file reads it otherwise than the newest view): it is
+ * written as a replacement of its unit at once, and where no unit holds it, as `trackedEdits` does.
+ */
+export function widenedFirstEdits(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+): TrackedEdits {
+  return widenedAtOnce(text, edits, ctx) ?? editsWidening(text, edits, ctx, true);
 }
 
 /** `trackedEdits` as marks at the grain of the edit only: what reads alike in every order, or the
