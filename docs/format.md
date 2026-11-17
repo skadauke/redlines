@@ -3434,6 +3434,14 @@ A comment thread is anchored in the body and stored in the ledger under the same
   carrier (§3.3). A range that reaches into the ledger, as select all does by ending at the end of
   the file, ends where the body does, for a comment's as for a highlight's: no anchor is written in
   the ledger or after it (§5.1), and a point at the very end of the file is at the end of the body.
+  **An end that falls in an HTML block** (a `<div>` and its lines, a `<!-- note -->`, in the body, in
+  a quote or in a list item) is widened, not refused: the range starts at the block's first
+  character if it starts inside the block, and ends at the block's last if it ends inside it, and
+  a point inside the block becomes the whole block. The block is one thing to the person, drawn
+  rendered with its raw text hidden, and a marker inside its lines would be text of the block.
+  The opener of a range that starts a block has a line of its own (§3.3). Highlights do the same.
+  The blocks are read as CommonMark reads the text without its markers; a text that the reader
+  doesn't know (one with tabs or a lone carriage return) is not widened.
   A range that ends right after the closing `_` of emphasis that ends the body has no place for
   its closer: a marker there would change how the `_` flanks (§3.1, rule 5), and the next place is
   past the ledger. It is refused, with the error code `no-legal-placement` and "There is no place
