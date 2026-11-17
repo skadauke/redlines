@@ -19,6 +19,8 @@ mod allowed;
 pub mod connections;
 pub mod gateway;
 mod latest;
+pub mod node;
+mod openclaw_protocol;
 mod log;
 mod process;
 mod question;
