@@ -245,16 +245,31 @@ function shiftRow(row: Row, delta: number): Row {
 
 /** The start of the line that starts the lines of text that run up to `pos`, or the end of those
  * that run on from it (with a line either side): the block a change in it can alter. */
-function blockEdge(doc: Text, pos: number, up: boolean): number {
-  let line = doc.lineAt(Math.max(0, Math.min(doc.length, pos)));
-  for (let steps = 0; steps < 2000; steps++) {
-    const next = up ? line.number - 1 : line.number + 1;
-    if (next < 1 || next > doc.lines) break;
-    line = doc.line(next);
-    if (line.text.trim() === '') break;
+export function blockEdge(doc: Text, pos: number, up: boolean): number {
+  const line = doc.lineAt(Math.max(0, Math.min(doc.length, pos)));
+  // At most `BLOCK_REACH` lines are looked at. Their text is read once and searched, not fetched a
+  // line at a time: a long block of code has no blank line to stop at.
+  if (up) {
+    if (line.number === 1) return line.from;
+    const top = doc.line(Math.max(1, line.number - BLOCK_REACH)).from;
+    const text = doc.sliceString(top, line.from);
+    // `text` ends with the line break before `line`: each line above it, nearest first.
+    for (let end = text.length - 1; ;) {
+      const start = end === 0 ? 0 : text.lastIndexOf('\n', end - 1) + 1;
+      if (text.slice(start, end).trim() === '') return top + start;
+      if (start === 0) return top;
+      end = start - 1;
+    }
   }
-  return up ? line.from : line.to;
+  if (line.number === doc.lines) return line.to;
+  const bottom = doc.line(Math.min(doc.lines, line.number + BLOCK_REACH)).to;
+  const text = doc.sliceString(line.to, bottom);
+  const blank = /\n[^\S\n]*(?=\n|$)/.exec(text);
+  return blank ? line.to + blank.index + blank[0].length : bottom;
 }
+
+/** How many lines `blockEdge` looks at in a direction. */
+const BLOCK_REACH = 2000;
 
 /** The end of the `count`th line after the line that holds `pos` (the end of the text if fewer). */
 function linesAfter(doc: Text, pos: number, count: number): number {

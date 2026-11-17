@@ -185,7 +185,7 @@ class Builder {
     this.state = state;
   }
 
-  private style(line: Line): LineStyle {
+  private style(line: Line | { from: number }): LineStyle {
     let style = this.lines.get(line.from);
     if (!style) this.lines.set(line.from, (style = { classes: new Set() }));
     return style;
@@ -195,12 +195,12 @@ class Builder {
     this.ranges.push(range);
   }
 
-  lineClass(line: Line, className: string): void {
+  lineClass(line: Line | { from: number }, className: string): void {
     this.style(line).classes.add(className);
   }
 
   /** Code keeps its own indentation, so its lines don't hang like a list item's text. */
-  unhang(line: Line): void {
+  unhang(line: Line | { from: number }): void {
     this.style(line).hang = undefined;
   }
 
@@ -210,6 +210,25 @@ class Builder {
     const first = doc.lineAt(from).number;
     const last = doc.lineAt(to).number;
     for (let n = first; n <= last; n++) fn(doc.line(n), n === first, n === last);
+  }
+
+  /** Calls `fn` with the start of each line from the one at `from` to the one at `to`: the lines
+   * `eachLine` gives, read in one pass, where a block of code has thousands of them. */
+  eachLineStart(
+    from: number,
+    to: number,
+    fn: (line: { from: number }, first: boolean, last: boolean) => void,
+  ): void {
+    const { doc } = this.state;
+    const first = doc.lineAt(from);
+    const last = doc.lineAt(to).number;
+    let at = first.from;
+    let n = first.number;
+    for (const text of doc.iterLines(first.number, last + 1)) {
+      fn({ from: at }, n === first.number, n === last);
+      at += text.length + 1;
+      n++;
+    }
   }
 
   /** Text drawn with `className`, which with `unchecked` the spell check leaves alone. */
@@ -486,7 +505,7 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
 
 function codeBlock(b: Builder, node: SyntaxNode): void {
   // Runs after any list item around the block, so it can take back that item's hang.
-  b.eachLine(node.from, node.to, (line, first, last) => {
+  b.eachLineStart(node.from, node.to, (line, first, last) => {
     b.lineClass(line, 'rl-codeblock');
     if (first) b.lineClass(line, 'rl-codeblock-first');
     if (last) b.lineClass(line, 'rl-codeblock-last');
