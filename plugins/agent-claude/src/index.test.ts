@@ -14,6 +14,7 @@ import {
   createClaudeProvider,
   INSTALL_COMMAND,
   newClaudeState,
+  parseClaudeEvents,
   parseClaudeLine,
   plugin,
   SIGNED_OUT_HELP,
@@ -489,6 +490,45 @@ describe('a read the agent could not make', () => {
         text: 'Couldn’t read plan.md',
         blocked: { path: '/Users/ada/Documents/plan.md', cause: 'privacy', place: 'Documents' },
       },
+    ]);
+  });
+
+  it('reports every refused read of a message, not the first only', () => {
+    const calls = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'a',
+            name: 'Read',
+            input: { file_path: '/Users/ada/Documents/one.md' },
+          },
+          {
+            type: 'tool_use',
+            id: 'b',
+            name: 'Read',
+            input: { file_path: '/Users/ada/Documents/two.md' },
+          },
+        ],
+      },
+    });
+    const results = JSON.stringify({
+      type: 'user',
+      message: {
+        content: ['a', 'b'].map((id) => ({
+          type: 'tool_result',
+          tool_use_id: id,
+          is_error: true,
+          content: 'EPERM: operation not permitted',
+        })),
+      },
+    });
+    const state = newClaudeState(home);
+    parseClaudeEvents(calls, state);
+    expect(parseClaudeEvents(results, state)).toMatchObject([
+      { blocked: { path: '/Users/ada/Documents/one.md' } },
+      { blocked: { path: '/Users/ada/Documents/two.md' } },
     ]);
   });
 
