@@ -142,6 +142,15 @@ describe('The crop box for the keyboard and a screen reader', () => {
     );
   });
 
+  it('is silent for arrow keys that did not move the box', () => {
+    load();
+    const status = document.querySelector('.rl-crop-sr[role="status"]')!;
+    press(handle('e'), 'ArrowDown'); // not this edge's axis
+    press(document.querySelector('.cm-content') as HTMLElement, 'ArrowLeft'); // the text's
+    vi.advanceTimersByTime(500);
+    expect(status.textContent).toBe('');
+  });
+
   it('crops with Return and leaves with Escape from a handle', async () => {
     const { session, crops } = load();
     press(handle('s'), 'Enter');

@@ -210,8 +210,11 @@ export function startCrop(
   let busy = false;
   let gone = false;
   let announce: ReturnType<typeof setTimeout> | undefined;
+  /** Whether a key press moved the box since it was last spoken of: other arrow keys are not its. */
+  let moved = false;
 
   const say = () => {
+    moved = false;
     const percent = (n: number) => Math.round(n * 100);
     status.textContent =
       `${Math.round(f.width * img.naturalWidth)} by ${Math.round(f.height * img.naturalHeight)} pixels, ` +
@@ -329,6 +332,7 @@ export function startCrop(
     done.setAttribute('aria-disabled', 'true');
     cancel.setAttribute('aria-disabled', 'true');
     size.textContent = 'Cropping…';
+    status.textContent = 'Cropping…';
     const doc0 = view.state.doc;
     try {
       const copy = await crop(path, { ...f });
@@ -384,7 +388,13 @@ export function startCrop(
       // A handle moves its own sides: the arrow toward the outside grows the box, away from it shrinks it.
       const sides = [...(handleSide ?? '')] as Side[];
       const step = event.shiftKey || event.altKey ? 10 : 1;
+      const before = f;
       set(resize(f, sides, (arrow[0] * step) / rect.width, (arrow[1] * step) / rect.height));
+      moved ||=
+        f.x !== before.x ||
+        f.y !== before.y ||
+        f.width !== before.width ||
+        f.height !== before.height;
       return;
     }
     const step = event.altKey ? 10 : 1;
@@ -392,9 +402,10 @@ export function startCrop(
     const dy = (arrow[1] * step) / rect.height;
     if (event.shiftKey) set({ ...f, width: f.width + dx, height: f.height + dy });
     else set({ ...f, x: f.x + dx, y: f.y + dy });
+    moved = true;
   };
   const onKeyUp = (event: KeyboardEvent) => {
-    if (!event.key.startsWith('Arrow')) return;
+    if (!moved || !event.key.startsWith('Arrow')) return;
     clearTimeout(announce);
     announce = setTimeout(say, ANNOUNCE_MS);
   };
