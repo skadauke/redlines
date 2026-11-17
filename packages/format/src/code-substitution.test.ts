@@ -303,7 +303,7 @@ describe('indented code, display math and raw text', () => {
     expect(bodyOf(text)).toContain('$$\nx = oneX\ny\n$$\n<!--/m2bd-->');
     expect(back(text)).toBe(body);
     const at = file(body).indexOf('one') + 3;
-    expect(attempt(file(body), at, at, '\n$$').code).toBe('no-legal-placement');
+    widenedOrAsked(file(body), at, at, '\n$$');
   });
 
   it('replaces the raw-text elements whole', () => {
@@ -413,7 +413,7 @@ describe('display math in a paragraph', () => {
     expect(back(text)).toBe(body);
     // A `$$` typed in it would end it.
     const inside = file(body).indexOf('1');
-    expect(attempt(file(body), inside, inside, '$$').code).toBe('no-legal-placement');
+    widenedOrAsked(file(body), inside, inside, '$$');
   });
 });
 
@@ -561,15 +561,15 @@ describe('a marker above indented code (fix round 2)', () => {
 });
 
 describe('the exact start and end of display math (fix round 2)', () => {
-  it('refuses text typed against the `$$`, writes no marker beside it, and leaves line breaks alone', () => {
+  it('widens text typed against the `$$`, writes no marker beside it, and leaves line breaks alone', () => {
     for (const body of ['Intro.\n\n$$\nx = 1\n$$\n\nAfter.', 'Intro.\n\n$$x = 1$$\n\nAfter.']) {
       const text = file(body);
       const start = text.indexOf('$$');
       const end = text.indexOf('\n\nAfter');
       for (const at of [start, end]) {
-        const typed = attempt(text, at, at, 'x');
-        expect(typed.error, `${body} ${at}`).toBeDefined();
-        expect(typed.after, `${body} ${at}`).toBeUndefined();
+        // Written as a replacement of the block (the blocks' scope or the code's), else asked.
+        const typed = widenedOrAsked(text, at, at, 'x');
+        if (typed !== undefined) expect(parse(typed).warnings, `${body} ${at}`).toEqual([]);
         // A line break there is the text around the block, written as it is.
         const broken = attempt(text, at, at, '\n');
         expect(broken.error, `${body} ${at} break`).toBeUndefined();
@@ -630,7 +630,7 @@ describe('CRLF files (fix round 3)', () => {
 });
 
 describe('Return at the edges of display math in a quote (fix round 3)', () => {
-  it('writes a line break with the quote’s prefixes against the `$$`, and still refuses text', () => {
+  it('writes a line break with the quote’s prefixes against the `$$`, and widens text', () => {
     for (const [body, prefix] of [
       ['> $$\n> x = 1\n> $$\n>\n> After.', '> '],
       ['> > $$\n> > x = 1\n> > $$\n> >\n> > After.', '> > '],
@@ -641,7 +641,7 @@ describe('Return at the edges of display math in a quote (fix round 3)', () => {
       const broken = attempt(text, end, end, `\n${bar}\n${prefix}`);
       expect(broken.error, body).toBeUndefined();
       expect(parse(broken.after ?? '').marks, body).toEqual([]);
-      expect(attempt(text, end, end, 'x').error, body).toBeDefined();
+      widenedOrAsked(text, end, end, 'x');
       // Before the opening `$$`, after the quote's markers.
       const start = text.indexOf('$$');
       expect(attempt(text, start, start, `\n${bar}\n${prefix}`).error, body).toBeUndefined();
