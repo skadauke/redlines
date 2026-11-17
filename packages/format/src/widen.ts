@@ -212,7 +212,16 @@ function widenIn(
     );
     // The unit with the block after it is kept only where micromark reads its file as the newest
     // view (the check of the oracle's reader), else the ladder ends in an alert.
-    const kept = done && !(fromSpare && readsOtherMicromark(text, done.changes)) ? done : undefined;
+    // A fence in the unit is read too where an edit starts in a line's indentation: one that leaves
+    // the fence open (a line of its code less deep than its item) makes the closer a line of the
+    // code, where the newest view reads the text otherwise. A keystroke in code costs what it did.
+    const fenced =
+      /^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to)) &&
+      sorted.some((edit) => /^[ \t>]*$/.test(text.slice(lineStart(text, edit.from), edit.from)));
+    const kept =
+      done && !((fromSpare || fenced) && readsOtherMicromark(text, done.changes))
+        ? done
+        : undefined;
     if (kept && (!beside || kept.touchingOthers.length === 0)) return kept;
     if (
       beside &&
