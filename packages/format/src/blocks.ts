@@ -1465,3 +1465,7 @@ export function closerRange(text: string, close: Range): Range {
   const above = start === 0 ? '' : text.slice(text.lastIndexOf('\n', start - 2) + 1, start - 1);
   return start === 0 || above.trim() === '' ? { from: close.from - eol, to: close.to } : close;
 }
+
+/** Whether the line that starts at `start` is blank. */
+export const blankAt = (text: string, start: number): boolean =>
+  /^[ \t]*$/.test(text.slice(start, lineEnd(text, start)));
