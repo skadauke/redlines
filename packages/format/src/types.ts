@@ -1,4 +1,5 @@
 // Provisional: these types follow docs/format.md and will change when the parser is written.
+import type { MarkdownDialect } from './dialect.ts';
 
 /** A UTC time with minute precision, `YYYY-MM-DDTHH:MMZ`, kept as a string. */
 export type Time = string;
@@ -232,6 +233,9 @@ export interface Parsed {
   ledger: Ledger;
   /** The ledger comment plus the blank line before it; null when the file has none. */
   ledgerRange: Range | null;
+  /** The ledgers in front of the last, each with its blank line, in a document joined from
+   * several files (format §5.1); empty in any other. */
+  earlierLedgers: Range[];
   warnings: Warning[];
   /** The payloads of marks in `marks` that hold marks of their own (format §3.12). */
   payloads: PayloadMarks[];
@@ -264,4 +268,6 @@ export interface EditContext {
   note?: string;
   /** A group id for the new marks, decided together. */
   group?: string;
+  /** The dialect of the file (§9.1), from its name; GitHub's when absent. */
+  dialect?: MarkdownDialect;
 }

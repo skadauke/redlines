@@ -51,3 +51,20 @@ export function eolOf(text: string, ledger?: Range | null): Eol {
 export function inEol(s: string, eol: Eol): string {
   return s.replace(/\r\n?|\n/g, eol);
 }
+
+/**
+ * The old text that a payload holds, written back into a file whose line breaks are `eol`: a break
+ * of the file's kind (`\n` in the payload) as `eol`, and a break that has a kind of its own as that
+ * kind, so that rejecting gives the file back byte for byte (format §2.5).
+ */
+export function restoredPayload(payload: string, eol: Eol): string {
+  return payload.replace(/\uffff|\r\n|\r|\n/g, (found) =>
+    found === '\uffff' ? '\n' : found === '\n' ? eol : found,
+  );
+}
+
+/** A payload's text with every line break an LF, as the views and the checks that compare it with
+ * other text read it. */
+export function plainPayload(payload: string): string {
+  return payload.replace(/\uffff|\r\n?/g, '\n');
+}

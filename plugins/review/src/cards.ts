@@ -17,7 +17,7 @@ import {
   tooltips,
 } from '@codemirror/view';
 import { parsedField, viewModeField } from '@redlines/editor';
-import { isAlignMark, rejectReason } from '@redlines/format';
+import { isAlignMark, plainPayload, rejectReason } from '@redlines/format';
 import type { MarkRange, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
@@ -128,7 +128,8 @@ function struckChange(changes: readonly MarkRange[], pos: number, el: Element): 
       // Only a deletion's and a substitution's payload is deleted text: a format change's is its
       // operations, such as `+bold`.
       if (change.kind !== 'del' && change.kind !== 'sub') continue;
-      if (segment.payload === undefined || reading(segment.payload) !== struck) continue;
+      if (segment.payload === undefined || reading(plainPayload(segment.payload)) !== struck)
+        continue;
       const span = segmentSpan(segment);
       const away = Math.max(span.from - pos, pos - span.to, 0);
       if (away < distance) {

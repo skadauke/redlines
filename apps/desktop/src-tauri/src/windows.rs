@@ -94,6 +94,11 @@ pub struct WindowStart {
     /// or replaced (`Registry::report`), the file holds the text, and the app needn't keep a long
     /// answer for as long as the window is open, nor bring it back, unsaved, over a saved file.
     text: Option<String>,
+    /// The window joins the session of `path`, whose leader is another window: one document in
+    /// several windows (session.rs). It is the second window of a file, which is otherwise brought
+    /// forward and never opened twice.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    session: bool,
 }
 
 impl WindowStart {
@@ -108,7 +113,12 @@ impl WindowStart {
                 "A window opens for a file or for text, not both. Ask for one of them.".to_owned(),
             );
         }
-        Ok(Self { path, line, text })
+        Ok(Self {
+            path,
+            line,
+            text,
+            session: false,
+        })
     }
 }
 
@@ -169,6 +179,9 @@ pub struct Routed {
     to_tell: Vec<String>,
     /// The files that open in a window of their own.
     to_open: Vec<String>,
+    /// The windows that already hold a file that was opened again: they come forward, and the
+    /// file opens nowhere else, so that two windows never write the same file.
+    to_raise: Vec<String>,
 }
 
 /// The document windows, and what the app knows of them.
@@ -259,6 +272,15 @@ impl Registry {
             .any(|entry| entry.label == label && entry.path.as_deref() == Some(path))
     }
 
+    /// The window whose document is the file at `path`, as the windows last said, the frontmost
+    /// first.
+    fn holder(&self, path: &str) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|entry| entry.path.as_deref() == Some(path))
+            .map(|entry| entry.label.clone())
+    }
+
     /// Gives a window's document another file, as the window will say itself a moment later: a
     /// second rename must not find the first one's old path held.
     fn set_path(&mut self, label: &str, path: String) {
@@ -306,11 +328,32 @@ impl Registry {
     /// the window may not use opens nothing: the frontmost window tells the person.
     fn route(&mut self, files: Vec<OpenedFile>) -> Routed {
         let mut routed = Routed::default();
+        let held: Vec<(String, Option<String>)> = self
+            .entries
+            .iter()
+            .map(|entry| (entry.label.clone(), entry.path.clone()))
+            .collect();
         let Some(front) = self.entries.first_mut() else {
             return routed;
         };
         for file in files {
             if file.error.is_none() {
+                if let Some(label) = held
+                    .iter()
+                    .find(|(_, held)| held.as_deref() == Some(file.path.as_str()))
+                    .map(|(label, _)| label.clone())
+                {
+                    if !routed.to_raise.contains(&label) {
+                        routed.to_raise.push(label);
+                    }
+                    continue;
+                }
+                if routed.to_open.contains(&file.path)
+                    || front.files.iter().any(|taken| taken.path == file.path)
+                {
+                    // The same file twice in one batch opens one window.
+                    continue;
+                }
                 if !front.untouched() {
                     routed.to_open.push(file.path);
                     continue;
@@ -538,6 +581,9 @@ pub fn deliver(app: &AppHandle) {
     for label in routed.to_tell {
         tell_of_files(app, &label);
     }
+    for label in routed.to_raise {
+        bring_forward(app, &label);
+    }
     for path in routed.to_open {
         let start = WindowStart {
             path: Some(path.clone()),
@@ -555,6 +601,16 @@ pub fn deliver(app: &AppHandle) {
                 tell_of_files(app, &label);
             }
         }
+    }
+}
+
+/// Brings a window forward, minimized or not.
+fn bring_forward(app: &AppHandle, label: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        // Focus does nothing for a minimized window.
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
     }
 }
 
@@ -587,8 +643,25 @@ pub fn open_window(
     path: Option<String>,
     line: Option<u32>,
     text: Option<String>,
+    session: Option<bool>,
 ) -> Result<String, String> {
-    let start = WindowStart::new(path, line, text)?;
+    let mut start = WindowStart::new(path, line, text)?;
+    // Another window on the document of a window that leads its session (`session_join`): it joins
+    // that session, and the file is not brought forward.
+    let joining = session == Some(true)
+        && start
+            .path
+            .as_deref()
+            .is_some_and(|path| app.state::<crate::session::Sessions>().has(path));
+    start.session = joining;
+    // A file that a window holds is not opened twice: that window comes forward.
+    if let Some(path) = start.path.as_deref().filter(|_| !joining) {
+        let holder = app.state::<Windows>().lock().holder(path);
+        if let Some(label) = holder {
+            bring_forward(&app, &label);
+            return Ok(label);
+        }
+    }
     open_document_window(&app, start)
         .map(|window| window.label().to_owned())
         .map_err(|error| format!("Can't open another window: {error}"))
@@ -711,6 +784,9 @@ pub fn on_window_event(app: &AppHandle, label: &str, event: &WindowEvent) {
     match event {
         WindowEvent::Focused(true) => windows.lock().focus(label),
         WindowEvent::Destroyed => {
+            // A window that was one of a document's, with others, is gone from its session; the
+            // next one leads (session.rs).
+            crate::session::window_closed(app, label);
             let (was_asking, front) = {
                 let mut registry = windows.lock();
                 (registry.remove(label), registry.frontmost())
@@ -1040,6 +1116,26 @@ mod tests {
     }
 
     #[test]
+    fn a_file_a_window_holds_brings_that_window_forward_and_opens_nothing() {
+        let mut registry = registry_of(&["main", "doc-2"]);
+        registry.report("doc-2", Some("/docs/plan.md".to_owned()), true);
+        let routed = registry.route(vec![allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_raise, ["doc-2"]);
+        assert!(routed.to_open.is_empty() && routed.to_tell.is_empty());
+        assert!(registry.take_files("main").is_empty());
+        assert_eq!(registry.holder("/docs/plan.md").as_deref(), Some("doc-2"));
+        assert_eq!(registry.holder("/docs/other.md"), None);
+    }
+
+    #[test]
+    fn the_same_file_twice_in_one_batch_opens_one_window() {
+        let mut registry = registry_of(&["main"]);
+        registry.report("main", Some("/docs/old.md".to_owned()), false);
+        let routed = registry.route(vec![allowed("/docs/plan.md"), allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_open, ["/docs/plan.md"]);
+    }
+
+    #[test]
     fn a_file_opens_a_new_window_when_the_focused_window_has_unsaved_edits() {
         let mut registry = registry_of(&["main"]);
         registry.report("main", None, true);
@@ -1338,6 +1434,7 @@ mod tests {
                 path: some("/docs/a.md"),
                 line: Some(7),
                 text: None,
+                session: false,
             })
         );
         assert_eq!(
@@ -1488,6 +1585,7 @@ mod tests {
                 path: Some("/docs/a.md".to_owned()),
                 line: Some(7),
                 text: None,
+                session: false,
             })
             .unwrap(),
             serde_json::json!({ "path": "/docs/a.md", "line": 7, "text": null })
@@ -1495,6 +1593,16 @@ mod tests {
         assert_eq!(
             serde_json::to_value(opened_for_text(ANSWER)).unwrap(),
             serde_json::json!({ "path": null, "line": null, "text": ANSWER })
+        );
+        // A window that joins a session is told so; the others are told nothing.
+        assert_eq!(
+            serde_json::to_value(WindowStart {
+                path: Some("/docs/a.md".to_owned()),
+                session: true,
+                ..WindowStart::default()
+            })
+            .unwrap(),
+            serde_json::json!({ "path": "/docs/a.md", "line": null, "text": null, "session": true })
         );
         assert_eq!(
             serde_json::to_value(WindowStart::default()).unwrap(),

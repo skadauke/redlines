@@ -287,6 +287,12 @@ pub fn held(app: &AppHandle, path: &str) -> bool {
     )
 }
 
+/// Whether the windows may use the document at `path`, as `held` says it, without remembering it or
+/// showing its project: the session commands ask it of every path a page names.
+pub fn may_use(app: &AppHandle, path: &str) -> bool {
+    spelled(&app.fs_scope(), Path::new(path))
+}
+
 /// `held`, with the app's parts: only a file the scope allows is held. It is remembered by the file
 /// it really is, so that a link pointed elsewhere by the next launch allows nothing new.
 fn hold(

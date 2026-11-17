@@ -244,7 +244,8 @@ pub struct Runs {
 struct Run {
     /// The label of the window that started it.
     owner: String,
-    group: i32,
+    /// The process group of the program; none for a run that is a thread (`start_thread`).
+    group: Option<i32>,
     /// Someone has asked it to stop.
     stopping: AtomicBool,
     over: Over,
@@ -281,15 +282,19 @@ impl Run {
         if self.stopping.swap(true, Ordering::SeqCst) {
             return;
         }
+        // A thread sees `stopping` for itself, and ends.
+        let Some(group) = self.group else {
+            return;
+        };
         let run = Arc::clone(self);
         thread::spawn(move || {
             for signal in [libc::SIGINT, libc::SIGTERM] {
-                signal_group(run.group, signal);
+                signal_group(group, signal);
                 if run.over.wait(grace) {
                     return;
                 }
             }
-            signal_group(run.group, libc::SIGKILL);
+            signal_group(group, libc::SIGKILL);
         });
     }
 }
@@ -376,16 +381,17 @@ impl Runs {
         };
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let group = group_of(&child);
         let run = Arc::new(Run {
             owner: owner.to_owned(),
-            group: group_of(&child),
+            group: Some(group),
             stopping: AtomicBool::new(false),
             over: Over::default(),
         });
         self.running().insert(id, Arc::clone(&run));
         // `stop_all` says it's closing before it looks, so it can't miss this and this not see that.
         if self.closing.load(Ordering::SeqCst) {
-            signal_group(run.group, libc::SIGKILL);
+            signal_group(group, libc::SIGKILL);
         }
 
         let started = Started {
@@ -399,7 +405,7 @@ impl Runs {
             stderr: Arc::default(),
         };
         let input = child.stdin.take().map(|stdin| Input {
-            stdin: Mutex::new(stdin),
+            way: Way::Stdin(Mutex::new(stdin)),
             log: Arc::clone(&following.log),
         });
         let (reader_ended, readers) = mpsc::channel::<()>();
@@ -411,8 +417,79 @@ impl Runs {
         let running = Arc::clone(&self.running);
         thread::spawn(move || {
             let status = child.wait().ok();
-            remove_what_is_left(run.group, &readers);
+            remove_what_is_left(group, &readers);
             following.finish(status, run.stopping.load(Ordering::SeqCst));
+            running
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&id);
+            run.over.set();
+        });
+        Ok((started, input))
+    }
+
+    /// Starts a run that is a thread of this program, not a program: an agent at a Gateway
+    /// (`openclaw_chat.rs`), which speaks the Agent Client Protocol to the window as a program
+    /// would. It has a log, an owner, a stop and an end like any run; the body gets the lines the
+    /// window sends, and says its own with [`ThreadRun::say`], and when it returns the run is over.
+    /// `program` is what the log names, in place of a program.
+    pub fn start_thread(
+        &self,
+        owner: &str,
+        log_folder: &Path,
+        info: &RunInfo,
+        program: &str,
+        send: impl Fn(RunMessage) + Send + Sync + 'static,
+        body: impl FnOnce(Receiver<String>, &ThreadRun) + Send + 'static,
+    ) -> Result<(Started, Input), String> {
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(QUITTING.to_owned());
+        }
+        let log = RunLog::create(log_folder, &info.agent, SystemTime::now()).map_err(|error| {
+            format!("Couldn't start a log in {}: {error}", log_folder.display())
+        })?;
+        log.started(info, program, &[], None);
+        let log = Arc::new(log);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let run = Arc::new(Run {
+            owner: owner.to_owned(),
+            group: None,
+            stopping: AtomicBool::new(false),
+            over: Over::default(),
+        });
+        self.running().insert(id, Arc::clone(&run));
+        // `stop_all` says it's closing before it looks, so it can't miss this and this not see that.
+        if self.closing.load(Ordering::SeqCst) {
+            run.stopping.store(true, Ordering::SeqCst);
+        }
+        let started = Started {
+            id,
+            log_path: log.path().to_string_lossy().into_owned(),
+        };
+        let (lines_in, lines) = mpsc::channel::<String>();
+        let send: Arc<dyn Fn(RunMessage) + Send + Sync> = Arc::new(send);
+        let input = Input {
+            way: Way::Thread(Mutex::new(lines_in)),
+            log: Arc::clone(&log),
+        };
+        let ours = ThreadRun {
+            log: Arc::clone(&log),
+            send: Arc::clone(&send),
+            run: Arc::clone(&run),
+        };
+        let running = Arc::clone(&self.running);
+        thread::spawn(move || {
+            body(lines, &ours);
+            let stopped = run.stopping.load(Ordering::SeqCst);
+            log.ended(RunEnd {
+                code: Some(0),
+                signal: None,
+                stopped,
+            });
+            send(RunMessage::Ended {
+                code: Some(0),
+                stderr: String::new(),
+            });
             running
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -461,21 +538,57 @@ impl Runs {
 /// The way in to a run started with its stdin open. What goes in goes in its log too, and dropping
 /// this closes the program's stdin.
 pub struct Input {
-    stdin: Mutex<ChildStdin>,
+    way: Way,
     log: Arc<RunLog>,
+}
+
+/// Where a line goes: a program's stdin, or the thread that is the run.
+enum Way {
+    Stdin(Mutex<ChildStdin>),
+    Thread(Mutex<mpsc::Sender<String>>),
 }
 
 impl Input {
     /// Writes a line to the program, and to its log.
     pub fn send(&self, line: &str) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap_or_else(PoisonError::into_inner);
-        stdin
-            .write_all(line.as_bytes())
-            .and_then(|()| stdin.write_all(b"\n"))
-            .and_then(|()| stdin.flush())
-            .map_err(|error| format!("Couldn't write to the program: {error}"))?;
+        match &self.way {
+            Way::Stdin(stdin) => {
+                let mut stdin = stdin.lock().unwrap_or_else(PoisonError::into_inner);
+                stdin
+                    .write_all(line.as_bytes())
+                    .and_then(|()| stdin.write_all(b"\n"))
+                    .and_then(|()| stdin.flush())
+                    .map_err(|error| format!("Couldn't write to the program: {error}"))?;
+            }
+            Way::Thread(lines) => lines
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .send(line.to_owned())
+                .map_err(|_| "That agent has stopped.".to_owned())?,
+        }
         self.log.stdin(line);
         Ok(())
+    }
+}
+
+/// What the thread of a run that is no program holds: a way to say something to the window, and
+/// whether someone has stopped it. (The lines the window sends come apart from it, so that this can
+/// be shared with the threads a run starts.)
+pub struct ThreadRun {
+    log: Arc<RunLog>,
+    send: Arc<dyn Fn(RunMessage) + Send + Sync>,
+    run: Arc<Run>,
+}
+
+impl ThreadRun {
+    /// A line to the window, and to the log.
+    pub fn say(&self, line: String) {
+        self.log.stdout(&line);
+        (self.send)(RunMessage::Line { line });
+    }
+
+    pub fn stopped(&self) -> bool {
+        self.run.stopping.load(Ordering::SeqCst)
     }
 }
 

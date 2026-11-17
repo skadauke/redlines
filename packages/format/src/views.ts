@@ -7,7 +7,7 @@
 // original view leaves out the break a `split` stands for (format §3.4).
 
 import { closerRange, openerRange, splitEnd } from './blocks.ts';
-import { applyChanges, eolOf } from './changes.ts';
+import { applyChanges, eolOf, plainPayload } from './changes.ts';
 import { EditError } from './errors.ts';
 import { decidesFormat, isAlignOps, opsOf, parseFormatOps } from './format-ops.ts';
 import { alignChange, alignHide, alignLabel } from './table-align.ts';
@@ -64,10 +64,10 @@ function wholeSegment(segment: Segment, insert: string): TextChange {
   return { from: segment.open.from, to: (segment.close ?? openerRange(segment)).to, insert };
 }
 
-/** The ledger and its blank line, as a change. */
+/** The ledger and its blank line, as a change; and those of the other parts of a joined file. */
 function ledgerChanges(parsed: Parsed): TextChange[] {
-  const range = parsed.ledgerRange;
-  return range ? [{ from: range.from, to: range.to, insert: '' }] : [];
+  const ranges = [...parsed.earlierLedgers, ...(parsed.ledgerRange ? [parsed.ledgerRange] : [])];
+  return ranges.map((range) => ({ from: range.from, to: range.to, insert: '' }));
 }
 
 /** Changes that hide every marker of a segment and keep what lies between them. */
@@ -402,9 +402,9 @@ function notation(
     case 'ins':
       return segment.close ? { open: '{++', close: `++}${tag}` } : { open: '', close: '' };
     case 'sub':
-      return { open: `{~~${segment.payload ?? ''}~>`, close: `~~}${tag}` };
+      return { open: `{~~${plainPayload(segment.payload ?? '')}~>`, close: `~~}${tag}` };
     case 'del':
-      return { open: `{--${segment.payload ?? ''}--}${tag}`, close: '' };
+      return { open: `{--${plainPayload(segment.payload ?? '')}--}${tag}`, close: '' };
     case 'hl':
       return { open: '{==', close: `==}${tag}` };
     case 'fmt': {

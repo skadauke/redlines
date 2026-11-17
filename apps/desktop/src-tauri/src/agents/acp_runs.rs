@@ -20,6 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::acp::{AcpAgent, AcpAgents, Bridge};
 use super::acp_gate::Conversation;
 use super::log::RunInfo;
+use super::openclaw_agent::{Talk, serve};
 use super::process::{Input, RunMessage, Runs, Spec, Started};
 use super::which::is_clean_path;
 
@@ -174,6 +175,71 @@ impl AcpRuns {
             }),
         );
         // It may have ended before it was listed, and then nothing else would take it off.
+        if shared.ended.load(Ordering::SeqCst) {
+            self.running().remove(&started.id);
+        }
+        if !window_open() {
+            runs.stop_owned_by(owner);
+            return Err("The window has closed.".to_owned());
+        }
+        Ok(started)
+    }
+
+    /// Starts an OpenClaw agent that answers from a Gateway (`openclaw_agent.rs`) for the window
+    /// `owner`: a run like any other, with the same gate on what the window sends and the same
+    /// bridge rules (no toolbox, a session key of the thread's shape), but no program behind it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn start_gateway(
+        &self,
+        runs: &Runs,
+        owner: &str,
+        log_folder: &Path,
+        info: &RunInfo,
+        folder: &str,
+        bridge: Bridge,
+        bundled: &str,
+        talk: Talk,
+        window_open: impl Fn() -> bool,
+        send: impl Fn(RunMessage) + Send + Sync + 'static,
+    ) -> Result<Started, String> {
+        if !is_clean_path(folder) {
+            return Err("Redlines runs an agent only for an absolute folder.".to_owned());
+        }
+        let shared = Arc::new(Shared {
+            conversation: Mutex::new(Conversation::new(bundled, folder).for_bridge(Some(bridge))),
+            id: OnceLock::new(),
+            ended: AtomicBool::new(false),
+        });
+        let hearing = Arc::clone(&shared);
+        let running = Arc::clone(&self.running);
+        let (started, input) = runs.start_thread(
+            owner,
+            log_folder,
+            info,
+            "OpenClaw Gateway",
+            move |message| {
+                match &message {
+                    RunMessage::Line { line } => locked(&hearing.conversation).heard(line),
+                    RunMessage::Ended { .. } => {
+                        hearing.ended.store(true, Ordering::SeqCst);
+                        if let Some(id) = hearing.id.get() {
+                            locked(&running).remove(id);
+                        }
+                    }
+                }
+                send(message);
+            },
+            move |lines, link| serve(lines, link, &talk),
+        )?;
+        let _ = shared.id.set(started.id);
+        self.running().insert(
+            started.id,
+            Arc::new(AcpRun {
+                owner: owner.to_owned(),
+                input,
+                shared: Arc::clone(&shared),
+            }),
+        );
         if shared.ended.load(Ordering::SeqCst) {
             self.running().remove(&started.id);
         }

@@ -89,6 +89,8 @@ interface Setup {
     edits: string[];
     /** The step each edit was handed over as. */
     steps: AgentStep[];
+    /** The text each edit's tool had read: what the edit is placed from. */
+    bases: (string | undefined)[];
   };
   consent: Record<string, AgentScope | 'no'>;
   /** What the runs told of reads the agents couldn't make. */
@@ -152,6 +154,7 @@ function setup(options: Options = {}): Setup {
     saves: 0,
     edits: [],
     steps: [],
+    bases: [],
   };
   const consent = options.consent ?? { 'claude|/repo': 'folder', 'codex|/repo': 'folder' };
   let ended = 0;
@@ -171,10 +174,11 @@ function setup(options: Options = {}): Setup {
         await options.saving;
         return doc.saveAnswer;
       },
-      applyAgentEdit: (next, step) => {
+      applyAgentEdit: (next, step, base) => {
         doc.edits.push(next);
         doc.steps.push(step);
-        editor.applyAgentEdit(next, step);
+        doc.bases.push(base);
+        editor.applyAgentEdit(next, step, base);
         return Promise.resolve();
       },
     },
@@ -1194,6 +1198,24 @@ describe('a run', () => {
     expect(parse(doc).text).toContain('nightly');
     expect(parse(doc).marks.some((mark) => mark.entry.by === 'claude-ada')).toBe(true);
     expect(s.editor.view.state.selection.main.head).toBe('Today '.length);
+  });
+
+  it('hands each edit over with the text its tool read, so that it is a push', async () => {
+    const s = setup({
+      async *claude({ tools }) {
+        await tools.initialize();
+        await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        await tools.call('str_replace', { old_str: 'CI', new_str: 'the nightly build' });
+        yield { type: 'done' };
+      },
+    });
+    ask(s, '@Claude edit');
+    // The comment that asked is in what the tool reads.
+    const before = s.editor.getDoc();
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    // The first edit is made from the document as it was, the second from what the first left.
+    expect(s.doc.bases[0]).toBe(before);
+    expect(s.doc.bases[1]).toBe(s.doc.edits[0]);
   });
 
   it('hands each agent edit to the document, in order', async () => {

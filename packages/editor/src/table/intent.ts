@@ -30,6 +30,9 @@ export interface TableIntent {
   /** To the minute. Empty when written without tracking. */
   time: string;
   drawn: readonly (readonly number[])[];
+  /** For the rows of a paste: the values written into their cells once the format has added them
+   * (`paste-intent.ts`). */
+  filled?: { range: readonly (readonly string[])[]; first: number; col: number };
 }
 
 export interface TableRequest {
