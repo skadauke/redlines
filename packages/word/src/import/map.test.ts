@@ -169,7 +169,7 @@ Some *emphasis*, **strong** and \`code\` and a [link](https://example.org/a).
 `;
     const result = await roundTrip(markdown);
     clean(result);
-    expect(result.markdown).toBe(markdown.replace('[link]', '[linkhttps://example.org/a]'));
+    expect(result.markdown).toBe(markdown);
   });
 
   it('keeps a table, and changes in its cells', async () => {
