@@ -216,6 +216,10 @@
     page-break-inside: avoid;
   }
 
+  #rl-print .rl-keep:first-child > h1:first-child {
+    margin-top: 0;
+  }
+
   /* A heading and the start of what it heads stay together (keepHeadingsWithNext, print.ts). */
   #rl-print .rl-keep {
     break-inside: avoid;

@@ -81,7 +81,8 @@ export function plainPageHtml(text: string): string {
 export function keepHeadingsWithNext(root: ParentNode): void {
   for (const heading of Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'))) {
     const next = heading.nextElementSibling;
-    if (!next || /^H[1-6]$/.test(next.tagName)) continue;
+    // Only a paragraph or a table: a long list or code block in the box would leave a gap.
+    if (!next || !/^(?:P|TABLE)$/.test(next.tagName)) continue;
     const wrap = heading.ownerDocument.createElement('div');
     wrap.className = 'rl-keep';
     heading.before(wrap);

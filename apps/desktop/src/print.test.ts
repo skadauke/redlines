@@ -87,9 +87,11 @@ describe('keepHeadingsWithNext', () => {
     expect(root.querySelectorAll('tr')).toHaveLength(3);
   });
 
-  it('leaves a heading followed by a heading, or by nothing, as it is', () => {
+  it('leaves a heading followed by a heading, a code block or nothing as it is', () => {
     expect(page('<h1>A</h1><h2>B</h2>').innerHTML).toBe('<h1>A</h1><h2>B</h2>');
     expect(page('<p>a</p><h2>B</h2>').innerHTML).toBe('<p>a</p><h2>B</h2>');
+    // A long block would leave a gap in a box.
+    expect(page('<h2>B</h2><pre>x</pre>').innerHTML).toBe('<h2>B</h2><pre>x</pre>');
   });
 });
 
