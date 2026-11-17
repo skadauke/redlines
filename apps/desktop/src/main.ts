@@ -709,8 +709,8 @@ const review = createReview(editor, {
         documentPath: () => controller.state.path,
         projectFolder: async (path) => {
           const root = await projectOf(path);
-          // As for images: a repository too broad to read all of is not the place to look.
-          return root.tooBroad ? dirname(path) : root.folder;
+          // As for images: a folder too broad to be a project is no place to look (#451).
+          return root.tooBroad ? null : root.folder;
         },
         realPath: (path) => invoke<string>('real_path', { path }),
         // A document opens in a window, and an image or a PDF in its default app; any other
