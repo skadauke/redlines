@@ -239,10 +239,13 @@ early, must stay on one line, and must not let other tools act on what it contai
 | a backtick                                                                   | `\x60`                           | knitr runs R code it finds in comments, deleted text included                                                      |
 | `\|`                                                                         | `\|`                             | An unescaped pipe splits a table cell, even inside a comment, and kramdown reads any line with one as a table row |
 | `{{` and `{%`                                                                | `{\{` and `{\%`                  | Liquid (Jekyll, GitHub Pages) runs them                                                                            |
-| a `\` before `-`, `n`, `x`, `\|`, `{`, `%`, `\`, a backtick or a line break  | `\\`                             | Keeps every escape unambiguous                                                                                     |
+| a `\` before `-`, `n`, `x`, `\|`, `{`, `%`, `\`, a backtick, a line break, U+2028 or U+2029  | `\\`                             | Keeps every escape unambiguous                                                                                     |
+| U+2028 and U+2029                                                            | `\u2028` and `\u2029`           | YAML 1.1 readers (PyYAML) take them for line breaks, which would split a value in the ledger                       |
 
 - A reader decodes left to right, after turning CRLF and CR into LF. The escapes are `\\`, `\n`,
-  `\-`, `\xHH`, `\|`, `\{` and `\%`. Any other backslash is literal, so Markdown escapes such as
+  `\-`, `\xHH`, `\u2028`, `\u2029`, `\|`, `\{` and `\%`. A backslash before the letters `u2028` or
+  `u2029` of the text is written `\\`, as one before `n` is (a file written before this rule that
+  holds those letters after one backslash reads as the separator). Any other backslash is literal, so Markdown escapes such as
   `\*` are kept as written. When a payload goes back into the text, as when a deletion is
   rejected, its line breaks are written as the rule on line breaks below says.
 - The file writes line breaks as its body has them: CRLF when the body has a CRLF, and when it has
@@ -3762,6 +3765,7 @@ frontmatter:
 | `frontmatter` | Pending changes to the YAML front matter (§3.8)                                                    |
 
 Defaults are never written. Unknown keys are kept and ignored, so later versions can add fields.
+A ledger whose `version` is not `1` is read with a warning, and the next write puts `version: 1`.
 
 ### 5.3 People
 
@@ -3821,13 +3825,15 @@ same values.
   written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
   and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
   `-\x2d`, a YAML escape, so that `--` never appears in the ledger.
-- The text of a comment and of a reply is always a literal block (`|-`). Text a person types may
+  A line break in a key is written `\n` (or `\r`), and U+2028 and U+2029 `\u2028` and `\u2029`, since a key is on one line.
+- The text of a comment and of a reply, and the quote a comment keeps of the text it covered, is
+  always a literal block (`|-`). Text a person types may
   start with `@`, contain `: ` or ` #`, or say `No`; as a plain or flow scalar, each of these broke
   or changed the value in every parser tested.
 - Other strings, a mark's `note` among them, are written inline: the entry of a mark is one line in
   flow style (§5.4, §5.7). A string is plain when it starts with a letter or `_`, holds only
   letters, digits, spaces and the punctuation `_ . @ / + ( ) = ! ' \ | * & % $ ~ ^ < > ; : -`, has
-  no `: ` and no space at its end, and is not a word such as `no` (§2.4). Any other string is
+  no `: `, and no `:` or space at its end, and is not a word such as `no` (§2.4). Any other string is
   quoted, because a `,`, `?`, `[`, `]`, `{`, `}` or `#` would end it early in some parser. Times
   are minute-precision strings, written plain (§2.4).
 - Values use the payload escapes (§2.5), except that a value may span lines inside a literal block.
@@ -3835,6 +3841,10 @@ same values.
   an HTML comment at a blank line, and a line holding only a literal `\` is written `\\`.
 - A literal block takes its indentation from its first line, so spaces at the start of that line
   are written `\x20`. Control characters, which YAML can't hold, are written `\xHH`.
+  A backslash right before a control character is written `\\`, so that its `\x` escape doesn't pair
+  with it. A line of only spaces and tabs is written with each of them as `\x20` or `\x09`, because
+  Markdown tools count such a line as blank and formatters trim it; the reader gives the spaces
+  back, with no rule of its own.
 - Because values never contain `--`, `-->` can't appear inside the ledger. The ledger never uses
   YAML document markers (`---`).
 
