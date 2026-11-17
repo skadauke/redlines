@@ -148,6 +148,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   ['packages/editor/src/blocks/tab.ts', 'FIRST_ITEM', 'disable', 'inventory #14'],
   ['packages/editor/src/blocks/tab.ts', 'NOT_UNDER_TEXT', 'disable', 'inventory #15'],
+  [
+    'packages/editor/src/blocks/tab.ts',
+    'READS_OTHERWISE',
+    'disable',
+    'Tab under an empty item whose pending split is on its line: neither the fine nor the widened write reads as the view (#1052)',
+  ],
   ['packages/editor/src/blocks/tab.ts', 'THEIR_SPLIT', 'widen', 'inventory #1'],
   [
     'packages/editor/src/blocks/tab.ts',

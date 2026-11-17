@@ -865,6 +865,16 @@ function sampleDecisions(
 ): string[] {
   const problems: string[] = [];
   const random = seeded(ids.length * 7919 + file.length);
+  // The halves of a move of a row are one decision: either half decides both (format §3.7), so a
+  // set that accepts one and rejects the other has no reading, and the first one decided wins.
+  const partner = new Map<string, string>();
+  for (const mark of parse(file).marks) {
+    if (mark.entry.move !== undefined) partner.set(mark.id, mark.entry.move);
+  }
+  const canon = (id: string) => {
+    const other = partner.get(id);
+    return other !== undefined && other < id ? other : id;
+  };
   const shuffled = () => {
     const order = [...ids];
     for (let i = order.length - 1; i > 0; i--) {
@@ -897,7 +907,7 @@ function sampleDecisions(
       const later: string[] = [];
       for (const id of pending) {
         if (!present(id)) continue;
-        const next = decideOne(text, id, how(id));
+        const next = decideOne(text, id, how(canon(id)));
         if (next === undefined) later.push(id);
         else {
           text = next;
