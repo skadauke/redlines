@@ -44,7 +44,7 @@ export const emojiCodes: MarkdownConfig = {
         if (code === null) return -1;
         // Anything but white space or the start of a text against its start (a letter, a digit,
         // punctuation): GitHub shows it as written.
-        const from = Math.max(cx.offset, pos - 200);
+        const from = Math.max(cx.offset, pos - 4000);
         if (!startsEmoji(cx.slice(from, pos), true)) return -1;
         return cx.addElement(cx.elt('Emoji', pos, pos + code.length));
       },

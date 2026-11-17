@@ -93,6 +93,12 @@ describe('an emoji shortcode in the preview (#312)', () => {
       ':tent:',
       ':tent:',
     ]);
+    // A marker in front of emphasis, or a long one, is no text: the shortcode still follows a space.
+    const marked = `a <!--fmt m2bd +bold-->**:tent:**<!--/m2bd--> b <!--del k3x9 ${'x'.repeat(300)}-->:smile:\n`;
+    expect(drawn(editorAt(marked, marked.length)).map((found) => found.source)).toEqual([
+      ':tent:',
+      ':smile:',
+    ]);
   });
 
   it('is left alone in code, in a link’s address and in a code block', () => {

@@ -29,11 +29,15 @@ export function shortcodeAt(text: string): string | null {
  */
 export function startsEmoji(before: string, emphasis = false): boolean {
   let text = before;
-  while (text.endsWith('-->')) {
-    const open = text.lastIndexOf('<!--');
-    if (open === -1) break;
-    text = text.slice(0, open);
+  for (;;) {
+    const length = text.length;
+    // A comment that ends there; one whose start is cut off holds all of what is left.
+    while (text.endsWith('-->')) {
+      const open = text.lastIndexOf('<!--');
+      text = open === -1 ? '' : text.slice(0, open);
+    }
+    if (emphasis) text = text.replace(/[*_~]+$/, '');
+    if (text.length === length) break;
   }
-  if (emphasis) text = text.replace(/[*_~]+$/, '');
   return text === '' || /\s$/u.test(text);
 }

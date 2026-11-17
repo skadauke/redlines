@@ -515,7 +515,7 @@ Redlines covers everything in the Markdown Guide's
   Preferences › Editor › Suggest emoji after a colon turns it off; macOS's own picker (fn-E) is
   not touched. A shortcode that a file already has (`:tent:`) is kept as written and drawn as its
   emoji in every view but Plain, as an entity is drawn as its character, and shows as written while
-  the caret is on it; one that a letter or a digit is before (`a:tent:`) is text, as GitHub shows
+  the caret is on it; one that a letter, a digit or punctuation is before (`a:tent:`, `(:tent:`) is text, as GitHub shows
   it. An emoji and a shortcode are one character for a change: no marker parts either
   ([format §3.1](format.md#31-inside-a-line)).
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
