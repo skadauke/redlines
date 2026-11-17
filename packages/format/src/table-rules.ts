@@ -378,6 +378,24 @@ export function highlightAgainstRows(
   return null;
 }
 
+/**
+ * Where a marker of a comment, to be written at `at` in `text`, goes so that it does not hide the
+ * mark of a pending inserted or moved row: a marker in front of the mark, at the start of the row's
+ * first cell, or between the mark and its space, would take the mark out of the table's reading and
+ * the row could be neither accepted nor rejected. It goes past the mark and its space, where the
+ * text of the row starts. `at` when it is anywhere else.
+ */
+export function pastRowMark(table: TableRead, text: string, at: number): number {
+  for (const row of table.rows) {
+    const open = row.insertion?.segments[0]?.open;
+    if (!open || at < row.from || at > open.to) continue;
+    if (at === open.to || /^[\s|]*$/.test(text.slice(row.from, at))) {
+      return text[open.to] === ' ' ? open.to + 1 : open.to;
+    }
+  }
+  return at;
+}
+
 /** The marks, other than comments and highlights, that have a marker inside `row`. */
 function changesIn(parsed: Parsed, row: TableRowRead): MarkRange[] {
   return parsed.marks.filter(
