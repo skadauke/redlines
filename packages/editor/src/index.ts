@@ -56,7 +56,7 @@ export {
 } from './blocks/containers.ts';
 import { tabItems } from './blocks/tab-items.ts';
 import { tableMarkers } from './table/markers.ts';
-import { images, imageSpot } from './images.ts';
+import { imageFetcherFacet, images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
@@ -447,6 +447,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
     images(options.onImageFiles, options.onNotice, options.projectImageLink),
+    imageFetcherFacet.of(options.onFetchImage),
     noticeFacet.of(options.onNotice),
     options.onError
       ? EditorView.exceptionSink.of((error) => {
