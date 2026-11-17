@@ -184,7 +184,7 @@ repo root.
 
 - **Epics work on an integration branch** (#773). `epic/<issue>` starts from main; lane PRs target
   it and get the **thin** CI below; one PR from it to main, after the final sweep, gets the full
-  CI and merges as a merge commit. **Thin** is `ci.yml` on a pull request (into any branch) and on
+  CI and merges as a merge commit. **Thin** is `ci.yml` on a pull request (but the one from `epic/*` to main, which is full) and on
   a push to `epic/**`: typecheck, lint, format, `vitest run --changed <base>` plus the rule tests,
   and the Rust, Quick Look and journeys jobs only when their paths change (the journeys on a pull
   request by the label, as below; a push runs none). A push that makes a branch has no base, so

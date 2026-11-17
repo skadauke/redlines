@@ -78,6 +78,8 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
           SHA: ${{ github.sha }}
           EPIC_BRANCH: ${{ vars.EPIC_BRANCH }}
           GH_TOKEN: ${{ github.token }}
@@ -89,6 +91,10 @@ jobs:
           if [ "$EVENT" = pull_request ] || { [ "$EVENT" = push ] && [[ "$REF_NAME" == epic/* ]]; }; then
             thin=true
           fi
+          # The one pull request from an Epic branch to main gets the full run.
+          if [ "$EVENT" = pull_request ] && [ "$BASE_REF" = main ] && [[ "$HEAD_REF" == epic/* ]]; then
+            thin=false
+          fi
           if [ "$EVENT" = schedule ]; then
             branch="$EPIC_BRANCH"
             if [ -z "$branch" ]; then
@@ -97,7 +103,12 @@ jobs:
             fi
             if [ -n "$branch" ]; then
               found=$(gh api "repos/$REPO/git/ref/heads/$branch" --jq '.object.sha' || true)
-              [ -n "$found" ] && ref="$found"
+              if [ -n "$found" ]; then
+                ref="$found"
+              elif [ -n "$EPIC_BRANCH" ]; then
+                echo "::error::EPIC_BRANCH is set to $EPIC_BRANCH, which is not a branch."
+                exit 1
+              fi
             fi
             echo "The scheduled run tests: ${branch:-main} at $ref"
           fi
@@ -213,7 +224,7 @@ jobs:
       # A push that makes a branch has no commit before it (all zeros): that run takes every test.
       - name: Test
         run: |
-          if [ "$THIN" = true ] && [ -n "${BASE//0/}" ]; then
+          if [ "$THIN" = true ] && [ -n "${BASE//0/}" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             pnpm exec vitest run --changed "$BASE" --passWithNoTests
             # The rules every change must keep are tests that read the source files rather than
             # import them, so --changed never picks them; they run on every thin run.
@@ -348,7 +359,7 @@ jobs:
   # run writes nothing (it tested nothing); a skipped job counts as passing.
   record:
     needs: [changes, check, quicklook, desktop, journeys]
-    if: ${{ !cancelled() && needs.changes.outputs.skip != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.skip != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
