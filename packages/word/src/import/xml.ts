@@ -59,6 +59,9 @@ function qualify(name: string, scope: Map<string, string>, isAttribute: boolean)
   return prefix === '' ? local : name;
 }
 
+/** Deeper than any real document goes; the readers recurse. */
+const MAX_DEPTH = 256;
+
 interface Open {
   element: XmlElement;
   scope: Map<string, string>;
@@ -125,10 +128,12 @@ export function parseXml(text: string): XmlElement {
       for (const found of rest.matchAll(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
         rawAttrs.push([found[1] as string, decode((found[2] ?? found[3]) as string)]);
       }
-      const scope = new Map(top().scope);
+      // A scope is copied only where a start tag declares a namespace.
+      let scope = top().scope;
       for (const [name, value] of rawAttrs) {
-        if (name === 'xmlns') scope.set('', value);
-        else if (name.startsWith('xmlns:')) scope.set(name.slice(6), value);
+        if (name !== 'xmlns' && !name.startsWith('xmlns:')) continue;
+        if (scope === top().scope) scope = new Map(scope);
+        scope.set(name === 'xmlns' ? '' : name.slice(6), value);
       }
       const attrs: Record<string, string> = {};
       for (const [name, value] of rawAttrs) {
@@ -137,7 +142,10 @@ export function parseXml(text: string): XmlElement {
       }
       const element: XmlElement = { name: qualify(raw, scope, false), attrs, children: [] };
       top().element.children.push(element);
-      if (!selfClosing) stack.push({ element, scope, raw });
+      if (!selfClosing) {
+        if (stack.length > MAX_DEPTH) throw new Error('XML: elements are nested too deeply');
+        stack.push({ element, scope, raw });
+      }
       i = j + 1;
     }
   }

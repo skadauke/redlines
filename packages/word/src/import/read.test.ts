@@ -326,6 +326,48 @@ describe('readDocx: files it must refuse or cope with', () => {
     expect(gone?.deleted?.author).toBe('B');
   });
 
+  it('finds the main part through the package relationships', () => {
+    const w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const model = readDocx(
+      writeParts({
+        '_rels/.rels': strToU8(
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/main.xml"/></Relationships>',
+        ),
+        'word/main.xml': strToU8(
+          `<w:document ${w}><w:body><w:p><w:r><w:t>found</w:t></w:r></w:p></w:body></w:document>`,
+        ),
+      }),
+    );
+    expect(textOfParagraph(paragraphs(model.blocks)[0] as Paragraph)).toBe('found');
+  });
+
+  it('takes a list from the style when the paragraph names only a level', () => {
+    const w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const model = readDocx(
+      writeParts({
+        'word/document.xml': strToU8(
+          `<w:document ${w}><w:body><w:p><w:pPr><w:pStyle w:val="Item"/><w:numPr><w:ilvl w:val="1"/></w:numPr></w:pPr><w:r><w:t>x</w:t></w:r></w:p></w:body></w:document>`,
+        ),
+        'word/styles.xml': strToU8(
+          `<w:styles ${w}><w:style w:type="paragraph" w:styleId="Item"><w:name w:val="Item"/><w:pPr><w:numPr><w:numId w:val="3"/></w:numPr></w:pPr></w:style></w:styles>`,
+        ),
+        'word/numbering.xml': strToU8(
+          `<w:numbering ${w}><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum><w:num w:numId="3"><w:abstractNumId w:val="0"/></w:num></w:numbering>`,
+        ),
+      }),
+    );
+    expect((paragraphs(model.blocks)[0] as Paragraph).list).toEqual({
+      numId: 3,
+      level: 1,
+      format: 'decimal',
+      ordered: true,
+    });
+  });
+
+  it('refuses elements nested far deeper than a document goes', () => {
+    expect(() => parseXml(`${'<a>'.repeat(5000)}${'</a>'.repeat(5000)}`)).toThrow(/nested/);
+  });
+
   it('prefers dateUtc to the local date', () => {
     const xml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du"><w:body><w:p><w:ins w:id="1" w:author="A" w:date="2026-01-01T10:00:00Z" w16du:dateUtc="2026-01-01T15:00:00Z"><w:r><w:t>x</w:t></w:r></w:ins></w:p></w:body></w:document>`;
     const model = readDocx(writeParts({ 'word/document.xml': strToU8(xml) }));

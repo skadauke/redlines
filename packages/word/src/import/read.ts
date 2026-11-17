@@ -11,7 +11,8 @@
 
 import { ledgerTime } from '../shared/dates.ts';
 import type { ReportEntry } from '../shared/report.ts';
-import { partText, readParts } from '../shared/zip.ts';
+import { unzipSync } from 'fflate';
+import { partText } from '../shared/zip.ts';
 import type { Parts } from '../shared/zip.ts';
 import type {
   BookmarkMarker,
@@ -42,7 +43,7 @@ import type { XmlElement } from './xml.ts';
 const REL_BASE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
 
 /** The size of a part that is read, so that a damaged or hostile file can't take the app down. */
-const MAX_PART = 200 * 1024 * 1024;
+const MAX_PART = 64 * 1024 * 1024;
 
 interface Relationship {
   type: string;
@@ -64,7 +65,10 @@ function resolvePath(folder: string, target: string): string {
 function relsOf(parts: Parts, partPath: string): Map<string, Relationship> {
   const slash = partPath.lastIndexOf('/');
   const folder = partPath.slice(0, slash + 1);
-  const text = partText(parts, `${folder}_rels/${partPath.slice(slash + 1)}.rels`);
+  // The package's own relationships are `_rels/.rels`, not the relationships of a part.
+  const relsPath =
+    partPath === '.rels' ? '_rels/.rels' : `${folder}_rels/${partPath.slice(slash + 1)}.rels`;
+  const text = partText(parts, relsPath);
   const map = new Map<string, Relationship>();
   if (text === undefined) return map;
   for (const rel of kids(parseXml(text), 'Relationship')) {
@@ -330,7 +334,7 @@ class Reader {
       const l = Number(val(kid(numPr, 'w:ilvl')));
       if (val(kid(numPr, 'w:ilvl')) !== undefined && Number.isFinite(l)) level = l;
     }
-    if (numId === undefined && !numPr) {
+    if (numId === undefined) {
       for (const def of chain) {
         if (def.numId !== undefined) {
           numId = def.numId;
@@ -413,10 +417,12 @@ class Reader {
         old.other.join() === props.other.join();
       if (!same) paragraph.propsChange = { revision: revisionOf(change), old };
     }
+    // A move's range can open in one paragraph and close in another, so `moves` is kept; a field
+    // can't, and a text box holds paragraphs of its own, so the outer paragraph's fields wait.
+    const outer = this.fields;
     this.fields = [];
-    this.moves = [];
     this.inlines(p, {}, paragraph.children);
-    this.fields = [];
+    this.fields = outer;
     return paragraph;
   }
 
@@ -518,11 +524,14 @@ class Reader {
           break;
         }
         case 'w:commentRangeStart':
-          out.push({ type: 'commentStart', id: Number(child.attrs['w:id']) });
+        case 'w:commentRangeEnd': {
+          const id = Number(child.attrs['w:id']);
+          if (Number.isFinite(id)) {
+            const type = child.name === 'w:commentRangeStart' ? 'commentStart' : 'commentEnd';
+            out.push({ type, id });
+          }
           break;
-        case 'w:commentRangeEnd':
-          out.push({ type: 'commentEnd', id: Number(child.attrs['w:id']) });
-          break;
+        }
         case 'w:bookmarkStart':
         case 'w:bookmarkEnd': {
           const marker: BookmarkMarker = {
@@ -577,7 +586,12 @@ class Reader {
     let text = '';
     const flush = (): void => {
       if (text === '') return;
-      const run: Run = { type: 'run', text, format, ...ctx };
+      const run: Run = {
+        type: 'run',
+        text,
+        format: { ...format, other: [...format.other] },
+        ...ctx,
+      };
       const style = val(kid(rPr, 'w:rStyle'));
       if (style !== undefined) run.style = style;
       const change = kid(rPr, 'w:rPrChange');
@@ -608,6 +622,7 @@ class Reader {
             text += '-';
             break;
           case 'w:instrText':
+          case 'w:delInstrText':
             this.fieldInstruction(out, textOf(part));
             break;
           case 'w:fldChar':
@@ -786,7 +801,7 @@ function root(parts: Parts, path: string | undefined): XmlElement | undefined {
 export function readDocx(bytes: Uint8Array): DocxModel {
   let parts: Parts;
   try {
-    parts = readParts(bytes);
+    parts = unzipSync(bytes, { filter: (file) => file.originalSize <= MAX_PART });
   } catch {
     throw new Error('This is not a Word (.docx) file: it is not a zip.');
   }
