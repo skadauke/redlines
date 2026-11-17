@@ -648,8 +648,8 @@ function deletedTogether(
     const changes = ChangeSet.of(written, text.length);
     const after = parse(applyChanges(text, written), parsed);
     if (lineStartMarkers(after) > lineStartMarkers(parsed)) return null;
-    const main = edits.find((edit) => edit.main) ?? edits.at(-1)!;
-    return { changes, caret: changes.mapPos(main.from, -1) };
+    const main = edits.find((edit) => edit.main);
+    return { changes, caret: main ? changes.mapPos(main.from, -1) : null };
   } catch (error) {
     if (error instanceof EditError) return null;
     throw error;
