@@ -24,6 +24,7 @@ import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.
 import { type Callout, CalloutTitleWidget, calloutOf, pendingCallout } from './callout.ts';
 import { dialectFacet, imageOfNode } from '../image-size.ts';
 import { htmlBreak, htmlChip, htmlElement, htmlHeading, htmlWbr } from './html-draw.ts';
+import { htmlBlock, htmlBlocks, openedField } from './html-block.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
 import {
@@ -642,6 +643,7 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
         b.syntax(node.from, node.to, touches(state, node.from, node.to));
       else if (name === 'HtmlChip') htmlChip(b, node);
       else if (name === 'HTMLBlock' && htmlHeading(b, node.node)) return false;
+      else if (name === 'HTMLBlock' && htmlBlock(b, node.node)) return false;
       else if (name === 'Image' || name === 'HTMLTag' || name === 'HTMLBlock') {
         // An `<img>` tag is an image too (#526: it is what an image with a size is written as).
         if (imageOfNode(state, node.node)) {
@@ -720,6 +722,8 @@ function updatePreview(value: Preview, tr: Transaction): Preview {
   const everything =
     tr.effects.some((effect) => effect.is(refreshImagesEffect)) ||
     openBlock(state) !== null ||
+    // The HTML blocks whose source is open, or held open by a match of Find.
+    state.field(openedField, false) !== tr.startState.field(openedField, false) ||
     openBlock(tr.startState) !== null ||
     state.field(viewModeField, false) !== tr.startState.field(viewModeField, false) ||
     // The names of emoji that a host gave, or took away, after the text was drawn.
@@ -826,5 +830,5 @@ const hardBreakCaret = Prec.highest(
 
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
-  return [previewField, hardBreakCaret];
+  return [previewField, hardBreakCaret, htmlBlocks()];
 }

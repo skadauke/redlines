@@ -81,6 +81,7 @@ import {
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
 import { tableMouse } from './table/mouse.ts';
@@ -332,6 +333,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     barLayer(),
     barSwitch(),
     trackedTyping(),
+    // Before the blocks' keys, which Return would else replace a selected HTML block with a line.
+    htmlBlockKeys,
     openBlocks(),
     emptyLineTyping,
     typedSyntax,
