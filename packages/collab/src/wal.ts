@@ -40,6 +40,16 @@ export interface WriteAheadLog {
   records(): readonly WalRecord[];
 }
 
+/**
+ * A log whose appends reach a store later (a file behind a command). `append` is still synchronous,
+ * as the authority needs; `flushed` resolves once every record appended so far is stored, and a
+ * host sends no acknowledgement before it does. It rejects when the store refused one, for the
+ * host to stop on: a record that is not stored never was confirmed.
+ */
+export interface DurableLog extends WriteAheadLog {
+  flushed(): Promise<void>;
+}
+
 export class MemoryLog implements WriteAheadLog {
   private list: WalRecord[];
   constructor(records: readonly WalRecord[] = []) {

@@ -13,6 +13,7 @@
 import { Annotation } from '@codemirror/state';
 import type { Transaction } from '@codemirror/state';
 import type { Person, TextChange } from '@redlines/format';
+import type { TableIntent } from '../table/intent.ts';
 import type { FormatIntent } from './format-intent.ts';
 
 /** An edit of an intent, in the offsets of the text it was made to. */
@@ -40,9 +41,25 @@ export interface TypingIntent {
   time: string;
   /** The bytes the format drew for ids, call by call, in order. */
   drawn: readonly (readonly number[])[];
+  /**
+   * For text composed by an input method: the change that puts the text as it was before the
+   * composition back, which the transaction's start text has composed in. The edits are of that
+   * text, and the transaction's changes are this one followed by what they wrote.
+   */
+  revert?: readonly TextChange[];
 }
 
-export type Intent = TypingIntent | FormatIntent;
+/**
+ * An edit of several writes, each made on the text the one before it left, as a paste over cells
+ * that adds columns and rows and then fills the cells: its steps in order, each an intent of its own.
+ */
+export interface StepsIntent {
+  kind: 'steps';
+  id: string;
+  steps: readonly (TypingIntent | TableIntent)[];
+}
+
+export type Intent = TypingIntent | FormatIntent | TableIntent | StepsIntent;
 
 /** An intent with no id yet: what the writers make. */
 export type Unnamed<T = Intent> = T extends unknown ? Omit<T, 'id'> : never;
@@ -100,7 +117,9 @@ export function recording(source?: (n: number) => Uint8Array): Drawing {
  * than the first did (an id was taken meanwhile); those further draws come from a stream that
  * depends only on the intent's id and the draw's place, so deriving twice gives the same.
  */
-export function replaying(intent: Pick<Intent, 'id' | 'drawn'>): (n: number) => Uint8Array {
+export function replaying(
+  intent: Pick<Exclude<Intent, StepsIntent>, 'id' | 'drawn'>,
+): (n: number) => Uint8Array {
   let next = 0;
   return (n) => {
     const at = next++;

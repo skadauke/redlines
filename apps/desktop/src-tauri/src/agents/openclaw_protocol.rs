@@ -1,10 +1,10 @@
 //! What Redlines says to an OpenClaw Gateway as a node, and what it understands back: every frame's
 //! shape, in one place (docs/research/openclaw-connection.md, "The node connection").
 //!
-//! **These shapes are from OpenClaw's documentation and from what its apps are known to send, not
-//! from its schemas, and nothing has been run against a real Gateway yet.** They are the first thing
-//! the first live test (docs/research/openclaw-connection.md, "First live test") checks, and the
-//! only place to change when a Gateway says otherwise. What is assumed:
+//! **These shapes were first written from OpenClaw's documentation, and then checked against a
+//! live `openclaw@2026.11.5` Gateway** (docs/research/openclaw-connection.md, "First live test",
+//! "What the live test found"). This is the only place to change when a Gateway says otherwise.
+//! What is assumed:
 //!
 //! - frames are JSON text: `{"type":"req","id","method","params"}` from the client,
 //!   `{"type":"res","id","ok","payload"|"error"}` back, and `{"type":"event","event","payload"}`
@@ -17,8 +17,15 @@
 //! - a call arrives as the event `node.invoke.request` and is answered with the request
 //!   `node.invoke.result`.
 //!
-//! A Gateway that speaks a newer protocol than [`PROTOCOL`] is told apart (`is_newer`), so that the
-//! sheet says "this Gateway is newer than Redlines knows" rather than failing in a strange way.
+//! Checked against a live `openclaw@2026.11.5` Gateway (Epic #930's first live test): the client id
+//! must be one of a closed list (`node-host`), a published tool is a closed descriptor
+//! (`pluginId: "node-mcp"`, `parameters`, `mcp: {server, tool}`), and a call's `paramsJSON` is
+//! `{server, tool, arguments}`.
+//!
+//! A Gateway that can't speak [`PROTOCOL`] refuses `connect`, and `classify` tells that apart, so
+//! that the sheet says "this Gateway is newer than Redlines knows". A live Gateway answers
+//! `hello-ok` with its own protocol (4) to a node that offered 3, as its own node host does, so a
+//! `hello-ok` is never judged by its number.
 
 use serde_json::{Value, json};
 
@@ -29,8 +36,32 @@ pub const PROTOCOL: u64 = 3;
 /// `system.run` or anything that runs a program.
 pub const COMMAND: &str = "mcp.tools.call.v1";
 
-/// What this client calls itself.
-pub const CLIENT_ID: &str = "redlines";
+/// What this client calls itself. The Gateway checks `client.id` against a closed list (a live
+/// Gateway answered "must be one of: webchat-ui, openclaw-control-ui, ... node-host"), so a third
+/// party can't have an id of its own: a node says `node-host`, and the Gateway's owner tells it
+/// apart by its display name and its device.
+pub const CLIENT_ID: &str = "node-host";
+
+/// The name of the MCP server the tools are published under (the Gateway sends it back in a call).
+pub const SERVER: &str = "redlines";
+
+/// The plugin id the Gateway reserves for a node's MCP tools.
+pub const PLUGIN_ID: &str = "node-mcp";
+
+/// What an operator client calls itself. A third party can't have an id of its own (the list is
+/// closed, see [`CLIENT_ID`]); `gateway-client` in mode `backend` is what a program that talks to a
+/// Gateway for its owner is, and a live Gateway accepted it for a chat client (see "The other
+/// direction" in docs/research/openclaw-connection.md).
+pub const OPERATOR_CLIENT_ID: &str = "gateway-client";
+pub const OPERATOR_MODE: &str = "backend";
+
+/// The protocol an operator speaks. A live Gateway refuses an operator that offers the node's 3
+/// ("protocol mismatch", expected 4), though it takes a node's 3.
+pub const OPERATOR_PROTOCOL: u64 = 4;
+
+/// What an operator may do here: read what a session said, and write to a session. Nothing else
+/// (no `operator.admin`, no pairing, no approvals).
+pub const OPERATOR_SCOPES: [&str; 2] = ["operator.read", "operator.write"];
 
 /// A Gateway's error: a code and a line, and what else it said.
 #[derive(Clone, Debug, PartialEq)]
@@ -59,8 +90,51 @@ pub enum Incoming {
         command: String,
         params_json: String,
     },
+    /// A step of a chat run: what the agent said so far, or how it ended.
+    Chat(ChatEvent),
     /// Anything else (a tick, a presence event): ignored.
     Other,
+}
+
+/// What the Gateway says of a run started by `chat.send` (the event `chat`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChatEvent {
+    pub run_id: String,
+    pub session_key: String,
+    pub state: ChatState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ChatState {
+    /// Progress with no words (`preparing_workspace`, `starting_model`): not an answer.
+    Status,
+    /// More of the answer: the new words, or, when `replace`, the whole text so far.
+    Delta {
+        text: String,
+        replace: bool,
+    },
+    /// The answer, whole.
+    Final {
+        text: String,
+    },
+    Aborted,
+    Error {
+        message: String,
+    },
+}
+
+/// The text of a chat message as the Gateway writes it: `content` is a list of `{type, text}`.
+fn message_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter(|part| part.get("type").and_then(Value::as_str).unwrap_or("text") == "text")
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
 }
 
 /// Reads a text frame. Anything that isn't a frame is `Other`.
@@ -78,6 +152,36 @@ pub fn parse(text: &str) -> Incoming {
                     Some(nonce) => Incoming::Challenge { nonce },
                     None => Incoming::Other,
                 },
+                Some("chat") => {
+                    let (Some(run_id), Some(session_key)) =
+                        (string(&payload, "runId"), string(&payload, "sessionKey"))
+                    else {
+                        return Incoming::Other;
+                    };
+                    let message = payload.get("message").cloned().unwrap_or(Value::Null);
+                    let state = match payload.get("state").and_then(Value::as_str) {
+                        Some("delta") => ChatState::Delta {
+                            text: string(&payload, "deltaText")
+                                .unwrap_or_else(|| message_text(&message)),
+                            replace: payload.get("replace").and_then(Value::as_bool) == Some(true),
+                        },
+                        Some("final") => ChatState::Final {
+                            text: message_text(&message),
+                        },
+                        Some("aborted") => ChatState::Aborted,
+                        Some("error") => ChatState::Error {
+                            message: string(&payload, "errorMessage")
+                                .or_else(|| string(&payload, "error"))
+                                .unwrap_or_else(|| "The agent failed.".to_owned()),
+                        },
+                        _ => ChatState::Status,
+                    };
+                    Incoming::Chat(ChatEvent {
+                        run_id,
+                        session_key,
+                        state,
+                    })
+                }
                 Some("node.invoke.request") => {
                     let params_json = match payload.get("paramsJSON") {
                         Some(Value::String(text)) => text.clone(),
@@ -188,12 +292,32 @@ pub fn classify(error: &WireError, offered_setup_code: bool) -> Refusal {
     })
 }
 
-/// Whether a `hello-ok` speaks a newer protocol than this one.
-pub fn is_newer(hello: &Value) -> bool {
-    hello
-        .get("protocol")
-        .and_then(Value::as_u64)
-        .is_some_and(|protocol| protocol > PROTOCOL)
+/// What a setup code holds: `openclaw qr --setup-code-only` prints base64url of
+/// `{"url": ..., "bootstrapToken": ..., "expiresAtMs": ...}` (a live Gateway's), and a Gateway
+/// takes only the bootstrap token in `auth.bootstrapToken`. A person may paste the whole code or,
+/// from an older agent, the bare token; either way this gives the token. `None` for a code that is
+/// JSON with no token.
+pub fn bootstrap_token(pasted: &str) -> Option<String> {
+    use base64::Engine as _;
+    // A code that a chat or a terminal wrapped has line breaks inside it.
+    let text = pasted
+        .split_whitespace()
+        .collect::<String>()
+        .trim_end_matches('=')
+        .replace('+', "-")
+        .replace('/', "_");
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(text.as_bytes())
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    match decoded {
+        Some(Value::Object(object)) => object
+            .get("bootstrapToken")
+            .and_then(Value::as_str)
+            .filter(|token| !token.is_empty())
+            .map(str::to_owned),
+        _ => Some(pasted.split_whitespace().collect()),
+    }
 }
 
 /// The text the device signs: what the Gateway checks against the key it was given, so that the
@@ -206,6 +330,19 @@ pub fn signed_text(
     nonce: &str,
 ) -> String {
     format!("v2|{device_id}|{CLIENT_ID}|{role}|{role}||{signed_at_ms}|{credential}|{nonce}")
+}
+
+/// The same for an operator: its own client id and mode, and its scopes, comma-joined.
+pub fn operator_signed_text(
+    device_id: &str,
+    signed_at_ms: u64,
+    credential: &str,
+    nonce: &str,
+) -> String {
+    format!(
+        "v2|{device_id}|{OPERATOR_CLIENT_ID}|{OPERATOR_MODE}|operator|{}|{signed_at_ms}|{credential}|{nonce}",
+        OPERATOR_SCOPES.join(",")
+    )
 }
 
 /// What a `connect` carries, apart from the device's signature.
@@ -257,16 +394,86 @@ pub fn connect_request(c: &Connect<'_>) -> String {
     .to_string()
 }
 
+/// The operator's `connect`: the same device as the node's, the role `operator`, and the two scopes
+/// that read and write a session.
+pub fn operator_connect_request(c: &Connect<'_>) -> String {
+    json!({
+        "type": "req",
+        "id": c.id,
+        "method": "connect",
+        "params": {
+            "minProtocol": OPERATOR_PROTOCOL,
+            "maxProtocol": OPERATOR_PROTOCOL,
+            "client": {
+                "id": OPERATOR_CLIENT_ID,
+                "displayName": c.display_name,
+                "version": c.version,
+                "platform": "macos",
+                "mode": OPERATOR_MODE,
+            },
+            "role": "operator",
+            "scopes": OPERATOR_SCOPES,
+            "caps": [],
+            "commands": [],
+            "permissions": {},
+            "auth": { (c.credential_kind): c.credential },
+            "device": {
+                "id": c.device_id,
+                "publicKey": c.public_key,
+                "signature": c.signature,
+                "signedAt": c.signed_at_ms,
+                "nonce": c.nonce,
+            },
+        },
+    })
+    .to_string()
+}
+
+/// A message into an agent's session, the way OpenClaw's own apps chat. `key` makes a repeat of the
+/// same send one run, and is the run's id in the events.
+pub fn chat_send_request(id: &str, session_key: &str, message: &str, key: &str) -> String {
+    json!({
+        "type": "req",
+        "id": id,
+        "method": "chat.send",
+        "params": { "sessionKey": session_key, "message": message, "idempotencyKey": key },
+    })
+    .to_string()
+}
+
+/// Stops a run in a session.
+pub fn chat_abort_request(id: &str, session_key: &str, run_id: &str) -> String {
+    json!({
+        "type": "req",
+        "id": id,
+        "method": "chat.abort",
+        "params": { "sessionKey": session_key, "runId": run_id },
+    })
+    .to_string()
+}
+
 /// Publishes the node's tools: MCP's own descriptors (`name`, `description`, `inputSchema`), each
 /// tied to the one command.
 pub fn plugin_tools_request(id: &str, tools: &[Value]) -> String {
     let tools: Vec<Value> = tools
         .iter()
         .filter_map(|tool| {
-            let mut tool = tool.as_object()?.clone();
-            tool.get("name")?.as_str()?;
-            tool.insert("command".to_owned(), json!(COMMAND));
-            Some(Value::Object(tool))
+            // The Gateway's descriptor is a closed object: `parameters` where MCP says
+            // `inputSchema`, and the MCP server and tool a call is routed to.
+            let name = tool.get("name")?.as_str()?;
+            let description = tool
+                .get("description")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .unwrap_or(name);
+            Some(json!({
+                "pluginId": PLUGIN_ID,
+                "name": name,
+                "description": description,
+                "parameters": tool.get("inputSchema").cloned().unwrap_or_else(|| json!({"type": "object"})),
+                "command": COMMAND,
+                "mcp": { "server": SERVER, "tool": name },
+            }))
         })
         .collect();
     json!({
@@ -307,14 +514,14 @@ mod tests {
         let greeting =
             r#"{"type":"event","event":"connect.challenge","payload":{"nonce":"n1","ts":5}}"#;
         assert_eq!(parse(greeting), Incoming::Challenge { nonce: "n1".into() });
-        let call = r#"{"type":"event","event":"node.invoke.request","payload":{"id":"c1","nodeId":"d1","command":"mcp.tools.call.v1","paramsJSON":"{\"name\":\"view\"}","timeoutMs":9000}}"#;
+        let call = r#"{"type":"event","event":"node.invoke.request","payload":{"id":"c1","nodeId":"d1","command":"mcp.tools.call.v1","paramsJSON":"{\"server\":\"redlines\",\"tool\":\"view\"}","timeoutMs":9000}}"#;
         assert_eq!(
             parse(call),
             Incoming::Invoke {
                 id: "c1".into(),
                 node_id: "d1".into(),
                 command: "mcp.tools.call.v1".into(),
-                params_json: r#"{"name":"view"}"#.into()
+                params_json: r#"{"server":"redlines","tool":"view"}"#.into()
             }
         );
     }
@@ -330,6 +537,26 @@ mod tests {
         ] {
             assert_eq!(parse(text), Incoming::Other, "{text}");
         }
+    }
+
+    #[test]
+    fn a_setup_code_gives_its_bootstrap_token_and_a_bare_token_is_itself() {
+        use base64::Engine as _;
+        let code = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"url":"ws://127.0.0.1:18789","bootstrapToken":"Bt-1_x","expiresAtMs":5}"#);
+        assert_eq!(bootstrap_token(&code).as_deref(), Some("Bt-1_x"));
+        assert_eq!(
+            bootstrap_token(&format!(" {code}=\n")).as_deref(),
+            Some("Bt-1_x")
+        );
+        assert_eq!(
+            bootstrap_token("CcN4abcDEF123").as_deref(),
+            Some("CcN4abcDEF123")
+        );
+        let wrapped = format!("{}\n  {}", &code[..10], &code[10..]);
+        assert_eq!(bootstrap_token(&wrapped).as_deref(), Some("Bt-1_x"));
+        let none = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"url":"x"}"#);
+        assert_eq!(bootstrap_token(&none), None);
     }
 
     #[test]
@@ -394,13 +621,6 @@ mod tests {
     }
 
     #[test]
-    fn a_newer_protocol_is_noticed() {
-        assert!(is_newer(&json!({"protocol": PROTOCOL + 1})));
-        assert!(!is_newer(&json!({"protocol": PROTOCOL})));
-        assert!(!is_newer(&json!({})));
-    }
-
-    #[test]
     fn connect_declares_the_one_command_and_the_node_role() {
         let text = connect_request(&Connect {
             id: "1",
@@ -437,6 +657,144 @@ mod tests {
         let tools = frame["params"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["command"], "mcp.tools.call.v1");
+        // The Gateway's descriptor is closed: these keys and no others.
+        assert_eq!(
+            tools[0],
+            json!({"pluginId": "node-mcp", "name": "view", "description": "d",
+                "parameters": {}, "command": "mcp.tools.call.v1",
+                "mcp": {"server": "redlines", "tool": "view"}})
+        );
+    }
+
+    #[test]
+    fn a_node_is_a_node_host_and_signs_what_the_gateway_checks() {
+        // The Gateway's own text: v2|device|client id|mode|role|scopes|at|token|nonce.
+        assert_eq!(
+            signed_text("d", "node", 7, "tok", "n"),
+            "v2|d|node-host|node|node||7|tok|n"
+        );
+        let text = connect_request(&Connect {
+            id: "1",
+            display_name: "x",
+            version: "1",
+            device_id: "d",
+            public_key: "p",
+            signature: "s",
+            signed_at_ms: 1,
+            nonce: "n",
+            credential_kind: "token",
+            credential: "t",
+        });
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(frame["params"]["client"]["id"], "node-host");
+        assert_eq!(frame["params"]["client"]["mode"], "node");
+    }
+
+    #[test]
+    fn a_chat_run_is_read_as_status_words_and_an_end() {
+        let frame = |payload: Value| {
+            let mut payload = payload;
+            payload["runId"] = json!("r1");
+            payload["sessionKey"] = json!("agent:main:redlines-0");
+            json!({"type": "event", "event": "chat", "payload": payload}).to_string()
+        };
+        let state = |text: String| match parse(&text) {
+            Incoming::Chat(event) => {
+                assert_eq!(event.run_id, "r1");
+                assert_eq!(event.session_key, "agent:main:redlines-0");
+                event.state
+            }
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            state(frame(json!({"state": "status", "phase": "starting_model"}))),
+            ChatState::Status
+        );
+        assert_eq!(
+            state(frame(json!({"state": "delta", "deltaText": "Hi"}))),
+            ChatState::Delta {
+                text: "Hi".into(),
+                replace: false
+            }
+        );
+        assert_eq!(
+            state(frame(
+                json!({"state": "delta", "deltaText": "", "replace": true,
+                "message": {"content": [{"type": "text", "text": ""}]}})
+            )),
+            ChatState::Delta {
+                text: String::new(),
+                replace: true
+            }
+        );
+        assert_eq!(
+            state(frame(
+                json!({"state": "final", "message": {"role": "assistant",
+                "content": [{"type": "text", "text": "Hi "}, {"type": "text", "text": "there"}]}})
+            )),
+            ChatState::Final {
+                text: "Hi there".into()
+            }
+        );
+        assert_eq!(
+            state(frame(json!({"state": "aborted"}))),
+            ChatState::Aborted
+        );
+        assert_eq!(
+            state(frame(
+                json!({"state": "error", "errorMessage": "No model."})
+            )),
+            ChatState::Error {
+                message: "No model.".into()
+            }
+        );
+        assert_eq!(
+            parse(r#"{"type":"event","event":"chat","payload":{"state":"final"}}"#),
+            Incoming::Other
+        );
+    }
+
+    #[test]
+    fn an_operator_connects_as_a_backend_client_with_two_scopes_and_signs_for_them() {
+        assert_eq!(
+            operator_signed_text("d", 7, "tok", "n"),
+            "v2|d|gateway-client|backend|operator|operator.read,operator.write|7|tok|n"
+        );
+        let text = operator_connect_request(&Connect {
+            id: "1",
+            display_name: "Redlines on Ada's MacBook",
+            version: "0.2.0",
+            device_id: "dev",
+            public_key: "pk",
+            signature: "sig",
+            signed_at_ms: 5,
+            nonce: "n",
+            credential_kind: "bootstrapToken",
+            credential: "code",
+        });
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        let params = &frame["params"];
+        assert_eq!(params["role"], "operator");
+        assert_eq!(params["minProtocol"], 4);
+        assert_eq!(params["client"]["id"], "gateway-client");
+        assert_eq!(params["client"]["mode"], "backend");
+        assert_eq!(params["scopes"], json!(["operator.read", "operator.write"]));
+        assert_eq!(params["commands"], json!([]));
+        assert!(!text.contains("operator.admin"));
+    }
+
+    #[test]
+    fn a_send_and_an_abort_name_the_session() {
+        let send: Value =
+            serde_json::from_str(&chat_send_request("3", "agent:main:redlines-0", "Hi", "k1"))
+                .unwrap();
+        assert_eq!(send["method"], "chat.send");
+        assert_eq!(send["params"]["sessionKey"], "agent:main:redlines-0");
+        assert_eq!(send["params"]["idempotencyKey"], "k1");
+        let abort: Value =
+            serde_json::from_str(&chat_abort_request("4", "agent:main:redlines-0", "k1")).unwrap();
+        assert_eq!(abort["method"], "chat.abort");
+        assert_eq!(abort["params"]["runId"], "k1");
     }
 
     #[test]

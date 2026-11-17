@@ -8,21 +8,31 @@
 //! the record's, the device key's, and `openclaw-tools.json`, which is a copy of the six tools of
 //! `packages/agent-tools` that a test keeps equal.
 //!
+//! The same connection record also lets Redlines *ask* the agent (`openclaw_chat.rs`): the setup
+//! code is first used to open an operator connection, whose token is kept beside the node's, and
+//! an OpenClaw connection that holds one is an agent in the @ picker and in Ask (`chat_agents`,
+//! `chat_for`).
+//!
 //! Calls are answered with a plain "not connected to documents yet": which document an agent's call
 //! acts on is the next piece of work (the tool bridge), and until then the Gateway's agent can see
 //! the tools and will be told so when it uses one.
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{Value, json};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
+use super::acp::{AcpAgent, Bridge};
 use super::connections::{Connections, Kind, Secret};
 use super::gateway::target;
 use super::node::{
     Config, Credential, Event, Identity, Running, Status, Timing, TokenStore, ToolHost, start,
 };
+use super::openclaw_agent::Talk;
+use super::openclaw_chat::{Outcome, ask, connect_operator, run_key};
+use super::openclaw_protocol as protocol;
 
 /// The six tools, as `tools/list` says them.
 const TOOLS: &str = include_str!("openclaw-tools.json");
@@ -132,7 +142,12 @@ impl Nodes {
             .ok_or("That connection isn’t there any more.")?;
         let gateway = target(&connection.url, None)?;
         let first = match setup_code {
-            Some(code) => Credential::SetupCode(code),
+            Some(code) => {
+                let token = protocol::bootstrap_token(code.expose())
+                    .and_then(|token| Secret::new(&token).ok())
+                    .ok_or("That setup code has no token in it. Ask for a new one.")?;
+                Credential::SetupCode(token)
+            }
             None => match store.secret(handle, Kind::NodeToken) {
                 Some(token) => Credential::Token(token),
                 None => return Err("There is no setup code or token to connect with.".to_owned()),
@@ -140,6 +155,27 @@ impl Nodes {
         };
         let seed = store.device_key(handle)?;
         let identity = Identity::from_seed(seed.expose()).ok_or("The device key is damaged.")?;
+        // A setup code is good for both roles of a device when the operator goes first (a live
+        // Gateway refused it to an operator once the node had used it), so a new code opens the
+        // operator connection, keeps its token, and then the node starts with the same code.
+        if let Credential::SetupCode(code) = &first {
+            let operator = Config {
+                target: target(&connection.url, None)?,
+                identity: Identity::from_seed(seed.expose()).ok_or("The device key is damaged.")?,
+                display_name: format!("Redlines on {computer}"),
+                version: env!("CARGO_PKG_VERSION").to_owned(),
+                timing: Timing::default(),
+            };
+            let offered = Credential::SetupCode(Secret::new(code.expose())?);
+            // A failure here only means no chat yet: the node still connects, and says its own.
+            if let Ok((mut socket, Some(token))) =
+                connect_operator(&operator, &offered, &AtomicBool::new(false))
+            {
+                let _ = store.keep(handle, Kind::OperatorToken, &token);
+                let _ = socket.close(None);
+                let _ = app.emit(super::ACP_AGENTS_CHANGED, ());
+            }
+        }
         let status = Arc::new(Mutex::new(Status::Connecting));
         let (shown, owner, name) = (Arc::clone(&status), app.clone(), handle.to_owned());
         let running = start(
@@ -173,6 +209,74 @@ impl Nodes {
         }
         Ok(())
     }
+}
+
+/// The OpenClaw connections that can be asked, as the agents the window lists: the handle is what
+/// people write after an @, and the OpenClaw agent the person named, if they did, is the bridge's.
+pub fn chat_agents(app: &AppHandle) -> Vec<AcpAgent> {
+    app.state::<Connections>()
+        .views()
+        .into_iter()
+        .filter(|view| view.operator_token && view.device_key)
+        .map(|view| AcpAgent {
+            id: view.connection.handle,
+            name: view.connection.name,
+            program: String::new(),
+            args: Vec::new(),
+            bridge: Some(Bridge {
+                agent: view.connection.agent,
+            }),
+        })
+        .collect()
+}
+
+/// What a run of this connection as an agent needs: the OpenClaw agent it asks, and the way to
+/// ask. Nothing for a connection that has no operator token.
+pub fn chat_for(app: &AppHandle, handle: &str) -> Option<(Bridge, Talk)> {
+    let store = app.state::<Connections>();
+    let connection = store.get(handle)?;
+    let token = store.secret(handle, Kind::OperatorToken)?;
+    let seed = store.device_key(handle).ok()?;
+    let gateway = target(&connection.url, None).ok()?;
+    let (owner, name) = (app.clone(), handle.to_owned());
+    let talk: Talk = Arc::new(move |session: &str, text: &str, stop: &AtomicBool| {
+        let config = Config {
+            target: gateway.clone(),
+            identity: Identity::from_seed(seed.expose()).ok_or("The device key is damaged.")?,
+            display_name: format!("Redlines on {}", this_mac()),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            timing: Timing::default(),
+        };
+        let credential =
+            Credential::Token(Secret::new(token.expose()).map_err(|_| "The token is damaged.")?);
+        let (mut socket, issued) =
+            connect_operator(&config, &credential, stop).map_err(|error| error.message())?;
+        // A Gateway that rotates the device's token says so in the answer to connect.
+        if let Some(fresh) = issued
+            && fresh.expose() != token.expose()
+        {
+            let _ = owner
+                .state::<Connections>()
+                .keep(&name, Kind::OperatorToken, &fresh);
+        }
+        let outcome = ask(&mut socket, &config, session, text, &run_key(), stop);
+        let _ = socket.close(None);
+        if matches!(outcome, Ok(Outcome::Done(_))) {
+            let _ = owner.state::<Connections>().used(&name, super::now());
+        }
+        outcome
+    });
+    Some((
+        Bridge {
+            agent: connection.agent,
+        },
+        talk,
+    ))
+}
+
+/// This Mac's name for the Gateway's owner to read in a request.
+fn this_mac() -> String {
+    super::this_mac_name()
 }
 
 /// The name of this Mac as people know it, for what the Gateway's owner sees in a request.
