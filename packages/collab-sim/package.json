@@ -14,6 +14,8 @@
     "yjs": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/yjs-cli.ts"
   },
   "dependencies": {
+    "@codemirror/state": "^6.7.6",
+    "@redlines/editor": "workspace:*",
     "@redlines/format": "workspace:*",
     "yjs": "13.6.33"
   }

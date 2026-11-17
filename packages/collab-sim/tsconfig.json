@@ -1,7 +1,9 @@
 {
   // Research tooling that runs in Node: the matrix script reads the environment and writes files.
+  // `real.ts` drives the editor, which needs a DOM, in Vitest's happy-dom.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
     "types": ["node"]
   },
   "include": ["src"]
