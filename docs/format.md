@@ -1088,7 +1088,10 @@ at the outer edge of a whole inline construct. A marker never goes:
    in every order, but never a character of the text of another person's insertion or
    substitution: that is not the author's to write again (a deletion holds no text, and the change
    may stand behind its marker). Where no way reads alike, the change is refused, in words that name
-   the other person's change and ask for it to be decided first;
+   the other person's change and ask for it to be decided first. A format change (`fmt`) counts as
+   a mark that stands against the change: an insertion right before another person's tracked italic
+   that starts with punctuation (`*<sup>`) would read otherwise when it is accepted (`é*<sup>`
+   can't open emphasis) than when it is rejected, so it is refused in those words (#484);
 6. between a hard break's trailing spaces or backslash and the line end. It goes before them. The
    spaces are those of the newest view, whoever types them: two spaces typed at the end of a line
    that another line follows (or one typed after a space, or next to the spaces of another

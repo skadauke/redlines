@@ -2446,7 +2446,6 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   /** Whether a marker of a mark that is no format change or split touches the change. */
   const stands = (m: MarkerRange) =>
     m.mark !== undefined &&
-    m.mark.kind !== 'fmt' &&
     m.mark.kind !== 'split' &&
     m.to >= from &&
     m.from <= to;
