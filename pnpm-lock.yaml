@@ -262,6 +262,12 @@ importers:
 
   packages/collab-sim:
     dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../editor
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
