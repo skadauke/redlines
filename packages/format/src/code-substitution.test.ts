@@ -340,10 +340,11 @@ describe('a block that a pending change holds, and front matter', () => {
     expect(refused.code).toBe('no-legal-placement');
   });
 
-  it('is widened for another person in a block that your substitution holds', () => {
+  it('is refused for another person in a block that your substitution holds (#808)', () => {
     const mine = typeIn(BODY, ['X'], afterOne);
     const at = mine.indexOf('oneX') + 4;
-    widened(mine, at, at, 'Y', bo, 'bo');
+    // A replacement that would hold Ada's pending change keeps the refusal (#808).
+    expect(attempt(mine, at, at, 'Y', bo).code).toBe('no-legal-placement');
     // Deciding it first frees the code.
     const decided = applyChanges(mine, accept(mine, 'm2bd'));
     const free = decided.indexOf('oneX') + 4;
@@ -664,7 +665,8 @@ describe('the marks that refuse a key in indented code (fix round 3)', () => {
     // Bo's deletion of the break is at it.
     const at = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'bo' });
     const held = at.indexOf('one') + 1;
-    widened(at, held, held, 'x');
+    // The refusal stays: a widened replacement would not read alike in every order (#808, #107).
+    expect(type(at, held).code).toBe('no-legal-placement');
     const own2 = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'ada' });
     expect(type(own2, own2.indexOf('one') + 1).error).toBeUndefined();
   });

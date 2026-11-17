@@ -77,7 +77,8 @@ export interface Widened {
   unit: WidenedUnit;
   /** The ids of other people's pending changes that are in its old text. */
   held: string[];
-  /** The part of `held` that is not the author's own: those keep a widened edit refused (#808). */
+  /** The part of `held` that is not the author's own, and others' marks that touch the unit's edges:
+   * those keep a widened edit refused (#808, #107). */
   heldByOthers: string[];
   /** The ids of the author's own pending changes in the unit, which folded into the replacement:
    * its old text has them rejected. */
@@ -465,9 +466,22 @@ function tryRung(
     id,
     unit: { kind: rung.kind, rung: index, from: rung.from, to: rung.to, blocks },
     held,
-    heldByOthers: held.filter(
-      (held_id) => parsed.marks.find((m) => m.id === held_id)?.entry.by !== ctx.author.handle,
-    ),
+    heldByOthers: [
+      ...held.filter(
+        (held_id) => parsed.marks.find((m) => m.id === held_id)?.entry.by !== ctx.author.handle,
+      ),
+      // Another person's mark that ends at the unit's edge (a split's break right in front of it,
+      // an insertion right after it) is decided with the block next to it: the replacement would
+      // read differently in some order (#107).
+      ...parsed.marks
+        .filter(
+          (mark) =>
+            mark.entry.by !== ctx.author.handle &&
+            !held.includes(mark.id) &&
+            touches(mark, { from: rung.lineFrom - 2, to: rung.to + 2 }),
+        )
+        .map((mark) => mark.id),
+    ],
     folded: own.map((mark) => mark.id),
   };
 }
