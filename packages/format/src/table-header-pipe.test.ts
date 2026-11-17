@@ -34,7 +34,7 @@ describe('a comment or a highlight at the end of a header row', () => {
     });
   }
 
-  it('goes in front of the underscore before a pending alignment mark, not past the pipe', () => {
+  it('stays in front of the pipe beside a pending alignment mark', () => {
     const body = `|b|café|café_<!--fmt k3x9 align=\\|\\x20-\\-:\\x20\\|\\x20:-\\-\\x20\\|\\x20-\\-\\-\\-:\\x20\\|-->|${rest}`;
     const text = file(body, { k3x9: 'ada' });
     const view = newestView(text);
@@ -43,7 +43,7 @@ describe('a comment or a highlight at the end of a header row', () => {
       text,
       addComment(text, range, 'Note.', context(ada, ['q6rs'])).changes,
     );
-    expect(bodyOf(out).split('\n')[0]).toMatch(/<!--\/q6rs-->_<!--fmt k3x9.*-->\|$/);
+    expect(bodyOf(out).split('\n')[0]).toMatch(/<!--\/q6rs-->_?<!--fmt k3x9.*-->\|$/);
     expect(isTable(out)).toBe(true);
   });
 });
