@@ -7,7 +7,7 @@
 
 import { isolateHistory } from '@codemirror/commands';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { ChangeSet, type EditorState, Transaction } from '@codemirror/state';
+import { type EditorState, Transaction } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
 import {
@@ -32,15 +32,18 @@ import {
   setFold,
   setViewModeEffect,
   tablesOf,
+  editSourceFacet,
+  recordedAs,
   trackedEditAnnotation,
   trackingField,
+  type Unnamed,
   viewModeField,
+  writeFormat,
 } from '@redlines/editor';
 import {
   type BlockType,
   EditError,
   GITHUB_TYPES,
-  applyChanges,
   type FormatOp,
   idsIn,
   type InlineFormat,
@@ -48,9 +51,6 @@ import {
   type Person,
   type Range,
   type TextChange,
-  trackedFormat,
-  trackedFormatRanges,
-  untrackedFormat,
 } from '@redlines/format';
 import type { Plugin } from '@redlines/plugin-api';
 import { calloutMenuTheme, closeCalloutMenu, openCalloutMenu } from './callout-menu.ts';
@@ -408,13 +408,22 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
    * library made, markers and all, and Track Changes must not take them for typing; otherwise they
    * count as typing, which Track Changes records as insertions or writes plainly.
    */
-  const put = (changes: readonly TextChange[], userEvent: string, final: boolean): boolean => {
+  const put = (
+    changes: readonly TextChange[],
+    userEvent: string,
+    final: boolean,
+    intent?: Unnamed,
+  ): boolean => {
     if (changes.length === 0) return false;
     const before = view.state.doc;
     const tracked = view.state.field(trackingField);
     view.dispatch({
       changes: changes.map(({ from, to, insert }) => ({ from, to, insert })),
-      annotations: [isolateHistory.of('full'), ...(final ? [trackedEditAnnotation.of(true)] : [])],
+      annotations: [
+        isolateHistory.of('full'),
+        ...(final ? [trackedEditAnnotation.of(true)] : []),
+        ...(intent ? [recordedAs(intent)] : []),
+      ],
       userEvent,
       scrollIntoView: true,
     });
@@ -423,6 +432,12 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       view.dispatch({ effects: setViewModeEffect.of(view.state.facet(markupViewFacet)) });
     }
     return view.state.doc !== before;
+  };
+
+  /** Where ids come from: the editor's source when it has one (a session, a test), else the system's. */
+  const sourceOf = () => {
+    const { random } = view.state.facet(editSourceFacet);
+    return random ? { random } : {};
   };
 
   /** Changes the format of `range`: tracked, or written directly with Track Changes off. */
@@ -436,16 +451,17 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const text = view.state.doc.toString();
     const person = personOf(options.author);
     try {
-      if (view.state.field(trackingField)) {
-        const { changes } = trackedFormat(text, range, op, {
-          author: person,
-          time: ledgerTime(new Date()),
-        });
-        // What the format library made is final, markers and all: Track Changes must not see it
-        // as typing.
-        return put(changes, userEvent, true);
-      }
-      return put(untrackedFormat(text, range, op, { author: person }), userEvent, true);
+      // What the format library made is final, markers and all: Track Changes must not see it as
+      // typing. The intent says what was asked, to derive it again.
+      const { changes, intent } = writeFormat(text, {
+        tracking: view.state.field(trackingField),
+        ranges: [range],
+        op,
+        author: person,
+        time: ledgerTime(new Date()),
+        ...sourceOf(),
+      });
+      return put(changes, userEvent, true, intent);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
       notice(explain(error));
@@ -471,53 +487,29 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     if (ranges.length === 0) return false;
     const person = personOf(options.author);
     const tracked = view.state.field(trackingField);
-    let text = view.state.doc.toString();
-    let total = ChangeSet.empty(text.length);
+    const text = view.state.doc.toString();
     // The changes of several ranges are decided together (format §3.7).
     const group = tracked && ranges.length > 1 ? newId(idsIn(text)) : undefined;
-    // The formats of text are made at once: the format library reads the text once, and checks
-    // each cell of a table against its own marks.
-    if (tracked && (op.kind === 'inline' || op.kind === 'clear')) {
-      try {
-        const made = trackedFormatRanges(text, ranges, op, {
-          author: person,
-          time: ledgerTime(new Date()),
-          ...(group === undefined ? {} : { group }),
-        });
-        return put(made.changes, userEvent, true);
-      } catch (error) {
-        if (!(error instanceof EditError)) throw error;
-        notice(explain(error));
-        return false;
-      }
-    }
     try {
-      for (const found of ranges.toReversed()) {
-        const range = { from: total.mapPos(found.from, -1), to: total.mapPos(found.to, 1) };
-        const made = tracked
-          ? trackedFormat(text, range, op, {
-              author: person,
-              time: ledgerTime(new Date()),
-              ...(group === undefined ? {} : { group }),
-            }).changes
-          : untrackedFormat(text, range, op, { author: person });
-        const step = ChangeSet.of(
-          made.map(({ from, to, insert }) => ({ from, to, insert })),
-          text.length,
-        );
-        text = applyChanges(text, made);
-        total = total.compose(step);
-      }
+      // The formats of text are made at once: the format library reads the text once, and checks
+      // each cell of a table against its own marks.
+      const { changes, intent } = writeFormat(text, {
+        tracking: tracked,
+        ranges,
+        op,
+        compose: true,
+        writer: tracked && (op.kind === 'inline' || op.kind === 'clear') ? 'ranges' : 'tracked',
+        ...(group === undefined ? {} : { group }),
+        author: person,
+        time: ledgerTime(new Date()),
+        ...sourceOf(),
+      });
+      return put(changes, userEvent, true, intent);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
       notice(explain(error));
       return false;
     }
-    const changes: TextChange[] = [];
-    total.iterChanges((from, to, _fromB, _toB, inserted) =>
-      changes.push({ from, to, insert: inserted.toString() }),
-    );
-    return put(changes, userEvent, true);
   };
 
   /**

@@ -256,10 +256,13 @@ export {
   setTrackingEffect,
   trackingField,
 } from './tracked/typing.ts';
-export { intentAnnotation, intentOf } from './tracked/intent.ts';
+export { editSourceFacet } from './tracked/typing.ts';
+export { intentAnnotation, intentOf, newIntentId, recordedAs } from './tracked/intent.ts';
+export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
+export type { FormatIntent, FormatRequest, FormatWriter } from './tracked/format-intent.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
-export type { Intent, IntentEdit, TypingIntent } from './tracked/intent.ts';
+export type { Intent, IntentEdit, TypingIntent, Unnamed } from './tracked/intent.ts';
 export {
   UNTRACKED_DETAILS,
   UNTRACKED_TITLE,

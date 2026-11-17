@@ -58,13 +58,10 @@ import {
   type TextChange,
   fineEdit,
   fineEdits,
-  fineFormat,
   trackedEdit,
-  trackedFormat,
   type UnitKind,
   unitsOf,
   untrackedEdit,
-  untrackedFormat,
   readsOtherAtBoundary,
   widenedFirstEdits,
 } from '@redlines/format';
@@ -90,7 +87,9 @@ import {
   recording,
   replaying,
   type TypingIntent,
+  type Unnamed,
 } from './intent.ts';
+import { type FormatIntent, writeFormat } from './format-intent.ts';
 import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
@@ -194,15 +193,41 @@ export function blockFormatChanges(
   op: FormatOp,
   widening = false,
 ): TextChange[] {
+  return blockFormat(state, range, op, widening).changes;
+}
+
+/** `blockFormatChanges`, with the intent that wrote them, for the transaction that makes them. */
+export function blockFormat(
+  state: EditorState,
+  range: Range,
+  op: FormatOp,
+  widening = false,
+): { changes: TextChange[]; intent: Unnamed<FormatIntent> } {
   const text = state.doc.toString();
-  if (state.field(trackingField)) {
-    const write = widening ? trackedFormat : fineFormat;
-    return write(text, range, op, contextFor(state)).changes;
-  }
+  const tracking = state.field(trackingField);
   const { random } = state.facet(editSourceFacet);
   const editing = state.facet(authorFacet);
-  const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
-  return untrackedFormat(text, range, op, { random, author });
+  const author = editing ? { handle: editing.handle, name: editing.name } : null;
+  if (tracking) {
+    const ctx = contextFor(state);
+    return writeFormat(text, {
+      tracking,
+      ranges: [range],
+      op,
+      writer: widening ? 'tracked' : 'fine',
+      author: ctx.author,
+      time: ctx.time,
+      ...(random ? { random } : {}),
+    });
+  }
+  return writeFormat(text, {
+    tracking,
+    ranges: [range],
+    op,
+    author,
+    time: '',
+    ...(random ? { random } : {}),
+  });
 }
 
 /** A change of a transaction, in its start document's offsets. */
