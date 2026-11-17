@@ -1156,7 +1156,20 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
       changed = true;
     }
   }
-  if (options.carriers === false) return changed ? writeParts(parts) : bytes;
+  if (options.carriers === false) {
+    // Word's revisions have no place for a change's note; the source part keeps it (#1081).
+    const notes = Object.values(ledger.marks).filter((mark) => mark.note !== undefined).length;
+    if (notes > 0) {
+      report.push({
+        kind: 'note',
+        message:
+          notes === 1
+            ? 'One change note is not in the Word file.'
+            : `${notes} change notes are not in the Word file.`,
+      });
+    }
+    return changed ? writeParts(parts) : bytes;
+  }
   const sourceBlocks: SourceBlock[] = blocks.map((block, i) => ({
     id: blockId(i),
     type: block.type,

@@ -364,6 +364,22 @@ export const imageSaverFacet = Facet.define<
   ((files: File[], spot: ImageSpot, pasted: boolean) => void) | undefined
 >({ combine: (values) => values[0] });
 
+/** A picture the host fetched by its address: its bytes, their type and the extension to save with. */
+export interface FetchedImage {
+  bytes: Uint8Array<ArrayBuffer>;
+  type: string;
+  extension: string;
+}
+
+/**
+ * The host's fetch of a picture by address (`EditorOptions.onFetchImage`), which a paste from Google
+ * Docs uses to save its pictures instead of leaving them linked to Google's addresses.
+ */
+export const imageFetcherFacet = Facet.define<
+  ((url: string) => Promise<FetchedImage | null>) | undefined,
+  ((url: string) => Promise<FetchedImage | null>) | undefined
+>({ combine: (values) => values[0] });
+
 /** The image files on a clipboard or in a drop, unless it holds web content (design §5.10). */
 export function imageFiles(data: DataTransfer | null): File[] {
   if (!data || data.getData('text/html')) return [];

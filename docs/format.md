@@ -1917,6 +1917,12 @@ item's, because a marker can't stand between two items:
 break that goes is the one after the blocks, or the one before them when that is the stronger of
 the two, so that the last item of a list and the paragraph after it stay a list and a paragraph.
 
+**Text typed at the marker of a text that is only deleted blocks** (a table deleted with nothing else
+in the file) is written after the marker, never before it: the newest view has nothing there, so
+both places read alike, and after the marker the text is a paragraph of its own, below the deleted
+blocks, where the editor draws them as they were (#470). Before the marker it would share the
+marker's line.
+
 **Under a setext heading,** the break in front of the deleted blocks does not go, for it holds the
 heading's underline (above), and the underline is the heading's own: no marker may stand behind it
 (§3.1), and a payload that held it would leave the heading's text a paragraph, in the file and once
@@ -3793,8 +3799,8 @@ A ledger whose `version` is not `1` is read with a warning, and the next write p
 ### 5.3 People
 
 - `people` maps a handle (§2.4) to a person. Fields: `name` (required; what Word shows), `email`,
-  `org`, `accounts` (stable ids such as `github:ada-l` or Microsoft 365 ids from Word, used to
-  match the same person across documents and on Word import), `aliases` (other names seen on
+  `org`, `accounts` (stable ids such as `github:ada-l`, used to
+  match the same person across documents; Word's account ids are never written by the import), `aliases` (other names seen on
   import), `agent: true` and `for: HANDLE` for an agent acting for a person, `members` for a team
   that can be mentioned, and `deleted: true` for someone who left; their handle stays.
 - A handle is derived from the email's local part, or else from the name, with `-2`, `-3` appended
