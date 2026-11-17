@@ -231,6 +231,7 @@ function stepInfo(tr: Transaction): StepInfo {
   const intent = made?.kind === 'steps' ? made.steps[0] : made;
   if (!intent) return { person: null, marks: [] };
   const person = intent.author?.handle ?? null;
+  // A move and a widened paste are written tracked only: untracked, they record a typing intent.
   const tracked =
     'tracking' in intent
       ? intent.tracking
