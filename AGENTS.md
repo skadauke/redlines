@@ -20,6 +20,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/agent-process` | `@redlines/agent-process`: what the agent providers share               |
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
+| `packages/collab-sim`   | `@redlines/collab-sim`: the session simulation harness: seeded live sessions over the real format library, with an oracle (research tooling, not shipped; `REDLINES_FUZZ=<n>` for the larger run, `pnpm --filter @redlines/collab-sim matrix` for the matrix) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `apps/desktop/quicklook` | `@redlines/quicklook`: the Quick Look preview in the app: the renderer (TypeScript, run in JavaScriptCore) and the Swift extension (`swift/`) |

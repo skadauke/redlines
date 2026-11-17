@@ -6,7 +6,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./oracle": "./src/oracle.ts"
   },
   "scripts": {
     "typecheck": "tsc"
