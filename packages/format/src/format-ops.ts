@@ -1,6 +1,7 @@
 // The operations of a format change (format §2.6): what a person asks for, and how a payload says
 // what changed, written and read.
 
+import { readFenceWas } from './callout-fence.ts';
 import { readCalloutWas } from './callout.ts';
 import { decodePayload, encodePayload } from './payload.ts';
 import type { MarkRange, Segment } from './types.ts';
@@ -23,6 +24,8 @@ export type FormatOp =
   | { kind: 'block'; to: BlockType }
   /** Changes the type of an alert, `> [!NOTE]` and its kin, to `type` (`note`, `tip`, `info`…). */
   | { kind: 'callout'; type: string }
+  /** Sets the title of a Quarto callout (`title="…"` on its fence), or takes it away with null. */
+  | { kind: 'callout-title'; title: string | null }
   | { kind: 'indent'; by: 1 | -1 }
   /** Columns of a table aligned otherwise: each with its name (the newest view of its header cell), the
    * alignment it has now and the one it had (format §3.7). Never asked for; read from a change's
@@ -200,7 +203,9 @@ export function isBlockUndo(ops: readonly ParsedFormatOp[]): boolean {
   return (
     op.name === 'was' &&
     op.sign === '' &&
-    (readWas(op.value) !== undefined || readCalloutWas(op.value) !== undefined)
+    (readWas(op.value) !== undefined ||
+      readCalloutWas(op.value) !== undefined ||
+      readFenceWas(op.value) !== undefined)
   );
 }
 

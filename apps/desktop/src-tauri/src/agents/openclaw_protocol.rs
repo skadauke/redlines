@@ -48,6 +48,21 @@ pub const SERVER: &str = "redlines";
 /// The plugin id the Gateway reserves for a node's MCP tools.
 pub const PLUGIN_ID: &str = "node-mcp";
 
+/// What an operator client calls itself. A third party can't have an id of its own (the list is
+/// closed, see [`CLIENT_ID`]); `gateway-client` in mode `backend` is what a program that talks to a
+/// Gateway for its owner is, and a live Gateway accepted it for a chat client (see "The other
+/// direction" in docs/research/openclaw-connection.md).
+pub const OPERATOR_CLIENT_ID: &str = "gateway-client";
+pub const OPERATOR_MODE: &str = "backend";
+
+/// The protocol an operator speaks. A live Gateway refuses an operator that offers the node's 3
+/// ("protocol mismatch", expected 4), though it takes a node's 3.
+pub const OPERATOR_PROTOCOL: u64 = 4;
+
+/// What an operator may do here: read what a session said, and write to a session. Nothing else
+/// (no `operator.admin`, no pairing, no approvals).
+pub const OPERATOR_SCOPES: [&str; 2] = ["operator.read", "operator.write"];
+
 /// A Gateway's error: a code and a line, and what else it said.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WireError {
@@ -74,9 +89,55 @@ pub enum Incoming {
         node_id: String,
         command: String,
         params_json: String,
+        /// The session of the agent run that made the call: the Gateway puts it in the request
+        /// when the agent's tool is a node's (`node.invoke` carries the run's `sessionKey`).
+        session_key: Option<String>,
     },
+    /// A step of a chat run: what the agent said so far, or how it ended.
+    Chat(ChatEvent),
     /// Anything else (a tick, a presence event): ignored.
     Other,
+}
+
+/// What the Gateway says of a run started by `chat.send` (the event `chat`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChatEvent {
+    pub run_id: String,
+    pub session_key: String,
+    pub state: ChatState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ChatState {
+    /// Progress with no words (`preparing_workspace`, `starting_model`): not an answer.
+    Status,
+    /// More of the answer: the new words, or, when `replace`, the whole text so far.
+    Delta {
+        text: String,
+        replace: bool,
+    },
+    /// The answer, whole.
+    Final {
+        text: String,
+    },
+    Aborted,
+    Error {
+        message: String,
+    },
+}
+
+/// The text of a chat message as the Gateway writes it: `content` is a list of `{type, text}`.
+fn message_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter(|part| part.get("type").and_then(Value::as_str).unwrap_or("text") == "text")
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
 }
 
 /// Reads a text frame. Anything that isn't a frame is `Other`.
@@ -94,6 +155,36 @@ pub fn parse(text: &str) -> Incoming {
                     Some(nonce) => Incoming::Challenge { nonce },
                     None => Incoming::Other,
                 },
+                Some("chat") => {
+                    let (Some(run_id), Some(session_key)) =
+                        (string(&payload, "runId"), string(&payload, "sessionKey"))
+                    else {
+                        return Incoming::Other;
+                    };
+                    let message = payload.get("message").cloned().unwrap_or(Value::Null);
+                    let state = match payload.get("state").and_then(Value::as_str) {
+                        Some("delta") => ChatState::Delta {
+                            text: string(&payload, "deltaText")
+                                .unwrap_or_else(|| message_text(&message)),
+                            replace: payload.get("replace").and_then(Value::as_bool) == Some(true),
+                        },
+                        Some("final") => ChatState::Final {
+                            text: message_text(&message),
+                        },
+                        Some("aborted") => ChatState::Aborted,
+                        Some("error") => ChatState::Error {
+                            message: string(&payload, "errorMessage")
+                                .or_else(|| string(&payload, "error"))
+                                .unwrap_or_else(|| "The agent failed.".to_owned()),
+                        },
+                        _ => ChatState::Status,
+                    };
+                    Incoming::Chat(ChatEvent {
+                        run_id,
+                        session_key,
+                        state,
+                    })
+                }
                 Some("node.invoke.request") => {
                     let params_json = match payload.get("paramsJSON") {
                         Some(Value::String(text)) => text.clone(),
@@ -108,6 +199,8 @@ pub fn parse(text: &str) -> Incoming {
                             node_id: string(&payload, "nodeId").unwrap_or_default(),
                             command,
                             params_json,
+                            session_key: string(&payload, "sessionKey")
+                                .filter(|key| !key.is_empty()),
                         },
                         _ => Incoming::Other,
                     }
@@ -244,6 +337,19 @@ pub fn signed_text(
     format!("v2|{device_id}|{CLIENT_ID}|{role}|{role}||{signed_at_ms}|{credential}|{nonce}")
 }
 
+/// The same for an operator: its own client id and mode, and its scopes, comma-joined.
+pub fn operator_signed_text(
+    device_id: &str,
+    signed_at_ms: u64,
+    credential: &str,
+    nonce: &str,
+) -> String {
+    format!(
+        "v2|{device_id}|{OPERATOR_CLIENT_ID}|{OPERATOR_MODE}|operator|{}|{signed_at_ms}|{credential}|{nonce}",
+        OPERATOR_SCOPES.join(",")
+    )
+}
+
 /// What a `connect` carries, apart from the device's signature.
 pub struct Connect<'a> {
     pub id: &'a str,
@@ -289,6 +395,64 @@ pub fn connect_request(c: &Connect<'_>) -> String {
                 "nonce": c.nonce,
             },
         },
+    })
+    .to_string()
+}
+
+/// The operator's `connect`: the same device as the node's, the role `operator`, and the two scopes
+/// that read and write a session.
+pub fn operator_connect_request(c: &Connect<'_>) -> String {
+    json!({
+        "type": "req",
+        "id": c.id,
+        "method": "connect",
+        "params": {
+            "minProtocol": OPERATOR_PROTOCOL,
+            "maxProtocol": OPERATOR_PROTOCOL,
+            "client": {
+                "id": OPERATOR_CLIENT_ID,
+                "displayName": c.display_name,
+                "version": c.version,
+                "platform": "macos",
+                "mode": OPERATOR_MODE,
+            },
+            "role": "operator",
+            "scopes": OPERATOR_SCOPES,
+            "caps": [],
+            "commands": [],
+            "permissions": {},
+            "auth": { (c.credential_kind): c.credential },
+            "device": {
+                "id": c.device_id,
+                "publicKey": c.public_key,
+                "signature": c.signature,
+                "signedAt": c.signed_at_ms,
+                "nonce": c.nonce,
+            },
+        },
+    })
+    .to_string()
+}
+
+/// A message into an agent's session, the way OpenClaw's own apps chat. `key` makes a repeat of the
+/// same send one run, and is the run's id in the events.
+pub fn chat_send_request(id: &str, session_key: &str, message: &str, key: &str) -> String {
+    json!({
+        "type": "req",
+        "id": id,
+        "method": "chat.send",
+        "params": { "sessionKey": session_key, "message": message, "idempotencyKey": key },
+    })
+    .to_string()
+}
+
+/// Stops a run in a session.
+pub fn chat_abort_request(id: &str, session_key: &str, run_id: &str) -> String {
+    json!({
+        "type": "req",
+        "id": id,
+        "method": "chat.abort",
+        "params": { "sessionKey": session_key, "runId": run_id },
     })
     .to_string()
 }
@@ -362,9 +526,15 @@ mod tests {
                 id: "c1".into(),
                 node_id: "d1".into(),
                 command: "mcp.tools.call.v1".into(),
-                params_json: r#"{"server":"redlines","tool":"view"}"#.into()
+                params_json: r#"{"server":"redlines","tool":"view"}"#.into(),
+                session_key: None,
             }
         );
+        let scoped = r#"{"type":"event","event":"node.invoke.request","payload":{"id":"c2","nodeId":"d1","command":"mcp.tools.call.v1","paramsJSON":"{}","sessionKey":"agent:main:redlines-0"}}"#;
+        assert!(matches!(
+            parse(scoped),
+            Incoming::Invoke { session_key: Some(key), .. } if key == "agent:main:redlines-0"
+        ));
     }
 
     #[test]
@@ -529,6 +699,113 @@ mod tests {
         let frame: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(frame["params"]["client"]["id"], "node-host");
         assert_eq!(frame["params"]["client"]["mode"], "node");
+    }
+
+    #[test]
+    fn a_chat_run_is_read_as_status_words_and_an_end() {
+        let frame = |payload: Value| {
+            let mut payload = payload;
+            payload["runId"] = json!("r1");
+            payload["sessionKey"] = json!("agent:main:redlines-0");
+            json!({"type": "event", "event": "chat", "payload": payload}).to_string()
+        };
+        let state = |text: String| match parse(&text) {
+            Incoming::Chat(event) => {
+                assert_eq!(event.run_id, "r1");
+                assert_eq!(event.session_key, "agent:main:redlines-0");
+                event.state
+            }
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            state(frame(json!({"state": "status", "phase": "starting_model"}))),
+            ChatState::Status
+        );
+        assert_eq!(
+            state(frame(json!({"state": "delta", "deltaText": "Hi"}))),
+            ChatState::Delta {
+                text: "Hi".into(),
+                replace: false
+            }
+        );
+        assert_eq!(
+            state(frame(
+                json!({"state": "delta", "deltaText": "", "replace": true,
+                "message": {"content": [{"type": "text", "text": ""}]}})
+            )),
+            ChatState::Delta {
+                text: String::new(),
+                replace: true
+            }
+        );
+        assert_eq!(
+            state(frame(
+                json!({"state": "final", "message": {"role": "assistant",
+                "content": [{"type": "text", "text": "Hi "}, {"type": "text", "text": "there"}]}})
+            )),
+            ChatState::Final {
+                text: "Hi there".into()
+            }
+        );
+        assert_eq!(
+            state(frame(json!({"state": "aborted"}))),
+            ChatState::Aborted
+        );
+        assert_eq!(
+            state(frame(
+                json!({"state": "error", "errorMessage": "No model."})
+            )),
+            ChatState::Error {
+                message: "No model.".into()
+            }
+        );
+        assert_eq!(
+            parse(r#"{"type":"event","event":"chat","payload":{"state":"final"}}"#),
+            Incoming::Other
+        );
+    }
+
+    #[test]
+    fn an_operator_connects_as_a_backend_client_with_two_scopes_and_signs_for_them() {
+        assert_eq!(
+            operator_signed_text("d", 7, "tok", "n"),
+            "v2|d|gateway-client|backend|operator|operator.read,operator.write|7|tok|n"
+        );
+        let text = operator_connect_request(&Connect {
+            id: "1",
+            display_name: "Redlines on Ada's MacBook",
+            version: "0.2.0",
+            device_id: "dev",
+            public_key: "pk",
+            signature: "sig",
+            signed_at_ms: 5,
+            nonce: "n",
+            credential_kind: "bootstrapToken",
+            credential: "code",
+        });
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        let params = &frame["params"];
+        assert_eq!(params["role"], "operator");
+        assert_eq!(params["minProtocol"], 4);
+        assert_eq!(params["client"]["id"], "gateway-client");
+        assert_eq!(params["client"]["mode"], "backend");
+        assert_eq!(params["scopes"], json!(["operator.read", "operator.write"]));
+        assert_eq!(params["commands"], json!([]));
+        assert!(!text.contains("operator.admin"));
+    }
+
+    #[test]
+    fn a_send_and_an_abort_name_the_session() {
+        let send: Value =
+            serde_json::from_str(&chat_send_request("3", "agent:main:redlines-0", "Hi", "k1"))
+                .unwrap();
+        assert_eq!(send["method"], "chat.send");
+        assert_eq!(send["params"]["sessionKey"], "agent:main:redlines-0");
+        assert_eq!(send["params"]["idempotencyKey"], "k1");
+        let abort: Value =
+            serde_json::from_str(&chat_abort_request("4", "agent:main:redlines-0", "k1")).unwrap();
+        assert_eq!(abort["method"], "chat.abort");
+        assert_eq!(abort["params"]["runId"], "k1");
     }
 
     #[test]
