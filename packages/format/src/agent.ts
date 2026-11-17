@@ -4,7 +4,7 @@
 // word by word, and only the words that changed become marks.
 
 import { applyChanges } from './changes.ts';
-import { reject } from './decide.ts';
+import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { eolOf, inEol, paragraphBreaks } from './edit-support.ts';
@@ -13,7 +13,7 @@ import { hunksOf, joinedHunks, runsOf } from './join.ts';
 import { tableSuggestion } from './table-diff.ts';
 import type { Hunk, JoinGuards } from './join.ts';
 import { parse } from './parse.ts';
-import { fineEdits as trackedEdits } from './track.ts';
+import { fineEdits as fineTrackedEdits, trackedEdits as widenedEdits } from './track.ts';
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Parsed, Range, TextChange } from './types.ts';
 import { closerRange } from './blocks.ts';
@@ -98,8 +98,17 @@ export function suggestReplaceWith(
   guarded = true,
 ): TrackedEdits {
   const edits = suggestForms(text, oldStr, newStr, ctx, join);
-  if (guarded) keepRejectable(text, edits);
-  return edits;
+  if (!guarded || keepsDecidable(text, edits)) return edits;
+  // The marks next to the edit, written at the grain of the words, leave a decision that could be
+  // made before it impossible (#251). Written as a replacement of the unit that holds them, they
+  // may not; where that is no better, the edit is refused (#246).
+  try {
+    const wide = suggestForms(text, oldStr, newStr, ctx, join, widenedEdits);
+    if (keepsDecidable(text, wide)) return wide;
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+  }
+  throw new EditError(INSERTION_STUCK, 'no-legal-placement');
 }
 
 function suggestForms(
@@ -108,6 +117,7 @@ function suggestForms(
   newStr: string,
   ctx: EditContext,
   join: (before: string, after: string, guards: JoinGuards) => Hunk[],
+  trackedEdits: typeof fineTrackedEdits = fineTrackedEdits,
 ): TrackedEdits {
   const eol = eolOf(text);
   const before = inEol(oldStr, eol);
@@ -218,10 +228,10 @@ function readsAs(got: string, expected: string): boolean {
   return plain(got) === plain(expected);
 }
 
-/** Whether rejecting the mark with `id` can be done. */
-function canReject(text: string, id: string): boolean {
+/** Whether deciding the mark with `id`, accepting or rejecting it, can be done. */
+function canDecide(text: string, id: string, decide: typeof accept): boolean {
   try {
-    reject(text, id);
+    decide(text, id);
     return true;
   } catch {
     return false;
@@ -229,34 +239,41 @@ function canReject(text: string, id: string): boolean {
 }
 
 /**
- * An edit at a pending insertion, anyone's, must leave that insertion rejectable, as every mark is
- * decidable in every order (format §3.4): where the insertion could be rejected before the
- * edit and could not after it, the edit is refused (#246).
+ * Every mark is decidable in every order (format §3.4), and an edit keeps it so: a change in the
+ * blocks of the edit, anyone's, that could be accepted or rejected before the edit can be after
+ * it (#246, #251). False where one cannot.
  */
-function keepRejectable(text: string, edits: TrackedEdits): void {
-  if (edits.changes.length === 0) return;
-  const from = Math.min(...edits.changes.map((change) => change.from));
-  const to = Math.max(...edits.changes.map((change) => change.to));
-  const insertions = parse(text).marks.filter(
+function keepsDecidable(text: string, edits: TrackedEdits): boolean {
+  if (edits.changes.length === 0) return true;
+  // The blocks the changes touch: up to the blank lines around them.
+  const start = Math.min(...edits.changes.map((change) => change.from));
+  const end = Math.max(...edits.changes.map((change) => change.to));
+  const from = Math.max(0, text.lastIndexOf('\n\n', start - 1) + 1);
+  const next = text.indexOf('\n\n', end);
+  const to = next === -1 ? text.length : next;
+  const marks = parse(text).marks.filter(
     (mark) =>
-      mark.kind === 'ins' &&
+      mark.kind !== 'cmt' &&
+      mark.kind !== 'hl' &&
       mark.segments.some(
         (segment) => segment.open.from <= to && (segment.close?.to ?? segment.content.to) >= from,
       ),
   );
-  if (insertions.length === 0) return;
+  if (marks.length === 0) return true;
   const result = applyChanges(text, edits.changes);
-  // An insertion that the edit takes back is gone, and has nothing left to reject.
+  // A mark that the edit takes back is gone, and has nothing left to decide.
   const left = new Set(parse(result).marks.map((mark) => mark.id));
-  for (const mark of insertions) {
-    if (left.has(mark.id) && canReject(text, mark.id) && !canReject(result, mark.id)) {
-      throw new EditError(INSERTION_STUCK, 'no-legal-placement');
+  for (const mark of marks) {
+    if (!left.has(mark.id)) continue;
+    for (const decide of [accept, reject]) {
+      if (canDecide(text, mark.id, decide) && !canDecide(result, mark.id, decide)) return false;
     }
   }
+  return true;
 }
 
 const INSERTION_STUCK =
-  'After this edit, a pending insertion next to it could no longer be rejected, so nothing was written. Change the text in another way, or leave the text beside that insertion as it is.';
+  'After this edit, a pending change next to it could no longer be decided, so nothing was written. Change the text in another way, or leave the text beside that change as it is.';
 
 const sameHunks = (a: readonly Hunk[], b: readonly Hunk[]) =>
   a.length === b.length &&
