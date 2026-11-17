@@ -788,7 +788,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'packages/format/src/track.ts',
     'SPLIT_ALONE',
     'widen',
-    "a split that would stand alone at the start of a lazy line (#615): written as a replacement of the item",
+    'a split that would stand alone at the start of a lazy line (#615): written as a replacement of the item',
   ],
   [
     'packages/format/src/track.ts',

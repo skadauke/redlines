@@ -5080,7 +5080,7 @@ function editsWidening(
     const done = widening ? widenedAtOnce(text, edits, ctx) : undefined;
     if (done) return done;
     throw new EditError(
-      'This block can\'t be added as a tracked change here.',
+      "This block can't be added as a tracked change here.",
       'no-legal-placement',
     );
   }
@@ -5292,8 +5292,7 @@ function codeEdits(
 /** How many ways of writing a change next to a mark are tried (as typed, then by a character). */
 const MOST_MODES = 8;
 
-const SPLIT_ALONE =
-  'A line break here would leave a change marker at the start of the new line.';
+const SPLIT_ALONE = 'A line break here would leave a change marker at the start of the new line.';
 
 /** A split that stands alone on a line, with only closers in front of it, on a line that goes on a
  * paragraph: an HTML block that ends the paragraph, and the list it is in, which the file reads and
@@ -5509,7 +5508,9 @@ function makesThematicBreak(text: string, edit: TextChange, start: number): bool
   // the item's line is the two together.
   if (/^[ \t]+[-*_ \t]*$/.test(left) && start > 0) {
     const above = text.slice(lineStart(text, start - 1), start - 1).replace(/<!--[^]*?-->/g, '');
-    if (/^(?:[ \t]*>)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(above)) {
+    if (
+      /^(?:[ \t]*>)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(above)
+    ) {
       left = `${above.replace(/[ \t]*$/, '')} ${left.trim()}`;
     }
   }
@@ -5524,7 +5525,11 @@ function startsBlockInEmptyItem(text: string, edit: TextChange): boolean {
   if (edit.from !== edit.to || edit.insert === '') return false;
   const start = lineStart(text, edit.from);
   if (makesThematicBreak(text, edit, start)) return true;
-  if (!/^(?:[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])[ \t]))*[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]?$/.test(text.slice(start, edit.from)))
+  if (
+    !/^(?:[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])[ \t]))*[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]?$/.test(
+      text.slice(start, edit.from),
+    )
+  )
     return false;
   if (!/^(?:<!--[^]*?-->)*\r?$/.test(text.slice(edit.from, lineEnd(text, edit.from)))) return false;
   return BLOCK_START.test(edit.insert.replace(/^[ \t]+/, ''));

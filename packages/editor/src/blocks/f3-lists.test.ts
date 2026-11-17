@@ -39,8 +39,26 @@ describe('#605: Tab then Return in an item', () => {
 describe('#583: a block start typed into an empty item', () => {
   scriptRows([
     { name: '--- in a bare item', doc: '- one⏎-‸', keys: [{ type: ' ---' }], tc: true, expect: {} },
-    { name: 'a nested marker in a bare item', doc: '- one⏎-‸', keys: [{ type: ' - a' }], tc: true, expect: {} },
-    { name: 'a nested number in a bare item', doc: '- one⏎-‸', keys: [{ type: ' 1. a' }], tc: true, expect: {} },
-    { name: '--- in an empty item', doc: '- one⏎- ‸', keys: [{ type: '---' }], tc: true, expect: { newest: '- one⏎- ---⏎' } },
+    {
+      name: 'a nested marker in a bare item',
+      doc: '- one⏎-‸',
+      keys: [{ type: ' - a' }],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'a nested number in a bare item',
+      doc: '- one⏎-‸',
+      keys: [{ type: ' 1. a' }],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: '--- in an empty item',
+      doc: '- one⏎- ‸',
+      keys: [{ type: '---' }],
+      tc: true,
+      expect: { newest: '- one⏎- ---⏎' },
+    },
   ]);
 });
