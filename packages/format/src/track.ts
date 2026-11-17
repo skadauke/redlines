@@ -1136,7 +1136,7 @@ function wholeIndentedCode(tokens: Token[], linePrefix: string, where: TypedAt, 
 }
 
 /** A line of typed text that is the fence of a pandoc div: three or more colons, then attributes. */
-const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t][^\r\n]*)?$/;
+const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
 
 /**
  * Typed text with the fence of a pandoc div in it (format §3.1, rule 9, §9.4): pandoc takes a fence
