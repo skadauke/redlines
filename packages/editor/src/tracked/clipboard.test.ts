@@ -187,6 +187,22 @@ describe('copied images', () => {
     );
     expect(out).toContain('<img src="mine.png" alt="Mine">');
   });
+
+  it('embeds a local image as its bytes when the host reads the file, and keeps remote ones', async () => {
+    const text = '![Mine](img/a%20b.png) and ![Far](https://e.com/a.png)\n';
+    const asked: string[] = [];
+    const editor = load(text, {
+      resolveImage: (path) => `asset://${path}`,
+      imageData: async (path) => {
+        asked.push(path);
+        return { mimeType: 'image/png', data: 'QUJD' };
+      },
+    });
+    const out = (await copyData(editor, 0, text.indexOf('\n'))).getData('text/html');
+    expect(asked).toEqual(['img/a b.png']);
+    expect(out).toContain('<img src="data:image/png;base64,QUJD" alt="Mine">');
+    expect(out).toContain('<img src="https://e.com/a.png" alt="Far">');
+  });
 });
 
 describe('paste', () => {

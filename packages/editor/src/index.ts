@@ -96,6 +96,7 @@ import { dialectFacet, noticeFacet } from './image-size.ts';
 import { likelyParsing } from './likely/parse.ts';
 import {
   imageOpening,
+  imageReader,
   imageResolver,
   imageSizer,
   imageSelection,
@@ -373,6 +374,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
+    options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     imageSelection(),
