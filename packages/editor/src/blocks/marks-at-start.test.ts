@@ -77,8 +77,11 @@ describe('a join with a block that starts with another person’s insertion', ()
         doc: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two',
         keys: ['Delete'],
         off: { caret: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two', refusal: REWRITE },
+        // Kept while another person's mark is in the text the replacement would hold (#808).
         on: {
-          caret: 'Para.‸<del ⏎⏎><sub 3. <!--ins zbb9-->one<!--/zbb9-->⏎4. two>3. one⏎⏎4. two</sub>',
+          caret: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two',
+          refusal:
+            'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
         },
       },
       {
