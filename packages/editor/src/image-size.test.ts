@@ -48,6 +48,16 @@ function written(doc: string, look: Parameters<typeof imageText>[1], at = 0): st
 }
 
 describe('the text an image is written as', () => {
+  it('reads a lone tag as the image when a substitution\u2019s closer is on the line after it (#628)', () => {
+    const doc =
+      '<!--sub k3x9 ![A cat](a.png)-->\n\n<img src="a.png" alt="A cat" width="240">\n<!--/k3x9-->\n';
+    const at = doc.indexOf('<img');
+    const { view } = load(doc, at);
+    const image = imageInSelection(view.state)!;
+    expect(image.form).toBe('tag');
+    expect(doc.slice(image.from, image.to)).toBe('<img src="a.png" alt="A cat" width="240">');
+  });
+
   it('turns a Markdown image into a tag with its width, keeping its alt text and its title', () => {
     expect(written('![A cat](cat.png "Tip")', { width: 320 })).toBe(
       '<img src="cat.png" alt="A cat" title="Tip" width="320">',

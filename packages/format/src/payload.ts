@@ -25,25 +25,24 @@
 // is written as the kind it is: `\x0d\n` for a CRLF, `\x0d` for a CR, and `\x0a` for an LF in a
 // file whose line breaks are CRLF. A reader gives the first two back as the characters they are,
 // and the third as `LF_IN_CRLF`, since an LF there would read as the file's own.
+//
+// In a payload as the code holds it, U+FFFF is an escape, and always has a letter after it: `a` for
+// an LF in a CRLF file (`LF_IN_CRLF`), `b` for a U+FFFF of the text itself (`LITERAL_FFFF`), so that
+// text which holds that character comes back as it was (#943). A U+FFFF in a file's payload is
+// written as it is, and no file written before has one: the old writer made it an `\x0a`.
 
 /** What `\x0a` decodes to: an LF that stays an LF in a file whose line breaks are CRLF, where the
- * LF that `\n` stands for comes back as a CRLF. A noncharacter, which text never holds. */
-export const LF_IN_CRLF = '\uffff';
+ * LF that `\n` stands for comes back as a CRLF. */
+export const LF_IN_CRLF = '\uffffa';
+
+/** A U+FFFF of the text, in a payload as the code holds it. */
+export const LITERAL_FFFF = '\uffffb';
+
+/** `s` with each U+FFFF of its text as a payload holds it. */
+const literalFfff = (s: string): string => s.replaceAll('\uffff', LITERAL_FFFF);
 
 /** The characters that would form an escape with a backslash written before them. */
-const ESCAPED_AFTER_BACKSLASH = new Set([
-  '-',
-  'n',
-  'x',
-  '|',
-  '{',
-  '%',
-  '\\',
-  '`',
-  '\n',
-  '\r',
-  LF_IN_CRLF,
-]);
+const ESCAPED_AFTER_BACKSLASH = new Set(['-', 'n', 'x', '|', '{', '%', '\\', '`', '\n', '\r']);
 
 /**
  * The text of a file, as the payload that stands for it holds it (what `decodePayload` gives): a
@@ -51,12 +50,18 @@ const ESCAPED_AFTER_BACKSLASH = new Set([
  * in a CRLF file as `LF_IN_CRLF`.
  */
 export function payloadText(raw: string, style: '\r\n' | '\n'): string {
-  let out = '';
-  for (const part of raw.split(/(\r\n|\r|\n)/)) {
-    // A CRLF right after a CR alone stays explicit: `\r` and an implicit `\n` would read as one CRLF.
-    out += part === style && !out.endsWith('\r') ? '\n' : part === '\n' ? LF_IN_CRLF : part;
-  }
-  return out;
+  // One pass of replace, not a split and a string built by parts: a code block of thousands of
+  // lines is read on its first key. A CRLF right after a CR alone stays explicit: `\r` and an
+  // implicit `\n` would read as one CRLF. A U+FFFF of the text is held as `LITERAL_FFFF` (#943).
+  return raw.replace(/\r\n|\r|\n|\uffff/g, (found, at: number) =>
+    found === '\uffff'
+      ? LITERAL_FFFF
+      : found === style && raw.charAt(at - 1) !== '\r'
+        ? '\n'
+        : found === '\n'
+          ? LF_IN_CRLF
+          : found,
+  );
 }
 
 /**
@@ -66,7 +71,7 @@ export function payloadText(raw: string, style: '\r\n' | '\n'): string {
  */
 export function encodePayload(text: string, style?: '\r\n' | '\n'): string {
   return encodePayloadText(
-    style === undefined ? text.replace(/\r\n?/g, '\n') : payloadText(text, style),
+    style === undefined ? literalFfff(text.replace(/\r\n?/g, '\n')) : payloadText(text, style),
   );
 }
 
@@ -84,8 +89,11 @@ export function encodePayloadText(s: string): string {
           i++;
         } else out += '\\x0d';
         break;
-      case LF_IN_CRLF:
-        out += '\\x0a';
+      case '\uffff':
+        // An LF of a CRLF file, or a U+FFFF of the text, by the letter after it.
+        if (s.charAt(i + 1) === 'a') out += '\\x0a';
+        else out += '\uffff';
+        if (s.charAt(i + 1) === 'a' || s.charAt(i + 1) === 'b') i++;
         break;
       case '\n':
         out += '\\n';
@@ -106,7 +114,10 @@ export function encodePayloadText(s: string): string {
         out += previous === '{' ? `\\${c}` : c;
         break;
       case '\\':
-        out += ESCAPED_AFTER_BACKSLASH.has(s.charAt(i + 1)) ? '\\\\' : '\\';
+        out +=
+          ESCAPED_AFTER_BACKSLASH.has(s.charAt(i + 1)) || s.startsWith(LF_IN_CRLF, i + 1)
+            ? '\\\\'
+            : '\\';
         break;
       default:
         out += c;
@@ -116,18 +127,27 @@ export function encodePayloadText(s: string): string {
 }
 
 /** The escapes of `encodePayload`, and what each stands for. */
-const ESCAPE = /\\(?:n|[\\|{%-]|x[0-9a-fA-F]{2})/g;
+const ESCAPE = /\\(?:n|[\\|{%-]|x[0-9a-fA-F]{2})|\uffff/g;
 
 /** Decodes a payload written by `encodePayload`. */
 export function decodePayload(written: string): string {
-  if (!written.includes('\\')) return written;
+  if (!written.includes('\\') && !written.includes('\uffff')) return written;
   // Left to right, an escape and then what follows it: `\\` is one backslash, so the `n` after it
   // is a letter. Any other backslash is literal.
   return written.replace(ESCAPE, (escape) => {
+    if (escape === '\uffff') return LITERAL_FFFF;
     const c = escape.charAt(1);
     if (c === 'n') return '\n';
     if (c !== 'x') return c;
     const code = parseInt(escape.slice(2), 16);
     return code === 0x0a ? LF_IN_CRLF : String.fromCharCode(code);
   });
+}
+
+/** Decodes a value that has no payload's meaning for the line breaks (a comment's text, a format
+ * operation's value): an LF in a CRLF file is an LF, and a U+FFFF is itself. */
+export function decodeText(written: string): string {
+  return decodePayload(written).replace(/\uffff([ab])/g, (_, k: string) =>
+    k === 'a' ? '\n' : '\uffff',
+  );
 }

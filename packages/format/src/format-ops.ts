@@ -3,7 +3,7 @@
 
 import { readFenceWas } from './callout-fence.ts';
 import { readCalloutWas } from './callout.ts';
-import { decodePayload, encodePayload } from './payload.ts';
+import { decodeText, encodePayload } from './payload.ts';
 import type { MarkRange, Segment } from './types.ts';
 
 /** The inline formats a person asks for. `sub` and `sup` are the HTML tags `<sub>` and `<sup>`, in
@@ -220,7 +220,7 @@ export function parseFormatOps(payload: string): ParsedFormatOp[] {
       const equals = source.indexOf('=');
       const name = source.slice(sign.length, equals === -1 ? undefined : equals);
       const op: ParsedFormatOp = { source, sign, name };
-      if (equals !== -1) op.value = decodePayload(source.slice(equals + 1));
+      if (equals !== -1) op.value = decodeText(source.slice(equals + 1));
       const inverse = inverseOf(sign, name, op.value);
       if (inverse) op.inverse = inverse;
       return op;

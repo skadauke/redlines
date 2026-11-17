@@ -9,6 +9,7 @@
 // refused with the same message.
 
 import {
+  ChangeSet,
   Compartment,
   EditorSelection,
   EditorState,
@@ -20,19 +21,28 @@ import {
   Transaction,
 } from '@codemirror/state';
 import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
-import type { Parsed, Warning } from '@redlines/format';
+import type { Parsed, TextChange, Warning } from '@redlines/format';
 import { takeBackAnnotation } from '../blocks/open.ts';
 import { hardBreakAtoms } from '../preview/decorations.ts';
 import { atomsOf } from '../tracked/decorations.ts';
+import { intentOf } from '../tracked/intent.ts';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
-import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
+import {
+  authoredChanges,
+  RAW_READ_ONLY,
+  rawIsReadOnly,
+  refusedEditEffect,
+} from '../tracked/typing.ts';
 import { agentCaret } from './caret.ts';
 import {
   history,
   historyField,
   historyKeymap,
+  markNotes,
+  remoteStep,
   redo,
   redoDepth,
+  type StepInfo,
   undo,
   undoDepth,
 } from './history.ts';
@@ -74,6 +84,8 @@ const outsideField = StateField.define<boolean>({
     // outside the history, which drops their steps (a Return joined to the step before it is
     // composed out of it, exactly): what is left fits the text exactly.
     if (tr.annotation(takeBackAnnotation)) return outside;
+    // Another person's edit from the session isn't the file changed on disk: its steps are mapped.
+    if (tr.annotation(remoteStep)) return outside;
     return outside || (tr.docChanged && tr.annotation(Transaction.addToHistory) === false);
   },
 });
@@ -212,10 +224,49 @@ function outOfHiddenText(tr: Transaction): EditorSelection {
   return next.eq(selection) ? selection : next;
 }
 
+/** Whose a step is: the intent's author, and the marks a tracked step wrote (per-person undo). */
+function stepInfo(tr: Transaction): StepInfo {
+  const made = intentOf(tr);
+  // A group of steps is one person's: the first step says who, and whether it was tracked.
+  const intent = made?.kind === 'steps' ? made.steps[0] : made;
+  if (!intent) return { person: null, marks: [] };
+  const person = intent.author?.handle ?? null;
+  if (!person || !intent.tracking) return { person, marks: [] };
+  const before = tr.startState.field(parsedField, false);
+  const after = tr.state.field(parsedField, false);
+  if (!before || !after) return { person, marks: [] };
+  const known = new Set(before.marks.map((mark) => mark.id));
+  const written = after.marks.filter((mark) => !known.has(mark.id));
+  return {
+    person,
+    marks: written.map((mark) => mark.id),
+    entries: markNotes(before, after),
+    // The old text of a deletion is in its marker, which Undo can't find again once another person
+    // accepts it.
+    deleted: written
+      .filter((mark) => mark.payload && (mark.kind === 'del' || mark.kind === 'sub'))
+      .map((mark) => ({ id: mark.id, at: mark.segments[0]!.open.from, text: mark.payload! })),
+  };
+}
+
+/** Writes edits as the person's own, for Undo of a step that another person decided. */
+function takeBack(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): ChangeSet | null {
+  try {
+    return authoredChanges(state, text, parsed, edits);
+  } catch {
+    return null;
+  }
+}
+
 /** The history, and Undo and Redo from the Edit menu, which reach the page as input events. */
 export function undoHistory(): Extension {
   return [
-    history({ agentCaret, visibleCaret: outOfHiddenText, label: labelOf }),
+    history({ agentCaret, visibleCaret: outOfHiddenText, label: labelOf, stepInfo, takeBack }),
     restart.of([]),
     droppedField,
     outsideField,
