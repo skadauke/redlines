@@ -49,7 +49,7 @@ judged by an independent Markdown reader (micromark 4.0.2, with GitHub's tables 
 not by us.
 
 **When an edit can't be written the usual way, it is meant to be written another way, or to ask.**
-Redlines does not guess and does not tidy. Where no fine form of an edit reads the same in every
+Redlines does not guess and does not tidy. Where no small, in-place form of an edit reads the same in every
 order, it writes the smallest whole unit that holds the edit (a word, a list item, a block, a table
 row) as one replacement, with anyone else's pending changes kept in the text it replaces. Where no
 unit can be written, it asks before making the edit without tracking, as Word does. A refusal stays
@@ -91,8 +91,8 @@ then:
   it, an insertion right after it), the edit is not written, because a heading typed after another
   person's split would read `## xbeta` in one order and `xbeta` in another (#107). The words are
   *"This would change how Bo Chen's insertion reads. Decide it first, or turn off Track Changes."*
-  Typing in code that holds another person's pending code change was refused and is written now
-  (#285, in review). Other refusals are kept where the file would be unreadable or forged.
+  Typing in code that holds another person's pending code change is refused (#285); a pull
+  request that writes it is open (#1016). Other refusals are kept where the file would be unreadable or forged.
 
 In the cases that remain, the way out is to decide the other person's change first, or to turn Track
 Changes off for the edit; the refusal says which.
@@ -132,7 +132,7 @@ We would rather say it than have you find it.
   - typing over one `*` of a pending bold's `**` (#299);
   - a highlight that runs from the text above a table into its header row can make another person's
     pending column change impossible to decide (#396);
-  - a few cases in one shape of pastes next to another person's marks (#276);
+  - five cases in one shape of pastes next to another person's marks (#276);
   - Return at the start of a nested first item, in four more shapes (#395);
   - pandoc's `~x~` and `^x^` in Quarto and R Markdown files, which a marker can stand inside (#370).
 - In a file with mixed line breaks, the editor writes a break whose line feed a tracked edit takes out
