@@ -14,9 +14,9 @@ import type { IntentEdit, TypingIntent } from './intent.ts';
 import { deriveIntent } from './typing.ts';
 
 /** How much visible text on each side of an edit is kept to find its place again. */
-const CONTEXT = 24;
+export const CONTEXT = 24;
 /** How much source text on each side tells that the place hasn't changed. */
-const WINDOW = 12;
+export const WINDOW = 12;
 
 /** One edit of an intent, among the visible words of the text it was made on. */
 export interface Part {
@@ -69,7 +69,7 @@ export type Rederived =
   | { ok: false; reason: string };
 
 /** How well `p` in `text` matches the words around an edit: the characters that agree on each side. */
-function score(text: string, part: Part, p: number, end: number): number {
+export function score(text: string, part: Part, p: number, end: number): number {
   let n = 0;
   while (
     n < part.before.length &&
@@ -83,7 +83,7 @@ function score(text: string, part: Part, p: number, end: number): number {
   return n + m;
 }
 
-function occurrences(text: string, needle: string, cap = 5000): number[] {
+export function occurrences(text: string, needle: string, cap = 5000): number[] {
   const found: number[] = [];
   if (!needle) return found;
   for (
@@ -97,7 +97,11 @@ function occurrences(text: string, needle: string, cap = 5000): number[] {
 }
 
 /** The candidate whose words fit best, the nearest to `near` among equals. */
-function best(candidates: number[], fit: (p: number) => number, near: number): number | null {
+export function best(
+  candidates: number[],
+  fit: (p: number) => number,
+  near: number,
+): number | null {
   let top: number | null = null;
   let topScore = -1;
   for (const p of candidates) {
@@ -111,7 +115,7 @@ function best(candidates: number[], fit: (p: number) => number, near: number): n
 }
 
 /** Where an insertion goes among the words of the newest text, and whether its words were found. */
-function placeInsertion(text: string, part: Part): { at: number; found: boolean } {
+export function placeInsertion(text: string, part: Part): { at: number; found: boolean } {
   // Nothing was kept around the edit (an empty text): there is nothing to find, and nothing lost.
   if (!part.before && !part.after) return { at: Math.min(part.at, text.length), found: true };
   const a = part.before.slice(-8);

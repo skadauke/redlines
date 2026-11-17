@@ -17,5 +17,8 @@
     "@redlines/collab": "workspace:*",
     "@redlines/editor": "workspace:*",
     "@redlines/format": "workspace:*"
+  },
+  "devDependencies": {
+    "@redlines/formatting": "workspace:*"
   }
 }

@@ -5,11 +5,12 @@
 
 import { Authority, Hub, memoryTransport } from '@redlines/collab';
 import type { Identity } from '@redlines/collab';
-import { createEditor, editSourceFacet, refusedEditEffect } from '@redlines/editor';
+import { createEditor, editSourceFacet, moveBlocks, refusedEditEffect } from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
 import type { Editor } from '@redlines/editor';
-import { parse } from '@redlines/format';
+import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createFormatting } from '@redlines/formatting';
 import { peersShown, syncEditor } from './index.ts';
 import type { SyncBinding } from './index.ts';
 
@@ -485,5 +486,135 @@ describe('undo in two windows', () => {
     expect(parse(text).warnings).toEqual([]);
     expect(bo.editor.view.state.doc.toString()).toBe(text);
     expect(ada.editor.view.state.doc.toString()).toBe(text);
+  });
+});
+
+describe('commands over another window’s edit', () => {
+  it('places a bold over a word that the other window typed inside', async () => {
+    const { hub, ada, bo } = await session();
+    const remove = createFormatting(bo.editor, {
+      author: { handle: 'bo', name: 'Bo' },
+      notice: (message) => bo.notices.push(message),
+    });
+    bo.editor.view.dispatch({
+      selection: {
+        anchor: bo.editor.view.state.doc.toString().indexOf('Second paragraph') + 7,
+        head: bo.editor.view.state.doc.toString().indexOf('Second paragraph') + 16,
+      },
+    });
+    type(ada.editor, 'Second para', 'X');
+    expect(bo.editor.commands.run('format.bold')).toBe(true);
+    await settle(ada.binding, bo.binding);
+    remove();
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(text).toContain('X');
+    // Widened to hold the other window's typing, which stays pending inside it.
+    expect(newestView(text).text).toContain('**paraXgraph**');
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('places a bold over a paragraph that the other window typed at the start of', async () => {
+    const { hub, ada, bo } = await session();
+    const remove = createFormatting(bo.editor, {
+      author: { handle: 'bo', name: 'Bo' },
+      notice: (message) => bo.notices.push(message),
+    });
+    const at = bo.editor.view.state.doc.toString().indexOf('Second paragraph');
+    bo.editor.view.dispatch({ selection: { anchor: at, head: at + 22 } });
+    type(ada.editor, 'First paragraph here.\n\n', 'X');
+    expect(bo.editor.commands.run('format.bold')).toBe(true);
+    await settle(ada.binding, bo.binding);
+    remove();
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    // Still three paragraphs: the other window's text is in the one it typed in, and the bold is
+    // on the words it was made on.
+    expect(newestView(text).text.split('\n\n').slice(0, 3)).toEqual([
+      'First paragraph here.',
+      'X**Second paragraph here.**',
+      'Third paragraph here.\n',
+    ]);
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('tells a person that the words they formatted were deleted', async () => {
+    const { hub, ada, bo } = await session();
+    const remove = createFormatting(bo.editor, {
+      author: { handle: 'bo', name: 'Bo' },
+      notice: (message) => bo.notices.push(message),
+    });
+    ada.editor.setTracking(false, { inFile: false });
+    const at = bo.editor.view.state.doc.toString().indexOf('Second paragraph');
+    bo.editor.view.dispatch({ selection: { anchor: at, head: at + 22 } });
+    // Ada deletes the paragraph outright (Track Changes off) while Bo's bold is still on its way.
+    ada.editor.view.dispatch({
+      changes: { from: at, to: at + 24, insert: '' },
+      userEvent: 'delete.selection',
+    });
+    expect(bo.editor.commands.run('format.bold')).toBe(true);
+    await settle(ada.binding, bo.binding);
+    remove();
+    const text = hub.authority.text;
+    expect(text).not.toContain('Second');
+    expect(bo.notices.join(' ')).toMatch(/formatted/);
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  const moved = async (after: string, text: string) => {
+    const { hub, ada, bo } = await session();
+    const at = bo.editor.view.state.doc.toString().indexOf('Third paragraph');
+    bo.editor.view.dispatch({ selection: { anchor: at + 2 } });
+    type(ada.editor, after, text);
+    moveBlocks(bo.editor.view, true);
+    await settle(ada.binding, bo.binding);
+    const doc = hub.authority.text;
+    expect(parse(doc).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(doc);
+    expect(ada.editor.view.state.doc.toString()).toBe(doc);
+    return { notices: bo.notices, paragraphs: newestView(doc).text.split('\n\n').slice(0, 3) };
+  };
+
+  it('places a move of a paragraph that the other window typed inside', async () => {
+    const { notices, paragraphs } = await moved('Third para', 'X');
+    expect(notices).toEqual([]);
+    expect(paragraphs).toEqual([
+      'First paragraph here.',
+      'Third paraXgraph here.',
+      'Second paragraph here.\n',
+    ]);
+  });
+
+  it('places a move over a paragraph that the other window typed at the start of', async () => {
+    const { notices, paragraphs } = await moved('First paragraph here.\n\n', 'X');
+    expect(notices).toEqual([]);
+    expect(paragraphs).toEqual([
+      'First paragraph here.',
+      'Third paragraph here.',
+      'XSecond paragraph here.\n',
+    ]);
+  });
+
+  it('tells a person that the paragraph they moved was deleted, and moves nothing', async () => {
+    const { hub, ada, bo } = await session();
+    ada.editor.setTracking(false, { inFile: false });
+    const doc = bo.editor.view.state.doc.toString();
+    const at = doc.indexOf('Third paragraph');
+    bo.editor.view.dispatch({ selection: { anchor: at + 2 } });
+    ada.editor.view.dispatch({
+      changes: { from: at - 2, to: at + 'Third paragraph here.'.length, insert: '' },
+      userEvent: 'delete.selection',
+    });
+    moveBlocks(bo.editor.view, true);
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(bo.notices.join(' ')).toMatch(/moved/);
+    expect(text).not.toContain('Third');
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
   });
 });

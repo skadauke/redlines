@@ -9,8 +9,17 @@ import { EditorState, Annotation, ChangeSet, Text, Transaction } from '@codemirr
 import { SyncClient, Replica } from '@redlines/collab';
 import type { Pending, SyncState, Transport } from '@redlines/collab';
 import type { Credential, Peer } from '@redlines/collab';
-import { anchorIntent, intentOf, rederiveIntent, remoteStep } from '@redlines/editor';
-import type { Editor, Intent } from '@redlines/editor';
+import {
+  anchorFormat,
+  anchorIntent,
+  anchorMove,
+  intentOf,
+  rederiveFormat,
+  rederiveIntent,
+  rederiveMove,
+  remoteStep,
+} from '@redlines/editor';
+import type { Editor, Intent, Rederived } from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
 import { placeLedgerWrite } from './ledger.ts';
 import { ensureStyle, peersShown, presenceExtension, showPeers } from './presence.ts';
@@ -27,6 +36,8 @@ export interface EditNote {
   intent: Intent | undefined;
   /** The edit as made, on the text it started from (`Pending.start`), to place its ledger write. */
   made?: ChangeSet;
+  /** The text the intent was made on, which its offsets are of; it stays as the edit is placed again. */
+  origin?: Text;
 }
 
 export interface SyncOptions {
@@ -184,7 +195,11 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
       let local = false;
       for (const tr of update.transactions) {
         if (!tr.docChanged || tr.annotation(received)) continue;
-        replica.local(tr.changes, tr.startState.doc, { intent: intentOf(tr), made: tr.changes });
+        replica.local(tr.changes, tr.startState.doc, {
+          intent: intentOf(tr),
+          made: tr.changes,
+          origin: tr.startState.doc,
+        });
         local = true;
       }
       if (local) {
@@ -279,23 +294,38 @@ function rederive(
     const fits = edit.changes.length === old.length;
     const mapped = fits && shift ? edit.changes.map(shift) : edit.changes;
     let changes: ChangeSet | null = null;
-    if (intent?.kind === 'typing') {
-      const placed = rederiveIntent(state, anchorIntent(edit.start.toString(), intent));
+    const origin = (edit.note.origin ?? edit.start).toString();
+    // The text's own changes (Undo, an agent's edit) are written as they are: mapped over what
+    // others did, with their ledger write and their rejections made again on the newest text.
+    const asIs = !intent || (intent.kind === 'typing' && intent.exact === true);
+    const byWords = (): Rederived | null =>
+      intent?.kind === 'typing'
+        ? rederiveIntent(state, anchorIntent(origin, intent))
+        : intent?.kind === 'format'
+          ? rederiveFormat(state, anchorFormat(origin, intent))
+          : intent?.kind === 'move'
+            ? rederiveMove(state, anchorMove(origin, intent))
+            : null;
+    const take = (placed: Rederived) => {
       if (placed.ok) {
         changes = placed.changes;
         notices.push(...placed.notices);
-      } else if (intent.exact && edit.changes.length === state.doc.length) {
-        // The text's own changes (Undo, an agent's edit) that can't be placed by their source: as
-        // the session mapped them over what others changed, which never takes them back.
-        changes = edit.changes;
       } else {
         notices.push(`An edit of yours was taken back: ${placed.reason}`);
       }
+    };
+    if (!asIs) {
+      const placed = byWords();
+      if (placed) take(placed);
+      else notices.push('A change of yours could not be placed after what others changed.');
     } else if (fits && mapped.length === state.doc.length) {
       // Mapped over what others did, but its ledger write is made again on the newest ledger.
       changes = edit.note.made
         ? (placeLedgerWrite(state.doc, mapped, edit.start, edit.note.made) ?? mapped)
         : mapped;
+    } else if (intent) {
+      const placed = byWords();
+      if (placed) take(placed);
     } else {
       notices.push('A change of yours could not be placed after what others changed.');
     }
