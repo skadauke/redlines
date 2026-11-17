@@ -113,6 +113,74 @@ export interface DocumentParts {
   altOnly?: (href: string) => boolean;
 }
 
+/** The widest a picture goes on a page of Word or Docs: 6.5 in at 96 dpi. */
+const COLUMN_PX = 624;
+
+/** The size in px of an image given as a `data:` address, read from its header; null if unknown. */
+export function dataImageSize(url: string): { width: number; height: number } | null {
+  const comma = url.indexOf(',');
+  if (!/^data:image\/[\w+.-]+;base64$/i.test(url.slice(0, comma))) return null;
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(
+      url
+        .slice(comma + 1, comma + 1 + 87_384)
+        .replace(/=+$/, '')
+        .slice(0, 87_380),
+    );
+    bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+  const u16 = (i: number) => (bytes[i] ?? 0) | ((bytes[i + 1] ?? 0) << 8);
+  const be16 = (i: number) => ((bytes[i] ?? 0) << 8) | (bytes[i + 1] ?? 0);
+  const be32 = (i: number) => be16(i) * 65536 + be16(i + 2);
+  const ascii = (i: number, n: number) => String.fromCharCode(...bytes.subarray(i, i + n));
+  let size: { width: number; height: number } | null = null;
+  if (ascii(1, 3) === 'PNG') size = { width: be32(16), height: be32(20) };
+  else if (ascii(0, 3) === 'GIF') size = { width: u16(6), height: u16(8) };
+  else if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') {
+    const kind = ascii(12, 4);
+    if (kind === 'VP8X') {
+      size = {
+        width: 1 + (bytes[24]! | (bytes[25]! << 8) | (bytes[26]! << 16)),
+        height: 1 + (bytes[27]! | (bytes[28]! << 8) | (bytes[29]! << 16)),
+      };
+    } else if (kind === 'VP8 ') size = { width: u16(26) & 0x3fff, height: u16(28) & 0x3fff };
+    else if (kind === 'VP8L') {
+      const bits = bytes[21]! | (bytes[22]! << 8) | (bytes[23]! << 16) | (bytes[24]! << 24);
+      size = { width: 1 + (bits & 0x3fff), height: 1 + ((bits >>> 14) & 0x3fff) };
+    }
+  } else if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    for (let i = 2; i + 9 < bytes.length;) {
+      if (bytes[i] !== 0xff) {
+        i++;
+        continue;
+      }
+      const marker = bytes[i + 1]!;
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+        size = { height: be16(i + 5), width: be16(i + 7) };
+        break;
+      }
+      i += 2 + (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) ? 0 : be16(i + 2));
+    }
+  }
+  return size && size.width > 0 && size.height > 0 ? size : null;
+}
+
+/**
+ * The `width` and `height` attributes of a picture for a program that pastes, so it doesn't guess:
+ * the width set in the document, else the file's own, kept inside the column, aspect kept.
+ */
+function pictureSize(shown: string, set: number | null): string {
+  const natural = dataImageSize(shown);
+  let width = set ?? natural?.width ?? null;
+  if (width === null) return '';
+  width = Math.min(width, COLUMN_PX);
+  if (!natural) return ` width="${Math.round(width)}"`;
+  return ` width="${Math.round(width)}" height="${Math.max(1, Math.round((width * natural.height) / natural.width))}"`;
+}
+
 const OFFICE_CODE = 'background:#f2f2f2;color:#24292f;';
 const OFFICE_CELL = 'border:1px solid #8c8c8c;padding:4px 8px;';
 const OFFICE_QUOTE =
@@ -172,8 +240,9 @@ function render(
     const shown = doc?.imageUrl ? doc.imageUrl(href) : href;
     if (shown === null) return escape(value('alt') ?? '');
     const width = /^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$/i.exec(value('width') ?? '')?.[1];
+    const set = width && Number(width) > 0 ? Number(width) : null;
     return `<img src="${escape(shown)}" alt="${escape(value('alt') ?? '')}"${
-      width && Number(width) > 0 ? ` width="${Math.round(Number(width))}"` : ''
+      office ? pictureSize(shown, set) : set ? ` width="${Math.round(set)}"` : ''
     }>`;
   }
 
@@ -264,7 +333,7 @@ function render(
         // An image the preview doesn't fetch is not one a target should: its alt text only.
         const shown = doc?.imageUrl ? doc.imageUrl(href) : href;
         return pictureOk(href) && !keepAsText(href) && shown !== null
-          ? `<img src="${escape(shown)}" alt="${escape(alt)}">`
+          ? `<img src="${escape(shown)}" alt="${escape(alt)}"${office ? pictureSize(shown, null) : ''}>`
           : escape(alt);
       }
       case 'Autolink':

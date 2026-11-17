@@ -200,3 +200,33 @@ describe('documentHtml of a selection (clip)', () => {
     expect(html).toContain('☐ open');
   });
 });
+
+describe('picture sizes for Word and Docs', () => {
+  const png = (width: number, height: number) => {
+    const bytes = Buffer.alloc(24);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
+    bytes.writeUInt32BE(13, 8);
+    bytes.write('IHDR', 12);
+    bytes.writeUInt32BE(width, 16);
+    bytes.writeUInt32BE(height, 20);
+    return `data:image/png;base64,${bytes.toString('base64')}`;
+  };
+
+  it('gives a picture its natural size, kept inside the column with its aspect', () => {
+    const small = documentHtml(`![a](${png(16, 8)})`, 'clean', { office: true });
+    expect(small).toContain('width="16" height="8"');
+    const wide = documentHtml(`![a](${png(1248, 624)})`, 'clean', { office: true });
+    expect(wide).toContain('width="624" height="312"');
+  });
+
+  it('takes the width set in the document, with the aspect of the file', () => {
+    const html = documentHtml(`<img src="${png(400, 200)}" alt="a" width="100">`, 'clean', {
+      office: true,
+    });
+    expect(html).toContain('width="100" height="50"');
+  });
+
+  it('leaves print as it was', () => {
+    expect(documentHtml(`![a](${png(16, 8)})`)).not.toContain('height=');
+  });
+});
