@@ -266,8 +266,9 @@ async function importDocx(rest: string[], io: CliIo): Promise<number> {
   const written: string[] = [];
   try {
     for (const [name, picture] of pictures) {
-      await io.writeBytes?.(folder + name, picture).catch(cannot('write', folder + name));
+      // Listed before the write: a file that stopped half way goes too (none was there before).
       written.push(folder + name);
+      await io.writeBytes?.(folder + name, picture).catch(cannot('write', folder + name));
     }
     await io.writeFile(target, markdown).catch(cannot('write', target));
   } catch (error) {
