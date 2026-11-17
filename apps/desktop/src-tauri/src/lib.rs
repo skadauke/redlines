@@ -417,6 +417,7 @@ pub fn run() {
             recovery::recovery_write,
             session::session_join,
             session::session_leave,
+            session::session_members,
             session::session_wal_append,
             session::session_wal_read,
             session::session_wal_start,

@@ -224,7 +224,8 @@ async function beginSession(path: string, follow = false): Promise<void> {
     follow,
     person: { handle: author.handle, name: author.name },
     // The leader writes the file, for every window of the document.
-    save: async () => ((await controller.save()) ? editor.getDoc() : null),
+    diskText: () => controller.diskText,
+    save: async () => ((await controller.save()) ? controller.diskText : null),
     onSaved: (text) => controller.savedBySession(text),
     onLoaded: () => controller.sessionLoaded(),
     onLead: () => controller.becameLeader(),

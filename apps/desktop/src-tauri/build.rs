@@ -88,6 +88,7 @@ const COMMANDS: &[&str] = &[
     "reveal_in_finder",
     "session_join",
     "session_leave",
+    "session_members",
     "session_wal_append",
     "session_wal_read",
     "session_wal_start",

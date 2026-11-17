@@ -16,6 +16,7 @@ export function tauriSessionPorts(): SessionPorts {
     walAppend: (path, epoch, lines) => invoke('session_wal_append', { path, epoch, lines }),
     walRead: (path) =>
       invoke<{ base: string; records: string[] } | null>('session_wal_read', { path }),
+    members: (path) => invoke<string[]>('session_members', { path }),
     leave: (path) => invoke('session_leave', { path }),
     send: (label, event, payload) => emitTo(label, event, payload),
     // This window's own: the plain `listen` would hear what is sent to the others too.

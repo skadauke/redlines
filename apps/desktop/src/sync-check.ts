@@ -53,7 +53,8 @@ function pane(host: HTMLElement, who: 'ada' | 'bo', hub: Hub, hosts: boolean): P
   holder.style.cssText = 'flex:1 1 0;min-width:0;overflow:auto;padding:0 8px;';
   const label = document.createElement('div');
   label.textContent = who === 'ada' ? 'Ada’s window' : 'Bo’s window';
-  label.style.cssText = 'font:13px system-ui;color:#666;padding:6px 0;';
+  label.style.cssText =
+    'font-family:system-ui;font-size:var(--rl-size-ui);color:#666;padding:6px 0;';
   const mount = document.createElement('div');
   holder.append(label, mount);
   host.append(holder);

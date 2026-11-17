@@ -55,6 +55,7 @@ class FakeApp {
         this.logs.get(path)?.records.push(...lines);
       },
       walRead: async (path) => this.logs.get(path) ?? null,
+      members: async (path) => this.sessions.get(path)?.members ?? [],
       leave: async (path) => this.leave(label, path),
       send: async (to, event, payload) => {
         // Delivered later, as events between windows are.
@@ -116,25 +117,32 @@ interface Window {
   editor: Editor;
   session: Session;
   saved: string[];
+  /** What it was told the file holds. */
+  told: string[];
   notices: string[];
 }
 
 async function windowOn(app: FakeApp, label: string, doc: string): Promise<Window> {
   const editor = editorFor(doc);
   const saved: string[] = [];
+  const told: string[] = [];
   const notices: string[] = [];
+  let disk: string | null = doc === '' ? null : doc;
   const session = await joinSession(app.ports(label), editor, {
     path: PATH,
     person: { handle: 'ada', name: 'Ada' },
+    diskText: () => disk,
+    onSaved: (text) => told.push(text),
     save: async () => {
       const text = editor.view.state.doc.toString();
       saved.push(text);
+      disk = text;
       return text;
     },
     notice: (message) => notices.push(message),
     saveDelayMs: 20,
   });
-  return { label, editor, session, saved, notices };
+  return { label, editor, session, saved, told, notices };
 }
 
 function type(editor: Editor, after: string, text: string): void {
@@ -227,6 +235,67 @@ describe('a document in two windows', () => {
     expect(three.editor.view.state.doc.toString()).toBe(text);
     for (const word of ['ONE', 'TWO', 'THREE']) expect(text).toContain(word);
     expect(parse(text).warnings).toEqual([]);
+  });
+
+  it('tells a window that joins what the file holds, not what the session has', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    type(one.editor, 'First', ' UNSAVED');
+    await settle(one);
+    const two = await windowOn(app, 'doc-2', '');
+    await settle(one, two);
+    await wait(30);
+    expect(two.editor.view.state.doc.toString()).toContain('UNSAVED');
+    expect(two.told).toContain(BASE);
+  });
+
+  it('goes on through two handovers in a row with nobody typing in between', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    const two = await windowOn(app, 'doc-2', '');
+    const three = await windowOn(app, 'doc-3', '');
+    await settle(one, two, three);
+    type(one.editor, 'First', ' ONE');
+    await settle(one, two, three);
+    await one.session.stop();
+    await wait(40);
+    expect(two.session.leading).toBe(true);
+    // The first to take over has stored what it replayed, though nobody has typed since.
+    await two.session.stop();
+    await wait(40);
+    expect(three.session.leading).toBe(true);
+    expect(three.editor.view.state.doc.toString()).toContain('ONE');
+    type(three.editor, 'Third', ' THREE');
+    await wait(60);
+    const log = app.logs.get(PATH)!;
+    expect(log.records.join('')).toContain('ONE');
+    expect(log.records.join('')).toContain('THREE');
+  });
+
+  it('turns away a call from a window that is not in the session', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    await settle(one);
+    const answers: unknown[] = [];
+    const stranger = app.ports('doc-9');
+    await stranger.listen(EVENTS.reply, (payload) => answers.push(payload));
+    await stranger.send('doc-1', EVENTS.call, {
+      from: 'doc-9',
+      id: 1,
+      call: {
+        call: 'hello',
+        request: {
+          credential: { key: 'x' },
+          clientID: 'doc-9',
+          protocol: 1,
+          format: 1,
+          version: 0,
+          epoch: 1,
+        },
+      },
+    });
+    await wait(20);
+    expect(JSON.stringify(answers)).toContain('forbidden');
   });
 
   it('restores what the last run confirmed when its log was left behind', async () => {

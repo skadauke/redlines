@@ -46,6 +46,8 @@ export interface SessionPorts {
   walStart(path: string, epoch: number, base: string): Promise<void>;
   walAppend(path: string, epoch: number, lines: string[]): Promise<void>;
   walRead(path: string): Promise<{ base: string; records: string[] } | null>;
+  /** The windows of the session, which only a member may ask. */
+  members(path: string): Promise<string[]>;
   leave(path: string): Promise<void>;
   /** Sends an event to one window. */
   send(label: string, event: string, payload: unknown): Promise<void>;
@@ -68,6 +70,8 @@ export interface SessionOptions {
   path: string;
   /** Who this window's person is, as the ledger names them. */
   person: { handle: string; name: string };
+  /** What the file holds, as far as this window knows: the leader tells it to a window that joins. */
+  diskText?(): string | null;
   /** Writes the file, which only the leader does. Resolves to the text written, or null. */
   save(): Promise<string | null>;
   /** The leader wrote the file: this is what it holds. */
@@ -141,7 +145,10 @@ class Switch implements Transport {
 class Remote implements Transport {
   leader: string;
   readonly #ports: SessionPorts;
-  readonly #waiting = new Map<number, (reply: Reply) => void>();
+  readonly #waiting = new Map<
+    number,
+    { resolve: (reply: Reply) => void; reject: (e: Error) => void }
+  >();
   readonly #handlers = new Set<(notice: Notice) => void>();
   #next = 0;
 
@@ -157,9 +164,15 @@ class Remote implements Transport {
         this.#waiting.delete(id);
         reject(new Error('The window that leads the session did not answer.'));
       }, TIMEOUT);
-      this.#waiting.set(id, (reply) => {
-        clearTimeout(timer);
-        resolve(reply);
+      this.#waiting.set(id, {
+        resolve: (reply) => {
+          clearTimeout(timer);
+          resolve(reply);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
       });
       this.#ports
         .send(this.leader, EVENTS.call, { from: this.#ports.label, id, call })
@@ -177,8 +190,15 @@ class Remote implements Transport {
   }
 
   replied(id: number, reply: Reply): void {
-    this.#waiting.get(id)?.(reply);
+    this.#waiting.get(id)?.resolve(reply);
     this.#waiting.delete(id);
+  }
+
+  /** The leader changed: what was asked of the old one will not be answered. */
+  retarget(leader: string): void {
+    this.leader = leader;
+    for (const { reject } of this.#waiting.values()) reject(new Error('The leader changed.'));
+    this.#waiting.clear();
   }
 
   heard(notice: Notice): void {
@@ -249,15 +269,26 @@ export async function joinSession(
   options: SessionOptions,
 ): Promise<Session> {
   const { path } = options;
-  const joined = await ports.join(path);
-  if (options.follow && joined.leading) {
-    await ports.leave(path).catch(() => {});
-    throw new Error('The window that showed this document has closed.');
-  }
   const off: (() => void)[] = [];
   const listen = async (event: string, handler: (payload: unknown) => void) => {
     off.push(await ports.listen(event, handler));
   };
+  // Listening starts before the app counts this window in: the leader may close in between, and
+  // the app tells the next window once.
+  let onMoved: ((moved: Moved) => void) | null = null;
+  const early: Moved[] = [];
+  await listen(EVENTS.moved, (payload) => {
+    const moved = payload as Moved;
+    if (moved.path !== path) return;
+    if (onMoved) onMoved(moved);
+    else early.push(moved);
+  });
+  const joined = await ports.join(path);
+  if (options.follow && joined.leading) {
+    await ports.leave(path).catch(() => {});
+    for (const stop of off) stop();
+    throw new Error('The window that showed this document has closed.');
+  }
   const authenticate = authenticateFor(options.person);
   let hub: Hub | null = null;
   let leading = joined.leading;
@@ -295,6 +326,9 @@ export async function joinSession(
       }
     });
     made.onLogged(() => saveSoon());
+    // What a takeover or a restore wrote to the new log is stored before anyone is answered: until
+    // then the app's log holds the base alone, and a second handover would begin from that.
+    await wal.flushed();
     return made;
   };
 
@@ -303,7 +337,7 @@ export async function joinSession(
       try {
         if (!hub) return null;
         // What is shown is what the authority holds, or the file would lag behind the session.
-        for (let tries = 0; tries < 50; tries++) {
+        for (let tries = 0; tries < 250; tries++) {
           const settled =
             binding.replica.pending.length === 0 &&
             binding.replica.version === hub.authority.version;
@@ -340,8 +374,27 @@ export async function joinSession(
     await listen(EVENTS.call, (payload) => {
       const { from, id, call } = payload as { from: string; id: number; call: Call };
       if (!hub) return;
-      if (call.call === 'hello') windowOf.set(call.request.clientID, from);
-      void hub.handle(call).then((reply) => ports.send(from, EVENTS.reply, { id, reply }));
+      const answer = (reply: Reply) => ports.send(from, EVENTS.reply, { id, reply });
+      const refuse = () =>
+        answer({ ok: false, error: 'forbidden', message: 'Not a window of this session.' });
+      void (async () => {
+        if (call.call === 'hello') {
+          // Only a window the app counts in the session may join it.
+          const members = await ports.members(path).catch(() => [] as string[]);
+          if (!members.includes(from)) return refuse();
+          windowOf.set(call.request.clientID, from);
+        } else if (windowOf.get(call.clientID) !== from) {
+          // A client is its window's: no window speaks for another's.
+          return refuse();
+        }
+        const reply = await hub.handle(call);
+        await answer(reply);
+        // A window that joins is told what the file holds, to know what is unsaved.
+        const disk = options.diskText?.() ?? null;
+        if (call.call === 'hello' && reply.ok && disk !== null) {
+          await ports.send(from, EVENTS.saved, { text: disk });
+        }
+      })().catch(() => {});
     });
     // A window closed: its client is out of the session, and its caret with it.
     await listen(EVENTS.left, (payload) => {
@@ -407,26 +460,27 @@ export async function joinSession(
 
   // The app says who leads. A window that is now the leader takes the log over, and the others
   // look for the new leader.
-  await listen(EVENTS.moved, (payload) => {
-    const moved = payload as Moved;
-    if (moved.path !== path) return;
-    epoch = moved.epoch;
-    leader = moved.leader;
-    if (moved.leader === ports.label) void takeOver();
+  const moved = (change: Moved): void => {
+    epoch = change.epoch;
+    leader = change.leader;
+    if (change.leader === ports.label) void takeOver();
     else if (remote) {
-      remote.leader = moved.leader;
+      remote.retarget(change.leader);
       binding.client.rejoin();
     }
-  });
+  };
+  onMoved = moved;
+  for (const change of early.splice(0)) moved(change);
 
   async function takeOver(): Promise<void> {
     try {
       const log = await ports.walRead(path);
       if (!log) throw new Error('The session has no log to take over from.');
-      leading = true;
       windowOf.clear();
       windowOf.set(clientID, ports.label);
       hub = await host(log.base, log);
+      leading = true;
+      remote?.retarget(ports.label);
       transport.use(memoryTransport(hub, clientID));
       remote = null;
       await serve();

@@ -154,6 +154,8 @@ export class DocumentController {
   #generation = 0;
   /** The session this document is in, with other windows, or null. */
   #session: DocumentSession | null = null;
+  /** The leader has said what the file holds, for a window that joined a session. */
+  #sessionSaved = false;
   /** Agent edits being written to the file, one after another. */
   #agentWrites: Promise<void> = Promise.resolve();
   /** How many agent edits are waiting to be written, or being written. */
@@ -621,9 +623,10 @@ export class DocumentController {
     // next window leads on; a window with edits the authority doesn't have yet asks as ever.
     if (this.#session) {
       if (!this.#session.leading && this.#session.confirmed) return true;
+      // A save that did not happen (the person said no to overwriting, the write failed) is not one:
+      // the question is asked, and closing waits for the answer.
       if (this.#session.leading && this.#session.members > 1) {
-        await this.save().catch(() => false);
-        return true;
+        if (await this.save().catch(() => false)) return true;
       }
     }
     this.#question ??= this.#askAboutEdits().finally(() => {
@@ -667,6 +670,8 @@ export class DocumentController {
   /** The window leads, now: the leader before it closed. It sees the file again. */
   becameLeader(): void {
     if (this.#state.path !== null) this.#watch(this.#state.path);
+    // What this window had of the file's text may be older than the session's: look again.
+    this.markEdited();
   }
 
   /** The window is out of its session and holds the document alone again. */
@@ -681,6 +686,7 @@ export class DocumentController {
    * text yet. The text comes from the session (`sessionLoaded`), and the file isn't read.
    */
   followSession(path: string): void {
+    this.#sessionSaved = false;
     this.#generation++;
     this.#diskSteps = 0;
     this.#base = '';
@@ -700,14 +706,29 @@ export class DocumentController {
 
   /** The session's text is in the editor: it is the file's, as far as this window knows. */
   sessionLoaded(): void {
-    const text = this.#editor.getDoc();
-    this.#base = text;
-    this.#disk = text;
-    this.#update({ dirty: false });
+    // The leader may have told what the file holds already: then the session's text is not it.
+    if (!this.#sessionSaved) {
+      const text = this.#editor.getDoc();
+      this.#base = text;
+      this.#disk = text;
+    }
+    this.#update({ dirty: lf(this.#editor.getDoc()) !== lf(this.#base) });
+  }
+
+  /** What the file holds, as far as this window knows; null when it is gone or unreadable. */
+  get diskText(): string | null {
+    return this.#disk;
   }
 
   /** The leader wrote the file, and `text` is what it holds. */
   savedBySession(text: string): void {
+    this.#sessionSaved = true;
+    // The session's text has LF line breaks; a file with CRLF ones keeps them in this window too, or
+    // the window that leads next would write the file with other ones.
+    const shown = this.#editor.getDoc();
+    if (/\r\n/.test(text) && !shown.includes('\r')) {
+      this.#editor.reloadDoc(shown.replace(/\n/g, '\r\n'));
+    }
     this.#savedAt = new Date();
     this.#base = text;
     this.#disk = text;

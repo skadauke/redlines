@@ -158,7 +158,12 @@ impl Registry {
         Ok(())
     }
 
-    /// The window that leads `path`'s session, and its members.
+    /// Whether `path` has a session.
+    pub fn has(&self, path: &str) -> bool {
+        self.sessions.contains_key(path)
+    }
+
+    /// The windows of `path`'s session.
     pub fn members(&self, path: &str) -> Vec<String> {
         self.sessions
             .get(path)
@@ -172,6 +177,11 @@ impl Registry {
 pub struct Sessions(Mutex<Registry>);
 
 impl Sessions {
+    /// Whether `path` has a session.
+    pub fn has(&self, path: &str) -> bool {
+        self.lock().has(path)
+    }
+
     fn lock(&self) -> MutexGuard<'_, Registry> {
         self.0
             .lock()
@@ -263,6 +273,20 @@ fn folder(app: &AppHandle) -> Result<PathBuf, String> {
 
 // --- commands ----------------------------------------------------------------------------------
 
+/// The most a page may hand the log in one call: a document is at most 8 MB, and a record is one
+/// edit of it.
+const MAX_BYTES: usize = 32 * 1024 * 1024;
+
+/// Refuses a path the windows may not use: any page can name any string, and a session is a way to
+/// read a document and to write the app's log of it.
+fn allowed(app: &AppHandle, path: &str) -> Result<(), String> {
+    if crate::file_scope::may_use(app, path) {
+        Ok(())
+    } else {
+        Err("This window may not use that file.".to_owned())
+    }
+}
+
 /// What a window that joins is given besides its place: the log an earlier run left, for the leader
 /// to restore from, or None.
 #[derive(Debug, Serialize)]
@@ -281,6 +305,7 @@ pub fn session_join(
     path: String,
 ) -> Result<JoinReply, String> {
     let app = window.app_handle();
+    allowed(app, &path)?;
     let (joined, fresh) = {
         let mut registry = sessions.lock();
         let fresh = registry.members(&path).is_empty();
@@ -304,6 +329,10 @@ pub fn session_wal_start(
     epoch: u32,
     base: String,
 ) -> Result<(), String> {
+    allowed(window.app_handle(), &path)?;
+    if base.len() > MAX_BYTES {
+        return Err("The text is too large for a session.".to_owned());
+    }
     sessions.lock().may_write(&path, window.label(), epoch)?;
     start(&folder(window.app_handle())?, &path, &base).map_err(|e| e.to_string())
 }
@@ -318,6 +347,10 @@ pub fn session_wal_append(
     epoch: u32,
     lines: Vec<String>,
 ) -> Result<(), String> {
+    allowed(window.app_handle(), &path)?;
+    if lines.iter().map(String::len).sum::<usize>() > MAX_BYTES {
+        return Err("The records are too large for one write.".to_owned());
+    }
     sessions.lock().may_write(&path, window.label(), epoch)?;
     append(&folder(window.app_handle())?, &path, &lines).map_err(|e| e.to_string())
 }
@@ -339,6 +372,22 @@ pub fn session_wal_read(
         return Err("This window is not in the session.".to_owned());
     }
     Ok(read(&folder(window.app_handle())?, &path))
+}
+
+/// The windows of a document's session, for the leader to know who may call it.
+#[tauri::command]
+pub fn session_members(
+    window: WebviewWindow,
+    sessions: tauri::State<'_, Sessions>,
+    path: String,
+) -> Result<Vec<String>, String> {
+    allowed(window.app_handle(), &path)?;
+    let members = sessions.lock().members(&path);
+    if members.iter().any(|m| m == window.label()) {
+        Ok(members)
+    } else {
+        Err("This window is not in the session.".to_owned())
+    }
 }
 
 /// This window leaves its document's session (it opened another document, or stops being synced).
@@ -404,6 +453,8 @@ mod tests {
         // Joining twice changes nothing.
         registry.join("/a/plan.md", "doc-2");
         assert_eq!(registry.members("/a/plan.md"), ["doc-1", "doc-2"]);
+        assert!(registry.has("/a/plan.md"));
+        assert!(!registry.has("/a/other.md"));
         // Another document has a session of its own.
         assert!(registry.join("/a/other.md", "doc-3").leading);
     }

@@ -648,7 +648,11 @@ pub fn open_window(
     let mut start = WindowStart::new(path, line, text)?;
     // Another window on the document of a window that leads its session (`session_join`): it joins
     // that session, and the file is not brought forward.
-    let joining = session == Some(true) && start.path.is_some();
+    let joining = session == Some(true)
+        && start
+            .path
+            .as_deref()
+            .is_some_and(|path| app.state::<crate::session::Sessions>().has(path));
     start.session = joining;
     // A file that a window holds is not opened twice: that window comes forward.
     if let Some(path) = start.path.as_deref().filter(|_| !joining) {

@@ -2260,6 +2260,40 @@ describe('a document in a session of windows', () => {
     expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'One\nTwo\n' }]);
   });
 
+  it('asks when the leader’s save did not happen, and does not close on it', async () => {
+    const { host, controller, editor } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    controller.enterSession(session(true));
+    editor.type('One\nTwo\n');
+    // The file changed elsewhere meanwhile, and the person says no to overwriting it.
+    host.files.set('/docs/plan.md', 'Elsewhere\n');
+    host.overwriteChoice = 'cancel';
+    host.choice = 'cancel';
+    expect(await controller.confirmDiscard()).toBe(false);
+    expect(host.writes).toEqual([]);
+    expect(host.asked).toBe(1);
+  });
+
+  it('keeps what the leader says the file holds when the session’s text arrives after it', () => {
+    const { controller, editor, state } = setup();
+    controller.followSession('/docs/plan.md');
+    controller.enterSession(session(false));
+    controller.savedBySession('Old\n');
+    editor.setDoc('Old\nand an unsaved edit\n');
+    controller.sessionLoaded();
+    expect(state()?.dirty).toBe(true);
+  });
+
+  it('keeps a file’s CRLF line breaks in a window that has the session’s LF text', () => {
+    const { controller, editor, state } = setup();
+    controller.followSession('/docs/plan.md');
+    controller.enterSession(session(false));
+    editor.setDoc('A\nB\n');
+    controller.savedBySession('A\r\nB\r\n');
+    expect(editor.reloadDoc).toHaveBeenCalledWith('A\r\nB\r\n');
+    expect(state()?.dirty).toBe(false);
+  });
+
   it('asks as ever when the leader is alone in its session', async () => {
     const { host, controller, editor } = setup({ '/docs/plan.md': 'One\n' });
     host.choice = 'cancel';

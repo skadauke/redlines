@@ -73,6 +73,7 @@
     "allow-rename-file",
     "allow-session-join",
     "allow-session-leave",
+    "allow-session-members",
     "allow-session-wal-append",
     "allow-session-wal-read",
     "allow-session-wal-start",
