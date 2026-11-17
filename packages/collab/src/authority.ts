@@ -47,6 +47,10 @@ export interface Limits {
   maxDocument: number;
   /** The JSON length of a presence state. */
   maxPresence: number;
+  /** Ranges in one footprint. */
+  maxFootprint: number;
+  /** The JSON length of an update's entries and decision. */
+  maxEntries: number;
   /** Pushes per window, per client. */
   rateMax: number;
   rateWindowMs: number;
@@ -59,6 +63,8 @@ export const DEFAULT_LIMITS: Limits = {
   maxInserted: 256_000,
   maxDocument: 8_000_000,
   maxPresence: 4_000,
+  maxFootprint: 1_000,
+  maxEntries: 64_000,
   rateMax: 200,
   rateWindowMs: 10_000,
   presenceTtlMs: 30_000,
@@ -244,6 +250,14 @@ export class Authority {
 
   hello(request: HelloRequest): HelloReply | ProtocolError {
     if (this.closed) return error('ended', 'The session has ended.');
+    if (
+      !isObject(request) ||
+      !Number.isInteger(request.protocol) ||
+      !Number.isInteger(request.format)
+    ) {
+      return error('invalid', 'A hello says which protocol and format it speaks.');
+    }
+    if (!isObject(request.credential)) return error('invalid', 'A hello carries a credential.');
     if (request.protocol < MIN_PROTOCOL_VERSION || request.format < MIN_FORMAT_VERSION) {
       return error('update-required', 'This version of Redlines is too old for the session.');
     }
@@ -259,6 +273,10 @@ export class Authority {
         who.error,
         who.error === 'token-expired' ? 'The token has expired.' : 'No access.',
       );
+    }
+    const known = this.sessions.get(request.clientID);
+    if (known && known.identity.handle !== who.handle) {
+      return error('forbidden', 'That client id belongs to someone else.');
     }
     this.sessions.set(request.clientID, { identity: who });
     const reset = request.epoch !== this.currentEpoch || request.version > this.version;
@@ -307,6 +325,9 @@ export class Authority {
     const { identity } = found;
     const where = { version: this.version, epoch: this.currentEpoch };
     if (identity.role === 'viewer') return error('forbidden', 'Viewers can not edit.', where);
+    if (!isObject(request) || !Number.isInteger(request.epoch)) {
+      return error('invalid', 'Not a push.', where);
+    }
     if (request.epoch !== this.currentEpoch) {
       return error('stale', 'The session moved to another epoch.', { ...where, reason: 'epoch' });
     }
@@ -321,13 +342,13 @@ export class Authority {
       });
     }
     const sent: unknown = request.updates;
-    if (!Array.isArray(sent) || sent.length === 0) {
+    if (!Array.isArray(sent) || sent.length === 0 || !sent.every(isObject)) {
       return error('invalid', 'A push holds at least one update.', where);
     }
     if (request.updates.length > this.limits.maxUpdates) {
       return error('too-large', 'Too many updates in one push.', where);
     }
-    const limited = this.rateLimit(clientID);
+    const limited = this.rateLimit(clientID, request.updates.length);
     if (limited) return limited;
 
     // Read the updates.
@@ -344,6 +365,9 @@ export class Authority {
       } catch {
         return error('invalid', 'An update is not a change.', where);
       }
+      if (!Number.isSafeInteger(changes.newLength) || changes.newLength < 0) {
+        return error('invalid', 'An update is not a change.', where);
+      }
       if (changes.length !== length) {
         return error('invalid', 'An update does not fit the text it follows.', where);
       }
@@ -353,12 +377,17 @@ export class Authority {
       if (changes.newLength > this.limits.maxDocument) {
         return error('too-large', 'The document would be too big.', where);
       }
-      const footprint =
-        wire.footprint === undefined
-          ? changedRanges(changes)
-          : readFootprint(wire.footprint, length);
-      if (footprint === null)
-        return error('invalid', 'A footprint is not a list of ranges.', where);
+      // What the client says it depends on, and always what it changes.
+      const declared: unknown = wire.footprint;
+      if (Array.isArray(declared) && declared.length > this.limits.maxFootprint) {
+        return error('too-large', 'The footprint is too big.', where);
+      }
+      const read = declared === undefined ? [] : readFootprint(declared, length);
+      if (read === null) return error('invalid', 'A footprint is not a list of ranges.', where);
+      const footprint = [...read, ...changedRanges(changes)];
+      if (!jsonFits([wire.entries, wire.decision], this.limits.maxEntries)) {
+        return error('too-large', 'The entries or the decision are too big, or not JSON.', where);
+      }
       length = changes.newLength;
       parsed.push({
         wire,
@@ -414,6 +443,9 @@ export class Authority {
     let before = this.currentParsed();
     let beforeText = this.text;
     for (const p of pending) {
+      if (p.update.changes.newLength > this.limits.maxDocument) {
+        return error('too-large', 'The document would be too big.', where);
+      }
       doc = p.update.changes.apply(doc);
       const afterText = doc.toString();
       const after = parse(afterText);
@@ -481,7 +513,7 @@ export class Authority {
     if (state === null) {
       this.presences.delete(clientID);
     } else {
-      if (JSON.stringify(state).length > this.limits.maxPresence) {
+      if (!jsonFits(state, this.limits.maxPresence)) {
         return error('too-large', 'The presence state is too big.');
       }
       this.presences.set(clientID, { state, at: time });
@@ -520,7 +552,7 @@ export class Authority {
     return this.parsedAt.parsed;
   }
 
-  private rateLimit(clientID: string): ProtocolError | null {
+  private rateLimit(clientID: string, weight: number): ProtocolError | null {
     const time = this.now();
     const recent = (this.pushTimes.get(clientID) ?? []).filter(
       (t) => time - t < this.limits.rateWindowMs,
@@ -534,9 +566,22 @@ export class Authority {
         epoch: this.currentEpoch,
       });
     }
-    recent.push(time);
+    for (let i = 0; i < weight; i++) recent.push(time);
     this.pushTimes.set(clientID, recent);
     return null;
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Whether `value` is JSON (no cycles, no BigInt) and no longer than `most` characters. */
+function jsonFits(value: unknown, most: number): boolean {
+  try {
+    return (JSON.stringify(value) ?? '').length <= most;
+  } catch {
+    return false;
   }
 }
 

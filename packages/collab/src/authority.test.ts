@@ -656,4 +656,117 @@ describe('with real clients', () => {
   });
 });
 
+describe('hostile input', () => {
+  it('answers an error, and never throws, for malformed messages', () => {
+    const { authority } = make();
+    join(authority, 'bo');
+    const bad = (request: unknown) => authority.push('bo', request as never);
+    expect(code(bad(null))).toBe('invalid');
+    expect(code(bad({ version: 0, epoch: 1, updates: [null] }))).toBe('invalid');
+    expect(code(bad({ version: 0, epoch: 1, updates: 'x' }))).toBe('invalid');
+    expect(code(bad({ version: 'a', epoch: 1, updates: [] }))).toBe('stale');
+    expect(
+      code(bad({ version: 0, epoch: 1, updates: [{ clientID: 'bo', changes: [-5, [1]] }] })),
+    ).toBe('invalid');
+    const cyclic: Record<string, unknown> = {};
+    cyclic.me = cyclic;
+    expect(code(authority.presence('bo', cyclic))).toBe('too-large');
+    const hello = (request: unknown) => authority.hello(request as never);
+    expect(code(hello(null))).toBe('invalid');
+    expect(
+      code(hello({ credential: { key: 'bo' }, clientID: 'x', protocol: 'one', format: 1 })),
+    ).toBe('invalid');
+    expect(code(hello({ clientID: 'x', protocol: 1, format: 1 }))).toBe('invalid');
+    expect(authority.version).toBe(0);
+  });
+
+  it('counts what a push changes whatever footprint it declares', () => {
+    const { authority } = make();
+    join(authority, 'ada');
+    join(authority, 'bo');
+    ok(
+      authority.push('ada', { version: 0, epoch: 1, updates: [edit('ada', BASE.length, 5, 'XX')] }),
+    );
+    const hiding = edit('bo', BASE.length, 2, '', 6, { footprint: [] });
+    expect(authority.push('bo', { version: 0, epoch: 1, updates: [hiding] })).toMatchObject({
+      error: 'stale',
+    });
+    // And an empty declared footprint is logged with what the change touched.
+    ok(
+      authority.push('bo', {
+        version: 1,
+        epoch: 1,
+        updates: [edit('bo', BASE.length + 2, 30, 'Q', 30, { footprint: [] })],
+      }),
+    );
+    const pulled = authority.pull('bo', 1);
+    if (isError(pulled)) throw new Error('pull');
+    expect(pulled.updates[0]?.footprint).toEqual([{ from: 30, to: 30 }]);
+  });
+
+  it('binds a client id to the person who said hello with it', () => {
+    const { authority } = make();
+    join(authority, 'bo', 'shared-id');
+    expect(
+      code(
+        authority.hello({
+          credential: { key: 'ada' },
+          clientID: 'shared-id',
+          protocol: 1,
+          format: 1,
+          version: 0,
+          epoch: 1,
+        }),
+      ),
+    ).toBe('forbidden');
+    // The same person may come back with it.
+    join(authority, 'bo', 'shared-id');
+  });
+
+  it('limits the length of the document after a rebase too', () => {
+    const { authority } = make({ limits: { maxDocument: BASE.length + 4 } });
+    join(authority, 'ada');
+    join(authority, 'bo');
+    ok(
+      authority.push('ada', {
+        version: 0,
+        epoch: 1,
+        updates: [edit('ada', BASE.length, 0, 'aaa')],
+      }),
+    );
+    expect(
+      code(
+        authority.push('bo', {
+          version: 0,
+          epoch: 1,
+          updates: [edit('bo', BASE.length, 30, 'bbb')],
+        }),
+      ),
+    ).toBe('too-large');
+  });
+
+  it('counts a push by its updates when it limits the rate', () => {
+    const { authority } = make({ limits: { rateMax: 3, rateWindowMs: 1000 } });
+    join(authority, 'bo');
+    const two = [edit('bo', BASE.length, 0, 'a'), edit('bo', BASE.length + 1, 0, 'b')];
+    ok(authority.push('bo', { version: 0, epoch: 1, updates: two }));
+    ok(
+      authority.push('bo', {
+        version: 2,
+        epoch: 1,
+        updates: [edit('bo', BASE.length + 2, 0, 'c')],
+      }),
+    );
+    expect(
+      code(
+        authority.push('bo', {
+          version: 3,
+          epoch: 1,
+          updates: [edit('bo', BASE.length + 3, 0, 'd')],
+        }),
+      ),
+    ).toBe('rate-limited');
+  });
+});
+
 export type { Role };
