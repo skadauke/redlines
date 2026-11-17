@@ -6,7 +6,6 @@
 
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
-import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import type { Range, TextChange } from './types.ts';
 import { newestView } from './views.ts';
@@ -28,8 +27,8 @@ function refusals(text: string): Set<string> {
     ] as const) {
       try {
         decide(text, mark.id);
-      } catch (error) {
-        if (!(error instanceof EditError)) throw error;
+      } catch {
+        // Whatever stops a decision, a placement must not add to it.
         refused.add(`${how} ${mark.id}`);
       }
     }
