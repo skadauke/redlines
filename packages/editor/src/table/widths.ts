@@ -24,7 +24,7 @@ import {
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { viewModeField } from '../tracked/field.ts';
 import { colGhostField, ghostColumnsOf } from './colghosts.ts';
-import { type Cell, type Table, tablesOf } from './model.ts';
+import { type Cell, type Table, shownCells, tablesOf } from './model.ts';
 
 /** The widths of a text, in pixels: of its longest word, and of its longest line. */
 export interface Measured {
@@ -202,9 +202,7 @@ export function shownText(state: EditorState, cell: Cell, bold = false): string 
 function cellsOf(state: EditorState, table: Table): string[][] {
   const ghosts = ghostColumnsOf(state, table.id);
   return table.rows.map((row) => {
-    const texts = row.cells
-      .filter((cell) => cell.col < table.columns)
-      .map((cell) => shownText(state, cell, true));
+    const texts = shownCells(table, row).map((cell) => shownText(state, cell, true));
     ghosts.forEach((ghost, i) => {
       texts.splice(Math.min(ghost.position + i, texts.length), 0, ghost.cells[row.index] ?? '');
     });
