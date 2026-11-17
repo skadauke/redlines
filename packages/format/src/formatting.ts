@@ -152,6 +152,9 @@ const REFERENCE =
   "This text has a reference, whose address is defined elsewhere in the file, so a link can't be changed or added here.";
 
 const DEFINES = 'This line defines a link.';
+/** How far above a paragraph a pending change is looked for, for one that brings back what makes
+ * its line a definition (the `[label]` that a deletion takes, with a blank line after it). */
+const ABOVE_A_DEFINITION = 200;
 
 const STRAY_TAG =
   'This text has a <sub> or <sup> tag without its pair. Select whole pairs of tags, or take the stray tag away in Plain first.';
@@ -1374,7 +1377,10 @@ function planFormat(
     // change does, and not the block it ends at the start of.
     const outside =
       forBlocks && from === to
-        ? paragraph.to < from || paragraph.from > to
+        ? paragraph.to < from ||
+          (paragraph.from > to &&
+            // Only hidden markers and container syntax between the caret and the paragraph (#420).
+            !/^[ \t>\r\n]*$/.test(visible(planning.text, planning.hidden, to, paragraph.from).text))
         : paragraph.to <= from || paragraph.from >= to;
     if (outside) continue;
     if (isRawParagraph(planning, paragraph)) {
@@ -1385,11 +1391,14 @@ function planFormat(
     // A definition is not text: formatting would leave the links it defines with none (format §2.6).
     const defined = definitionLines(planning, paragraph);
     if (defined && from <= defined.to && defined.from <= to) throw refused(DEFINES);
-    // Nor once the pending changes in it are rejected, which can make a line a definition again.
+    // Nor once the pending changes are rejected, which can make a line a definition again: the
+    // changes in it, and a deletion above it that brings back the `[label]` it starts with (#335).
     if (
       parsed.marks.some((mark) =>
         mark.segments.some(
-          (g) => g.open.from <= paragraph.to && paragraph.from <= (g.close ?? g.open).to,
+          (g) =>
+            g.open.from <= paragraph.to &&
+            paragraph.from - ABOVE_A_DEFINITION <= (g.close ?? g.open).to,
         ),
       )
     ) {

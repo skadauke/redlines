@@ -1096,3 +1096,47 @@ describe.skipIf(!process.env['REDLINES_COST'])(
     );
   },
 );
+
+// ⌫ over a selected column of a 300-row table (#456): the first press clears the text of 301 cells,
+// which Track Changes writes as 301 deletion marks. They are written in one pass, with the per-cell
+// checks of format §3.7 made once, so the tracked press costs the same order as the plain one (about
+// 15 times as much, 2.3 s, when each was planned and read on its own). The bound is 4 times the press
+// with Track Changes off, timed in the same attempt, and two milliseconds for noise. A timing test: it
+// runs with REDLINES_COST set, and a run over the bound is timed twice more before it fails.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of ⌫ over a 300-row column', () => {
+  it('costs at most 4 times the plain press, with Track Changes on', () => {
+    const rows = Array.from({ length: 300 }, (_, i) => `| r${i} | s${i} | t${i} |`);
+    const doc = `| a | b | c |\n| - | - | - |\n${rows.join('\n')}\n`;
+    const press = (tracking: boolean) => {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      view.dispatch({
+        selection: { anchor: doc.indexOf('| b |') + 2, head: doc.indexOf('s299') + 4 },
+      });
+      const start = performance.now();
+      runScopeHandlers(
+        view,
+        new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }),
+        'editor',
+      );
+      const took = performance.now() - start;
+      expect(editor.getDoc()).not.toBe(doc);
+      editor.destroy();
+      return took;
+    };
+    press(true);
+    const attempt = (): Held => {
+      const plain = median([press(false), press(false), press(false)]);
+      return { ours: median([press(true), press(true), press(true)]), limit: 4 * plain + 2 };
+    };
+    const result = held(attempt(), attempt);
+    console.log(
+      `cost: ⌫ over a column, Track Changes on: bound ${result.limit.toFixed(0)} ms, now ${result.ours.toFixed(0)} ms`,
+    );
+    expect(result.ours).toBeLessThan(result.limit);
+  }, 600_000);
+});

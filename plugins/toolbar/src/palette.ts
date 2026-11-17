@@ -85,6 +85,7 @@ export const PALETTE_NAMES: Readonly<Record<string, string>> = {
   'block.body': 'Remove List',
   'review.start': 'Review Changes',
   'image.edit': 'Edit Image in Preview',
+  'image.crop': 'Crop Image',
 };
 
 /** Words that find a command besides its names. Matching is by whole word. */
