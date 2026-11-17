@@ -187,6 +187,13 @@ fn says_unreachable(line: &str) -> bool {
     .any(|phrase| line.contains(phrase))
 }
 
+/// Whether an address is a secure page of Tailscale's own, the only kind a sign-in button opens.
+fn is_tailscale_address(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.split(['/', '?', '#']).next())
+        .is_some_and(|host| host == "tailscale.com" || host.ends_with(".tailscale.com"))
+}
+
 /// Reads what `status --json` printed. `None` when it isn't Tailscale's JSON.
 pub fn parse_status(json: &str, program: Option<String>) -> Option<Status> {
     let raw: Raw = serde_json::from_str(json).ok()?;
@@ -252,7 +259,7 @@ pub fn parse_status(json: &str, program: Option<String>) -> Option<Status> {
             .this
             .as_ref()
             .and_then(|me| non_empty(&without_dot(&me.dns_name))),
-        auth_url: non_empty(&raw.auth_url).filter(|url| url.starts_with("https://")),
+        auth_url: non_empty(&raw.auth_url).filter(|url| is_tailscale_address(url)),
         peers,
         blocked,
         health,
@@ -302,9 +309,9 @@ pub fn check(places: &[PathBuf], app: &Path, run: impl Fn(&Path) -> Ran) -> Stat
     let shown = Some(program.display().to_string());
     match run(&program) {
         Ran::Failed => Status::bare(State::Off, shown),
-        Ran::Printed(json) => {
-            parse_status(&json, shown.clone()).unwrap_or_else(|| Status::bare(State::Off, shown))
-        }
+        // An answer that isn't understood is not "turned off": asked again in a moment.
+        Ran::Printed(json) => parse_status(&json, shown.clone())
+            .unwrap_or_else(|| Status::bare(State::Starting, shown)),
     }
 }
 
@@ -322,12 +329,13 @@ fn run_status(program: &Path, timeout: Duration) -> Ran {
     };
     // `status --json` is small, but a pipe that fills would stop the command: read as it runs.
     let mut stdout = child.stdout.take();
-    let reader = std::thread::spawn(move || {
+    let (sender, received) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut text = String::new();
         if let Some(out) = stdout.as_mut() {
             let _ = out.take(4 * 1024 * 1024).read_to_string(&mut text);
         }
-        text
+        let _ = sender.send(text);
     });
     let started = Instant::now();
     let ok = loop {
@@ -343,8 +351,12 @@ fn run_status(program: &Path, timeout: Duration) -> Ran {
             }
         }
     };
-    let text = reader.join().unwrap_or_default();
-    if ok { Ran::Printed(text) } else { Ran::Failed }
+    // A helper that the command left running may hold the pipe open: wait for the text only a
+    // moment, and leave the reading thread to end by itself.
+    match received.recv_timeout(Duration::from_secs(1)) {
+        Ok(text) if ok => Ran::Printed(text),
+        _ => Ran::Failed,
+    }
 }
 
 fn places() -> Vec<PathBuf> {
@@ -384,11 +396,15 @@ pub fn tailscale_open_app() -> Result<(), String> {
 /// Opens Tailscale's download page in the browser.
 #[tauri::command(async)]
 pub fn tailscale_download() -> Result<(), String> {
-    Command::new("open")
+    let status = Command::new("open")
         .arg(DOWNLOAD)
         .status()
-        .map_err(|error| format!("Couldn’t open the page: {error}"))
-        .map(|_| ())
+        .map_err(|error| format!("Couldn’t open the page: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Couldn’t open the page. Go to tailscale.com/download.".to_string())
+    }
 }
 
 #[cfg(test)]
@@ -477,7 +493,12 @@ mod tests {
     fn only_a_secure_sign_in_address_is_passed_on() {
         let json = r#"{"BackendState":"NeedsLogin","AuthURL":"javascript:alert(1)"}"#;
         assert_eq!(status(json).auth_url, None);
-        let json = r#"{"BackendState":"NeedsLogin","AuthURL":"http://login.example/a"}"#;
+        let json = r#"{"BackendState":"NeedsLogin","AuthURL":"http://login.tailscale.com/a"}"#;
+        assert_eq!(status(json).auth_url, None);
+        let json = r#"{"BackendState":"NeedsLogin","AuthURL":"https://login.tailscale.com.evil.example/a"}"#;
+        assert_eq!(status(json).auth_url, None);
+        let json =
+            r#"{"BackendState":"NeedsLogin","AuthURL":"https://evil.example/login.tailscale.com"}"#;
         assert_eq!(status(json).auth_url, None);
     }
 
@@ -539,10 +560,11 @@ mod tests {
         });
         assert_eq!(found.state, State::Off);
         assert_eq!(found.program, Some(command.display().to_string()));
+        // What it printed isn't understood: not "off", which would send the person to the app.
         let garbage = check(&[command], &dir.join("none"), |_| {
             Ran::Printed("oops".into())
         });
-        assert_eq!(garbage.state, State::Off);
+        assert_eq!(garbage.state, State::Starting);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -581,6 +603,16 @@ mod tests {
         let started = Instant::now();
         assert!(matches!(
             run_status(&slow, Duration::from_millis(200)),
+            Ran::Failed
+        ));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // A helper left running, which keeps the pipe open, doesn't hold the answer up.
+        let helper = dir.join("helper");
+        fs::write(&helper, "#!/bin/sh\nsleep 30 &\nexit 1\n").unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+        let started = Instant::now();
+        assert!(matches!(
+            run_status(&helper, Duration::from_secs(5)),
             Ran::Failed
         ));
         assert!(started.elapsed() < Duration::from_secs(5));
