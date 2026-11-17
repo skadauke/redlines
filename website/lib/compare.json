@@ -47,7 +47,7 @@
     },
     {
       "feature": "Word files with tracked changes, in and out",
-      "redlines": "planned",
+      "redlines": "built",
       "others": [true, true, false, false]
     },
     {
