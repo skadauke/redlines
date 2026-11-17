@@ -164,6 +164,8 @@ export {
   joinsNewestStep,
   redo,
   redoDepth,
+  remoteStep,
+  staleUndo,
   undo,
   undoDepth,
 } from './history/index.ts';
