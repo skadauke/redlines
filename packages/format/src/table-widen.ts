@@ -77,7 +77,10 @@ export function widenedCellFormat(
     if (edits.length === 0) throw first;
     const done = widen(text, edits, ctx);
     // Outside a table's cells, others' pending marks in the old text keep the refusal (#808).
-    if (done.held.length > 0 && ranges.some((r) => scopeOf(text, r.from, r.to) !== 'cell')) {
+    if (
+      done.heldByOthers.length > 0 &&
+      ranges.some((r) => scopeOf(text, r.from, r.to) !== 'cell')
+    ) {
       throw first;
     }
     return { changes: done.changes, markIds: [done.id], extendedIds: [] };
