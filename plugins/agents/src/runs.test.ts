@@ -2139,6 +2139,26 @@ describe('an agent with no toolbox', () => {
     expect(s.relay.counts()).toEqual({ opened: 1, closed: 1 });
   });
 
+  it('writes a Gateway run’s edit through the same push path as a local run, in the agent’s name', async () => {
+    const s = setup({
+      moby: async function* ({ tools }) {
+        await tools.call('str_replace', { old_str: 'run in CI', new_str: 'run nightly' });
+        await tools.call('reply', { text: 'Changed to nightly.' });
+        yield await Promise.resolve<AgentEvent>({ type: 'done' });
+      },
+      mobyNodeTools: true,
+      consent: { 'moby|/repo': 'folder' },
+    });
+    const thread = ask(s, '@Moby make it nightly');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    // The edit went through `applyAgentEdit`, as a local agent's does, with a step to push.
+    expect(s.doc.steps.length).toBeGreaterThan(0);
+    const doc = s.editor.getDoc();
+    expect(parse(doc).text).toContain('nightly');
+    expect(parse(doc).marks.some((mark) => mark.entry.by === 'moby-ada')).toBe(true);
+    expect(entries(s.editor, thread).at(-1)?.text).toBe('Changed to nightly.');
+  });
+
   it('has its longer answer folded behind More, as an agent that never called reply has', async () => {
     const long = `Shorter: "The importer ships Friday."\n\n${'More detail. '.repeat(30)}`;
     const s = setup({ moby: answering(long), consent: { 'moby|/repo': 'folder' } });

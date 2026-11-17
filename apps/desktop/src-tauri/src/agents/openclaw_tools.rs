@@ -18,17 +18,22 @@
 //! has ended is refused, in words the agent can pass on. Ending a run closes the line, which also
 //! ends a call that was waiting on it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
 /// How long a call may take at the window: an edit is quick, and a person is never waited on.
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long a thread's next run waits for the run before it to be over at the Gateway: its final
+/// `chat` event (`aborted`, `error` or `final`) or, failing that, this. A little longer than the
+/// grace a stopped run is given for that event (`ABORT_GRACE` in `openclaw_chat.rs`).
+pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// How long the window may take to answer the handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -115,6 +120,12 @@ impl Wire {
 #[derive(Default)]
 pub struct RunTools {
     live: Mutex<HashMap<String, Arc<Line>>>,
+    /// Threads whose last run has lost its tools but isn't over at the Gateway: its agent may
+    /// still make a call, which must not meet the thread's next run (the session key is the
+    /// thread's, and calls carry no run id: `docs/research/openclaw-connection.md`). A new run
+    /// in the thread waits for `settled`.
+    draining: Mutex<HashSet<String>>,
+    settled: Condvar,
 }
 
 /// A run's hold on its tools: dropping it, or calling `end`, ends the run's tool access.
@@ -134,15 +145,25 @@ impl Registration {
             .is_some_and(|line| Arc::ptr_eq(line, &self.line))
         {
             live.remove(&self.key);
+            // Until `finish`, the thread's next run waits.
+            locked(&self.tools.draining).insert(self.key.clone());
         }
         drop(live);
         let _ = self.line.control.shutdown(Shutdown::Both);
+    }
+
+    /// The run is over at the Gateway (its final event came, or the wait for it ran out): the
+    /// thread's next run may begin.
+    pub fn finish(&self) {
+        self.end();
+        locked(&self.tools.draining).remove(&self.key);
+        self.tools.settled.notify_all();
     }
 }
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        self.end();
+        self.finish();
     }
 }
 
@@ -151,6 +172,35 @@ impl RunTools {
     /// until the registration ends, answers calls made from `session`. A session that already has
     /// a live run isn't taken over: the first holds it.
     pub fn register(self: &Arc<Self>, session: &str, socket: &str) -> Result<Registration, String> {
+        self.register_within(session, socket, SETTLE_TIMEOUT)
+    }
+
+    /// `register`, waiting at most `wait` for the thread's last run to be over.
+    fn register_within(
+        self: &Arc<Self>,
+        session: &str,
+        socket: &str,
+        wait: Duration,
+    ) -> Result<Registration, String> {
+        {
+            let key = thread_of(session);
+            let deadline = std::time::Instant::now() + wait;
+            let mut draining = locked(&self.draining);
+            while draining.contains(key) {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() {
+                    // The wait has run out: the old run is let go of, and calls from it are
+                    // refused as the new run isn't registered yet.
+                    draining.remove(key);
+                    break;
+                }
+                draining = self
+                    .settled
+                    .wait_timeout(draining, left)
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .0;
+            }
+        }
         let writer = UnixStream::connect(socket)
             .map_err(|_| "Redlines’ tools for this run couldn’t be reached.".to_owned())?;
         let control = writer.try_clone().map_err(|error| error.to_string())?;
@@ -233,6 +283,7 @@ mod tests {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
     use std::thread;
+    use std::time::Instant;
 
     use super::*;
 
@@ -335,6 +386,60 @@ mod tests {
             text(&call(&tools, Some("agent:main:redlines-0b"), "view")),
             NOT_LIVE
         );
+    }
+
+    #[test]
+    fn a_late_call_of_an_aborted_run_never_reaches_the_threads_next_run() {
+        let first = folder("late-1");
+        let (socket_1, _window_1) = window(&first);
+        let tools = Arc::new(RunTools::default());
+        let old = tools.register("agent:main:redlines-0a", &socket_1).unwrap();
+        // Stop: tools end now, the run isn't over at the Gateway yet.
+        old.end();
+        // The next run of the thread is told to wait, in a thread of its own.
+        let second = folder("late-2");
+        let (socket_2, window_2) = window(&second);
+        let next = {
+            let tools = Arc::clone(&tools);
+            thread::spawn(move || {
+                tools
+                    .register_within("agent:main:redlines-0a", &socket_2, Duration::from_secs(5))
+                    .map(|registration| (registration, Instant::now()))
+            })
+        };
+        thread::sleep(Duration::from_millis(300));
+        // A late call of the aborted run, while the next waits: refused, and heard by nobody.
+        let late = call(&tools, Some("agent:main:redlines-0a"), "str_replace");
+        assert_eq!(text(&late), NOT_LIVE);
+        assert!(!tools.is_live("agent:main:redlines-0a"));
+        // Its final event comes: now the next run registers.
+        let settled = Instant::now();
+        old.finish();
+        let (registration, registered) = next.join().unwrap().unwrap();
+        assert!(registered >= settled);
+        assert!(tools.is_live("agent:main:redlines-0a"));
+        let heard = {
+            drop(registration);
+            window_2.join().unwrap()
+        };
+        assert!(!heard.iter().any(|m| m == "tools/call"));
+    }
+
+    #[test]
+    fn a_next_run_waits_only_so_long_for_the_run_before_it() {
+        let first = folder("long-1");
+        let (socket_1, _window_1) = window(&first);
+        let tools = Arc::new(RunTools::default());
+        let old = tools.register("redlines-0a", &socket_1).unwrap();
+        old.end();
+        let second = folder("long-2");
+        let (socket_2, _window_2) = window(&second);
+        let began = Instant::now();
+        let _next = tools
+            .register_within("redlines-0a", &socket_2, Duration::from_millis(200))
+            .unwrap();
+        assert!(began.elapsed() >= Duration::from_millis(200));
+        assert!(began.elapsed() < Duration::from_secs(3));
     }
 
     #[test]

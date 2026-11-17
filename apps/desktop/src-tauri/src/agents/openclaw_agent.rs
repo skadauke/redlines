@@ -78,11 +78,16 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
         loop {
             if link.stopped() {
                 cancel.store(true, Ordering::Relaxed);
-                hold = None;
+                if let Some(held) = &hold {
+                    held.end();
+                }
             }
             if let Ok((id, outcome)) = done.try_recv() {
                 busy = false;
                 cancel.store(false, Ordering::Relaxed);
+                // The run is over at the Gateway (its final event, or the wait for it ran out):
+                // the thread's next run may have its tools.
+                hold = None;
                 match outcome {
                     Ok(Outcome::Done(text)) => {
                         if !text.trim().is_empty() {
@@ -117,7 +122,9 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
                 // The window has let go of the run: what is running is told to stop.
                 Err(RecvTimeoutError::Disconnected) => {
                     cancel.store(true, Ordering::Relaxed);
-                    hold = None;
+                    if let Some(held) = &hold {
+                        held.end();
+                    }
                     if !busy {
                         return;
                     }
@@ -183,8 +190,10 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
                     if busy {
                         cancel.store(true, Ordering::Relaxed);
                         // Stop ends the run's tool access at once, before the Gateway has
-                        // finished stopping the run.
-                        hold = None;
+                        // finished stopping the run; the thread's next run waits for that.
+                        if let Some(held) = &hold {
+                            held.end();
+                        }
                     }
                 }
                 (Some(_), Some(id)) => link.say(failure(&id, -32601, "Method not found")),

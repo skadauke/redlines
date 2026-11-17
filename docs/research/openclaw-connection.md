@@ -610,8 +610,20 @@ the Gateway, its registration ended) had its next call refused, and no call reac
 window there is a stand-in (a document in memory behind a relay's socket); the real tools answering
 a relay are covered by the page's tests.
 
-**Open.** The same thread's session is reused by its next run, so a late call of an aborted run
-could meet the next run of that thread; the registration is dropped at Stop and the next run
-registers only after the first has ended, which leaves the gap small, not closed. Not checked: a
-real model, tool search on (the calls go through the same `execute`), the whole path in the app's
-window, and a Gateway on another computer.
+**Late calls of an aborted run.** The call carries the session key and nothing of the run: the
+node request has `id`, `nodeId`, `command`, `paramsJSON`, `timeoutMs`, `idempotencyKey` (a turn id
+and a tool call id) and `sessionKey` (`buildNodeInvokeRequest`), no run id. The thread's session is
+reused by its next run, so Redlines closes the gap itself: Stop ends the run's tools at once, and
+the thread's next run does not register until the aborted run's final `chat` event has come (the
+run's wait for it ends at `ABORT_GRACE`, 5 s) or `SETTLE_TIMEOUT` (8 s) has passed; calls in
+between are refused (`a_late_call_of_an_aborted_run_never_reaches_the_threads_next_run`).
+
+**Tool search on** (OpenClaw's default, `tools.toolSearch` unset): the six tools are deferred
+behind `tool_search`, `tool_describe` and `dispatch_action` as `mcp:redlines:<tool>`. The live
+check was repeated that way, the stand-in model calling `dispatch_action` with
+`mcp:redlines:str_replace`: the edit landed, and the stopped run and the bare key behaved as before.
+
+**Edits** go through the page's `answerMcp` of the run, so a Gateway run's edit is written by
+`applyAgentEdit` as a local agent's is (the push path of #954); `runs.test.ts` shows it.
+
+**Not checked:** a real model, the whole path in the app's window, a Gateway on another computer.
