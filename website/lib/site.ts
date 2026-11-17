@@ -127,7 +127,7 @@ export const uses = {
     },
     {
       title: 'Research',
-      body: 'Manuscripts and analyses in R Markdown and Quarto, reviewed the way prose is, without leaving the source format. Support for both comes next; File › Export to Word writes the `.docx` for journals.',
+      body: 'Manuscripts and analyses in R Markdown and Quarto, reviewed the way prose is, without leaving the source format. File › Export to Word writes the `.docx` for journals.',
     },
   ],
 };
