@@ -54,8 +54,11 @@ describe('the ledger map', () => {
     expect(writeLedger(map, 'Just text.\n')).toBe('');
   });
 
-  it('refuses a ledger that cannot be read: its map would be empty', () => {
-    expect(() => ledgerEntries('a\n\n<!-- redlines\nmarks: [\n-->\n')).toThrow(EditError);
+  it('marks the map of a ledger that cannot be read, and the file is not written over', () => {
+    const file = 'a\n\n<!-- redlines\nmarks: [\n-->\n';
+    const map = ledgerEntries(file);
+    expect(map.unreadable).toBe(true);
+    expect(() => setLedgerEntries(file, map)).toThrow(EditError);
   });
 
   it('reads and writes marks, threads, people and settings, keyed', () => {
@@ -226,6 +229,10 @@ describe('entry operations', () => {
     ]);
     expect(map.settings).toEqual({});
     expect(map.extra.size).toBe(0);
+  });
+
+  it('ignores a field that the ledger has its own entries for', () => {
+    expect(applyLedgerOp(start, { op: 'setField', name: 'marks', value: 'x' })).toBe(start);
   });
 
   it('commutes across different keys', () => {

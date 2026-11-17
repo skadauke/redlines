@@ -305,7 +305,7 @@ describe('mergeLedgers', () => {
       const theirs = more(
         base,
         { op: 'addPerson', person: person('bo', 'Bo Diaz', { email: 'bo@b.example' }) },
-        { op: 'addMark', id: 'n5vt', entry: entry('bo', 3) },
+        { op: 'addMark', id: 'n5vt', entry: entry('bo', 3, { note: 'ask @bo' }) },
         {
           op: 'addThread',
           thread: { ...thread('c9qf', 'bo', 3), text: 'Hi @bo and @ada, @bobby' },
@@ -319,7 +319,7 @@ describe('mergeLedgers', () => {
       expect(ledger.people.get('bo')?.email).toBe('bo@a.example');
       expect(ledger.people.get('bo-2')?.email).toBe('bo@b.example');
       expect(ledger.marks.get('m4vf')?.by).toBe('bo');
-      expect(ledger.marks.get('n5vt')?.by).toBe('bo-2');
+      expect(ledger.marks.get('n5vt')).toMatchObject({ by: 'bo-2', note: 'ask @bo-2' });
       expect(ledger.threads.get('c9qf')?.by).toBe('bo-2');
       expect(ledger.threads.get('c9qf')?.text).toBe('Hi @bo-2 and @ada, @bobby');
       const old = ledger.threads.get('c8d2') as Thread;

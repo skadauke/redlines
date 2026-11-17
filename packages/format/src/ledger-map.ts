@@ -5,7 +5,6 @@
 // write the ledger (`ledger-write.ts`); a map is written with the same serializer, in the same
 // canonical order, so that every copy that holds the same map writes the same bytes.
 
-import { EditError } from './errors.ts';
 import { findLedger, readSpan } from './ledger-read.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { keepsLedger, serializeLedger, setLedger } from './ledger-write.ts';
@@ -40,6 +39,8 @@ export interface LedgerMap {
   marks: Map<string, MarkEntry>;
   threads: Map<string, Thread>;
   extra: Map<string, YamlValue>;
+  /** The file's ledger couldn't be read, so this map is empty and says nothing about the file. */
+  unreadable?: true;
 }
 
 /** A map with nothing in it. */
@@ -67,21 +68,16 @@ export function ledgerMapOf(ledger: Ledger): LedgerMap {
 }
 
 /**
- * Reads the ledger of a file into a map. A file with no ledger gives an empty map.
- *
- * @throws EditError when the file's ledger can't be read: a map of it would be empty, and writing
- *   that map would lose what is in it.
+ * Reads the ledger of a file into a map. A file with no ledger gives an empty map. A ledger that
+ * can't be read gives an empty one too, marked `unreadable`: it holds none of what is in the file,
+ * so a caller must not write it over the file (`setLedgerEntries` doesn't: it stops at a ledger it
+ * can't read, as every edit does).
  */
 export function ledgerEntries(text: string): LedgerMap {
   const span = findLedger(text);
   if (!span) return emptyLedgerMap();
   const read = readSpan(span);
-  if (!read.valid) {
-    throw new EditError(
-      "The ledger at the end of this file can't be read, so it has no entries.",
-      'unreadable-ledger',
-    );
-  }
+  if (!read.valid) return { ...emptyLedgerMap(), unreadable: true };
   return ledgerMapOf(read.ledger);
 }
 
@@ -143,6 +139,8 @@ export type LedgerOp =
   | { op: 'setHistory'; value: 'current' | 'full' | undefined }
   /** A key of the top level that the ledger has beside the ones above, `frontmatter` for one. */
   | { op: 'setField'; name: string; value: YamlValue | undefined };
+
+const RESERVED = new Set(['version', 'tracking', 'view', 'history', 'people', 'marks', 'comments']);
 
 function cloneMap(map: LedgerMap): LedgerMap {
   return {
@@ -250,6 +248,8 @@ export function applyLedgerOp(map: LedgerMap, op: LedgerOp): LedgerMap {
       return copy;
     }
     case 'setField': {
+      // The keys the ledger has its own entries for are not fields: they would be written twice.
+      if (RESERVED.has(op.name)) return map;
       const copy = cloneMap(map);
       if (op.value === undefined) copy.extra.delete(op.name);
       else copy.extra.set(op.name, op.value);

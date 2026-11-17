@@ -300,7 +300,11 @@ function renameHandle(map: LedgerMap, from: string, to: string): LedgerMap {
     people.set(next.handle, next);
   }
   const marks = new Map<string, MarkEntry>();
-  for (const [id, entry] of map.marks) marks.set(id, { ...entry, by: swap(entry.by) });
+  for (const [id, entry] of map.marks) {
+    const next: MarkEntry = { ...entry, by: swap(entry.by) };
+    if (entry.note !== undefined) next.note = say(entry.note);
+    marks.set(id, next);
+  }
   const threads = new Map<string, Thread>();
   for (const thread of map.threads.values()) {
     const next: Thread = {
