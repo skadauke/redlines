@@ -12,15 +12,30 @@ import { isolateHistory } from '@codemirror/commands';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { Facet, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+import type { MarkdownDialect } from './api.ts';
 import { refusedEditEffect } from './tracked/typing.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
+
+/** The open file's dialect (`EditorOptions.dialect`); default GitHub's. */
+export const dialectFacet = Facet.define<MarkdownDialect, MarkdownDialect>({
+  combine: (values) => values[0] ?? 'gfm',
+});
+
+/**
+ * A pandoc attribute block right after an image, `{width=50%}`: `{`, anything but braces, angle
+ * brackets and line breaks, `}`. The same text the format library keeps as one with the image.
+ */
+const ATTRIBUTE_BLOCK = /^\{[^{}<>\r\n]*\}/;
+
+/** The tokens of an attribute block's inside: `width=50%`, `.class`, `#id`, `key="a b"`. */
+const TOKEN = /(?:[^\s"'=]+=(?:"[^"]*"|'[^']*'|\S*)|"[^"]*"|'[^']*'|\S+)/g;
 
 /** Where an image is placed in its line. */
 export type ImageAlign = 'left' | 'center' | 'right';
 
 /** One attribute of an `<img>` tag: its name in lowercase, its value read, and its text. */
-interface Attribute {
+export interface Attribute {
   name: string;
   /** The value with its quotes taken off and its character references read; null for none. */
   value: string | null;
@@ -34,6 +49,12 @@ export interface ImageElement {
   from: number;
   to: number;
   form: 'markdown' | 'tag';
+  /** A Markdown image of a pandoc file with its attribute block, as written (`{width=50%}`). */
+  block: string | null;
+  /** A Markdown image's own text, without its attribute block; null in a GitHub file. */
+  base: string | null;
+  /** The file is pandoc's (`.qmd`, `.Rmd`), where a size is written `{width=}`. */
+  pandoc: boolean;
   src: string;
   alt: string;
   title: string | null;
@@ -85,16 +106,25 @@ function inTableOf(node: SyntaxNode): boolean {
 /** The ASCII punctuation that a backslash in front of makes literal in Markdown. */
 const ESCAPABLE = /\\([!-/:-@[-`{-~])/g;
 
-/** An image's destination, alt text or title as the document writes it, read as text. */
+/**
+ * An image's destination, alt text or title as the document writes it, read as text: in one pass,
+ * so that what a backslash made literal (`\&amp;`) is not read as a character reference.
+ */
 function readMarkdown(written: string): string {
-  return readReferences(written.replace(ESCAPABLE, '$1'));
+  let text = '';
+  let last = 0;
+  for (const escape of written.matchAll(ESCAPABLE)) {
+    text += readReferences(written.slice(last, escape.index)) + escape[1];
+    last = escape.index + escape[0].length;
+  }
+  return text + readReferences(written.slice(last));
 }
 
 const TAG = /^<img((?:\s+[^\s"'<>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>$/i;
 const ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 
 /** The attributes of an `<img>` tag as it is written, or null when `text` is no one whole tag. */
-function readTag(text: string): Attribute[] | null {
+export function readTag(text: string): Attribute[] | null {
   const match = TAG.exec(text.trim());
   if (!match) return null;
   const attributes: Attribute[] = [];
@@ -125,12 +155,23 @@ function readAlign(value: string | null): ImageAlign {
   return align === 'left' || align === 'right' ? align : 'center';
 }
 
+/** The width and the height of an attribute block, as written, and its other tokens. */
+function readBlock(block: string): { width: string | null; tokens: string[] } {
+  const tokens = [...block.slice(1, -1).matchAll(TOKEN)].map((found) => found[0]);
+  const width = tokens.find((token) => /^width=/i.test(token));
+  return {
+    width: width === undefined ? null : width.slice(6).replace(/^(["'])(.*)\1$/, '$2'),
+    tokens,
+  };
+}
+
 /** A tag's image, from the tag's attributes. */
 function tagImage(
   from: number,
   to: number,
   attributes: Attribute[],
   inTable: boolean,
+  pandoc: boolean,
 ): ImageElement | null {
   const src = valueOf(attributes, 'src');
   if (!src) return null;
@@ -139,6 +180,9 @@ function tagImage(
     from,
     to,
     form: 'tag',
+    block: null,
+    base: null,
+    pandoc,
     src,
     alt: valueOf(attributes, 'alt') ?? '',
     title: valueOf(attributes, 'title'),
@@ -159,17 +203,26 @@ export function imageOfNode(state: EditorState, node: SyntaxNode): ImageElement 
     // A reference-style image has no destination here.
     if (!url || !open || !close) return null;
     const title = node.getChild('LinkTitle');
+    // In a pandoc file the attribute block that follows with no space is the image's own.
+    const pandoc = state.facet(dialectFacet) === 'pandoc';
+    const block = pandoc
+      ? (ATTRIBUTE_BLOCK.exec(state.sliceDoc(node.to, state.doc.lineAt(node.to).to))?.[0] ?? null)
+      : null;
+    const size = readWidth(block === null ? null : readBlock(block).width);
     const src = state.sliceDoc(url.from, url.to).trim();
     const unwrapped = src.startsWith('<') && src.endsWith('>') ? src.slice(1, -1) : src;
     return {
       from: node.from,
-      to: node.to,
+      to: node.to + (block?.length ?? 0),
       form: 'markdown',
+      pandoc,
+      block,
+      base: pandoc ? state.sliceDoc(node.from, node.to) : null,
       src: readMarkdown(unwrapped),
       alt: readMarkdown(state.sliceDoc(open.to, close.from)),
       title: title ? readMarkdown(state.sliceDoc(title.from + 1, title.to - 1)) : null,
-      width: null,
-      widthText: null,
+      width: size.width,
+      widthText: size.text,
       align: 'center',
       attributes: [],
       inTable: inTableOf(node),
@@ -177,7 +230,15 @@ export function imageOfNode(state: EditorState, node: SyntaxNode): ImageElement 
   }
   if (node.name === 'HTMLTag' || node.name === 'HTMLBlock') {
     const attributes = readTag(state.sliceDoc(node.from, node.to));
-    return attributes ? tagImage(node.from, node.to, attributes, inTableOf(node)) : null;
+    return attributes
+      ? tagImage(
+          node.from,
+          node.to,
+          attributes,
+          inTableOf(node),
+          state.facet(dialectFacet) === 'pandoc',
+        )
+      : null;
   }
   return null;
 }
@@ -187,6 +248,8 @@ export const IMAGE_NODES = new Set(['Image', 'HTMLTag', 'HTMLBlock']);
 
 /** The image whose text holds or touches `pos`, or null. */
 export function imageAt(state: EditorState, pos: number): ImageElement | null {
+  const ended = imageEndingAt(state, pos);
+  if (ended !== null) return ended;
   for (const side of [1, -1] as const) {
     for (
       let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);
@@ -199,6 +262,16 @@ export function imageAt(state: EditorState, pos: number): ImageElement | null {
     }
   }
   return null;
+}
+
+/** The image whose text, a pandoc attribute block included, ends at `pos`: a caret after its `}`. */
+function imageEndingAt(state: EditorState, pos: number): ImageElement | null {
+  if (state.facet(dialectFacet) !== 'pandoc' || state.sliceDoc(pos - 1, pos) !== '}') return null;
+  const line = state.doc.lineAt(pos);
+  const open = state.sliceDoc(line.from, pos).lastIndexOf('{');
+  if (open === -1) return null;
+  const image = imageAt(state, line.from + open - 1);
+  return image !== null && image.to === pos ? image : null;
 }
 
 /** The image under the caret, or the first in the selection. */
@@ -250,6 +323,9 @@ function attributesWith(image: ImageElement, look: ImageLook): Attribute[] {
     known.set('src', named('src', image.src));
     if (image.alt) known.set('alt', named('alt', image.alt));
     if (image.title !== null) known.set('title', named('title', image.title));
+    // The size of a pandoc image's attribute block goes into the tag.
+    const size = image.width !== null ? String(image.width) : image.widthText;
+    if (size !== null) known.set('width', named('width', size));
   }
   const width = look.width === undefined ? image.width : look.width;
   const align = look.align ?? image.align;
@@ -289,9 +365,49 @@ function asMarkdown(attributes: readonly Attribute[], inTable: boolean): string 
   return `![${alt}](${src}${title === null ? '' : ` "${title}"`})`;
 }
 
+/**
+ * The attribute block of a pandoc image with a new width (`{width=300px}`): its other tokens as
+ * they are written, its height gone (the aspect follows the width), and no block at all when none
+ * is left.
+ */
+function blockWith(image: ImageElement, width: number | null): string {
+  const kept = readBlock(image.block ?? '{}').tokens.filter(
+    (token) => !/^(?:width|height)=/i.test(token),
+  );
+  if (width !== null) kept.push(`width=${clampWidth(width)}px`);
+  return kept.length === 0 ? '' : `{${kept.join(' ')}}`;
+}
+
+/** Whether a pandoc image's attribute block holds only a size, which a tag can write. */
+function blockIsSize(image: ImageElement): boolean {
+  return readBlock(image.block ?? '{}').tokens.every((token) => /^(?:width|height)=/i.test(token));
+}
+
+/** Whether a tag, which an alignment needs, can hold everything the image has. */
+export function keepsAttributes(image: ImageElement): boolean {
+  return image.base === null || image.block === null || blockIsSize(image);
+}
+
 /** An image's text with the look: a tag, or `![alt](src)` where nothing is left of the tag. */
 export function imageText(image: ImageElement, look: ImageLook): string {
+  // A Markdown image of a pandoc file is sized by its attribute block, and stays Markdown; only an
+  // alignment, which pandoc has no word for, makes it a tag.
+  if (image.base !== null && (image.block !== null || look.width !== undefined)) {
+    const centered = (look.align ?? image.align) === 'center';
+    if (centered) {
+      if (look.width === undefined) return `${image.base}${image.block ?? ''}`;
+      return `${image.base}${blockWith(image, look.width)}`;
+    }
+  }
   const attributes = attributesWith(image, look);
+  // A tag of a pandoc file that is given a width, and has nothing a Markdown image can't hold,
+  // is written as pandoc writes a size.
+  if (image.pandoc && image.form === 'tag' && look.width !== undefined && look.width !== null) {
+    const rest = attributes.filter((attribute) => attribute.name !== 'width');
+    const own = rest.every((attribute) => MARKDOWN_ATTRIBUTES.has(attribute.name));
+    const markdown = own ? asMarkdown(rest, image.inTable) : null;
+    if (markdown !== null) return `${markdown}{width=${clampWidth(look.width)}px}`;
+  }
   const plain = asMarkdown(attributes, image.inTable);
   if (plain !== null) return plain;
   return `<img ${attributes.map((attribute) => attribute.source).join(' ')}>`;
@@ -326,6 +442,10 @@ function inSetextHeading(state: EditorState, image: ImageElement): boolean {
 export const IMAGE_IN_HEADING =
   'This image is the text of a heading, which a tag on its line would end. Turn the heading into an ATX heading (#) first.';
 
+/** What is said of an image of a pandoc file whose attributes a tag has no place for. */
+export const IMAGE_ATTRIBUTES =
+  "This image has attributes that an aligned image can't keep. Remove them first, or leave it unaligned.";
+
 /** The edit that gives an image its look: its changes, whether it parts a paragraph, or why not. */
 export interface LookEdit {
   changes: TextEdit[];
@@ -341,6 +461,10 @@ export function lookEdit(
   image: ImageElement,
   look: ImageLook,
 ): LookEdit | null {
+  const aligning = look.align !== undefined && look.align !== 'center';
+  if (aligning && !keepsAttributes(image)) {
+    return { changes: [], blocked: IMAGE_ATTRIBUTES };
+  }
   const insert = imageText(image, look);
   if (insert === state.sliceDoc(image.from, image.to)) return null;
   const change: TextEdit = { from: image.from, to: image.to, insert };
@@ -406,5 +530,76 @@ export function setImageLook(
     return false;
   }
   view.dispatch(spec);
+  return view.state.doc !== before;
+}
+
+/**
+ * Alt text as the document writes it between `![` and `]`: one line, with what Markdown would read
+ * as more than text escaped with a backslash (format §3.5.1), so that reading it back
+ * (`readMarkdown`) gives the text that was typed.
+ */
+export function escapeAlt(text: string, inTable: boolean): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.replace(inTable ? /[\\[\]&`*_<>|]/g : /[\\[\]&`*_<>]/g, '\\$&');
+}
+
+/** The change that gives `image` the alt text, or null where it has that text already. */
+export function altEdit(state: EditorState, image: ImageElement, alt: string): TextEdit | null {
+  const wanted = alt.replace(/\s+/g, ' ').trim();
+  // The alt it has is what is asked for: nothing to write, however the image happens to be written.
+  if (image.alt === wanted) return null;
+  let insert: string;
+  if (image.form === 'tag') {
+    const attributes = attributesWith(image, {});
+    const kept = attributes.filter((attribute) => attribute.name !== 'alt');
+    const at = attributes.findIndex((attribute) => attribute.name === 'alt');
+    // An alt taken away from a tag stays as `alt=""`: no alt at all is a picture that has not been
+    // described, and an empty one says it needs no description, as `![](src)` does.
+    const written: Attribute[] =
+      wanted === '' && at === -1
+        ? []
+        : [
+            {
+              name: 'alt',
+              value: wanted,
+              source: `alt="${escapeAttribute(wanted, image.inTable)}"`,
+            },
+          ];
+    // Where the alt was stays its place; a new one goes after the src, as a tag is first written.
+    const place = at === -1 ? Math.min(1, kept.length) : at;
+    const all = [...kept.slice(0, place), ...written, ...kept.slice(place)];
+    insert = `<img ${all.map((attribute) => attribute.source).join(' ')}>`;
+  } else {
+    let node: SyntaxNode | null = syntaxTree(state).resolveInner(image.from + 1, 1);
+    while (node && node.name !== 'Image') node = node.parent;
+    const [open, close] = node?.getChildren('LinkMark') ?? [];
+    if (!node || !open || !close) return null;
+    insert =
+      state.sliceDoc(image.from, open.to) +
+      escapeAlt(wanted, image.inTable) +
+      state.sliceDoc(close.from, image.to);
+  }
+  return insert === state.sliceDoc(image.from, image.to)
+    ? null
+    : { from: image.from, to: image.to, insert };
+}
+
+/**
+ * Gives the image at `at` (default: the one under the caret or in the selection) the alt text, as
+ * one change: with Track Changes on, the editing rules write it as the substitution of the image
+ * (an image is atomic content), and one Undo takes it back. False when there is no such image or
+ * it has that alt text already.
+ */
+export function setImageAlt(view: EditorView, alt: string, at?: number): boolean {
+  const image = at === undefined ? imageInSelection(view.state) : imageAt(view.state, at);
+  if (!image) return false;
+  const change = altEdit(view.state, image, alt);
+  if (!change) return false;
+  const before = view.state.doc;
+  view.dispatch({
+    changes: change,
+    userEvent: 'input.image.alt',
+    annotations: isolateHistory.of('full'),
+  });
   return view.state.doc !== before;
 }

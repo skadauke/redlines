@@ -92,6 +92,8 @@ export function fakeProvider(options: {
   toolbox?: false;
   /** The models it lists, as a provider's `models`. */
   models?: AgentProvider['models'];
+  /** Whether it can look at a picture the toolbox shows it. Default: no. */
+  seesImages?: boolean;
   state?: AgentState;
   /** How it is detected, for a test that holds detection; by default as `state` says, at once. */
   detect?: () => Promise<AgentState>;
@@ -102,6 +104,7 @@ export function fakeProvider(options: {
     readLimit: options.readLimit ?? 'folder',
     ...(options.toolbox === false ? { toolbox: false as const } : {}),
     ...(options.models ? { models: options.models } : {}),
+    ...(options.seesImages === true ? { seesImages: true as const } : {}),
     requests: [],
     script: options.script,
     detect:

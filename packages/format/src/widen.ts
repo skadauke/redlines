@@ -77,6 +77,8 @@ export interface Widened {
   unit: WidenedUnit;
   /** The ids of other people's pending changes that are in its old text. */
   held: string[];
+  /** The part of `held` that is not the author's own: those keep a widened edit refused (#808). */
+  heldByOthers: string[];
   /** The ids of the author's own pending changes in the unit, which folded into the replacement:
    * its old text has them rejected. */
   folded: string[];
@@ -451,12 +453,16 @@ function tryRung(
   if (!passes(text, parsed, done, intended, id)) return undefined;
   const read = parse(done);
   const holder = read.marks.find((mark) => mark.id === id);
+  const held = holder ? payloadIdsOf(read, holder) : [];
   return {
     changes: changesBetween(text, done),
     text: done,
     id,
     unit: { kind: rung.kind, rung: index, from: rung.from, to: rung.to, blocks },
-    held: holder ? payloadIdsOf(read, holder) : [],
+    held,
+    heldByOthers: held.filter(
+      (held_id) => parsed.marks.find((m) => m.id === held_id)?.entry.by !== ctx.author.handle,
+    ),
     folded: own.map((mark) => mark.id),
   };
 }

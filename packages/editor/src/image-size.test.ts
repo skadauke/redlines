@@ -191,6 +191,20 @@ describe('the commands of an image', () => {
     expect(plain.getUiState().enabledCommands).not.toContain('image.size.original');
   });
 
+  it('disables Align on an image among words, with the reason, and keeps Size', () => {
+    const editor = load('Words ![](cat.png) more.', 8);
+    const state = editor.getUiState();
+    for (const align of ['left', 'center', 'right']) {
+      expect(state.enabledCommands).not.toContain(`image.align.${align}`);
+      expect(state.disabledReasons[`image.align.${align}`]).toMatch(/line of its own/);
+      expect(editor.commands.run(`image.align.${align}`)).toBe(false);
+    }
+    expect(state.enabledCommands).toContain('image.size.medium');
+    // Alone on its line, with other lines around, it can be placed.
+    const alone = load('Words.\n\n![](cat.png)\n\nMore.', 9);
+    expect(alone.getUiState().enabledCommands).toContain('image.align.left');
+  });
+
   it('sizes a remote image too', () => {
     const editor = load('![](https://example.com/cat.png)');
     editor.commands.run('image.size.small');
@@ -302,7 +316,7 @@ const rows: Script[] = [
   {
     name: 'two changes of the same image: the second is part of the first',
     doc: 'Words ‸![](a.png) more',
-    keys: [{ command: 'image.size.small' }, { command: 'image.align.left' }],
+    keys: [{ command: 'image.size.small' }, { command: 'image.size.large' }],
     tc: true,
     expect: { original: 'Words ![](a.png) more' },
   },

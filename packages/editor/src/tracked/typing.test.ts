@@ -534,7 +534,7 @@ describe('tracked typing', () => {
     }
     // Backspace in front of the text would take a space of the line's indentation: written as a
     // replacement of the item (format §3.12). Enter at the end of the item's last paragraph would
-    // start a line with a marker: written as a replacement too.
+    // start a line with a marker: composed of several edits, which stay refused (#808).
     expect(said).toEqual([
       'x at the start: changed',
       'Enter at the start: changed',
@@ -545,7 +545,7 @@ describe('tracked typing', () => {
       'Backspace at the middle: changed',
       'Delete at the middle: changed',
       'x at the end: changed',
-      'Enter at the end: changed',
+      'Enter at the end: A marker here would start a line.',
       'Backspace at the end: changed',
       // CodeMirror's Delete at the end of the text would step over the hidden blank line into the
       // next item: the backstop drops it (design: block editing), as the block keys' Delete there

@@ -2127,8 +2127,10 @@ Editing inside one is a substitution of the whole comment.
 ### 3.5.1 Image size and alignment
 
 Markdown's `![alt](src "title")` has no size, so a size is written as an HTML `<img>` tag, which
-GitHub and every Markdown reader that passes HTML read (in every file type, as `<sub>` is, §2.6; a
-pandoc file's `{width=}` is not written yet). The rule:
+GitHub and every Markdown reader that passes HTML read. In a `.md` file that is the only way
+(`{width=}` there is text). In a pandoc file (`.qmd`, `.Rmd`, §9.1) the size is pandoc's attribute
+block, which also keeps pandoc's Word output: `![alt](src){width=300px}`. The rule for the tag
+follows; the pandoc block's is under it.
 
 - **The first size.** An image that is given a width becomes the tag, with its attributes in this
   order: `src`, `alt` (left out when empty), `title` (when it had one), `width`, `align`. Their
@@ -2147,14 +2149,35 @@ pandoc file's `{width=}` is not written yet). The rule:
   Markdown would read as more than text (no `[`, `]`, `\`, `*`, `_`, backtick, `<`, `>`, `&`, `!` or
   line break in the alt text; no `"`, `\`, `<`, `&` or line break in a title; in a table cell, no `|`
   anywhere, which is written `&#124;` in a tag). Any other tag stays a tag, without its width.
+- **Alt text.** Giving an image alt text writes it between `![` and `]`, or as a tag's `alt`
+  attribute (in the place it had, or after `src`), and leaves every other part of the image as it
+  was. The text is one line (whitespace runs are one space); in the brackets a backslash, `[`, `]`,
+  `&`, a backtick, `*`, `_` and `<` and `>` are written with a backslash in front, and in a table cell
+  `|` too, so that reading the image back gives the text as it was given; in a tag the attribute rules
+  above apply. An empty text takes the alt away: `![](src)`, and a tag's `alt=""` (a tag that never had one is left as it is). Under Track Changes it is
+  a substitution of the whole image, like any change to an image; it is never refused.
 - **Alignment.** `align="left"` or `align="right"` places an image alone on its line at that side;
   an image alone on its line is otherwise centered, which is the absence of the attribute, so
   centering takes it away. Other readers float the image to that side. An image among words is not
-  placed.
+  placed, so the Align commands are disabled for it, with that reason in their hint (#633), and an
+  aligned image has no resize handle on the side it is anchored to.
 - **Track Changes.** An image is atomic content (above), and its size is its text: a new size or
   alignment is a substitution of the whole image, `![alt](src)` the old text in the payload and the
   tag the new text (or the other way round), which reads the same in every order of decisions. No
   marker goes inside the tag. Undo takes the change back as one.
+- **In a pandoc file.** The attribute block is the `{` right after the image's `)`, with no space,
+  up to the next `}`, with no brace, angle bracket or line break inside. It is part of the image,
+  atomic content like the rest of it (§3.5): the inline scanner keeps the image's range over it in
+  every file type, so that no marker goes inside it. Its `width` is read as pixels (`300`,
+  `300px`) or as another size (`50%`, drawn at the image's own size); its other tokens (`#fig`,
+  `.class`, `key=value`) are kept as written. The first size writes `{width=Npx}` after the
+  image; a new size replaces the `width` token and takes a `height` away; giving the image its
+  own size takes the `width` token away, and the block with it when no token is left. A tag that
+  holds only `src`, `alt`, `title`, `width` and `height` and is given a width becomes the Markdown
+  image with the block; any other tag stays a tag. Pandoc has no alignment: aligning an image makes
+  it a tag with the width it had, and an image whose block holds more than a size (`#fig`) is not
+  aligned, and the person is told so. Track Changes writes the new size as the substitution of the
+  whole image, block included, which reads the same in every order of decisions.
 - **A tag alone on a block's first line** is an HTML block (CommonMark's seventh kind), which runs
   on to the next blank line and reads the lines under it as raw HTML. So an image that stands alone
   on the first line of a paragraph with more lines under it is not turned into a tag as it is: the
@@ -3217,7 +3240,11 @@ and the views read the replacements it writes, and the writers that refuse today
 a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format change in a cell),
 and so have the lists (`edits-widen.ts`, `widen-scope.ts`: a typed, pasted or key edit and a format
 or block change in a list item, which `trackedEdits` and `trackedFormat` write as a replacement of
-the item or the list when no fine form reads alike in every order); and so has code (a typed, pasted or key edit in a fenced or indented block, display math or raw text, and a key that moves the lines under an item that leaves its list); the blocks follow. Until a writer calls it, it still refuses, in the words of
+the item or the list when no fine form reads alike in every order, and keep their refusal when
+the unit's old text would hold another person's pending change: some order of decisions would not
+read as the original, #808), and so has code (a typed, pasted or key edit in a fenced or indented
+block, display math or raw text, and a key that moves the lines under an item that leaves its
+list, with the same guard); the blocks follow. Until a writer calls it, it still refuses, in the words of
 its own section.
 
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
@@ -4051,8 +4078,28 @@ Agents edit the newest view, and the library turns their edits into tracked chan
 
 ### 9.1 File types and dialects
 
-- A Redlines file keeps its extension: `.md`, `.qmd`, `.Rmd` or `.txt`. A new extension would lose
-  GitHub's rendering and every Markdown, R Markdown and Quarto tool.
+- A Redlines file keeps its extension: `.md`, `.markdown`, `.qmd` or `.Rmd`. A new extension would
+  lose GitHub's rendering and every Markdown, R Markdown and Quarto tool.
+- **Two classes of file, decided by the last extension (lowercase) and never by the content.**
+  Markdown files (`md`, `markdown`, `qmd`, `rmd`) hold tracked changes, comments and a ledger. Only
+  a Markdown file has a ledger, markers or a review: for any other file the library is not called.
+  The Plain-only class is text and code, which an editor opens in Plain alone, with no Clean or
+  Redlines view, no Track Changes and no ledger:
+
+  | Group           | Extensions                                                                                                                    |
+  | --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+  | Text            | `txt`, `text`, `log`                                                                                                          |
+  | Data and config | `json`, `jsonc`, `yaml`, `yml`, `toml`, `ini`, `cfg`, `conf`, `env`, `csv`, `tsv`, `xml`, `plist`                             |
+  | Web             | `html`, `htm`, `css`, `scss`, `less`, `js`, `mjs`, `cjs`, `jsx`, `ts`, `mts`, `cts`, `tsx`, `svg`                             |
+  | Code            | `py`, `rb`, `go`, `rs`, `swift`, `java`, `kt`, `c`, `h`, `cc`, `cpp`, `hpp`, `cs`, `php`, `lua`, `r`, `sql`, `sh`, `bash`, `zsh`, `ps1` |
+
+  The table is written once in each of `apps/desktop/src/file-names.ts`, `src-tauri/src/project.rs`,
+  `packages/cli/src/plain-only.ts` and the app's `document-types.plist`, and tests hold them equal.
+  A Plain-only file is read and written as text, byte for byte (§5's line endings and final newline
+  are for Markdown): a `<!-- redlines` or a `<!--ins` in it is text, whatever it looks like, and
+  saving never adds a ledger or records a view or Track Changes. The `redlines` command line prints
+  such a file as it is and refuses every command that makes or decides a mark ("not a Markdown
+  document").
 - `.md` files are written in GitHub Flavored Markdown: `<mark>`, `<ins>` for underline,
   `<img width>`, `<dl>`, GitHub alerts.
 - `.qmd` and `.Rmd` files are written in pandoc's Markdown: `[x]{.mark}`, `{width=}`, `{#id}`,
@@ -4071,11 +4118,9 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   character. A shortcode that a file already has is kept as written, and is one character for a
   change (§3.1, rules 1 and 9).
 - Both read every common variant, and the serializer never rewrites syntax it didn't change.
-- `.txt` files are read and written as `.md` files are, in GitHub Flavored Markdown: a plain text
-  file is a document like any other, and its tracked changes and comments are the same markers and
-  ledger. Text that Markdown reads as syntax, such as a line of `=` under another line or a `*` at
-  the start of a line, shows as Markdown and stays as it was written. Other tools show a `.txt`
-  file as plain text, with every marker and the ledger (§9.3).
+- `.txt` files are Plain-only: a `*` or `_` in a log or a note is not Markdown to its author. A
+  `.txt` file that an earlier version of Redlines gave a ledger keeps it, as text that nothing
+  reads, and Redlines never changes it.
 - MDX is not supported: MDX can't compile HTML comments.
 - A file is a Redlines file if it contains Redlines markers or a `<!-- redlines` ledger. Tools that
   need a media type can use `text/markdown; variant=redlines` (RFC 7763 allows a `variant`
@@ -4101,7 +4146,6 @@ A file changes only when its content does.
 | Jekyll and GitHub Pages                                               | The newest version. Payloads escape Liquid's tags (§2.5)                              |
 | Editors that show HTML comments as text, and Google Docs' Markdown mode | Every marker and the ledger, as text. Saving keeps them; Google Docs also reformats the file (§9.5) |
 | Marp                                                                  | The newest version, with every marker and the ledger in the speaker notes             |
-| GitHub and the other tools that show a `.txt` file as plain text      | Every marker and the ledger, as text                                                  |
 | MDX                                                                   | A compile error                                                                       |
 
 ### 9.4 R Markdown, Quarto and knitr

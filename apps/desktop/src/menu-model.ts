@@ -5,6 +5,7 @@
 
 import { baseTitle, menuViewOf } from '@redlines/editor';
 import type { CommandRegistry, EditorCommand, MenuView, ViewMode } from '@redlines/editor';
+import { commandEntryId } from './shortcuts.ts';
 import { TEXT_LEAST, TEXT_MOST, ZOOM_LEAST, ZOOM_MOST } from './text-size.ts';
 
 export interface MenuCommands {
@@ -82,6 +83,11 @@ export interface MenuCommands {
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
 export interface MenuState {
+  /**
+   * Whether the document is a Plain-only file (text or code): it has Plain alone, and no Track
+   * Changes or review (`EditorUiState.kind`).
+   */
+  plainOnly: boolean;
   view: ViewMode;
   tracking: boolean;
   hasRedlines: boolean;
@@ -148,6 +154,11 @@ export interface StandardRow {
 
 export interface ActionRow {
   text: string;
+  /**
+   * Which shortcut is the row's (shortcuts.ts): `command:<id>` for a registered command, else the
+   * menu and the text, as in `File/Save`. Set by `appMenuModel`.
+   */
+  id?: string;
   /** In Tauri's notation, such as 'Shift+CmdOrCtrl+E'. */
   accelerator?: string;
   action: () => void;
@@ -220,19 +231,27 @@ export function acceleratorFor(shortcut: string): string {
 /** "Undo Typing": the item's name and what it does, or just the name for no step or no name. */
 const stepTitle = (verb: string, step: string | null) => (step ? `${verb} ${step}` : verb);
 
+const acceleratorOf = (shortcut: string | undefined) =>
+  shortcut ? acceleratorFor(shortcut) : undefined;
+
 const SEPARATOR: StandardRow = { item: 'Separator' };
 
 function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRow {
   const { id } = command;
   return {
+    id: commandEntryId(id),
     text: baseTitle(command),
     ...(typeof command.title === 'function'
       ? { textFor: (state: MenuState) => state.commandTitles[id] ?? baseTitle(command) }
       : {}),
-    accelerator: command.shortcut ? acceleratorFor(command.shortcut) : undefined,
+    // The key the command came with: the person's own are applied by the shortcuts (shortcuts.ts).
+    accelerator: acceleratorOf(
+      command.defaultShortcut === undefined ? command.shortcut : command.defaultShortcut,
+    ),
     action: () => void registry.run(id),
     checked: command.isActive ? (state) => state.activeCommands.includes(id) : undefined,
-    enabled: command.disabledReason ? (state) => state.enabledCommands.includes(id) : undefined,
+    // Every command can be disabled: a Plain-only file disables all but a few (`disabledReasonOf`).
+    enabled: (state) => state.enabledCommands.includes(id),
     keyInMenuOnly: true,
   };
 }
@@ -243,17 +262,19 @@ function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRo
  * console, once for each change.
  */
 export function drawnCommandsCheck(registry: CommandRegistry): () => void {
-  let drawn = registry.list();
+  // By id: the registry lists a command with the key it has now, a new object when that changes.
+  let drawn = registry.list().map(({ id }) => id);
   return () => {
-    const current = registry.list();
+    const current = registry.list().map(({ id }) => id);
     const changed = [
-      ...current.filter((command) => !drawn.includes(command)),
-      ...drawn.filter((command) => !current.includes(command)),
+      ...current.filter((id) => !drawn.includes(id)),
+      ...drawn.filter((id) => !current.includes(id)),
     ];
     if (!changed.length) return;
     drawn = current;
-    const ids = changed.map(({ id }) => id).join(', ');
-    console.error(`The menu bar was drawn without these changes to the commands: ${ids}`);
+    console.error(
+      `The menu bar was drawn without these changes to the commands: ${changed.join(', ')}`,
+    );
   };
 }
 
@@ -292,6 +313,8 @@ export function appMenuModel(
     accelerator: `Alt+CmdOrCtrl+${key}`,
     action: () => commands.setView(view),
     checked: (state) => menuViewOf(state.view) === view,
+    // A Plain-only file has Plain alone (the title bar's menu says why, in its hint).
+    enabled: view === 'raw' ? undefined : (state) => !state.plainOnly,
   });
   // Reviewing needs a document with redlines. The Redlines view is there for any document
   // (design §5.3), and a disabled item would take its shortcut away.
@@ -517,6 +540,7 @@ export function appMenuModel(
           accelerator: 'Shift+CmdOrCtrl+E',
           action: () => commands.toggleTracking(),
           checked: (state) => state.tracking,
+          enabled: (state) => !state.plainOnly,
         },
         {
           text: 'Accept All Changes and Stop Tracking',
@@ -569,5 +593,16 @@ export function appMenuModel(
     },
   ];
   // Format, Paragraph and Table hold only commands, and a menu with nothing in it isn't shown.
-  return { menus: menus.filter((menu) => menu.rows.length) };
+  return { menus: menus.filter((menu) => menu.rows.length).map(withIds) };
+}
+
+/** The menu with an id on each action row that has none: the menu's title and the row's text. */
+function withIds(menu: AppMenu): AppMenu {
+  const rows = (list: readonly MenuRow[]): MenuRow[] =>
+    list.map((row) => {
+      if ('rows' in row) return { ...row, rows: rows(row.rows) };
+      if ('action' in row && !row.id) return { ...row, id: `${menu.title}/${row.text}` };
+      return row;
+    });
+  return { ...menu, rows: rows(menu.rows) };
 }

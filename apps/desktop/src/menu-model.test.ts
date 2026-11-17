@@ -68,6 +68,7 @@ const command = (id: string, overrides: Partial<EditorCommand> = {}): EditorComm
 });
 
 const state = (overrides: Partial<MenuState> = {}): MenuState => ({
+  plainOnly: false,
   view: 'clean',
   tracking: false,
   hasRedlines: false,
@@ -521,7 +522,8 @@ describe('the menu model', () => {
     expect(registry.run).toHaveBeenCalledWith('format.bold');
     expect(bold.checked?.(state({ activeCommands: ['format.bold'] }))).toBe(true);
     expect(bold.checked?.(state())).toBe(false);
-    expect(bold.enabled).toBeUndefined();
+    expect(bold.enabled?.(state({ enabledCommands: ['format.bold'] }))).toBe(true);
+    expect(bold.enabled?.(state({ enabledCommands: [] }))).toBe(false);
 
     const link = actionRow(model, 'Format', 'Link…');
     expect(link.checked).toBeUndefined();
@@ -530,7 +532,7 @@ describe('the menu model', () => {
 
     const clear = actionRow(model, 'Format', 'Clear');
     expect(clear.checked).toBeUndefined();
-    expect(clear.enabled).toBeUndefined();
+    expect(clear.enabled?.(state({ enabledCommands: [] }))).toBe(false);
   });
 
   it('leaves the keys of registered commands to the editor', () => {

@@ -735,7 +735,24 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const text = view.state.doc.sliceString(first.from, last.to);
     if (blocks.some(({ name }) => name === 'Table' || name === 'FrontMatter')) return null;
     if (/!\[|<img\b/i.test(text) || text.includes('<!--')) return null;
-    return { from: first.from, to: last.to };
+    // A list the selection starts or ends in is wrapped by the items it touches (#754), which
+    // splits the list around the block, as Word does: the items of a list that a selection only
+    // starts or ends in stay outside, and an item takes its sublists with it.
+    const touched = (list: SyntaxNode): SyntaxNode[] => {
+      const items: SyntaxNode[] = [];
+      for (let item = list.firstChild; item; item = item.nextSibling) {
+        if (item.name === 'ListItem' && item.to > from && item.from < to) items.push(item);
+      }
+      return items;
+    };
+    // With Track Changes on, a replacement inside a list can't be written yet (the format keeps the
+    // items' markers in front of the inserted text), so the whole list is replaced, as before.
+    if (view.state.field(trackingField)) return { from: first.from, to: last.to };
+    const start =
+      first.name === 'BulletList' || first.name === 'OrderedList' ? touched(first)[0] : null;
+    const end =
+      last.name === 'BulletList' || last.name === 'OrderedList' ? touched(last).at(-1) : null;
+    return { from: start?.from ?? first.from, to: end?.to ?? last.to };
   };
 
   /** Quote or Callout: wraps the selected blocks, or inserts an empty one by the placement rule. */
@@ -844,7 +861,19 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const marker = EMPTY_MARKER.exec(doc.lineAt(from).text);
     const markerOnly = marker !== null && /[>*+\-\d]/.test(marker[1] ?? '');
     const inserting = empty ? !onEmptyLine() && !markerOnly : wrapRange() === null;
-    if (!inserting && nodes.some(({ name }) => name === 'ListItem' || name === 'Blockquote')) {
+    // A selection in list items wraps the items it touches (#754), as Quote and Callout do.
+    const itemRange =
+      !inserting &&
+      !view.state.field(trackingField) &&
+      !nodes.some(({ name }) => name === 'Blockquote') &&
+      nodes.some(({ name }) => name === 'ListItem')
+        ? wrapRange()
+        : null;
+    if (
+      !inserting &&
+      !itemRange &&
+      nodes.some(({ name }) => name === 'ListItem' || name === 'Blockquote')
+    ) {
       notice(NO_CODE_IN_CONTAINER);
       return false;
     }
@@ -856,6 +885,10 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     let last = doc.lineAt(to);
     // A selection that ends at the start of a line doesn't take that line.
     if (!empty && to === last.from && last.number > first.number) last = doc.line(last.number - 1);
+    if (itemRange) {
+      first = doc.lineAt(itemRange.from);
+      last = doc.lineAt(itemRange.to);
+    }
     if (empty) {
       // The paragraph the caret is in.
       const paragraph = nodes.find(({ name }) => name === 'Paragraph');
