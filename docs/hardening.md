@@ -261,8 +261,6 @@ its case; each is a bug. The list is what has been found, not a count of what is
   digits or markers is seen (#418). A deletion inside a blank line of a break, and a replacement
   inside the blank line of the break of the author's own pending split, are written as a
   substitution that keeps the break, so that every order of decisions reads as typed (#447, #419).
-- Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite
-  skips micromark's reading for that shape (#299).
 - A bold change on a line that rejecting a pending deletion makes a link definition reads otherwise in
   some orders (#335); typing at the end of a link reference definition with Track Changes on reads
   wrongly (#262).

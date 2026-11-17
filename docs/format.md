@@ -3384,6 +3384,14 @@ new text of someone else's substitution, the unit is a unit of that new text, wr
 the old text of the second is the new text of the first, and the first's marks stand around it.
 Accepting the first leaves the second pending; rejecting the first takes the second with it.
 
+**Delimiters.** A fine write that replaces, deletes or types an emphasis delimiter (`*`, `_`, `~`), or
+stands right against one, in a paragraph that holds a marker, is read with micromark first (`atDelimiter`
+in `widen.ts`). Typing over one `*` of another person's pending bold `**`, or a pasted run next to their
+pending split, can write a file that micromark reads otherwise than the newest view; the paragraph is
+replaced whole instead (#299, #265). Where another person's mark ends at the unit's edge (a pending
+split's break or deletion of one), the unit is tried with the block beside it, which holds the mark
+whole, before the refusal below applies.
+
 **The old text holds other people's marks.** The old text of a replacement may hold another
 person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every
 order of accepting and rejecting the replacement and the marks in it reads alike (#808). The one

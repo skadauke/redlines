@@ -123,13 +123,9 @@ describe('the linked issues', () => {
         doc: 'alpha <split>⏎⏎‸beta',
         others: 'bo',
         keys: [{ type: '## x' }],
-        // Refused, tracked or not: bo's break right in front of the block is decided with it, so
-        // a replacement of the block would not read alike in every order (#107).
+        // Tracked, a replacement of the paragraph before the break and the block after it, which
+        // holds bo's break in its old text (#107, #265); untracked, refused.
         off: { refusal: SELF_CHECK },
-        on: {
-          refusal:
-            "This edit would leave bo's line break right next to your insertion, and deciding one would change the other. Decide bo's line break first.",
-        },
       },
       {
         name: "#109: Delete twice at the end of the line above another person's split",
