@@ -10,7 +10,7 @@ import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, listDocument, randomDocument, seeded } from './random-docs.ts';
 import { claudeAda, expectInOrder } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import type { EditContext } from './types.ts';
 import { newestView, originalView } from './views.ts';
 

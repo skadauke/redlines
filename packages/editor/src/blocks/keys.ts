@@ -11,7 +11,9 @@ import {
   type Extension,
   Prec,
   Text,
+  type Transaction,
 } from '@codemirror/state';
+import type { TextChange } from '@redlines/format';
 import { type Command, type EditorView, keymap } from '@codemirror/view';
 import {
   bodyEnd,
@@ -24,7 +26,13 @@ import {
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import { heldEditEffect, wasHeld } from '../tracked/ask.ts';
-import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
+import {
+  caretKeptFromEnd,
+  probeAnnotation,
+  refusedEditEffect,
+  trackingField,
+  widenFirstAnnotation,
+} from '../tracked/typing.ts';
 import {
   type KeyEdit,
   inRoomParagraph,
@@ -126,9 +134,10 @@ const keyCaret = Prec.highest(
       const selection = visibleSelection(tr.state, EditorSelection.single(a, h));
       return [tr, { selection, sequential: true }];
     }
-    if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
-    else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
-    else if ('onLine' in caret) {
+    if ('at' in caret) pos = inReplaced(tr, caret.at) ?? tr.changes.mapPos(caret.at, 1);
+    else if ('before' in caret) {
+      pos = inReplaced(tr, caret.before) ?? tr.changes.mapPos(caret.before, -1);
+    } else if ('onLine' in caret) {
       const line = requestedLine(tr, {
         at: caret.onLine.at,
         assoc: -1,
@@ -163,6 +172,30 @@ const keyCaret = Prec.highest(
 );
 
 /**
+ * Where a caret that stood inside text that a replacement of its unit took in (format §3.12) goes:
+ * in the new text, at the same distance from its end, and not after the whole replacement. Null
+ * where no replacement holds the position.
+ */
+function inReplaced(tr: Transaction, at: number): number | null {
+  let held = false;
+  const edits: TextChange[] = [];
+  tr.changes.iterChanges((from, to, _a, _b, insert) => {
+    edits.push({ from, to, insert: insert.toString() });
+    // A replacement of a unit starts the unit's text: after the prefix of its line, nothing else.
+    const before = tr.startState.doc.sliceString(tr.startState.doc.lineAt(from).from, from);
+    if (
+      from < at &&
+      at < to &&
+      insert.toString().startsWith('<!--sub ') &&
+      /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(?:\[[ xX]\][ \t]+)?$/.test(before)
+    ) {
+      held = true;
+    }
+  });
+  return held ? caretKeptFromEnd(tr.startState, edits, at) : null;
+}
+
+/**
  * Dispatches a key's edit: one step to undo, apart from the typing around it, recorded by the
  * tracked layer as its user event says, and, for a Return, kept in the record of Returns.
  */
@@ -193,6 +226,7 @@ export function applyKeyEdit(
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
   if (edit.open?.line) annotations.push(holdViewAnnotation.of(true));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
+  if (edit.widenFirst) annotations.push(widenFirstAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
   if (edit.range) annotations.push(caretAnnotation.of({ range: edit.range }));
   else if (edit.caretBefore !== undefined) {
@@ -227,6 +261,9 @@ export function applyKeyEdit(
     userEvent: edit.userEvent,
     annotations,
     scrollIntoView: true,
+    ...(edit.fallback && !edit.fallback.refusal
+      ? { annotations: [...annotations, probeAnnotation.of(true)] }
+      : {}),
   });
   // Refused, where the key has another form: that one.
   if (edit.fallback && (wasHeld(tr) || tr.effects.some((effect) => effect.is(refusedEditEffect)))) {
@@ -249,7 +286,12 @@ export function pasteListItems(view: EditorView, text: string): boolean {
   /** Whether the tracked layer would refuse an edit: it is not made, and the paste goes in as text. */
   const refused = (at: EditorState, edit: KeyEdit) =>
     at
-      .update({ changes: edit.changes, selection: edit.selection, userEvent: edit.userEvent })
+      .update({
+        changes: edit.changes,
+        selection: edit.selection,
+        userEvent: edit.userEvent,
+        annotations: probeAnnotation.of(true),
+      })
       .effects.some((effect) => effect.is(refusedEditEffect) || effect.is(heldEditEffect));
   if (main.empty) {
     const bare = bareMarkerAt(state);

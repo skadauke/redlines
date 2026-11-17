@@ -35,7 +35,7 @@ import {
   squash,
   thread,
 } from './test-helpers.ts';
-import { SELF_CHECK, trackedEdit, trackedEdits } from './track.ts';
+import { SELF_CHECK, fineEdit as trackedEdit, fineEdits as trackedEdits } from './track.ts';
 import type { EditContext, Person, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 

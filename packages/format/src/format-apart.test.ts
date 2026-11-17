@@ -10,12 +10,12 @@ import { EditError } from './errors.ts';
 import { holdsMisreadItem, itemLines, marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
 import { formatReader } from './format-reader.ts';
-import { trackedFormat, tryingEveryMark, untrackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat, tryingEveryMark, untrackedFormat } from './formatting.ts';
 import { markerRanges } from './markers.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { cellAt } from './table-cells.ts';
-import { trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import type { TrackedEdits } from './track.ts';
 import {
   TIME,

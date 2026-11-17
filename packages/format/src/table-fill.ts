@@ -20,7 +20,7 @@ import { readLine, readTables } from './table.ts';
 import type { TableRead } from './table.ts';
 import type { TableEdit } from './table-ops.ts';
 import { movedCopyAt } from './table-rules.ts';
-import { SELF_CHECK, trackedEdit } from './track.ts';
+import { SELF_CHECK, fineEdit as trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import type { UntrackedContext } from './untracked.ts';
 import { newestView } from './views.ts';

@@ -123,7 +123,8 @@ describe('the linked issues', () => {
         doc: 'alpha <split>⏎⏎‸beta',
         others: 'bo',
         keys: [{ type: '## x' }],
-        // Still refused, #107 open: the block insertion would read differently by the order.
+        // Refused, tracked or not: bo's break right in front of the block is decided with it, so
+        // the guard of #808 keeps the refusal (#107).
         off: { refusal: SELF_CHECK },
         on: {
           refusal:

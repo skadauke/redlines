@@ -11,7 +11,7 @@ import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { ada, bodyOf, expectEveryOrderAlike, file, TIME } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** Bytes that go on, so that each id an edit draws is another, and the same in every run. */

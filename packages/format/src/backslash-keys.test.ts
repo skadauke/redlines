@@ -13,7 +13,7 @@ import { escapedMarker, expectSound, readsAsNewest } from './oracle.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { ada, bo, bodyOf, context, dropEmptyBlocks, file, squash } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import type { Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
 

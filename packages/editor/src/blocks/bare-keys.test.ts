@@ -58,8 +58,6 @@ function underBare(marker: string): Script[] {
 
 /** The words of the refusals that Return meets at a bare marker with Track Changes on: no write of the
  * Return that reads alike in every order is known for these shapes yet (lane R widens the edit). */
-const BREAK_TAKES_NEXT =
-  'A line break at the end of this text would take the start of the block that follows it.';
 const NOT_IN_INDENTATION =
   "A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.";
 
@@ -81,9 +79,7 @@ function returnAtBare(marker: string): Script[] {
             ? undefined
             : shape === 'nested'
               ? NOT_IN_INDENTATION
-              : tail
-                ? BREAK_TAKES_NEXT
-                : undefined;
+              : undefined;
         out.push({
           name: `Return at a bare ${marker} under another kind of item, ${shape}, ${where}, Track Changes ${tc ? 'on' : 'off'}`,
           doc: `${above}⏎${bare}‸${tail}⏎`,

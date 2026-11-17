@@ -8,7 +8,7 @@ import { EditError } from './errors.ts';
 import type { FormatOp } from './format-ops.ts';
 import { parseFormatOps } from './format-ops.ts';
 import { formatChange } from './format-blocks.ts';
-import { trackedFormat, untrackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { ada, bodyOf, context, expectEveryDecision, file, thread } from './test-helpers.ts';
 import type { Range } from './types.ts';

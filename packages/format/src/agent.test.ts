@@ -8,12 +8,12 @@ import {
   wordHunks,
 } from './agent.ts';
 import { eolOf, inEol } from './edit-support.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, acceptMarks, reject, rejectAll, rejectMarks } from './decide.ts';
 import { EditError } from './errors.ts';
-import { trackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {

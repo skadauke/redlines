@@ -4,9 +4,9 @@ import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import type { BlockType, FormatOp } from './format-ops.ts';
 import { formatChange } from './format-blocks.ts';
-import { trackedFormat, untrackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
-import { trackedEdit, trackedEdits } from './track.ts';
+import { fineEdit as trackedEdit, fineEdits as trackedEdits } from './track.ts';
 import {
   ada,
   bo,

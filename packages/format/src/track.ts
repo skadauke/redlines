@@ -122,6 +122,7 @@ import {
   NOT_CODE,
   theirChange,
 } from './code-edit.ts';
+import { widenedAtOnce, widenedEdits } from './edits-widen.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import { atWrappedLine, wrappedLineStart } from './wrapped-line.ts';
@@ -5034,6 +5035,44 @@ export function trackedEdits(
   edits: readonly TextChange[],
   ctx: EditContext,
 ): TrackedEdits {
+  return editsWidening(text, edits, ctx, true);
+}
+
+/**
+ * `trackedEdits` for an edit that a key knows no fine form reads right for, though the format's
+ * own check accepts one (a reader of the file reads it otherwise than the newest view): it is
+ * written as a replacement of its unit at once, and where no unit holds it, as `trackedEdits` does.
+ */
+export function widenedFirstEdits(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+): TrackedEdits {
+  return widenedAtOnce(text, edits, ctx) ?? editsWidening(text, edits, ctx, true);
+}
+
+/** `trackedEdits` as marks at the grain of the edit only: what reads alike in every order, or the
+ * refusal. For the tests of the fine forms, and for writers that compose edits by position, which a
+ * replacement moves. */
+export function fineEdits(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+): TrackedEdits {
+  return editsWidening(text, edits, ctx, false);
+}
+
+/** `trackedEdit` as marks at the grain of the edit only (see `fineEdits`). */
+export function fineEdit(text: string, edit: TextChange, ctx: EditContext): TextChange[] {
+  return fineEdits(text, [edit], ctx).changes;
+}
+
+function editsWidening(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  widening: boolean,
+): TrackedEdits {
   for (const edit of edits) assertWholeCharacters(text, edit);
   const random = ctx.random;
   // The next try draws the ids that the first one did.
@@ -5062,20 +5101,26 @@ export function trackedEdits(
   };
   // As typed first; where that reads otherwise next to another mark, each way of writing the change
   // again by a character, until one reads alike in every order of decisions, or none does.
-  for (let mode = 0; ; mode++) {
-    // Each way of writing the change is tried once; a change that reads otherwise in all of them is
-    // refused, never tried again.
-    if (mode > MOST_MODES) {
-      throw new EditError(
-        'This change could not be written so that every order of decisions reads alike. Make smaller changes.',
-        'no-legal-placement',
-      );
+  try {
+    for (let mode = 0; ; mode++) {
+      // Each way of writing the change is tried once; a change that reads otherwise in all of them
+      // is refused, never tried again.
+      if (mode > MOST_MODES) {
+        throw new EditError(
+          'This change could not be written so that every order of decisions reads alike. Make smaller changes.',
+          'no-legal-placement',
+        );
+      }
+      try {
+        return editsOnce(text, edits, mode === 0 ? first : again(), mode);
+      } catch (error) {
+        if (!(error instanceof ReadsOtherwise)) throw error;
+      }
     }
-    try {
-      return editsOnce(text, edits, mode === 0 ? first : again(), mode);
-    } catch (error) {
-      if (!(error instanceof ReadsOtherwise)) throw error;
-    }
+  } catch (error) {
+    // Where no fine form reads alike in every order, it is a replacement of the unit (format §3.12).
+    if (!widening) throw error;
+    return widenedEdits(text, edits, again(), error);
   }
 }
 

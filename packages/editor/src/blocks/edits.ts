@@ -101,6 +101,9 @@ export interface KeyEdit {
   openPlain?: { insert: string; down: number; at?: number };
   /** What the key does instead when the format refuses its changes. */
   fallback?: KeyEdit;
+  /** The changes are written as a replacement of their unit at once: the format accepts a fine
+   * form of them that a reader of the file reads otherwise than the newest view. */
+  widenFirst?: boolean;
 }
 
 /** A key that is taken and does nothing, the caret left where it is. */
@@ -311,10 +314,6 @@ function splitAbove(state: EditorState, line: Line): 'own' | 'theirs' | null {
   return found.entry.by === state.facet(authorFacet)?.handle ? 'own' : 'theirs';
 }
 
-/** Why Return is refused in the empty item of another person's pending split. */
-const THEIR_SPLIT =
-  "Another person's pending change made this item. Accept or reject it before moving it out of its list.";
-
 /**
  * A bare marker (`-`, `*`, `+`, `1.` or `1)` alone on its line) at the end of an item's text,
  * which the syntax tree reads as a line of that text, though the item's text ends before it and
@@ -368,6 +367,10 @@ function bareItemAt(
 }
 
 /** Return in an empty item: up a level, or out of the list at the top. One container per Return. */
+/** Why Return is refused in the empty item of another person's pending split. */
+const THEIR_SPLIT =
+  "Another person's pending change made this item. Accept or reject it before moving it out of its list.";
+
 function returnInEmptyItem(state: EditorState, block: Block, items: Item[], bare = false): KeyEdit {
   const { doc } = state;
   const item = items[0]!;

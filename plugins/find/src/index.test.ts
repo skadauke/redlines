@@ -1,10 +1,16 @@
 // @vitest-environment happy-dom
 import { EditorView } from '@codemirror/view';
 import { createEditor, type Editor, type EditorOptions, undo } from '@redlines/editor';
-import { newestView } from '@redlines/format';
+import { acceptAll, applyChanges, newestView, originalView, rejectAll } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFind, plugin } from './index.ts';
 import { setFind } from './search.ts';
+
+/** Rejecting every change gives the original text, accepting every change the newest. */
+function expectEveryOrder(written: string, original: string): void {
+  expect(originalView(applyChanges(written, rejectAll(written))).text).toBe(original);
+  expect(newestView(applyChanges(written, acceptAll(written))).text).toBe(newestView(written).text);
+}
 
 const mac = /Mac/.test(navigator.platform);
 
@@ -329,7 +335,7 @@ describe('replacing', () => {
     }
   });
 
-  it('refuses a replacement inside code with tracking on and goes on to the next', () => {
+  it('writes a replacement inside code as a replacement of its block, which holds the rest of it', () => {
     const doc = 'Run `cat` now, cat.\n';
     const { editor, notices } = mount(doc, { tracking: true });
     search(editor, 'cat');
@@ -338,24 +344,25 @@ describe('replacing', () => {
     expect(selected(editor)).toBe('cat');
     expect(editor.view.state.selection.main.from).toBe(5);
     bar(editor).press('Replace');
-    expect(editor.getDoc()).toBe(doc);
-    expect(notices).toEqual([expect.stringContaining('code')]);
-    expect(editor.view.state.selection.main.from).toBe(15);
-    bar(editor).press('Replace');
-    expect(newestView(editor.getDoc()).text).toBe('Run `cat` now, dog.\n');
+    expect(notices).toEqual([]);
+    expect(newestView(editor.getDoc()).text).toBe('Run `dog` now, cat.\n');
+    expect(originalView(editor.getDoc()).text).toBe(doc);
+    // The rest of the paragraph is in the tracked replacement now, where no match is made.
+    expect(bar(editor).count?.textContent).toBe('No results');
+    expectEveryOrder(editor.getDoc(), doc);
   });
 
-  it('Replace All skips what is in code with tracking on, and says so', () => {
-    const { editor, notices } = mount('Run `cat` now, cat.\n', { tracking: true });
+  it('Replace All writes what is in code as replacements too, in every order', () => {
+    const doc = 'Run `cat` now, cat.\n';
+    const { editor, notices } = mount(doc, { tracking: true });
     search(editor, 'cat');
     editor.commands.run('find.replace');
     bar(editor).replacement!.value = 'dog';
     bar(editor).press('Replace All');
-    expect(notices).toEqual([expect.stringContaining('code')]);
-    expect(newestView(editor.getDoc()).text).toBe('Run `cat` now, dog.\n');
-    expect(bar(editor).root?.querySelector('.rl-find-error')?.textContent).toBe(
-      'Couldn’t change 1 match here.',
-    );
+    expect(notices).toEqual([]);
+    expect(newestView(editor.getDoc()).text).toBe('Run `dog` now, dog.\n');
+    expect(bar(editor).root?.querySelector('.rl-find-error')?.textContent ?? '').toBe('');
+    expectEveryOrder(editor.getDoc(), doc);
   });
 
   it('replaces text a marker runs through', () => {
