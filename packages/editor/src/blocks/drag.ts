@@ -243,7 +243,8 @@ export function blockDrag(): Extension {
         position: 'absolute',
         height: '3px',
         borderRadius: '2px',
-        backgroundColor: 'var(--rl-red, #d42a1e)',
+        // The theme's gray, never red: the table and image drop lines share this class.
+        backgroundColor: 'var(--rl-ink-2, #6a6a6f)',
         pointerEvents: 'none',
         zIndex: '5',
       },

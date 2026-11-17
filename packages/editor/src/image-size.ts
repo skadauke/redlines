@@ -122,6 +122,8 @@ function readMarkdown(written: string): string {
 }
 
 const TAG = /^<img((?:\s+[^\s"'<>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>$/i;
+/** A lone tag's block that a change's closer on the next line ends: the tag is the first group. */
+const TAG_CLOSER = /^([^\n]*)\n<!--\/[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}-->\s*$/;
 const ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 
 /** The attributes of an `<img>` tag as it is written, or null when `text` is no one whole tag. */
@@ -230,15 +232,16 @@ export function imageOfNode(state: EditorState, node: SyntaxNode): ImageElement 
     };
   }
   if (node.name === 'HTMLTag' || node.name === 'HTMLBlock') {
-    const attributes = readTag(state.sliceDoc(node.from, node.to));
+    // A substitution's closer goes on the line after a lone tag (docs/format.md, #628), so that
+    // the block holds it too: the image is the tag, and the closer stays outside it.
+    let to = node.to;
+    if (node.name === 'HTMLBlock') {
+      const closer = TAG_CLOSER.exec(state.sliceDoc(node.from, node.to));
+      if (closer) to = node.from + closer[1]!.length;
+    }
+    const attributes = readTag(state.sliceDoc(node.from, to));
     return attributes
-      ? tagImage(
-          node.from,
-          node.to,
-          attributes,
-          inTableOf(node),
-          state.facet(dialectFacet) === 'pandoc',
-        )
+      ? tagImage(node.from, to, attributes, inTableOf(node), state.facet(dialectFacet) === 'pandoc')
       : null;
   }
   return null;
