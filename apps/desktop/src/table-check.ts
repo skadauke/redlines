@@ -264,6 +264,15 @@ const painted = (el: Element) => {
   return color !== '' && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)';
 };
 
+/**
+ * Whether a selected cell is tinted: the selection's color is a gradient on the cell, from one
+ * column line to the next (78ac64b7, #673), so its background color stays transparent.
+ */
+const selectionPainted = (el: Element) => {
+  const { backgroundImage } = getComputedStyle(el);
+  return painted(el) || (backgroundImage !== '' && backgroundImage !== 'none');
+};
+
 /** An input method's events in WebKit's order, with the changes it makes between them. */
 function compose(editor: Editor, steps: string[], commit: string): void {
   const fire = (type: string, data = '') => {
@@ -322,6 +331,15 @@ function hover(editor: Editor, x: number, y: number): void {
   editor.view.dom.dispatchEvent(
     new MouseEvent('mousemove', { clientX: x, clientY: y, bubbles: true, buttons: 0 }),
   );
+}
+
+/**
+ * A right-click on a grip, which opens its menu: a click on a grip only selects its row or column
+ * (5e885b9f), so the menu comes from the `contextmenu` event, as the grip listens for it.
+ */
+function openGripMenu(grip: HTMLElement): void {
+  const box = grip.getBoundingClientRect();
+  mouse(grip, 'contextmenu', box.left + 3, box.top + 3, { button: 2, buttons: 2 });
 }
 
 /** A mouse event at a point, on `target` (or the element there). */
@@ -1042,9 +1060,8 @@ const CHECKS: Check[] = [
       const unpainted = marked.filter((el) => {
         // The cell is painted (a mark inside an empty cell has no width of its own).
         const cell = el.closest('.rl-tc') ?? el;
-        const color = getComputedStyle(cell).backgroundColor;
         const box = cell.getBoundingClientRect();
-        return color === 'rgba(0, 0, 0, 0)' || color === 'transparent' || !(box.width > 0);
+        return !selectionPainted(cell) || !(box.width > 0);
       });
       if (unpainted.length) problems['unpainted'] = unpainted.length;
       // The last row is not reached.
@@ -1081,7 +1098,7 @@ const CHECKS: Check[] = [
         const drawn = selectedLabels(editor);
         if (!same(drawn, labels([1, 2], [0, 1]))) problems[`${view}-drawn`] = drawn;
         const mark = editor.view.contentDOM.querySelector('.rl-sel');
-        if (!mark || !painted(mark.closest('.rl-tc') ?? mark))
+        if (!mark || !selectionPainted(mark.closest('.rl-tc') ?? mark))
           problems[`${view}-color`] = 'the selected cells are not painted';
         if (doc(editor) !== GRID) problems[`${view}-wrote`] = 'a drag wrote something';
         // Back in the first cell: text again, with nothing drawn as cells.
@@ -1362,8 +1379,9 @@ const CHECKS: Check[] = [
   {
     // An input method composing over selected cells, in the order WebKit sends the events:
     // compositionstart, the document changes and compositionupdates, compositionend. Committed, the
-    // text lands in the first cell with its pipe escaped, the other cells are cleared, and one
-    // Undo gives every cell back. Never across the pipes between cells.
+    // text lands in the first cell with its pipe escaped, the other cells stay as they were (typing
+    // over a rectangle clears its top-left cell alone, 8fd0716f, #521), and one Undo gives the first
+    // cell back. Never across the pipes between cells.
     name: 'composition-over-cells-commits-into-the-first',
     async run(editor) {
       await load(editor, GRID);
@@ -1380,7 +1398,7 @@ const CHECKS: Check[] = [
       );
       if (!rows || rows.length !== 4 || rows.some((row) => row.cells.length !== 3)) {
         problems['shape'] = shown;
-      } else if (shown?.[1]?.[0] !== 'a\\|b' || shown[1][1] !== '' || shown[2]?.[0] !== '') {
+      } else if (shown?.[1]?.[0] !== 'a\\|b' || shown[1][1] !== '3' || shown[2]?.[0] !== 'Plums') {
         problems['text'] = shown;
       }
       if (!undo(editor.view) || doc(editor) !== GRID) problems['undo'] = doc(editor);
@@ -1691,8 +1709,7 @@ const CHECKS: Check[] = [
           problems[`${view}-beside-row`] = [box.top, line.top];
         if (editor.view.dom.querySelector('.rl-grips')?.getAttribute('aria-hidden') !== 'true')
           problems[`${view}-aria`] = 'not hidden';
-        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        openGripMenu(grip);
         await frames();
         const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
         if (
@@ -2062,8 +2079,7 @@ const CHECKS: Check[] = [
           problems[`${view}-strip`] = [box.top, box.bottom, top];
         if (editor.view.dom.querySelector('.rl-grips')?.getAttribute('aria-hidden') !== 'true')
           problems[`${view}-aria`] = 'not hidden';
-        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        openGripMenu(grip);
         await frames();
         const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
         if (
@@ -2103,11 +2119,23 @@ const CHECKS: Check[] = [
         if (!second) return { why: 'no header drawn' };
         const box = await reveal(second);
         const y = box.top - 10;
-        hover(editor, box.left + 9, y);
+        // The + stands on the column line, which is left of the cell's box (a gap's half: 78ac64b7,
+        // #673), so the line is read from the + that comes up at the cell's edge: from it, 7.5 px is
+        // within the reach and 9 is not.
+        hover(editor, box.left, y);
+        await frames();
+        const found = editor.view.dom
+          .querySelector<HTMLElement>('.rl-col-plus')
+          ?.getBoundingClientRect();
+        if (!found) return { ...problems, [`${view}-plus`]: 'none shows at the cell edge' };
+        const gapMiddle = found.left + found.width / 2;
+        hover(editor, -100, -100);
+        await frames();
+        hover(editor, gapMiddle + 9, y);
         await frames();
         if (editor.view.dom.querySelector('.rl-col-plus'))
           problems[`${view}-at-9`] = 'a + shows 9 px away';
-        hover(editor, box.left + 8, y);
+        hover(editor, gapMiddle + 7.5, y);
         await frames();
         const plus = editor.view.dom.querySelector<HTMLElement>('.rl-col-plus');
         if (!plus) return { ...problems, [`${view}-plus`]: 'none shows within 8 px' };
@@ -2321,8 +2349,7 @@ const CHECKS: Check[] = [
           const grip = await colGripOf(editor, 1);
           if (!grip) return { ...problems, grip: 'none shows' };
           const box = grip.getBoundingClientRect();
-          mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-          mouse(window, 'mouseup', box.left + 3, box.top + 3);
+          openGripMenu(grip);
           await frames();
           const item = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')].find(
             (i) => i.textContent === 'Align Right',
@@ -2418,8 +2445,7 @@ const CHECKS: Check[] = [
         const grip = await colGripOf(editor, 1);
         if (!grip) return null;
         const box = grip.getBoundingClientRect();
-        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
-        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        openGripMenu(grip);
         await frames();
         return [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
       };
