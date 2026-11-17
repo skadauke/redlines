@@ -515,6 +515,11 @@ pub fn run() {
             #[cfg(unix)]
             agents::relay::relay_close,
             agents::gateway::gateway_probe,
+            agents::openclaw_connection_add,
+            agents::openclaw_connection_change,
+            agents::openclaw_connection_remove,
+            agents::openclaw_connections,
+            agents::openclaw_use_token,
             agents::tailscale::tailscale_download,
             agents::tailscale::tailscale_open_app,
             agents::tailscale::tailscale_status

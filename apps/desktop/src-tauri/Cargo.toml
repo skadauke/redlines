@@ -52,6 +52,10 @@ base64 = "0.23"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake", "rustls-tls-native-roots"] }
 ed25519-dalek = "3.0.0"
 sha2 = "0.11.1"
+# The device key of a connection is random bytes of the operating system's (agents/connections.rs).
+getrandom = "0.4"
+# `geteuid` and `O_NOFOLLOW`, to read a secret only if it is ours and not a link (agents/connections.rs).
+libc = "0.2"
 
 # The window's icon, off the Mac, is read from a PNG (dock_icon.rs). The Mac sets the Dock icon
 # without it, and the tests of the icon family read its PNGs the same way.
