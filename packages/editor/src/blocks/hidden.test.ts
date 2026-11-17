@@ -111,7 +111,8 @@ describe('hidden blank lines', () => {
       'End.',
     ].join('\n');
     const editor = load(doc);
-    editor.view.dispatch({ selection: { anchor: doc.length } });
+    // The caret is in the `<pre>`: a block drawn rendered shows its source there.
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('<pre>') + 7 } });
     // The blank lines between the blocks only.
     expect(runs(editor)).toEqual(['', '', '', '']);
     expect(editor.view.contentDOM.dataset['rlHiddenLines']).toBe('4');

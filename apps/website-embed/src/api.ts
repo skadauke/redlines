@@ -36,6 +36,8 @@ export interface DemoHandle {
   startComment(): boolean;
   /** 'design' only: selects the sentence, opens the box with the question. */
   askClaude(): boolean;
+  /** 'design' only: selects the sentence and opens Ask's box, which the scripted Claude answers. */
+  askAboutNote(): boolean;
   openReviewBar(): void;
   /** The original document, the demo's view and tracking, no history. */
   reset(): void;
