@@ -141,7 +141,8 @@ export interface Hit {
     | 'reference'
     | 'image'
     | 'comment'
-    | 'alert';
+    | 'alert'
+    | 'fence';
   text?: Range;
   dest?: Range;
   /** The alt text of an image. */
@@ -201,6 +202,10 @@ const SUPERSCRIPT = /(?<!\\)\^[^\s^\\]+(?<!\\)\^/g;
  */
 const REFERENCES =
   /(?<![\w@])@(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
+/** The attributes of a Quarto callout's opening fence, `::: {.callout-note title="…"}`: syntax, as an
+ * alert's type is (docs/research/quarto.md, Q7). */
+const CALLOUT_FENCE_LINE =
+  /^(:{3,}[ \t]*)(\{[^}\n]*\.callout-(?:note|tip|important|warning|caution)\b[^}\n]*\}|callout-(?:note|tip|important|warning|caution))/gm;
 /** The type of an alert at the start of a quote's line; the word is `ALERT_LINE`'s (callout.ts). */
 const ALERT = /^[ \t>]*\[![A-Za-z][A-Za-z0-9-]*\]/gm;
 
@@ -342,6 +347,12 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
       to: end,
       refuse: 'A marker directly before www. would stop it from being a link.',
     });
+  }
+  if (isPandoc()) {
+    for (const m of w.matchAll(CALLOUT_FENCE_LINE)) {
+      const from = m.index + (m[1] ?? '').length;
+      hits.push({ lo: from, hi: from, from, to: from + (m[2] ?? '').length, kind: 'fence' });
+    }
   }
   for (const m of w.matchAll(ALERT)) {
     const open = m.index + m[0].indexOf('[');

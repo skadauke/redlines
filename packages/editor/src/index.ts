@@ -177,6 +177,7 @@ export {
   calloutOf,
   type CalloutMenuRequest,
 } from './preview/callout.ts';
+export { QUARTO_CALLOUTS } from './preview/divs.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export {

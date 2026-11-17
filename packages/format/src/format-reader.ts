@@ -525,6 +525,8 @@ function plainOf(layout: Layout): string {
     else if (kind === 'tag' || kind === 'comment') drop(from, to);
     // The type of an alert is syntax, as bold's stars are: changing it changes no words (#311).
     else if (kind === 'alert') drop(from + 2, to - 1);
+    // So are the attributes of a Quarto callout's fence: its type, and its title.
+    else if (kind === 'fence') drop(from, to);
     else if (alt) {
       drop(from, alt.from);
       drop(alt.to, to);
