@@ -257,8 +257,17 @@ impl AcpRuns {
     }
 
     /// Sends a message of the window `owner` to its run, if `acp_gate.rs` lets it through: what it
-    /// checked is what is written. `sockets` are the window's relays.
-    pub fn send(&self, owner: &str, id: u32, line: &str, sockets: &[String]) -> Result<(), String> {
+    /// checked is what is written. `sockets` are the window's relays the run may name, and `claim`
+    /// says whether the run may have the relay it names for its tool calls: a run at a Gateway
+    /// answers on its own relay and no other (`Relays::claim`).
+    pub fn send(
+        &self,
+        owner: &str,
+        id: u32,
+        line: &str,
+        sockets: &[String],
+        claim: &dyn Fn(&str) -> bool,
+    ) -> Result<(), String> {
         let run = self
             .running()
             .get(&id)
@@ -269,6 +278,16 @@ impl AcpRuns {
         }
         // Checked under the lock and written after it, so that the thread hearing the agent never
         // waits on a write the agent isn't reading.
+        // The run's relay is claimed before the gate takes the line as sent: a refused claim leaves
+        // the conversation where it was, so the run can ask again.
+        let tools = locked(&run.shared.conversation).tools_socket(line);
+        if let Some(socket) = tools
+            && !claim(&socket)
+        {
+            return Err(
+                "Redlines won't send an agent a relay that isn't this run's own.".to_owned(),
+            );
+        }
         let checked = locked(&run.shared.conversation).check(line, sockets)?;
         run.input.send(&checked)
     }
@@ -420,15 +439,15 @@ mod tests {
         let yolo = json!({ "jsonrpc": "2.0", "id": 5, "method": "session/set_mode",
                            "params": { "sessionId": "s", "modeId": "yolo" } });
         assert!(
-            acp.send("main", started.id, &yolo.to_string(), &sockets)
+            acp.send("main", started.id, &yolo.to_string(), &sockets, &|_| true)
                 .is_err()
         );
         assert!(
-            acp.send("doc-2", started.id, &initialize(), &sockets)
+            acp.send("doc-2", started.id, &initialize(), &sockets, &|_| true)
                 .is_err(),
             "another window's"
         );
-        acp.send("main", started.id, &initialize(), &sockets)
+        acp.send("main", started.id, &initialize(), &sockets, &|_| true)
             .unwrap();
         let echoed: Value = serde_json::from_str(&next_line(&receiver)).unwrap();
         assert_eq!(echoed["method"], "initialize");
@@ -440,7 +459,7 @@ mod tests {
             }
         }
         assert!(
-            acp.send("main", started.id, &initialize(), &sockets)
+            acp.send("main", started.id, &initialize(), &sockets, &|_| true)
                 .is_err()
         );
         assert!(acp.running().is_empty(), "an ended run is let go of");
@@ -539,7 +558,8 @@ mod tests {
                 },
             )
             .unwrap();
-        acp.send("main", started.id, &initialize(), &[]).unwrap();
+        acp.send("main", started.id, &initialize(), &[], &|_| true)
+            .unwrap();
         let answer = loop {
             let line = match receiver.recv_timeout(Duration::from_secs(60)).unwrap() {
                 RunMessage::Line { line } => line,
@@ -626,7 +646,8 @@ done
         );
         let (acp, runs) = (AcpRuns::default(), Runs::default());
         let (started, receiver) = start(&acp, &runs, &temp, launch);
-        let send = |message: &Value| acp.send("main", started.id, &message.to_string(), &[]);
+        let send =
+            |message: &Value| acp.send("main", started.id, &message.to_string(), &[], &|_| true);
 
         send(&acp_lines.messages["initialize"]).unwrap();
         let handshake: Value = serde_json::from_str(&next_line(&receiver)).unwrap();

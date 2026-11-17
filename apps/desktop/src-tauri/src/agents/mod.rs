@@ -416,8 +416,13 @@ pub fn acp_start(
 #[tauri::command(async)]
 pub fn acp_send(app: AppHandle, webview: Webview, id: u32, line: String) -> Result<(), String> {
     let owner = webview.label();
-    let sockets = app.state::<Relays>().sockets_of(owner);
-    app.state::<AcpRuns>().send(owner, id, &line, &sockets)
+    let relays = app.state::<Relays>();
+    // A run names a relay no other run has claimed, and a run at a Gateway claims the one it names.
+    let sockets = relays.sockets_for(owner, id);
+    app.state::<AcpRuns>()
+        .send(owner, id, &line, &sockets, &|socket| {
+            relays.claim(owner, socket, id)
+        })
 }
 
 /// How long an update may take: a package manager downloads the program.
