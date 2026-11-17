@@ -162,6 +162,42 @@ describe('the ledger of an agent edit and of others', () => {
   });
 });
 
+describe('a file with a ledger', () => {
+  const withLedger = (body: string) =>
+    `${body}\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo Chen}\nmarks:\n  b2b2: {by: bo, at: 2026-11-17T09:59Z}\n-->\n`;
+
+  it('changes the last line of the body without touching the ledger', () => {
+    const body = 'First <!--ins b2b2-->new<!--/b2b2--> line.\n\nLast line.\n';
+    const text = withLedger(body);
+    const typed = text.replace('First', 'Zeroth');
+    const next = text.replace('Last line.', 'Final line.');
+    const out = rebaseAgentEdit(typed, text, next);
+    expect(out.dropped).toEqual([]);
+    expect(out.text).toContain('Zeroth <!--ins b2b2-->new<!--/b2b2--> line.\n\nFinal line.');
+    expect(parse(out.text).warnings).toEqual([]);
+    expect(Object.keys(parse(out.text).ledger.marks)).toEqual(['b2b2']);
+  });
+
+  it('inserts at the very end of the body, before the ledger', () => {
+    const body = 'First <!--ins b2b2-->new<!--/b2b2--> line.\n\nLast line.\n';
+    const text = withLedger(body);
+    const typed = text.replace('First', 'Zeroth');
+    const next = text.replace('Last line.\n', 'Last line.\n\nAppended.\n');
+    const out = rebaseAgentEdit(typed, text, next);
+    expect(out.text.indexOf('Appended.')).toBeLessThan(out.text.indexOf('<!-- redlines'));
+    expect(out.text.startsWith('Zeroth')).toBe(true);
+  });
+
+  it('tells what it dropped as the agent changed it, not as it was placed', () => {
+    const text = 'One.\n\nTwo.\n\nThree.\n';
+    const next = text.replace('Two', 'Second');
+    const typed = text.replace('Two.\n\n', '');
+    expect(rebaseAgentEdit(typed, text, next).dropped).toEqual([
+      { from: text.indexOf('Two'), removed: 'Two', insert: 'Second' },
+    ]);
+  });
+});
+
 describe('in the editor', () => {
   const open: Editor[] = [];
   afterEach(() => {
@@ -209,6 +245,15 @@ describe('in the editor', () => {
     const b = mount(base);
     b.applyAgentEdit(next, step);
     expect(b.getDoc()).toBe(next);
+  });
+
+  it('an edit that changed nothing leaves what others typed alone', () => {
+    const editor = mount(base);
+    const read = editor.getDoc();
+    remote(editor, 'Alpha', 'Bo wrote this. ');
+    const typed = editor.getDoc();
+    expect(editor.applyAgentEdit(read, step, read)).toEqual({ rebased: false, dropped: [] });
+    expect(editor.getDoc()).toBe(typed);
   });
 
   it('says what could not be placed, and throws nothing', () => {

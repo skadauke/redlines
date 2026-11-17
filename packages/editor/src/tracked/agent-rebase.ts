@@ -49,10 +49,16 @@ export interface Rebased {
   dropped: readonly DroppedChange[];
 }
 
-/** The text of a file without its ledger comment: the body is a prefix of it. */
+/**
+ * The text of a file before its ledger comment, which is merged by entry and written apart. Its
+ * offsets are the file's own. Text after the ledger (a ledger is the file's last thing) is not the
+ * agent's to change here, and stays as it is.
+ */
 function bodyOf(text: string): string {
   const range = parse(text).ledgerRange;
-  return range ? text.slice(0, range.from) + text.slice(range.to) : text;
+  // A ledger's range takes the line break that ends the body; a file with none ends the same way.
+  if (range) return text.slice(0, range.from);
+  return text.endsWith('\n') ? text.slice(0, -1) : text;
 }
 
 /** What the agent changed in `base`, each change with the words around it. */
@@ -148,9 +154,14 @@ export function rebaseAgentEdit(current: string, base: string, next: string): Re
   const changes = anchorChanges(baseBody, agentBody);
   // Where the others' changes are, to move the agent's by what they added and removed before it.
   const others = lineChanges(baseBody, currentBody);
-  const placed: TextChange[] = [];
+  /** A change of the agent's placed in the body, and what it was, to tell of it if it can't go. */
+  interface Placed extends TextChange {
+    origin: DroppedChange;
+  }
+  const placed: Placed[] = [];
   const dropped: DroppedChange[] = [];
   for (const change of changes) {
+    const origin = { from: change.from, removed: change.removed, insert: change.insert };
     // Others' changes that touch the same stretch: where it was is no longer where it is. Two
     // insertions at one point don't touch; the agent's goes after the other's.
     const touched = others.some((other) => other.from < change.to && change.from < other.to);
@@ -161,32 +172,46 @@ export function rebaseAgentEdit(current: string, base: string, next: string): Re
     const from = change.from + delta;
     const to = change.to + delta;
     if (!touched && currentBody.slice(from, to) === change.removed) {
-      placed.push({ from, to, insert: change.insert });
+      placed.push({ from, to, insert: change.insert, origin });
       continue;
     }
     const found = find(currentBody, change, from);
-    if (found) placed.push({ from: found.from, to: found.to, insert: change.insert });
-    else dropped.push({ from: change.from, removed: change.removed, insert: change.insert });
+    if (found) placed.push({ from: found.from, to: found.to, insert: change.insert, origin });
+    else dropped.push(origin);
   }
   // Changes that now overlap can't be written together: the later ones go.
   placed.sort((a, b) => a.from - b.from || a.to - b.to);
-  const kept: TextChange[] = [];
+  const kept: Placed[] = [];
   for (const change of placed) {
     const last = kept.at(-1);
-    if (last && change.from < last.to) {
-      dropped.push({ from: change.from, removed: '', insert: change.insert });
-    } else kept.push(change);
+    if (last && change.from < last.to) dropped.push(change.origin);
+    else kept.push(change);
   }
-  // Offsets in the body are the file's own up to the ledger, and past it by the ledger's length.
-  const ledgerAt = parse(current).ledgerRange;
-  const inFile = (at: number) =>
-    ledgerAt && at >= ledgerAt.from ? at + ledgerAt.to - ledgerAt.from : at;
-  let text = applyChanges(
-    current,
-    kept.map((change) => ({ ...change, from: inFile(change.from), to: inFile(change.to) })),
-  );
-  if (!ledgerEntries(text).unreadable && !ours.unreadable && !theirs.unreadable) {
-    text = applyChanges(text, setLedgerEntries(text, merged.ledger));
+  const fileChange = (change: Placed): TextChange => ({
+    from: change.from,
+    to: change.to,
+    insert: change.insert,
+  });
+  // A change that would leave the file with more problems than it had is left out, with the
+  // others kept: the agent's text is never worth a marker that no longer reads.
+  const mergeable = !ours.unreadable && !theirs.unreadable && !ledgerEntries(base).unreadable;
+  /** The text with the merged ledger written into it: how it would be saved. */
+  const settle = (body: string) =>
+    mergeable && !ledgerEntries(body).unreadable
+      ? applyChanges(body, setLedgerEntries(body, merged.ledger))
+      : body;
+  const problems = (text: string) => parse(text).warnings.length;
+  const allowed = Math.max(problems(current), problems(next));
+  let text = current;
+  let applied = 0;
+  for (const change of kept.toReversed()) {
+    const tried = applyChanges(text, [fileChange(change)]);
+    if (problems(settle(tried)) > allowed) {
+      dropped.push(change.origin);
+    } else {
+      text = tried;
+      applied++;
+    }
   }
-  return { text, applied: kept.length, dropped };
+  return { text: settle(text), applied, dropped };
 }

@@ -665,7 +665,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       const was = fileText(view.state);
       let doc = written;
       let dropped: AgentEditOutcome['dropped'] = [];
-      const rebased = base !== undefined && base !== was && base !== written;
+      // An edit that changes nothing of what the agent read leaves the document as it is, whatever
+      // was typed since.
+      if (base !== undefined && written === base) return { rebased: false, dropped: [] };
+      const rebased = base !== undefined && base !== was;
       if (rebased) {
         const placed = rebaseAgentEdit(was, base, written);
         doc = placed.text;
