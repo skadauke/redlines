@@ -606,7 +606,9 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       // belongs to the list). A blank line there, after the one that goes over the item, was
       // written as two splits, the second a marker line in column 0, which ended the item above
       // (walk seed 23 of the lists side by side).
-      const joined = `\n${blankOf(item.indent)}\n${item.indent}${item.marker}${item.after}`;
+      // A task item's box goes with it, as the other forms of the key keep it.
+      const copy = box ? state.sliceDoc(box.from, block.text.from) : '';
+      const joined = `\n${blankOf(item.indent)}\n${item.indent}${item.marker}${item.after}${copy}`;
       return {
         changes: [{ from: above.to, insert: joined }],
         selection: EditorSelection.single(start + joined.length),
