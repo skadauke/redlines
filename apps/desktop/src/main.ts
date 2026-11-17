@@ -1097,12 +1097,12 @@ createAltText(editor, {
 
 /**
  * The bytes of the local picture `src` for Export to Word: only one inside the document's project
- * folder (`localImagePath`), read by the app under the rules that hold what the page may load
+ * folder (the one its sidebar shows) (`localImagePath`), read by the app under the rules that hold what the page may load
  * (`image_for_crop`). Undefined for any other address or a file the app won't give.
  */
 async function readImageForWord(src: string): Promise<Uint8Array | undefined> {
   const document = imageDocument;
-  const root = imageFolder;
+  const root = imageFolder ?? (isTauri ? null : '');
   if (/^[a-z][a-z0-9+.-]*:/i.test(src) || document === null || root === null) return undefined;
   let relative: string;
   try {
