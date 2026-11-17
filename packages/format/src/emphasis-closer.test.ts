@@ -8,7 +8,7 @@ import { EditError } from './errors.ts';
 import { expectSound, readsAsNewest } from './oracle.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { ada, bodyOf, context, file } from './test-helpers.ts';
-import { fineEdit as trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit, trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** `pasted` typed at the caret `‸` of `body`: the file it leaves. */
@@ -18,6 +18,18 @@ function paste(body: string, pasted: string, marks: Record<string, string> = {})
   const changes = trackedEdit(
     before,
     { from: at, to: at, insert: pasted },
+    context(ada, ['m2bd', 'n8fx', 'p7qd', 'q4wx', 'r5yz', 's6bc', 't7df', 'v8gh']),
+  );
+  return applyChanges(before, changes);
+}
+
+/** `paste` as the editor writes it: where no fine form reads alike, the paragraph is replaced. */
+function pasteWidened(body: string, pasted: string, marks: Record<string, string> = {}): string {
+  const at = body.indexOf('‸');
+  const before = file(body.replace('‸', ''), marks);
+  const { changes } = trackedEdits(
+    before,
+    [{ from: at, to: at, insert: pasted }],
     context(ada, ['m2bd', 'n8fx', 'p7qd', 'q4wx', 'r5yz', 's6bc', 't7df', 'v8gh']),
   );
   return applyChanges(before, changes);
@@ -172,6 +184,14 @@ describe("another person's pending marks around the change (#81)", () => {
       '**Start <!--ins k3x9-->yy<!--/k3x9-->‸middle** End',
       '_a *b <!--ins k3x9-->yy<!--/k3x9-->‸c_ d',
       'Start ‸<!--ins k3x9-->*yy*<!--/k3x9-->middle End',
+      // His pending split, or his deletion of a block break, beside the caret (#265).
+      'Start ‸<!--split k3x9-->\n\nmiddle End',
+      'Start<!--split k3x9-->\n\n‸middle End',
+      'Start *one ‸<!--split k3x9-->\n\ntwo* End',
+      'Start<!--del k3x9 \\n\\n-->‸middle End',
+      'Start ‸<!--del k3x9 \\n\\n-->middle End',
+      '**Start<!--del k3x9 \\n\\n-->‸middle** End',
+      'Start<!--del k3x9 \\n\\n-->middle ‸End',
     ];
     const total = fuzzCount(400);
     let written = 0;
@@ -184,7 +204,7 @@ describe("another person's pending marks around the change (#81)", () => {
       const target = targets[Math.floor(random() * targets.length)] ?? targets[0]!;
       let after: string;
       try {
-        after = paste(target, pasted, { k3x9: 'bo' });
+        after = pasteWidened(target, pasted, { k3x9: 'bo' });
       } catch (error) {
         if (!(error instanceof EditError)) throw error;
         continue;

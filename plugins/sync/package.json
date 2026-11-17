@@ -19,6 +19,7 @@
     "@redlines/format": "workspace:*"
   },
   "devDependencies": {
-    "@redlines/formatting": "workspace:*"
+    "@redlines/formatting": "workspace:*",
+    "@redlines/tables": "workspace:*"
   }
 }
