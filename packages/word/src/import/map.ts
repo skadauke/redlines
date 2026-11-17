@@ -664,7 +664,8 @@ class Mapper {
       for (const cell of row.cells) {
         const first = cell.blocks.find((block) => block.type === 'paragraph');
         const align = first?.type === 'paragraph' ? (first.align ?? 'left') : 'left';
-        if (cell.vMerge !== 'continue') seen[col]?.add(align === 'start' ? 'left' : align);
+        if (cell.vMerge !== 'continue')
+          seen[col]?.add(align === 'start' ? 'left' : align === 'end' ? 'right' : align);
         col += Math.max(1, cell.span);
       }
     }
