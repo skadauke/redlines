@@ -355,6 +355,9 @@ fn answer_call(
     Ok((name, reply["result"].to_string()))
 }
 
+/// How many calls may be out at once.
+const MAX_PENDING: usize = 64;
+
 /// A call's answer, on its way from the thread that made it to the one that writes.
 struct Finished {
     id: String,
@@ -548,6 +551,18 @@ fn run(
                         params_json,
                         session_key,
                     } => {
+                        // A call that is already out, or one too many, is refused, not run twice.
+                        if pending.contains_key(&id) || pending.len() >= MAX_PENDING {
+                            let frame = protocol::invoke_result(
+                                &id,
+                                &node_id,
+                                Err("Redlines is busy with other calls."),
+                            );
+                            if let Err(ended) = send(socket, frame) {
+                                return ended;
+                            }
+                            continue;
+                        }
                         pending.insert(id.clone(), (node_id.clone(), Instant::now() + timing.call));
                         let (host, published, done) = (
                             Arc::clone(host),

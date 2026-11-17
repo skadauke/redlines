@@ -84,7 +84,8 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
             }
             if let Ok((id, outcome)) = done.try_recv() {
                 busy = false;
-                cancel.store(false, Ordering::Relaxed);
+                // A cancel that came as the prompt finished has ended the tools already.
+                let cancelled = cancel.swap(false, Ordering::Relaxed);
                 // A prompt that was answered keeps the run's tools for the next one: OpenClaw offers
                 // the node's tools to every run of a session, so a follow-up prompt in this run
                 // can edit too (the registration ends with the run). One that was cancelled or
@@ -96,7 +97,7 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
                     if let Some(held) = hold.take() {
                         held.leave();
                     }
-                } else if !matches!(outcome, Ok(Outcome::Done(_))) {
+                } else if cancelled || !matches!(outcome, Ok(Outcome::Done(_))) {
                     hold = None;
                 }
                 match outcome {

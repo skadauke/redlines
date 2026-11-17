@@ -66,16 +66,73 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// The line to one run's window: the program's end of a relay.
 struct Line {
-    /// Held while a call is in flight, so that calls go one at a time, in order.
+    /// Held while a call is in flight (by whoever has its turn).
     stream: Mutex<Wire>,
+    /// The calls of the run in the order they came: one at a time, each within its own deadline.
+    queue: Mutex<Queue>,
+    turn: Condvar,
     /// The same socket, for ending the line from outside a call.
     control: UnixStream,
+}
+
+/// A run's calls, by ticket. A call that gives up before its turn leaves its ticket in `gave_up`,
+/// which the turn passes over.
+#[derive(Default)]
+struct Queue {
+    next: u64,
+    serving: u64,
+    gave_up: std::collections::HashSet<u64>,
+}
+
+impl Queue {
+    /// Moves the turn on past the tickets that gave up.
+    fn advance(&mut self) {
+        self.serving += 1;
+        while self.gave_up.remove(&self.serving) {
+            self.serving += 1;
+        }
+    }
+}
+
+impl Line {
+    /// Asks the window for a `tools/call` in its turn, after the calls that came before it, and all
+    /// within `wait` of now: a call that has waited its whole time for its turn is not made at all,
+    /// so the agent is never told it failed and then has the edit land.
+    fn ask_in_turn(&self, params: Value, wait: Duration) -> Result<Value, String> {
+        let until = Instant::now() + wait;
+        let mut queue = locked(&self.queue);
+        let ticket = queue.next;
+        queue.next += 1;
+        while queue.serving != ticket {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                queue.gave_up.insert(ticket);
+                return Err("The document didn’t answer in time.".to_owned());
+            }
+            queue = self
+                .turn
+                .wait_timeout(queue, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        drop(queue);
+        let answered = locked(&self.stream).ask(
+            "tools/call",
+            params,
+            until.saturating_duration_since(Instant::now()),
+        );
+        locked(&self.queue).advance();
+        self.turn.notify_all();
+        answered
+    }
 }
 
 struct Wire {
     writer: UnixStream,
     reader: BufReader<UnixStream>,
     next_id: u64,
+    /// The start of a line that a read timed out in: kept, so that the rest of it joins it.
+    partial: String,
 }
 
 impl Wire {
@@ -109,10 +166,10 @@ impl Wire {
                 .get_ref()
                 .set_read_timeout(Some(left.min(LOOK)))
                 .map_err(|error| error.to_string())?;
-            let mut text = String::new();
-            match self.reader.read_line(&mut text) {
+            match self.reader.read_line(&mut self.partial) {
                 Ok(0) => return Err("The run has ended.".to_owned()),
                 Ok(_) => {
+                    let text = std::mem::take(&mut self.partial);
                     if let Ok(message) = serde_json::from_str::<Value>(&text)
                         && message["id"] == json!(id)
                     {
@@ -291,6 +348,7 @@ impl RunTools {
             writer,
             reader,
             next_id: 0,
+            partial: String::new(),
         };
         // What a toolbox sees before any call.
         let hello = wire.ask_unless(
@@ -305,6 +363,8 @@ impl RunTools {
         wire.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))?;
         let line = Arc::new(Line {
             stream: Mutex::new(wire),
+            queue: Mutex::default(),
+            turn: Condvar::new(),
             control,
         });
         let key = thread_of(session).to_owned();
@@ -344,8 +404,7 @@ impl RunTools {
         let Some(line) = line else {
             return refused(NOT_LIVE);
         };
-        let answered =
-            locked(&line.stream).ask("tools/call", request["params"].clone(), CALL_TIMEOUT);
+        let answered = line.ask_in_turn(request["params"].clone(), CALL_TIMEOUT);
         // A run that ended while the call waited is a run that is not live.
         let still_live = locked(&self.live)
             .get(session)
@@ -615,6 +674,37 @@ mod tests {
                 .is_err()
         );
         assert!(tools.is_live("agent:main:redlines-1"));
+    }
+
+    #[test]
+    fn a_runs_calls_go_in_the_order_they_came_and_one_that_gave_up_is_passed_over() {
+        let mut queue = Queue {
+            next: 4,
+            serving: 0,
+            gave_up: [1, 2].into(),
+        };
+        queue.advance();
+        assert_eq!(
+            queue.serving, 3,
+            "tickets 1 and 2 gave up before their turn"
+        );
+        queue.advance();
+        assert_eq!(queue.serving, 4);
+
+        // And in a line: calls made one after another from threads are asked in that order.
+        let (socket, _window) = window(&folder("order"));
+        let tools = Arc::new(RunTools::default());
+        let _held = tools.register("redlines-0c", &socket, &|| false).unwrap();
+        let mut waiting = Vec::new();
+        for name in ["a", "b", "c", "d"] {
+            let tools = Arc::clone(&tools);
+            waiting.push(thread::spawn(move || {
+                text(&call(&tools, Some("redlines-0c"), name))
+            }));
+            thread::sleep(Duration::from_millis(30));
+        }
+        let answers: Vec<String> = waiting.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(answers.iter().all(|a| !a.is_empty()));
     }
 
     #[test]

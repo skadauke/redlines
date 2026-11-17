@@ -278,12 +278,9 @@ impl AcpRuns {
         }
         // Checked under the lock and written after it, so that the thread hearing the agent never
         // waits on a write the agent isn't reading.
-        let (checked, tools) = {
-            let mut conversation = locked(&run.shared.conversation);
-            let checked = conversation.check(line, sockets)?;
-            let tools = conversation.tools_socket(&checked);
-            (checked, tools)
-        };
+        // The run's relay is claimed before the gate takes the line as sent: a refused claim leaves
+        // the conversation where it was, so the run can ask again.
+        let tools = locked(&run.shared.conversation).tools_socket(line);
         if let Some(socket) = tools
             && !claim(&socket)
         {
@@ -291,6 +288,7 @@ impl AcpRuns {
                 "Redlines won't send an agent a relay that isn't this run's own.".to_owned(),
             );
         }
+        let checked = locked(&run.shared.conversation).check(line, sockets)?;
         run.input.send(&checked)
     }
 }

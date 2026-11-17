@@ -626,7 +626,7 @@ leaves its thread waiting for the full `SETTLE_TIMEOUT`; one that was reported o
   in the order the calls finish. Each call has its own deadline (`Timing::call`, 125 s, a little over
   the window's 120 s), at which the Gateway is told it failed and a late answer is dropped. A slow
   call so holds back neither another run's call nor the pings (`a_slow_call_holds_back_neither...`).
-  One run's own calls still go one at a time, in order, on its line.
+  One run's own calls still go one at a time, in the order they came (a ticket for each), on its line, and the wait for a turn counts in the call's 120 s: a call that spent it waiting is never made.
 - **A run answers on its own relay.** The first run at a Gateway to name a relay of the window
   claims it (`Relays::claim`, from `acp_send`, after the gate has passed the line); a relay another
   run has claimed, or that a program is already connected to, is neither named nor taken, so a
