@@ -12,7 +12,7 @@ import {
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { exists, readFile, writeFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { exists, readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
 import { appIdentity, BROWSER_IDENTITY } from './identity.ts';
@@ -435,6 +435,17 @@ async function sendImageData(
   return added;
 }
 
+/**
+ * Writes bytes to a file the window may write: the one the save panel just returned, which the
+ * dialog added to its scope. The file plugin's text command writes the body it is given as it is,
+ * so the window needs no other write permission (`fs:allow-write-file` would be a broader one).
+ */
+function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
+  return invoke('plugin:fs|write_text_file', bytes, {
+    headers: { path: encodeURIComponent(path) },
+  });
+}
+
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
   return {
@@ -481,7 +492,7 @@ function createTauriHost(): Host {
       if (!path) return null;
       // Written where the panel said: only that path is in the window's scope. The Mac's panel
       // adds the extension itself.
-      await writeFile(path, bytes);
+      await writeBytes(path, bytes);
       return path;
     },
     watch: watchDocument,
