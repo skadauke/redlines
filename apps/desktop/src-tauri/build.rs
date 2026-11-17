@@ -54,6 +54,7 @@ const COMMANDS: &[&str] = &[
     "identity",
     "image_sizes",
     "image_for_agent",
+    "image_for_crop",
     "image_stamps",
     "install_command_line",
     "install_command_line_at_home",

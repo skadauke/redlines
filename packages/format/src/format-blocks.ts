@@ -704,7 +704,13 @@ function planType(
     // The block after the blank line, indented to the item's text or more, would be the item's.
     let next = nextLine(reader, block.end);
     while (next !== undefined && isBlank(text, next)) next = nextLine(reader, next);
-    const indent = next === undefined ? 0 : (/^ */.exec(lineAt(text, next))?.[0].length ?? 0);
+    // A tab is four columns, to the next multiple of four (#445).
+    let indent = 0;
+    if (next !== undefined) {
+      for (const ch of /^[ \t]*/.exec(lineAt(text, next))?.[0] ?? '') {
+        indent = ch === '\t' ? indent + 4 - (indent % 4) : indent + 1;
+      }
+    }
     if (next !== undefined && indent >= (to === 'ol' ? 3 : 2)) throw refused(PULLS_IN);
   }
   if (isList(block.type) && isList(to)) {
