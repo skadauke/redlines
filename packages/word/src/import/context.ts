@@ -90,9 +90,16 @@ export class People {
     return earlier.handle;
   }
 
-  /** The people met so far, in the order they were met. */
+  /** The people met so far: those the file already knew in the order it had them, then the new ones
+   * in the order they were met. */
   people(): LedgerPerson[] {
-    return this.list;
+    const order = [...this.known.values()].map((person) => person.handle);
+    const rank = (person: LedgerPerson) => {
+      const at = order.indexOf(person.handle);
+      return at === -1 ? order.length : at;
+    };
+    // `sort` is stable, so the new people keep the order they were met in.
+    return [...this.list].sort((a, b) => rank(a) - rank(b));
   }
 }
 
@@ -127,7 +134,7 @@ export class Ctx {
 
   /** The threads the source file had resolved: Word keeps only that a thread is done, so who did it
    * and when come from here, for a thread that is the same (author, time and text). */
-  private readonly resolvedBefore: readonly Thread[];
+  private readonly resolvedBefore: Thread[];
 
   constructor(
     model: DocxModel,
@@ -242,9 +249,11 @@ export class Ctx {
     };
     if (root.done) {
       thread.resolved = { by: thread.by, at: thread.at };
-      const before = this.resolvedBefore.find(
+      // Each earlier thread serves one thread: two that read the same take it in turn.
+      const at = this.resolvedBefore.findIndex(
         (found) => found.by === thread.by && found.at === thread.at && found.text === thread.text,
-      )?.resolved;
+      );
+      const before = at === -1 ? undefined : this.resolvedBefore.splice(at, 1)[0]?.resolved;
       const by = before ? this.people.keep(before.by) : undefined;
       if (before && by) thread.resolved = { by, at: before.at };
     }
