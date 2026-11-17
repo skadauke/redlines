@@ -4835,7 +4835,8 @@ function underliningSplits(text: string): number {
 function noUnderliningSplit(text: string, written: TrackedEdits): TrackedEdits {
   if (!written.changes.some((change) => change.insert.includes('<!--split '))) return written;
   const after = applyChanges(text, written.changes);
-  if (underliningSplits(after) > underliningSplits(text))
+  const now = underliningSplits(after);
+  if (now > 0 && now > underliningSplits(text))
     throw new EditError(UNDERLINING_SPLIT, 'no-legal-placement');
   return written;
 }
