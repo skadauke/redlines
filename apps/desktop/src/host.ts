@@ -440,7 +440,7 @@ async function sendImageData(
  * dialog added to its scope. The file plugin's text command writes the body it is given as it is,
  * so the window needs no other write permission (`fs:allow-write-file` would be a broader one).
  */
-function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
+export function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
   return invoke('plugin:fs|write_text_file', bytes, {
     headers: { path: encodeURIComponent(path) },
   });
