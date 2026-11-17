@@ -1081,6 +1081,7 @@ function tokenize(typed: string, linePrefix: string, where?: TypedAt): Token[] {
   }
   if (at < typed.length) tokens.push({ text: typed.slice(at) });
   if (where) wholeIndentedCode(tokens, linePrefix, where, eol);
+  if (where) wholeDivs(tokens, linePrefix, where);
   return tokens;
 }
 
@@ -1140,6 +1141,35 @@ function wholeIndentedCode(tokens: Token[], linePrefix: string, where: TypedAt, 
     tokens.splice(first, last + 1 - first, { text: lines.join('') + eol + container, fence: true });
     last = first;
   }
+}
+
+/** A line of typed text that is the fence of a pandoc div: three or more colons, then attributes. */
+const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
+
+/**
+ * Typed text with the fence of a pandoc div in it (format §3.1, rule 9, §9.4): pandoc takes a fence
+ * only when nothing else is on its line, and the splits of the lines of a typed div would stand at
+ * the end of each fence line. From the first fence line to the end of the typed text it is one
+ * piece, with no marker inside, as a fenced code block is: the insertion is the div whole, and its
+ * closer stands alone on the line after the closing fence. Only at the top level, at the start of
+ * a line, with nothing after the text on its last line; anywhere else the text is written as it was.
+ */
+function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
+  if (linePrefix !== '' || where.rest.trim() !== '') return;
+  const first = tokens.findIndex((token, i) => {
+    if (!('text' in token) || token.fence === true) return false;
+    const before = tokens[i - 1];
+    const atLineStart = before === undefined ? where.prefix !== undefined : 'brk' in before;
+    return atLineStart && DIV_FENCE_TYPED.test(token.text.split('\n')[0]?.replace(/\r$/, '') ?? '');
+  });
+  if (first < 0) return;
+  const rest = tokens.slice(first);
+  if (rest.some((token) => 'brk' in token && token.prefix !== '')) return;
+  if (rest.some((token) => 'text' in token && token.fence === true)) return;
+  const text = rest.map((token) => ('text' in token ? token.text : token.brk)).join('');
+  // The break after the last line is the one that the closer stands behind (format §3.3).
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  tokens.splice(first, rest.length, { text: /\n$/.test(text) ? text : text + eol, fence: true });
 }
 
 /** What the tokens write: breaks before the last text are in the insertion, those after it behind. */

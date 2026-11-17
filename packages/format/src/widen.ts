@@ -600,6 +600,8 @@ const RISKY_LINES = [
   /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/,
   /^ {0,3}#{1,6}(?:[ \t].*)?#[ \t]*$/,
   /^ {0,3}\[[^\]]+\]:/,
+  // The fence of a pandoc div: nothing but the fence may be on its line (format §3.1, rule 9).
+  /^[ \t>]*:{3,}/,
   /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/,
 ];
 

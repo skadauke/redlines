@@ -1129,11 +1129,14 @@ at the outer edge of a whole inline construct. A marker never goes:
    with no space (`-<!--split k3x9-->` is text of the paragraph, not an item);
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
-9. inside pandoc's `~x~` or `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written
-   (§9.1; not built yet: the library reads a file of any type alike); after or inside `{…}`
-   attributes; on `:::` lines; before or
+9. inside pandoc's `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written (§9.1; a
+   change there is a replacement of the pair, in a file of any type, since the library reads them
+   alike; pandoc's `~x~` is not held, for GFM reads one tilde as strikethrough, which takes marks); after or inside `{…}`
+   attributes; on `:::` lines (a fence line; a change there is a replacement of the div's
+   paragraph, and a typed div is one insertion with no marker on a fence line, §9.4); before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
-   or a digit and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`. GitHub shows a
+   or a digit and an emoji shortcode; or inside `{{< >}}`, a cross-reference (`@fig-x`, `@sec-x`, and the other kinds Quarto numbers), a
+   citation bracket (`[@a; @b]`, `[-@a]`) or `(\#fig:x)`. GitHub shows a
    shortcode as its emoji at the start of a text or after a space, and as written with a letter or
    a digit before it (`a:tent:`); a marker between the two would leave it at the start of a text,
    where it shows as the emoji. A change whose end would stand there, as when text is typed or a
@@ -4269,6 +4272,17 @@ A file changes only when its content does.
 - Code keeps running. Markers never appear inside chunks, inline R code, chunk options (`#|`
   lines), front matter, math, shortcodes or cross-reference labels, and a chunk's fence always
   holds its newest code. Chunk options are kept byte for byte.
+- Fenced divs (`:::`, callouts, columns, tabsets) and cross-references. Pandoc takes a fence only
+  when nothing else is on its line, and reads `@fig-x`, `@sec-x` and `[@a; @b]` as one key, so
+  these are held in every file type, since the library reads a file of any type alike (§9.1): a
+  marker never stands on a `:::` line or inside a reference (§3.1, rule 9). An edit that touches
+  a fence line is a replacement of the unit that holds it (§3.12), the div's paragraph or the
+  whole div, and an edit that touches a reference is one of the whole reference (a deletion of all
+  of it is a deletion, and text typed next to it stands outside it). A div typed with Track Changes
+  on, from its opening fence to the end of the typed text, is one insertion with no `split`
+  marker inside; its closer stands alone on the line after the closing fence, as after a code
+  fence (§3.3). This holds at the top level of the file; in a quote or a list item the typed
+  fence lines keep the old form (not built).
 - knitr runs code it finds inside HTML comments, in payloads and in the ledger alike, so both
   escape every backtick (§2.5). This was verified with knitr 1.51.
 - No Redlines comment starts with `#`, which Jupytext's cell markers and Quarto's editing comments
