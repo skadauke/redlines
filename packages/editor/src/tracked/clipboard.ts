@@ -176,7 +176,6 @@ function fontsOf(view: EditorView): FontStacks {
 
 /** The files of a selection's local images, read ahead by the host: the URL they show at, as data. */
 const fetched = new WeakMap<EditorView, Map<string, string>>();
-const asked = new WeakMap<EditorView, Set<string>>();
 const IMAGE_MARKUP = /!\[[^\]]*\]\(\s*(<[^>\n]*>|[^\s)]+)|\bsrc="([^"\n]*)"/g;
 /** The most text of a selection that is searched for images, and the images read for one. */
 const SEARCHED = 400_000;
@@ -194,23 +193,25 @@ function readAhead(view: EditorView): void {
   const { from, to } = view.state.selection.main;
   if (from === to) return;
   const text = view.state.sliceDoc(from, Math.min(to, from + SEARCHED));
-  const known = fetched.get(view) ?? new Map<string, string>();
-  const done = asked.get(view) ?? new Set<string>();
+  // Each selection reads its images again, so that a file saved since is not copied as it was, and
+  // nothing outlives the selection it was read for.
+  const known = new Map<string, string>();
   fetched.set(view, known);
-  asked.set(view, done);
-  let count = 0;
+  const seen = new Set<string>();
   for (const match of text.matchAll(IMAGE_MARKUP)) {
     const found = sourceOf(destination(match[1] ?? match[2] ?? ''));
-    if (found.kind !== 'local' || done.has(found.path) || count++ >= MOST_IMAGES) continue;
+    if (found.kind !== 'local' || seen.size >= MOST_IMAGES) continue;
     const shown = resolve(found.path);
-    if (shown === null) continue;
-    done.add(found.path);
+    if (shown === null || seen.has(shown)) continue;
+    seen.add(shown);
     reader(found.path)
       .then((file) => {
-        if (file) known.set(shown, `data:${file.mimeType};base64,${file.data}`);
-        else done.delete(found.path);
+        // A newer selection has its own map by now; this one is dropped.
+        if (file && fetched.get(view) === known) {
+          known.set(shown, `data:${file.mimeType};base64,${file.data}`);
+        }
       })
-      .catch(() => done.delete(found.path));
+      .catch(() => undefined);
   }
 }
 

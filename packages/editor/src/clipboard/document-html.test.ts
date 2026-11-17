@@ -230,3 +230,26 @@ describe('picture sizes for Word and Docs', () => {
     expect(documentHtml(`![a](${png(16, 8)})`)).not.toContain('height=');
   });
 });
+
+describe('JPEG sizes', () => {
+  const jpeg = (exif: number[]) => {
+    const sof = [0xff, 0xc0, 0, 17, 8, 0, 50, 0, 100, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
+    return `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xff, ...exif, ...sof, 0, 0, 0]).toString('base64')}`;
+  };
+
+  it('reads a size past a fill byte', () => {
+    expect(documentHtml(`![a](${jpeg([])})`, 'clean', { office: true })).toContain(
+      'width="100" height="50"',
+    );
+  });
+
+  it('gives only the width to a picture that EXIF turns', () => {
+    // APP1, length 28, "Exif\0\0", little-endian TIFF, IFD at 8, one entry: orientation 6.
+    const exif = [
+      0xff, 0xe1, 0, 28, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 1,
+      3, 0, 1, 0, 0, 0, 6, 0, 0, 0,
+    ];
+    const html = documentHtml(`![a](${jpeg(exif)})`, 'clean', { office: true });
+    expect(html).not.toContain('height=');
+  });
+});

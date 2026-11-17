@@ -122,12 +122,7 @@ export function dataImageSize(url: string): { width: number; height: number } | 
   if (!/^data:image\/[\w+.-]+;base64$/i.test(url.slice(0, comma))) return null;
   let bytes: Uint8Array;
   try {
-    const binary = atob(
-      url
-        .slice(comma + 1, comma + 1 + 87_384)
-        .replace(/=+$/, '')
-        .slice(0, 87_380),
-    );
+    const binary = atob(url.slice(comma + 1, comma + 1 + 262_144).replace(/=+$/, ''));
     bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
   } catch {
     return null;
@@ -152,17 +147,38 @@ export function dataImageSize(url: string): { width: number; height: number } | 
       size = { width: 1 + (bits & 0x3fff), height: 1 + ((bits >>> 14) & 0x3fff) };
     }
   } else if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let turned = false;
     for (let i = 2; i + 9 < bytes.length;) {
       if (bytes[i] !== 0xff) {
         i++;
         continue;
       }
       const marker = bytes[i + 1]!;
+      // Fill bytes, and markers with no length.
+      if (marker === 0xff) {
+        i++;
+        continue;
+      }
+      if (marker === 0 || marker === 1 || (marker >= 0xd0 && marker <= 0xd8)) {
+        i += 2;
+        continue;
+      }
       if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
-        size = { height: be16(i + 5), width: be16(i + 7) };
+        size = turned ? null : { height: be16(i + 5), width: be16(i + 7) };
         break;
       }
-      i += 2 + (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) ? 0 : be16(i + 2));
+      // EXIF orientation 5 to 8 turns the picture a quarter: its stored size isn't how it shows.
+      if (marker === 0xe1 && ascii(i + 4, 4) === 'Exif') {
+        const t = i + 10;
+        const little = ascii(t, 2) === 'II';
+        const w16 = (j: number) => (little ? u16(j) : be16(j));
+        const w32 = (j: number) => (little ? u16(j) + u16(j + 2) * 65536 : be32(j));
+        const ifd = t + w32(t + 4);
+        for (let n = 0, count = w16(ifd); n < count && n < 64; n++) {
+          if (w16(ifd + 2 + n * 12) === 0x0112 && w16(ifd + 2 + n * 12 + 8) >= 5) turned = true;
+        }
+      }
+      i += 2 + be16(i + 2);
     }
   }
   return size && size.width > 0 && size.height > 0 ? size : null;
