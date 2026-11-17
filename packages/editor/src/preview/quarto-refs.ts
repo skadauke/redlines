@@ -57,7 +57,7 @@ interface Read {
 const kept = new WeakMap<Text, Read>();
 
 /** `text` with the HTML comments (the markers and the ledger) and inline code blanked, in its place. */
-function blanked(text: string, comment: { open: boolean }): string {
+export function blanked(text: string, comment: { open: boolean }): string {
   let out = '';
   let at = 0;
   while (at < text.length) {
