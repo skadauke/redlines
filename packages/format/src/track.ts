@@ -5484,7 +5484,15 @@ function withPipes(
   // A change that widened over the pipe's space reaches into the pipe just written, and would come
   // back with its start after its end: the pipe goes without its space then, so that nothing of it
   // lies inside a change (#429).
-  const reach = (at: number) => written.some((w) => at > w.from && at < w.from + w.insert.length);
+  const reach = (at: number) => {
+    let offset = 0;
+    for (const w of sorted) {
+      const place = w.at + offset;
+      if (at > place && at < place + w.insert.length) return true;
+      offset += w.insert.length;
+    }
+    return false;
+  };
   if (
     writes.some((w) => w.leading && w.insert === '| ') &&
     done.changes.some((c) => c.from < c.to && reach(c.from))
