@@ -58,6 +58,36 @@ describe('a delimiter key in a paragraph that holds marks', () => {
     }
   });
 
+  it('is read as the whole file reads it: a key at every 101st place, beside each kind of block', () => {
+    const filler = Array.from({ length: 14 }, () => 'plain words '.repeat(12).trim());
+    const specials = [
+      'A *starred <!--ins m2bd-->word<!--/m2bd--> and _more_ text.',
+      '```ts\nconst a = 1;\n\nconst b = *2;\n```',
+      '- item one <!--ins m2bd-->new<!--/m2bd-->\n\n  continued *item*\n- item two',
+      '> quoted _text_\n>\n> more <!--del m2bd old *words-->',
+      '| a | b |\n| - | - |\n| *x | y<!--ins m2bd-->z<!--/m2bd--> |',
+      '<!-- an ordinary comment\n\nthat spans a blank line -->',
+      '<pre>\nraw\n\n*text*\n</pre>',
+      '<!--ins m2bd-->first\n\nsecond *paragraph<!--/m2bd-->',
+    ];
+    let checked = 0;
+    for (const special of specials) {
+      const before = file([...filler, special, ...filler].join('\n\n'), { m2bd: 'bo' });
+      // Only where the file as it stands reads alike: elsewhere the whole read answers for the file.
+      if (readsOtherMicromark(before, [], true)) continue;
+      for (let at = 3; at < before.indexOf('<!-- redlines'); at += 101) {
+        for (const insert of ['*', '_', 'x']) {
+          const changes = [{ from: at, to: at, insert }];
+          expect(readsOtherMicromark(before, changes), `${insert} at ${at} by ${special}`).toBe(
+            readsOtherMicromark(before, changes, true),
+          );
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(50);
+  }, 120_000);
+
   timed(
     'costs at most 12 times a plain key in the paragraph (it was 3 to 4 in a short file)',
     () => {
