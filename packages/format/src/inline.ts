@@ -203,12 +203,11 @@ const SUPERSCRIPT = /(?<!\\)\^[^\s^\\]+(?<!\\)\^/g;
 const SUBSCRIPT = /(?<![\\~])~[^\s~\\]+(?<!\\)~(?!~)/g;
 /**
  * A cross-reference or a citation of Quarto and pandoc (format §3.1, rule 9): `@fig-x`, `@sec-x`,
- * `@tbl-x`, `@eq-x` and the other kinds Quarto numbers, and a bracket of citations, `[@a; @b, p. 4]`
- * or `[-@a]`. A marker inside changes the key, so each is atomic. The label's characters are
+ * `@tbl-x`, `@eq-x` and the other kinds Quarto numbers, which are keys like any other (`@smith2020`,
+ * the author in the text), and a bracket of citations, `[@a; @b, p. 4]` or `[-@a]`. A marker inside changes the key, so each is atomic. The label's characters are
  * pandoc's: letters, digits and `_`, with `:.#$%&+?<>~/-` inside, and not at its end.
  */
-const REFERENCES =
-  /(?<![\w@])@(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
+const REFERENCES = /(?<![\w@])@[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
 /** The attributes of a Quarto callout's opening fence, `::: {.callout-note title="…"}`: syntax, as an
  * alert's type is (docs/research/quarto.md, Q7). */
 const CALLOUT_FENCE_LINE = new RegExp(
@@ -437,6 +436,10 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
           dest: { from: i + 2, to: end },
         });
       }
+    } else if (isPandoc() && w[i + 1] === '{' && /^\{[#.=][^{}\n]*\}/.test(w.slice(i + 1))) {
+      // A span, `[text]{.mark}` (pandoc): a marker between the bracket and its attributes would
+      // leave the text with no attributes.
+      inside(i, i + 2, 'symbol');
     } else if (label[0] !== '^') {
       labels ??= definedLabels(file);
       if (w[i + 1] === '[') {

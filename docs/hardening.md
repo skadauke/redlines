@@ -94,7 +94,7 @@ rule 9, no marker inside pandoc's `~x~` and `^x^`, is not (#370).
 `random-docs.ts` has the seeded generators: `randomDocument` (blocks with other people's insertions,
 deletions, substitutions, comments and highlights, a ledger, front matter), `listDocument` and
 `adjacentListsDocument` (plain words in the shapes lists take, with no marks), and `seeded` and
-`fuzzCount`. The `*-random.test.ts` suites, and others, draw documents or tables from them or from
+`fuzzCount`. `randomDocument` takes `dialect: 'pandoc'` for Quarto documents (divs and callouts, includes, code chunks, citations, cross-references, shortcodes, `~x~` and `^x^`); `pandoc-random.test.ts` edits, comments, highlights and decides over them and holds every construct pandoc reads by its own grammar whole (#220). The `*-random.test.ts` suites, and others, draw documents or tables from them or from
 generators of their own, and each says in its header what it holds: usually that every order of
 decisions reads alike, that all accepted is the newest view and all rejected the original; the table
 suites and `first-prefix-random` also judge what is written by micromark's reading, and
