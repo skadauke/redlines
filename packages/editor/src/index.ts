@@ -266,6 +266,7 @@ export { editSourceFacet } from './tracked/typing.ts';
 export { intentAnnotation, intentOf, newIntentId, recordedAs } from './tracked/intent.ts';
 export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
 export { deriveTable, writeTable } from './table/intent.ts';
+export { deriveSteps } from './table/paste-intent.ts';
 export type { TableIntent, TableRequest, TableWriter, WrittenTable } from './table/intent.ts';
 export type { FormatIntent, FormatRequest, FormatWriter } from './tracked/format-intent.ts';
 export { agentIntentAnnotation, agentIntentOf } from './tracked/agent-intent.ts';
@@ -273,7 +274,7 @@ export type { AgentIntent } from './tracked/agent-intent.ts';
 export { anchorChanges, rebaseAgentEdit } from './tracked/agent-rebase.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
-export type { Intent, IntentEdit, TypingIntent, Unnamed } from './tracked/intent.ts';
+export type { Intent, IntentEdit, StepsIntent, TypingIntent, Unnamed } from './tracked/intent.ts';
 export {
   UNTRACKED_DETAILS,
   UNTRACKED_TITLE,

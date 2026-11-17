@@ -950,11 +950,22 @@ export function authoredChanges(
   edits: readonly TextChange[],
   group?: string,
 ): ChangeSet {
+  return authoredWrite(state, text, parsed, edits, group).changes;
+}
+
+/** `authoredChanges`, with the typing intent that wrote them, to record beside them. */
+export function authoredWrite(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+  group?: string,
+): { changes: ChangeSet; intent: Omit<TypingIntent, 'id'> } {
   const made = edits.map((edit): Edit => ({ ...edit, main: false }));
-  if (state.field(trackingField)) {
-    return trackEdits(state, text, parsed, made, false, group ?? made.length > 1).changes;
-  }
-  return untrackEdits(state, text, parsed, made, false).changes;
+  const done = state.field(trackingField)
+    ? trackEdits(state, text, parsed, made, false, group ?? made.length > 1)
+    : untrackEdits(state, text, parsed, made, false);
+  return { changes: done.changes, intent: done.intent! };
 }
 
 /** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
@@ -965,13 +976,24 @@ export function untrackedChanges(
   parsed: Parsed,
   edits: readonly TextChange[],
 ): ChangeSet {
-  return untrackEdits(
+  return untrackedWrite(state, text, parsed, edits).changes;
+}
+
+/** `untrackedChanges`, with the typing intent that wrote them. */
+export function untrackedWrite(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): { changes: ChangeSet; intent: Omit<TypingIntent, 'id'> } {
+  const done = untrackEdits(
     state,
     text,
     parsed,
     edits.map((edit): Edit => ({ ...edit, main: false })),
     false,
-  ).changes;
+  );
+  return { changes: done.changes, intent: done.intent! };
 }
 
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
