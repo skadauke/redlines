@@ -78,7 +78,16 @@ export type {
   TableRead,
   TableRowRead,
 } from './table.ts';
-export { fineTableEdit, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+export { widenedPaste } from './table-widen.ts';
+export type { PasteOnTable } from './table-widen.ts';
+export {
+  askedTableEdit,
+  fineTableEdit,
+  pendingOf,
+  ruleTwo,
+  tableEdit,
+  untrackedTableEdit,
+} from './table-ops.ts';
 export type { TableOp, TablePending } from './table-ops.ts';
 export { alignLabel, alignWas, isAlignMark, isAlignPoint } from './table-align.ts';
 export { blankTrailingMarkers, readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';

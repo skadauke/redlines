@@ -228,6 +228,18 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'info',
     'shows an error or a refusal that has its own tier',
   ],
+  [
+    'packages/editor/src/table/ops.ts',
+    'UNTRACKED_OPERATION',
+    'info',
+    "the sheet's question for a table operation that no tracked write holds (an unclosed `<!--` in its header): the operation is made untracked on Make Edit (§3.13), never refused",
+  ],
+  [
+    'packages/editor/src/table/paste.ts',
+    'PASTE_UNTRACKED',
+    'info',
+    "the sheet's question for a paste that no tracked write holds: made untracked on Make Edit (§3.13), never refused",
+  ],
   ['packages/editor/src/table/stops.ts', 'TEXT_IN_CELLS', 'disable', 'inventory #118'],
   [
     'packages/editor/src/tracked/typing.ts',
@@ -547,6 +559,18 @@ export const REFUSALS: readonly RefusalEntry[] = [
     "Decide ${name ?? phantom.by}'s ${what} next to i",
     'widen',
     'no fine form reads alike in every order: written as a replacement of its unit (format §3.12)',
+  ],
+  [
+    'packages/format/src/table-widen.ts',
+    'There is no such table.',
+    'keep',
+    'an argument error: an index or a place that is not there (design §5)',
+  ],
+  [
+    'packages/format/src/table-widen.ts',
+    'Nothing to paste.',
+    'keep',
+    'an argument error: a paste that changes no cell has nothing to write',
   ],
   ['packages/format/src/table-align.ts', 'LOST', 'disable', 'inventory #41'],
   ['packages/format/src/table-align.ts', 'MARK_PLACE', 'widen', 'inventory #105'],

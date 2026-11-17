@@ -505,7 +505,6 @@ describe('deciding and viewing an inserted row (format §3.7, §8)', () => {
 describe('deleting a whole table (format §3.7, rule 6)', () => {
   const around = (table: string) => `Intro.\n\n${table}\n\nAfter.`;
   const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
-  const pending = (name: string) => `${name}'s pending change is in this table. Decide it first.`;
   const CODE_AFTER =
     "This table can't be deleted with Track Changes on while a code block follows it with no text between. Put a paragraph between them first, or turn off Track Changes.";
   const CODE_BEFORE =
@@ -516,8 +515,6 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     "This table can't be deleted with Track Changes on while an HTML comment or block follows it with no blank line between. Put a blank line between them first, or turn off Track Changes.";
   const CODE_BETWEEN =
     "This table can't be deleted with Track Changes on while indented code stands both above and below it. Put a paragraph between the table and one of the code blocks first, or turn off Track Changes.";
-  const UNDER_HEADING =
-    "This table can't be deleted with Track Changes on while it starts right under a heading that has closing #s or attributes. Put a blank line between them first, or turn off Track Changes.";
   const said = (run: () => unknown) => {
     try {
       run();
@@ -723,8 +720,10 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     expect(readTables(text, parse(text))).toHaveLength(1);
     // The blank line after the table stays: the paragraphs would be one without it.
     expect(trimmed(remove(text, null).after)).toBe('Intro.\n\nAfter.');
-    // A tracked deletion there has no form, and is refused, in words of its own (below).
-    expect(refusal(() => remove(text)).message).toBe(UNDER_TEXT);
+    // A tracked deletion there is written with the line above, which holds it (never refused).
+    const done = remove(text);
+    expect(shown(done.after)).toHaveLength(0);
+    expectEveryOrderAlike('under a line', done.after, exactly);
   });
 
   // With Track Changes on, the deletion's marker stands in front of the block after the table, or
@@ -774,9 +773,9 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
           const label = JSON.stringify(`${head}${above}\n\n${FRUIT}`);
           const text = file(`${head}${above}\n\n${FRUIT}`);
           expect(readTables(text, parse(text)), label).toHaveLength(1);
-          const error = refusal(() => remove(text));
-          expect(error.message, label).toBe(CODE_BEFORE);
-          expect(error.code, label).toBe('no-legal-placement');
+          const widened = remove(text);
+          expect(shown(widened.after), label).toHaveLength(0);
+          expectEveryOrderAlike(label, widened.after, exactly);
           expect(trimmed(remove(text, null).after), label).toBe(`${head}${above}`);
           // A paragraph between them, or one after the table, gives it a place.
           for (const fixed of [
@@ -804,9 +803,9 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
         const label = JSON.stringify(`${above}\n${FRUIT}`);
         const text = file(`${above}\n${FRUIT}\n\nAfter.`);
         expect(readTables(text, parse(text)), label).toHaveLength(1);
-        const error = refusal(() => remove(text));
-        expect(error.message, label).toBe(UNDER_TEXT);
-        expect(error.code, label).toBe('no-legal-placement');
+        const widened = remove(text);
+        expect(shown(widened.after), label).toHaveLength(0);
+        expectEveryOrderAlike(label, widened.after, exactly);
         expect(trimmed(remove(text, null).after), label).toBe(`${above}\n\nAfter.`);
         // A blank line above the table gives it a place.
         const done = remove(file(`${above}\n\n${FRUIT}\n\nAfter.`));
@@ -843,8 +842,7 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
 
     it('refuses a table next to a heading with closing #s or attributes in the words of any edit there', () => {
       // (format §3.7, rule 6: such a heading takes no change at its end, so no marker can be written
-      // after it. Right under the heading the words say what to do; otherwise they are the ordinary ones.)
-      const WORDS = "A heading's closing #s and attributes take no change.";
+      // after it. The words are the ordinary ones, which say less than the others do.)
       for (const head of ['## Head ##', '## Head {#intro}']) {
         for (const [shape, body] of [
           ['right under it, with text after', `${head}\n${FRUIT}\n\nAfter.`],
@@ -858,13 +856,9 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
           const label = `${head}: ${shape}`;
           const text = file(body);
           expect(readTables(text, parse(text)), label).toHaveLength(1);
-          const error = refusal(() => remove(text));
-          expect(error.message, label).toBe(
-            shape.startsWith('right under') ? UNDER_HEADING : WORDS,
-          );
-          for (const words of [CODE_AFTER, CODE_BEFORE, UNDER_TEXT, HTML_BELOW, CODE_BETWEEN]) {
-            expect(error.message, label).not.toBe(words);
-          }
+          const widened = remove(text);
+          expect(shown(widened.after), label).toHaveLength(0);
+          expectEveryOrderAlike(label, widened.after, exactly);
           // Track Changes off takes the table as text, as it does anywhere.
           expect(shown(remove(text, null).after), label).toHaveLength(0);
         }
@@ -904,12 +898,15 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       }
     });
 
-    it('leaves the other refusals as they are', () => {
+    it("takes another person's pending change in the table along", () => {
       // Another person's change is named before the shape of the neighbors is looked at.
       const text = file(`Intro.\n${FRUIT.replace('Pears', 'Pe<!--ins m2bd-->x<!--/m2bd-->ars')}`, {
         m2bd: 'bo',
       });
-      expect(refusal(() => remove(text)).message).toBe(pending('Bo Chen'));
+      // (a deletion that widens takes it with the table, and reads alike in every order)
+      const done = remove(text);
+      expect(shown(done.after)).toHaveLength(0);
+      expectEveryOrderAlike("another person's mark", done.after, exactly);
     });
 
     // What the words above are chosen by is the shape next to the table: a fence that opens the block

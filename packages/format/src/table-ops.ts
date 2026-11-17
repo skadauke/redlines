@@ -1658,6 +1658,13 @@ function relocatedPatch(text: string, table: TableRead, index: number): TextChan
  */
 export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
   try {
+    // A table in the new text of a pending replacement takes no mark of its own there (a decision of
+    // the replacement would hide it): the operation is written into the replacement's new text.
+    if (inReplacementText(text, op)) return widenedTableEdit(text, op, ctx);
+  } catch (first) {
+    if (!(first instanceof EditError) && !(first instanceof Untrackable)) throw first;
+  }
+  try {
     return fineTableEdit(text, op, ctx);
   } catch (error) {
     if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
@@ -1669,6 +1676,51 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
     } catch (second) {
       // The operation has no meaning, or no unit holds it: the refusal is the first one's.
       if (second instanceof EditError || second instanceof Untrackable) throw error;
+      throw second;
+    }
+  }
+}
+
+/** Whether the table that `op` is on stands in the new text of a pending replacement. */
+function inReplacementText(text: string, op: TableOp): boolean {
+  const at = 'table' in op ? op.table : undefined;
+  if (typeof at !== 'number') return false;
+  return parse(text).marks.some(
+    (mark) =>
+      mark.kind === 'sub' &&
+      mark.segments.some(
+        (segment) =>
+          segment.close !== undefined &&
+          (segment.carrier?.to ?? segment.content.from) <= at &&
+          at < segment.content.to,
+      ),
+  );
+}
+
+/**
+ * `tableEdit`, and where no tracked write holds the operation (the fine form is refused, and no
+ * unit holds a replacement of the table: an unclosed `<!--` in its header, say), the operation as
+ * Track Changes off writes it, marked `untracked`: the caller asks the person first (format §3.13).
+ *
+ * @throws EditError when the operation is refused as `tableEdit` does and the plain one is too.
+ */
+export function askedTableEdit(
+  text: string,
+  op: TableOp,
+  ctx: EditContext,
+): TableEdit & { untracked?: true } {
+  try {
+    return tableEdit(text, op, ctx);
+  } catch (error) {
+    if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
+    if (NO_MEANING.test(error.message)) throw error;
+    try {
+      return {
+        ...untrackedTableEdit(text, op, { author: ctx.author, random: ctx.random }),
+        untracked: true,
+      };
+    } catch (second) {
+      if (second instanceof EditError) throw error;
       throw second;
     }
   }
