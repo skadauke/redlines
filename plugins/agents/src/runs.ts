@@ -13,6 +13,7 @@ import {
   answerMcp,
   callTool,
   fitReply,
+  nodeToolsPrompt,
   replyOnlyPrompt,
   replyOnlyRequest,
 } from '@redlines/agent-tools';
@@ -611,7 +612,11 @@ export function createRuns(deps: RunDeps): RunController {
       const unread = [thread, view].find((read) => read.isError);
       if (unread) return finish(run, failed(run, `${agent.name} didn't start: ${unread.text}`));
       prompt = replyOnlyRequest({ thread: thread.text, document: view.text, request: job.text });
-      systemPrompt = replyOnlyPrompt({ documentName, quote: threadOf?.quote });
+      // An agent whose tools reach it through a node has them for as long as the run is live.
+      systemPrompt = (agent.nodeTools === true ? nodeToolsPrompt : replyOnlyPrompt)({
+        documentName,
+        quote: threadOf?.quote,
+      });
     } else {
       systemPrompt = agentPrompt({
         documentName,

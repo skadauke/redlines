@@ -15,7 +15,7 @@ import {
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { dialectFacet } from '../dialect.ts';
 import { viewModeField } from '../tracked/field.ts';
-import { calloutName, drawChevron, drawIcon } from './callout.ts';
+import { calloutMenuEffect, calloutName, drawChevron, drawIcon } from './callout.ts';
 import { calloutsOf, divsOf, type QuartoCallout } from './divs.ts';
 
 /** A press of a callout's chevron: the position of its opening fence. */
@@ -62,6 +62,7 @@ class QuartoTitleWidget extends WidgetType {
       other.callout.type === this.callout.type &&
       other.callout.title === this.callout.title &&
       other.callout.collapse === this.callout.collapse &&
+      other.callout.attributes['title'] === this.callout.attributes['title'] &&
       other.folded === this.folded
     );
   }
@@ -78,6 +79,7 @@ class QuartoTitleWidget extends WidgetType {
     text.className = 'rl-callout-name';
     text.textContent = name;
     head.append(text);
+    head.append(this.menuButton(view, head));
     if (callout.collapse !== null) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -96,8 +98,50 @@ class QuartoTitleWidget extends WidgetType {
     return head;
   }
 
+  /** The button of the type and title menu: the formatting plugin answers (`calloutMenuEffect`). */
+  private menuButton(view: EditorView, head: HTMLElement): HTMLButtonElement {
+    const { callout } = this;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'rl-callout-menu';
+    button.setAttribute('aria-label', 'Callout type and title');
+    button.setAttribute('aria-haspopup', 'menu');
+    button.setAttribute('aria-expanded', 'false');
+    button.append(drawChevron());
+    const ask = () => {
+      const line = view.state.doc.lineAt(view.posAtDOM(head));
+      // A place inside the fence's colons, which a format change takes for the callout it opens.
+      view.dispatch({
+        effects: calloutMenuEffect.of({
+          pos: line.from + 4,
+          type: callout.type,
+          anchor: button,
+          quarto: { title: callout.attributes['title'] ?? null },
+        }),
+      });
+    };
+    button.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      if (event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      ask();
+    });
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'ArrowDown') return;
+      if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      ask();
+    });
+    return button;
+  }
+
   override ignoreEvent(event: Event): boolean {
-    return event.target instanceof Element && event.target.closest('.rl-callout-fold') !== null;
+    return (
+      event.target instanceof Element &&
+      event.target.closest('.rl-callout-fold, .rl-callout-menu') !== null
+    );
   }
 }
 
