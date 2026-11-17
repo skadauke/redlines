@@ -717,6 +717,7 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     // A key typed into an empty line (a block start typed into an empty paragraph or item) is the
     // typed-syntax code's, not this check's.
     const typed =
+      !/^[ \t]*\[[^\]\n]*\]:/.test(prefix) &&
       edit.from === edit.to &&
       edit.insert !== '' &&
       !/[\n\t]/.test(edit.insert) &&

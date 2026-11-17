@@ -4200,8 +4200,13 @@ function planEdit(plan: Plan, edit: TextChange): void {
     const wrapped = keepsBreak
       ? undefined
       : wrappedLineStart(text, plan.parsed, markers, from, to, { marker: true });
-    if (wrapped !== undefined) from = wrapped;
-    else {
+    if (
+      wrapped !== undefined &&
+      // (the text typed after a split of your own, all of it yours, goes as it did)
+      (!splitUnits(plan).some((unit) => unit.own) || !ownTextOnly(plan, from, to))
+    ) {
+      from = wrapped;
+    } else {
       startsWrapped = !keepsBreak && atWrappedLine(text, plan.parsed, markers, from);
       ({ from, to } = keepsBreak ? keepLine(plan, from, to) : coverLine(plan, from, to));
     }
