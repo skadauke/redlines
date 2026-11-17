@@ -38,7 +38,7 @@ import {
   selectRect,
   whole,
 } from './cells.ts';
-import { deleteReach } from './reach.ts';
+import { deleteReach, deleteWholeTableSelection } from './reach.ts';
 import { selectionInTable, shownCellAt } from './stops.ts';
 
 /** A key that moves the caret in a table, as the keymap names it. */
@@ -529,7 +529,7 @@ function clearOrDeleteCells(view: EditorView, onDeleted?: () => void): boolean {
  * editor's. */
 const backspace: Command = (view) => {
   if (clearOrDeleteCells(view)) return true;
-  if (deleteReach(view)) return true;
+  if (deleteWholeTableSelection(view) || deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;
   const { state } = view;
@@ -573,7 +573,7 @@ const forwardDelete: Command = (view) => {
   // What the key did, when it deleted the rows, the columns or the table: the repeats are not for
   // the text the caret lands in.
   if (clearOrDeleteCells(view, () => (held.deleted = true))) return true;
-  if (deleteReach(view)) return true;
+  if (deleteWholeTableSelection(view) || deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;
   const { state } = view;
