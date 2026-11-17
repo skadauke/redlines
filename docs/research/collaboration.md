@@ -401,6 +401,86 @@ under c1):
 - Bold is refused so often that bold changes are rarely confirmed together with other changes, so
   the format-change rules are tested far less than typing and deleting.
 
+## The no-host replay merge
+
+[Multiuser §3](multiuser.md#3-what-decides-the-architecture) leaves one method for a simulation
+before a decision: replicas that merge by replaying intents through the tracking filter in a fixed
+order, with no authority (the idea of [Eg-walker](https://arxiv.org/abs/2409.14252), with Redlines'
+`trackedEdits` as the replay). §8 decision 7 asks for it. `packages/collab-sim/src/replay.ts` runs
+it under the oracle of the fourth simulation.
+
+How it works in the simulation:
+
+- There is no host. Every replica is joined to every other by a link of the same network as before
+  (latency, spikes, drops, offline periods), keeps the intents it knows, and sends each new one to
+  all of the others, who pass it on. When a link comes back, the two ends exchange what they lack.
+- An intent carries a Lamport time (one more than the largest time its replica had seen) and its
+  replica's index. The order of two intents is their time, then the index.
+- A replica's text is the first text with every intent it knows derived again, in that order, by
+  the same code a client uses against the authority's newest text (`derive`: the real `trackedEdits`
+  and its kin, with the decision's guard). An intent that changes nothing there (the words are gone,
+  the mark has changed since the person saw it) changes nothing, and the same one changes nothing
+  in every replica.
+- An intent that arrives from someone else is slotted in by its time. When it sorts before intents
+  already derived, those are derived again, on the text with the new one in it. A person's own new
+  intent always sorts last. Ids come from each intent's seed, so deriving again gives the same ids.
+- The text is a function of the set of intents. Replicas that know the same ones have the same text
+  to the byte, in whatever order they heard them. A unit test shuffles twelve intents and finds the
+  same text each time, and no session of the matrix ended with replicas that differed.
+- The oracle runs on every history a replica derived (histories share their beginnings, so each step
+  is derived and checked once): every step on its own, as against the authority's every update, and
+  every state a replica showed.
+
+Results, 200 sessions per row, the seeds and the network of the fourth simulation (so the two
+columns are the same sessions as far as the network goes):
+
+| Workload | c2: corrupted / invalid | Replay: corrupted / invalid | Intents that changed the text | Seen by their author, gone in the final order |
+| -------- | ----------------------- | --------------------------- | ----------------------------- | --------------------------------------------- |
+| hot      | 8.5% / 1.5%             | 10.5% / 2.0%                | 86.5%                         | 1.2%                                          |
+| typical  | 15.0% / 18.5%          | 14.5% / 16.5%               | 90.8%                         | 0.4%                                          |
+| spread   | 8.0% / 6.0%             | 6.0% / 6.5%                 | 88.9%                         | 0.5%                                          |
+| review   | 10.0% / 4.0%            | 11.5% / 5.0%                | 89.9%                         | 0.7%                                          |
+
+| Cell              | Corrupted at end / invalid at any point | Replicas that differed at the end |
+| ----------------- | --------------------------------------- | --------------------------------- |
+| hot, 5 replicas   | 13.5% / 1.5%                            | 0 of 200                          |
+| typical, 5        | 14.5% / 19.0%                           | 0 of 200                          |
+| hot, never offline | 9.5% / 1.0%                            | 0 of 200                          |
+
+- **Safety is the same as with an authority.** The replay corrupted 6–14.5% of sessions, the share
+  of c1 and c2, from the same causes: the body not reading as the newest view (`render`, which one
+  person alone also makes), and a typed word inside someone else's change (`misattributed`, 19 of 200
+  hot sessions against 17 for c2). One session in the typical row with five replicas accepted a
+  decision that moved more than its own mark. No text was lost, swallowed, duplicated, revived or
+  left untracked at the level the oracle sees.
+- **Convergence is by construction, and held.** Not one replica of 1,400 sessions ended with a
+  different text, with the offline periods of the network, the replicas knowing intents in all
+  orders, and five replicas.
+- **Accept and reject go in one order**, which no merge of marks as text did: a decision is one
+  intent among the others, and the guard drops it, in every replica alike, when the mark has
+  changed before it in the order. It cost no more than the authority's guard did: 0.4–1.2% of
+  intents were applied where their person made them and dropped in the final order.
+- **The cost is that nothing is ever final.** An authority's version is confirmed for good; here an
+  intent that arrives late and sorts earlier derives the later ones again. 17.2% of merges did that,
+  and 4.0 intents were derived again each time. What a person saw changed under them in
+  0.4–1.2% of their intents (above) and in the other direction 0.0–0.1% (an intent that changed
+  nothing where its person made it, and does in the final order). There is no moment at which a
+  state is safe to save or decide on: a state is a replica's best reading of the intents it has. The
+  design in §4 gives that to the authority, and §4.7's replicas and epochs would need it when a host
+  is away.
+- **Time until every replica has an intent**: a median of 186 ms and a p95 of 5.3 s, for the
+  network of these sessions (the p95 is the offline periods).
+
+Limits, beyond those of the fourth simulation:
+
+- Offline periods of 2–8 s, so the longest divergence is a few intents. A copy that worked for a
+  day, and `git merge`, aren't tried. A replica never forgets an intent, and history would have to
+  be pruned at some point for it to be kept for ever; nothing here says how.
+- An intent's anchors are words, as in the sessions with an authority. Ids a decision refers to are
+  those the intent's seed gives, which holds while ids don't collide (they didn't in 1,400 sessions).
+- No outside edit (a `git pull`, an agent writing the file) takes part. It would be an intent with
+  no known place in the order.
+
 ## One app as the authority
 
 One desktop app can act as the authority, with the other apps as its clients; that is collab's
