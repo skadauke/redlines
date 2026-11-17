@@ -303,7 +303,11 @@ function rowDecorations(
           inclusiveStart: !before,
           inclusiveEnd:
             !(appended === 'end' && i === shownCount - 1) &&
-            !(pipeAlone(i + 1) && ghosts.some((ghost) => ghost.position === i + 1)),
+            !(
+              i + 1 < shownCount &&
+              pipeAlone(i + 1) &&
+              ghosts.some((ghost) => ghost.position === i + 1)
+            ),
           attributes: {
             ...(added ? { 'data-mark': added.id } : {}),
             role: row.header ? 'columnheader' : 'cell',
