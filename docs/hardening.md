@@ -31,7 +31,7 @@ isn't held*, and a gap is a bug.
    without tracking after the person is asked ([format.md](format.md) §3.12, §3.13). A refusal is
    kept only where every write would leave the file wrong (an unreadable ledger, forged markup, an
    agent's quote that is not there), in words that name the cause; one more is kept for now, where
-   the unit's old text holds another person's pending mark (the guard of #808, below). A key that
+   another person's mark ends at the unit's edge (the guard of #808 and #107, below). A key that
    does nothing and says nothing is a bug. `refusals.node.test.ts` holds it: every place in the sources that refuses an
    edit has a tier in `refusals.ts`, and a new one is a red test.
 3. **No line of a paragraph, heading, list item, quote, footnote or table row begins with a
@@ -259,24 +259,25 @@ its case; each is a bug. The list is what has been found, not a count of what is
   what renders (#136). It writes the break as two line breaks that read as one now, a stray blank
   line in the file that no reader sees, and the issue is still open.
 
-**The guard: refusals that widening keeps (#808).** The engine that replaces refusals (`widen.ts`,
-format §3.12) is called by the writers for tables (#657, #863), lists (#797), blocks (#813) and
-code (#810), and an edit that no unit can hold, or that is in front matter or in Plain, is asked
-about before it is made untracked (#714, #730, format §3.13). One refusal is kept on purpose. When
-the unit that holds an edit has another person's pending mark in its old text, `widen` reports it
-(`heldByOthers`) and the writers for lists, blocks and code (`edits-widen.ts`) keep the refusal the
-fine writer had, because rejecting every mark in a random order after such a replacement does not
-always give the original view. Tables are the exception: a table operation, and an edit or a format
-in a table's cell, are written as a replacement of the table with other people's marks left in its
-old text (#657, #863), and only a format change outside a cell keeps the refusal (`table-widen.ts`). The cases that made the guard are in #808:
-`typing-order.test.ts` seeds 12 and 27, and a block move over a widened list in `walk.test.ts`
-(two caret misses next to blocks inserted whole are #811, and are on main too). That is a cost, not a hole: the edit is not written, so nothing is silently
-wrong, but a person (or an agent) whose edit lands in a block that holds someone else's pending
-change is refused where the policy says to widen. In the lane's random run of agent suggestions over
-other people's marks, about 11 in 100 were refused for this reason; the run is not kept in the
-repository, so the figure is a measure of that run, not a bound. The tests that pin it say
-`(#808)` in their comments (`code-substitution.test.ts`, `block-widen.test.ts`, `issues.test.ts`
-for #107). Widening over other people's marks is not done: the guard keeps the refusal there. Also not held:
+**The guard: the refusal that widening keeps (#808, #107).** The engine that replaces refusals
+(`widen.ts`, format §3.12) is called by the writers for tables (#657, #863), lists (#797), blocks
+(#813) and code (#810), and an edit that no unit can hold, or that is in front matter or in Plain, is
+asked about before it is made untracked (#714, #730, format §3.13). A replacement's old text may hold
+another person's pending marks: they stay in the payload, and every order of accepting and rejecting
+them and the replacement reads alike (the random suites hold it: `widen-random.test.ts`,
+`block-widen.test.ts`, `typing-order.test.ts`, the walks, and `agent-probe.test.ts`, which counts the
+edits that stay refused). The first guard of #808 refused every such replacement; the failures it
+was made for (typing-order seeds 12 and 27, the block move of `walk.test.ts`) were in the harness,
+which decided only the marks that were in the file at the start, not the marks that a decision frees
+(`sampleDecisions` of `blocks/script.ts`); with that fixed, no order of decisions fails.
+One refusal is kept on purpose. When another person's mark ends at the unit's edge without being in
+it (a split's break right in front of the unit, an insertion right after it), `widen` reports it
+(`touchingOthers`) and the writers (`edits-widen.ts`, `table-widen.ts`) keep the refusal the fine writer had: that
+mark is decided with the block next to it, and a heading typed after another person's split would
+read `## xbeta` in one order and `xbeta` in another (#107). That is a cost, not a hole: the edit is
+not written, so nothing is silently wrong. In the probe of random edits that the fine writer
+refuses (`agent-probe.test.ts`), about 146 of 285 were held by the first guard and 58 are by this one. The tests that pin it say `(#107)` in
+their comments (`issues.test.ts`, `code-substitution.test.ts`). Also not held:
 
 - A unit of more than eight top-level blocks (`WIDEN_MOST_BLOCKS`) is not written; the edit is asked
   about and made untracked, and in an embed with no asker a table operation that no tracked write

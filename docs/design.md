@@ -727,7 +727,7 @@ mode has no counterpart in the desktop app.
   Make Edit accepts them (never rejects) and makes the edit, as one step to undo, and it is asked
   every time. A host with no sheet refuses as before, and an agent's edit is never made untracked.
   A refusal is kept only where every write would leave the file wrong, and, for now, where the
-  unit a widened edit would replace holds another person's pending change ([hardening](hardening.md)).
+  unit a widened edit would replace has another person's pending mark at its edge ([hardening](hardening.md)).
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
@@ -1551,8 +1551,8 @@ syntax Markdown needs, and never shows them.
   gives `<!--del * -->⏎⏎note<!--sub \n    - a-->⏎  - a<!--/-->`), which reads the same in every
   order of decisions; where fenced or indented code stands among the lines that move, or the
   tracked layer can't hold the lines, the key is written as a replacement of the whole item
-  (format §3.12), and only where another person's change is pending in the item does it say so in
-  words and write nothing (#808). Shift-Tab and the first Backspace in a nested
+  (format §3.12), and only where another person's change ends at the item's edge does it say so in
+  words and write nothing (#808, #107). Shift-Tab and the first Backspace in a nested
   list move what is nested in the item along, as before. Shift-Tab in indented code outdents it
   to a paragraph, and where a line stands right under the code (an item, or text) it keeps the four
   columns that make it code and says so, since the line would else join the paragraph.
