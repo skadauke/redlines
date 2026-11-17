@@ -33,6 +33,8 @@ import type {
   WireRange,
   WireUpdate,
 } from './protocol.ts';
+import { reviewCheck } from './review.ts';
+import type { DecidedRecord } from './review.ts';
 import { MemoryLog } from './wal.ts';
 import type { UpdateRecord, WalRecord, WriteAheadLog } from './wal.ts';
 import { rebaseUpdates } from './vendor/collab.ts';
@@ -82,6 +84,8 @@ export interface PushContext {
   before: Parsed;
   after: Parsed;
   changes: ChangeSet;
+  /** The decisions the log holds, by mark id: the first one wins. */
+  decided: ReadonlyMap<string, DecidedRecord>;
 }
 
 /** A refusal: `forbidden` (stop), `invalid`, or `stale` with a reason and detail. */
@@ -163,6 +167,7 @@ export class Authority {
   private parsedAt: { version: number; parsed: Parsed } | null = null;
   private currentEpoch: number;
   private closed = false;
+  private readonly decided = new Map<string, DecidedRecord>();
   private readonly sessions = new Map<string, Session>();
   private readonly presences = new Map<string, { state: PresenceState; at: number }>();
   private readonly pushTimes = new Map<string, number[]>();
@@ -197,6 +202,7 @@ export class Authority {
       this.doc = changes.apply(this.doc);
       this.log.push({ record, changes });
       this.lengths.push(this.doc.length);
+      this.noteDecision(record);
       this.currentEpoch = Math.max(this.currentEpoch, record.epoch);
     }
   }
@@ -413,7 +419,8 @@ export class Authority {
       // The logged update's footprint, moved to where each pending update applies.
       let theirs: Footprint = logged.record.footprint;
       for (const p of pending) {
-        if (touches(p.footprint, theirs)) {
+        // A decision is judged by the guard, which reads the marks as they are now.
+        if (!p.decision && touches(p.footprint, theirs)) {
           return error('stale', 'An update since the base touches this push.', {
             ...where,
             reason: 'footprint',
@@ -449,10 +456,6 @@ export class Authority {
       doc = p.update.changes.apply(doc);
       const afterText = doc.toString();
       const after = parse(afterText);
-      const added = newWarnings(before, after);
-      if (added.length) {
-        return error('invalid', `The update would break the file: ${added.join(', ')}.`, where);
-      }
       const refusal = this.check({
         identity,
         update: p.wire,
@@ -461,6 +464,7 @@ export class Authority {
         before,
         after,
         changes: p.update.changes,
+        decided: this.decided,
       });
       if (refusal) {
         return error(refusal.error, refusal.message, {
@@ -468,6 +472,10 @@ export class Authority {
           ...(refusal.reason ? { reason: refusal.reason } : {}),
           ...(refusal.detail !== undefined ? { detail: refusal.detail } : {}),
         });
+      }
+      const added = newWarnings(before, after);
+      if (added.length) {
+        return error('invalid', `The update would break the file: ${added.join(', ')}.`, where);
       }
       records.push(p);
       before = after;
@@ -491,6 +499,7 @@ export class Authority {
       this.doc = p.update.changes.apply(this.doc);
       this.log.push({ record, changes: p.update.changes });
       this.lengths.push(this.doc.length);
+      this.noteDecision(record);
       this.parsedAt = null;
     }
     return {
@@ -542,7 +551,17 @@ export class Authority {
   }
 
   private check(context: PushContext): PushRefusal | null {
-    return this.options.check ? this.options.check(context) : null;
+    return reviewCheck(context) ?? this.options.check?.(context) ?? null;
+  }
+
+  private noteDecision(record: UpdateRecord): void {
+    const { decision } = record;
+    if (!decision) return;
+    for (const id of decision.ids) {
+      if (!this.decided.has(id)) {
+        this.decided.set(id, { by: record.by, kind: decision.kind, version: record.version });
+      }
+    }
   }
 
   private currentParsed(): Parsed {
