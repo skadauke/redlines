@@ -2629,14 +2629,23 @@ it, one per line:
   as many cells as the header has columns ("This row has a different number of cells than the
   header, so the table would stop reading as a table. Make its cells match the header first."),
   tracked or not; a table whose header has another number of cells than its delimiter row is no
-  table. And with Track Changes on, a comment that runs from one row of the table into another, or a
+  table. A comment that runs from one row of the table into another (and one that starts above the
+  table and ends in the header) is carried through a move of rows, as a highlight across rows is: its
+  end in the moving row goes with the row, its other end stays where it is, and rejecting the move
+  gives the row back with it (#295). Where it can't be carried so that every order of decisions reads
+  alike, the move is written as a replacement of the whole table (§3.12), whose old text holds the
+  rows as they were: where the move would put the comment's end in front of its start, and for a comment
+  that starts a row with no pipe at its start, whose opener is parked at the end of the row above (below).
+  And with Track Changes on, a comment that is made while rows are moved or inserted and pending, and
+  runs from one row of the table into another, or a
   highlight that would leave one row for another or the table (below), is first widened: its start is taken
   to the text of a row above that is not pending, its end to one below, or past the table to the
   line of text before or after it, so that no decision of a row takes a marker away (§3.12, #726).
   Where no such place holds the markers, the comment is refused, naming its author ("Bo Chen's comment runs from one row of this table into the next.
   Delete or resolve it first, or turn off Track Changes."). A comment that starts a row with no pipe
   at its start has its opener at the end of the row above, so it crosses the line break, and moving
-  rows beside it could be accepted but not rejected. For the same reason, adding such a comment in a
+  rows beside it could be accepted but not rejected, which is why the move is then a replacement of the
+  table (above). For the same reason, adding such a comment in a
   table with a row move pending is refused, naming the person who moved the rows. A highlight is
   refused more widely, as deciding a row takes away or moves the markers in it and a highlight has
   no point form to be left as (a comment becomes one): in a table with a row inserted or moved and

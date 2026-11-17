@@ -315,70 +315,78 @@ describe('a comment in a row that moves (#371)', () => {
         expect(cases).toBe(leading ? 18 : 9);
       }, 60_000);
 
-      it('travels with the row both ways: a highlight that runs from one row into another, made first', () => {
-        // A highlight across rows is made while no row is pending, and a move beside it is not refused for
-        // it, as one beside a comment across rows is (#289). A move that would put its end in front of
-        // its start is refused when it is made; every other move is decided in every order, and the end
-        // in the moving row goes with the row.
-        const refusal = (run: () => unknown) => {
-          try {
-            run();
-          } catch (error) {
-            return error;
-          }
-          return undefined;
-        };
-        let made = 0;
-        let refused = 0;
-        for (let first = 0; first <= 3; first++) {
-          for (let last = first + 1; last <= 3; last++) {
-            const notes: Note[] = [
-              { kind: 'rows', by: ada, id: 'h4jj', highlight: true, through: last },
-            ];
-            const commented = noted(file(lines.join('\n')), first, notes);
-            for (let row = 0; row <= 3; row++) {
-              for (let to = 0; to <= 4; to++) {
-                if (to === row || to === row + 1) continue;
-                const label = `${layout}, a highlight from row ${first} into row ${last}, row ${row} to ${to}`;
-                // The rows after the move: does the highlight's end come in front of its start?
-                const others = [0, 1, 2, 3].filter((index) => index !== row);
-                const at = to - (row < to ? 1 : 0);
-                const order = [...others.slice(0, at), row, ...others.slice(at)];
-                if (order.indexOf(first) > order.indexOf(last)) {
-                  // The move can't be written finely (its end would stand in front of its start):
-                  // it is written as a replacement of the table, which reads alike.
-                  const table = readTables(commented, parse(commented))[0]?.from ?? 0;
-                  const op: TableOp = { kind: 'moveRows', table, rows: [row], to };
-                  expect(
-                    refusal(() =>
-                      fineTableEdit(commented, op, context(ada, ['k3x9', 'w8nn', 'r2zd'])),
-                    ),
+      it.each([
+        ['a highlight', true],
+        ['a comment', false],
+      ])(
+        'travels with the row both ways: %s that runs from one row into another, made first',
+        (_, highlight) => {
+          // A highlight or a comment across rows is made while no row is pending, and a move beside it
+          // is not refused for it (#295; a comment that starts a row with no pipe there, parked at the
+          // end of the row above, is no such, below). A move that would put its end in front of its
+          // start is written as a replacement of the table; every other move is decided in every order,
+          // and the end in the moving row goes with the row.
+          const refusal = (run: () => unknown) => {
+            try {
+              run();
+            } catch (error) {
+              return error;
+            }
+            return undefined;
+          };
+          let made = 0;
+          let refused = 0;
+          for (let first = 0; first <= 3; first++) {
+            for (let last = first + 1; last <= 3; last++) {
+              const notes: Note[] = [
+                { kind: 'rows', by: ada, id: 'h4jj', highlight, through: last },
+              ];
+              const commented = noted(file(lines.join('\n')), first, notes);
+              for (let row = 0; row <= 3; row++) {
+                for (let to = 0; to <= 4; to++) {
+                  if (to === row || to === row + 1) continue;
+                  const label = `${layout}, ${highlight ? 'a highlight' : 'a comment'} from row ${first} into row ${last}, row ${row} to ${to}`;
+                  // The rows after the move: does the highlight's end come in front of its start?
+                  const others = [0, 1, 2, 3].filter((index) => index !== row);
+                  const at = to - (row < to ? 1 : 0);
+                  const order = [...others.slice(0, at), row, ...others.slice(at)];
+                  if (order.indexOf(first) > order.indexOf(last)) {
+                    // The move can't be written finely (its end would stand in front of its start):
+                    // it is written as a replacement of the table, which reads alike.
+                    const table = readTables(commented, parse(commented))[0]?.from ?? 0;
+                    const op: TableOp = { kind: 'moveRows', table, rows: [row], to };
+                    expect(
+                      refusal(() =>
+                        fineTableEdit(commented, op, context(ada, ['k3x9', 'w8nn', 'r2zd'])),
+                      ),
+                      label,
+                    ).toBeInstanceOf(EditError);
+                    const wide = tableEdit(
+                      commented,
+                      op,
+                      context(claudeAda, ['k3x9', 'w8nn', 'r2zd', 's4ab', 't5cd']),
+                    );
+                    expectWidened(label, commented, wide.changes, 'claude-ada');
+                    refused++;
+                    continue;
+                  }
+                  expectMoveCarriesNotes(
                     label,
-                  ).toBeInstanceOf(EditError);
-                  const wide = tableEdit(
                     commented,
-                    op,
-                    context(claudeAda, ['k3x9', 'w8nn', 'r2zd', 's4ab', 't5cd']),
+                    moved(commented, row, to).text,
+                    row,
+                    to,
+                    notes,
                   );
-                  expectWidened(label, commented, wide.changes, 'claude-ada');
-                  refused++;
-                  continue;
+                  made++;
                 }
-                expectMoveCarriesNotes(
-                  label,
-                  commented,
-                  moved(commented, row, to).text,
-                  row,
-                  to,
-                  notes,
-                );
-                made++;
               }
             }
           }
-        }
-        expect([made, refused]).toEqual([52, 20]);
-      }, 60_000);
+          expect([made, refused]).toEqual([52, 20]);
+        },
+        60_000,
+      );
     });
   }
 
@@ -489,6 +497,54 @@ describe('a comment in a row that moves (#371)', () => {
       }
     }
     expect(cases).toBe(12);
+  });
+
+  it('carries a comment that starts above the table and ends in a row that moves, the header too (#295)', () => {
+    // The comment's start stays above the table, on a line of its own where the header has no leading
+    // pipe; its end is in the header, or in the first row below it. The header moves down, a row moves
+    // to the top and becomes the header: every order of decisions reads alike, none is refused, and
+    // rejecting the move gives back the file as it was.
+    let cases = 0;
+    for (const [layout, { lines }] of Object.entries(LAYOUTS)) {
+      for (const end of [0, 1]) {
+        const base = file(`Intro text\n\n${lines.join('\n')}`);
+        const table = readTables(base, parse(base))[0];
+        const cell = table?.rows[end]?.cells[1];
+        if (!cell) throw new Error('no cell');
+        const wanted = { from: base.indexOf('Intro') + 2, to: cell.textFrom + 1 };
+        const commented = applyChanges(
+          base,
+          addComment(base, wanted, 'A note.', context(bo, ['d4rs'])).changes,
+        );
+        for (const [row, to] of [
+          [0, 4],
+          [0, 2],
+          [2, 0],
+          [3, 0],
+          [1, 3],
+        ] as const) {
+          const label = `${layout}, a comment from above the table to row ${end}, row ${row} to ${to}`;
+          const at = readTables(commented, parse(commented))[0]?.from ?? 0;
+          const op: TableOp = { kind: 'moveRows', table: at, rows: [row], to };
+          let done: ReturnType<typeof tableEdit>;
+          try {
+            done = tableEdit(commented, op, context(claudeAda, ['k3x9', 'w8nn', 'r2zd']));
+          } catch (error) {
+            if (error instanceof EditError) continue;
+            throw error;
+          }
+          const pending = applyChanges(commented, done.changes);
+          expectEveryOrderRead(label, pending);
+          expectNoDecisionRefused(label, pending);
+          // Rejecting all gives the file back; a row with no pipe at its start has the plain one (above).
+          const bare = (text: string) => trim(text).replace(/^\| /gm, '');
+          expect(bare(applyChanges(pending, rejectAll(pending))), label).toBe(bare(commented));
+          expect(parse(pending).ledger.comments, label).toHaveLength(1);
+          cases++;
+        }
+      }
+    }
+    expect(cases).toBeGreaterThan(20);
   });
 
   it('is widened when the move is made, beside a comment on the first word of a row with no pipe there', () => {
