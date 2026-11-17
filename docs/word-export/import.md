@@ -93,7 +93,7 @@ Both behaviors are standard Word practice. Word for Mac keeps both through a
 tracked edit and a save, and after Accept All only the bookmark of a deleted
 paragraph is gone
 ([Word lab](../research/word.md#export-and-round-trip-checks)). Word for the
-web and Google Docs are still untested.
+web is still untested. Google Docs keeps the `_rl_` bookmarks and `commentsExtended` (paragraph ids renumbered, `done` lost) but replaces the custom part with its own, drops `commentsIds`, `commentsExtensible`, `w16du:dateUtc` and resolved threads. So a file saved by Docs has no source to restore from, and the importer converts everything (case 2). Text typed at the end of a block lands after its `bookmarkEnd`.
 
 What the exporter writes (`packages/word/src/carriers/`):
 
