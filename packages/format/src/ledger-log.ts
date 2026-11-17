@@ -5,6 +5,11 @@
 // goes through the log like any entry: the first one wins, and a second is dropped with a notice
 // that names the first. Nothing here is written to the file: the map is written by `writeLedger`,
 // and a decided mark leaves the ledger as it does today, when its markers leave the body.
+//
+// Deferred, on purpose: `decided` lives in the session's state and is rebuilt from the log, not
+// stored in the file (an epoch change replays the log); undoing a decision, the guard that carries
+// the mark as the person saw it (§4.4), and the thread's one outcome come with the review PRs.
+// Entries of one key (two `addMark` of an id, two settings) are applied in the log's order.
 
 import { applyLedgerOp } from './ledger-map.ts';
 import type { LedgerMap, LedgerOp } from './ledger-map.ts';
@@ -63,6 +68,8 @@ export function applyLogEntry(state: LedgerState, entry: LogEntry): LedgerState 
   }
   const first = state.decided.get(body.mark);
   if (first) {
+    // The same person deciding the same way again says nothing.
+    if (first.by === body.by && first.outcome === body.outcome) return { ...state, applied };
     const drop: DroppedDecision = {
       entry: entry.id,
       mark: body.mark,
@@ -86,5 +93,14 @@ export function applyLogEntry(state: LedgerState, entry: LogEntry): LedgerState 
 
 /** The state after `log`, in the order given. */
 export function applyLog(state: LedgerState, log: readonly LogEntry[]): LedgerState {
-  return log.reduce(applyLogEntry, state);
+  // One pass, so that a long log isn't copied for every entry.
+  let next = state;
+  const applied = new Set(state.applied);
+  for (const entry of log) {
+    if (applied.has(entry.id)) continue;
+    next = applyLogEntry({ ...next, applied: new Set() }, entry);
+    applied.add(entry.id);
+    next = { ...next, applied };
+  }
+  return next;
 }

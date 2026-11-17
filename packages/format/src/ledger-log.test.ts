@@ -87,4 +87,45 @@ describe('the ledger log', () => {
     expect(applyChanges(text, setLedgerEntries(text, state.map))).toBe(today);
     expect(today.match(/<!-- redlines/g)).toHaveLength(1);
   });
+
+  it('says nothing when one person decides the same way twice', () => {
+    const state = applyLog(ledgerState(emptyLedgerMap()), [
+      { id: 'a', body: { op: 'decide', mark: 'k3x9', outcome: 'accepted', by: 'bo', at } },
+      { id: 'b', body: { op: 'decide', mark: 'k3x9', outcome: 'accepted', by: 'bo', at } },
+    ]);
+    expect(state.dropped).toEqual([]);
+  });
+
+  it('leaves the state it is given as it was, and replays to the same state', () => {
+    const start = ledgerState(emptyLedgerMap());
+    const entries: LogEntry[] = [
+      { id: 'a', body: { op: 'addPerson', person: ada } },
+      { id: 'b', body: { op: 'decide', mark: 'k3x9', outcome: 'accepted', by: 'bo', at } },
+      { id: 'c', body: { op: 'decide', mark: 'k3x9', outcome: 'rejected', by: 'cy', at } },
+    ];
+    const once = applyLog(start, entries);
+    expect(start.applied.size).toBe(0);
+    expect(start.map.people.size).toBe(0);
+    const twice = applyLog(once, entries);
+    expect(twice.dropped).toHaveLength(1);
+    expect(twice.map.people.size).toBe(1);
+  });
+
+  it('keeps every reply and like whatever order the commuting entries come in', () => {
+    const base = ledgerEntries(
+      '<!--cmt c8d2-->y<!--/c8d2-->\n\n<!-- redlines\nversion: 1\npeople:\n  - ada: Ada Lovelace\nmarks: {}\ncomments:\n  - id: c8d2\n    by: ada\n    at: 2026-11-17T09:00Z\n    text: hi\n-->\n',
+    );
+    const ops: LogEntry[] = [
+      { id: '1', body: { op: 'like', thread: 'c8d2', by: 'bo', at } },
+      { id: '2', body: { op: 'like', thread: 'c8d2', by: 'cy', at } },
+      { id: '3', body: { op: 'setView', value: 'clean' } },
+      { id: '4', body: { op: 'addPerson', person: bo } },
+    ];
+    const a = applyLog(ledgerState(base), ops).map;
+    const b = applyLog(ledgerState(base), ops.toReversed()).map;
+    expect(a.settings).toEqual(b.settings);
+    expect(new Set(a.threads.get('c8d2')?.likes.map((l) => l.by))).toEqual(
+      new Set(b.threads.get('c8d2')?.likes.map((l) => l.by)),
+    );
+  });
 });
