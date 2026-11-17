@@ -13,10 +13,10 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, resolve, sep } from 'node:path';
+import { dirname } from 'node:path';
 import { buffer } from 'node:stream/consumers';
-import { notUtf8 } from './files.ts';
 import type { ReportEntry } from '@redlines/word';
+import { notUtf8 } from './files.ts';
 import type { CliIo } from './run.ts';
 
 /** The text of `bytes`, which came from `source`. It is decoded so that writing it back gives the
@@ -28,38 +28,6 @@ function decode(bytes: Uint8Array, source: string): string {
   } catch {
     throw notUtf8(source);
   }
-}
-
-/** The largest picture the export reads: Word's own limit for a picture is far under it. */
-const MAX_PICTURE_BYTES = 50 * 1024 * 1024;
-
-/**
- * The pictures a Markdown file links by a relative path, read from the file's own folder and what is
- * under it, where its images folder is (#523). Another address (a web address, an absolute path, a
- * `file:` link) and a path that leaves the folder, even by a symbolic link, is no picture of this
- * file's: it gives nothing, and the export says the picture is written as its description.
- */
-export function imagesBeside(file: string): (src: string) => Promise<Uint8Array | undefined> {
-  const folder = dirname(resolve(file));
-  return async (src) => {
-    if (/^[a-z][a-z0-9+.-]*:/i.test(src) || /^[/\\]/.test(src)) return undefined;
-    let relative: string;
-    try {
-      relative = decodeURIComponent(src.replace(/[?#].*$/s, ''));
-    } catch {
-      return undefined;
-    }
-    try {
-      const root = await realpath(folder);
-      const path = await realpath(resolve(folder, relative));
-      if (!path.startsWith(root + sep)) return undefined;
-      const info = await stat(path);
-      if (!info.isFile() || info.size > MAX_PICTURE_BYTES) return undefined;
-      return new Uint8Array(await readFile(path));
-    } catch {
-      return undefined;
-    }
-  };
 }
 
 /** A reader that stops reading, as `head` does after its first line, closes the pipe. That is not
@@ -114,14 +82,11 @@ export const nodeIo: CliIo = {
     const notes = result.report.entries.map((entry) => entry.message);
     return { markdown: result.markdown, notes, media: result.media };
   },
-  async exportDocx(text, file) {
+  async exportDocx(text, images) {
     // Loaded here and not in `run.ts`, so the program in the app, which has no Node, never holds it.
     const { exportDocx } = await import('@redlines/word');
     const report: ReportEntry[] = [];
-    const bytes = await exportDocx(text, {
-      report,
-      ...(file === undefined ? {} : { images: imagesBeside(file) }),
-    });
+    const bytes = await exportDocx(text, { report, ...(images ? { images } : {}) });
     return { bytes, notes: report.map((entry) => entry.message) };
   },
 };
