@@ -5,7 +5,7 @@
 
 import { Authority, Hub, memoryTransport } from '@redlines/collab';
 import type { Identity } from '@redlines/collab';
-import { createEditor } from '@redlines/editor';
+import { createEditor, editSourceFacet } from '@redlines/editor';
 import type { Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,6 +17,18 @@ const BASE = 'First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph
 const people: Record<string, Identity> = {
   ada: { handle: 'ada', name: 'Ada', role: 'owner' },
   bo: { handle: 'bo', name: 'Bo', role: 'editor' },
+};
+
+/** A random source with a stream of its own. */
+const source = (seed: number) => {
+  let a = seed;
+  return (n: number) =>
+    Uint8Array.from({ length: n }, () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return (t ^ (t >>> 14)) & 0xff;
+    });
 };
 
 const open: Editor[] = [];
@@ -176,5 +188,50 @@ describe('syncEditor', () => {
       for (const editor of open.splice(0)) editor.destroy();
       document.body.replaceChildren();
     }
+  });
+});
+
+describe('a person who works alone', () => {
+  it('writes the same file in a session of one window as with none, byte for byte', async () => {
+    const edits = (editor: Editor) => {
+      type(editor, 'First', ' one');
+      type(editor, 'Second paragraph', ' two');
+      type(editor, 'Third', ' three');
+    };
+    const make = (hosts: boolean) => {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc: BASE,
+        author: { handle: 'ada', name: 'Ada' },
+        tracking: true,
+        extensions: [
+          editSourceFacet.of({ now: () => new Date('2026-11-01T10:00:30Z'), random: source(9) }),
+        ],
+      });
+      open.push(editor);
+      if (hosts) {
+        const hub = new Hub(
+          new Authority({
+            base: BASE,
+            authenticate: () => ({ handle: 'ada', name: 'Ada', role: 'owner' }),
+          }),
+        );
+        syncEditor(editor, {
+          transport: memoryTransport(hub, 'ada-1'),
+          clientID: 'ada-1',
+          credential: { key: 'ada' },
+          hosts: true,
+        });
+      }
+      return editor;
+    };
+    const alone = make(false);
+    const synced = make(true);
+    edits(alone);
+    edits(synced);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(synced.getDoc()).toBe(alone.getDoc());
+    expect(synced.getDoc()).toContain('three');
   });
 });

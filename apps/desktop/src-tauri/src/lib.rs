@@ -64,6 +64,7 @@ mod file_scope;
 // copy can update itself, and starting the new version after an update.
 mod crash;
 mod recovery;
+mod session;
 mod updates;
 
 // Renaming a file, showing it in Finder, and printing the window.
@@ -353,6 +354,7 @@ pub fn run() {
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
+        .manage(session::Sessions::default())
         .manage(zoom::Zoom::default())
         .manage(zoom::WindowZooms::default())
         .manage(project::Projects::default())
@@ -413,6 +415,11 @@ pub fn run() {
             edit_menu::beep,
             crash::crash_environment,
             recovery::recovery_write,
+            session::session_join,
+            session::session_leave,
+            session::session_wal_append,
+            session::session_wal_read,
+            session::session_wal_start,
             recovery::recovery_read,
             recovery::recovery_delete,
             crash::crash_log_page,
@@ -592,6 +599,7 @@ pub fn run() {
             // an unsaved document is kept (recovery.rs).
             if matches!(event, tauri::RunEvent::Exit) {
                 recovery::quit(app);
+                session::quit(app);
             }
             // After an update is installed, the new version starts as this one quits.
             if matches!(event, tauri::RunEvent::Exit) {

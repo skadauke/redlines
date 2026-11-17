@@ -96,6 +96,12 @@ export class SyncClient<T = unknown> {
     return this.sync();
   }
 
+  /** The session has a new host (a takeover): say hello again, and go on from there. */
+  rejoin(): void {
+    this.#joined = false;
+    void this.sync();
+  }
+
   /** The person edited: send it. */
   edited(): void {
     void this.sync();

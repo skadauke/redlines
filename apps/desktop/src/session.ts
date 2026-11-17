@@ -1,0 +1,481 @@
+// One document in several windows of this app (docs/research/collaboration.md, "One app as the
+// authority"). The windows of a document are a session: one of them, the leader, runs the
+// authority and saves the file; the others are its clients, and talk to it by events between the
+// windows. The app (`src-tauri/src/session.rs`) says who leads, counts the epochs and keeps the
+// authority's log, so that a window that takes over begins from what was confirmed.
+//
+// Nothing here knows Tauri: `SessionPorts` is what a page asks of the app and of the other
+// windows, and `session-tauri.ts` fills it. A test fills it with two pages in one process.
+
+import {
+  Authority,
+  Hub,
+  memoryTransport,
+  type AuthResult,
+  type Call,
+  type DurableLog,
+  type Notice,
+  type Reply,
+  type Transport,
+  type WalRecord,
+} from '@redlines/collab';
+import type { Editor } from '@redlines/editor';
+import { syncEditor, type SyncBinding, type SyncState } from '@redlines/sync';
+
+/** What the app answers a window that joins a document's session. */
+export interface Joined {
+  leader: string;
+  epoch: number;
+  leading: boolean;
+  /** The log an earlier run left, for the window that starts the session. */
+  left: { base: string; records: string[] } | null;
+}
+
+/** What the app tells the members when the leader changes. */
+export interface Moved {
+  path: string;
+  leader: string;
+  epoch: number;
+}
+
+/** What a page asks of the app and of the other windows. */
+export interface SessionPorts {
+  /** This window's label. */
+  readonly label: string;
+  join(path: string): Promise<Joined>;
+  walStart(path: string, epoch: number, base: string): Promise<void>;
+  walAppend(path: string, epoch: number, lines: string[]): Promise<void>;
+  walRead(path: string): Promise<{ base: string; records: string[] } | null>;
+  leave(path: string): Promise<void>;
+  /** Sends an event to one window. */
+  send(label: string, event: string, payload: unknown): Promise<void>;
+  /** Listens for an event sent to this window. Resolves to the way to stop. */
+  listen(event: string, handler: (payload: unknown) => void): Promise<() => void>;
+}
+
+/** The names of the events between windows (the app's own is `session-moved`). */
+export const EVENTS = {
+  call: 'session-call',
+  reply: 'session-reply',
+  notice: 'session-notice',
+  moved: 'session-moved',
+  left: 'session-left',
+  save: 'session-save',
+  saved: 'session-saved',
+} as const;
+
+export interface SessionOptions {
+  path: string;
+  /** Who this window's person is, as the ledger names them. */
+  person: { handle: string; name: string };
+  /** Writes the file, which only the leader does. Resolves to the text written, or null. */
+  save(): Promise<string | null>;
+  /** The leader wrote the file: this is what it holds. */
+  onSaved?(text: string): void;
+  /** The authority's text replaced the editor's (a window that joined). */
+  onLoaded?(): void;
+  /** This window leads from now on: the window that did closed. */
+  onLead?(): void;
+  onState?(state: SyncState): void;
+  notice?(message: string): void;
+  /**
+   * The window has no text of its own and joins a session that is there: if there is none, it
+   * rejects, having left, rather than start one from nothing.
+   */
+  follow?: boolean;
+  /** How long the leader waits after the last change before it saves. */
+  saveDelayMs?: number;
+}
+
+export interface Session {
+  readonly path: string;
+  readonly binding: SyncBinding;
+  /** Whether this window leads: it runs the authority and writes the file. */
+  readonly leading: boolean;
+  /** How many windows are in the session, for the leader; one for any other window. */
+  readonly members: number;
+  /** Whether everything this window made is confirmed by the authority. */
+  readonly confirmed: boolean;
+  /** Has the file written, by the leader, and resolves to the text it holds or null. */
+  save(): Promise<string | null>;
+  /** Leaves the session. The editor keeps its text. */
+  stop(): Promise<void>;
+}
+
+const TIMEOUT = 8000;
+
+/** A transport whose target can change: to the leader's window, or to a hub of this window's own. */
+class Switch implements Transport {
+  #target: Transport;
+  readonly #handlers = new Set<(notice: Notice) => void>();
+  #stop: (() => void) | null = null;
+
+  constructor(target: Transport) {
+    this.#target = target;
+    this.#follow();
+  }
+
+  use(target: Transport): void {
+    this.#stop?.();
+    this.#target = target;
+    this.#follow();
+  }
+
+  #follow(): void {
+    this.#stop = this.#target.subscribe((notice) => {
+      for (const handler of this.#handlers) handler(notice);
+    });
+  }
+
+  call(call: Call): Promise<Reply> {
+    return this.#target.call(call);
+  }
+
+  subscribe(handler: (notice: Notice) => void): () => void {
+    this.#handlers.add(handler);
+    return () => void this.#handlers.delete(handler);
+  }
+}
+
+/** The transport of a window that is not the leader: calls go to the leader's window as events. */
+class Remote implements Transport {
+  leader: string;
+  readonly #ports: SessionPorts;
+  readonly #waiting = new Map<number, (reply: Reply) => void>();
+  readonly #handlers = new Set<(notice: Notice) => void>();
+  #next = 0;
+
+  constructor(ports: SessionPorts, leader: string) {
+    this.#ports = ports;
+    this.leader = leader;
+  }
+
+  call(call: Call): Promise<Reply> {
+    const id = ++this.#next;
+    return new Promise<Reply>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#waiting.delete(id);
+        reject(new Error('The window that leads the session did not answer.'));
+      }, TIMEOUT);
+      this.#waiting.set(id, (reply) => {
+        clearTimeout(timer);
+        resolve(reply);
+      });
+      this.#ports
+        .send(this.leader, EVENTS.call, { from: this.#ports.label, id, call })
+        .catch((error: unknown) => {
+          clearTimeout(timer);
+          this.#waiting.delete(id);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
+    });
+  }
+
+  subscribe(handler: (notice: Notice) => void): () => void {
+    this.#handlers.add(handler);
+    return () => void this.#handlers.delete(handler);
+  }
+
+  replied(id: number, reply: Reply): void {
+    this.#waiting.get(id)?.(reply);
+    this.#waiting.delete(id);
+  }
+
+  heard(notice: Notice): void {
+    for (const handler of this.#handlers) handler(notice);
+  }
+}
+
+/**
+ * The authority's log, kept by the app. `append` is synchronous, as the authority needs; the
+ * records reach the app in batches, and `flushed` resolves when they have. A refusal (this window
+ * was replaced as the leader) is kept, and every later `flushed` rejects with it.
+ */
+export class PortLog implements DurableLog {
+  readonly #ports: SessionPorts;
+  readonly #path: string;
+  readonly #epoch: number;
+  readonly #all: WalRecord[] = [];
+  #queue: WalRecord[] = [];
+  #chain: Promise<void> = Promise.resolve();
+  #failure: Error | null = null;
+
+  constructor(ports: SessionPorts, path: string, epoch: number) {
+    this.#ports = ports;
+    this.#path = path;
+    this.#epoch = epoch;
+  }
+
+  append(record: WalRecord): void {
+    this.#all.push(record);
+    this.#queue.push(record);
+  }
+
+  records(): readonly WalRecord[] {
+    return this.#all;
+  }
+
+  flushed(): Promise<void> {
+    if (this.#failure) return Promise.reject(this.#failure);
+    const lines = this.#queue.map((record) => JSON.stringify(record));
+    this.#queue = [];
+    if (lines.length) {
+      this.#chain = this.#chain.then(async () => {
+        if (this.#failure) throw this.#failure;
+        try {
+          await this.#ports.walAppend(this.#path, this.#epoch, lines);
+        } catch (error) {
+          this.#failure = error instanceof Error ? error : new Error(String(error));
+          throw this.#failure;
+        }
+      });
+    }
+    return this.#chain;
+  }
+}
+
+/** Anyone in a session of this app's windows may be in it: they are the person's own. */
+function authenticateFor(person: { handle: string; name: string }) {
+  return (credential: unknown): AuthResult =>
+    typeof credential === 'object' && credential !== null && 'key' in credential
+      ? { handle: person.handle, name: person.name, role: 'owner' }
+      : { error: 'forbidden' };
+}
+
+/** Joins the session of the document `options.path`, or starts it when there is none. */
+export async function joinSession(
+  ports: SessionPorts,
+  editor: Editor,
+  options: SessionOptions,
+): Promise<Session> {
+  const { path } = options;
+  const joined = await ports.join(path);
+  if (options.follow && joined.leading) {
+    await ports.leave(path).catch(() => {});
+    throw new Error('The window that showed this document has closed.');
+  }
+  const off: (() => void)[] = [];
+  const listen = async (event: string, handler: (payload: unknown) => void) => {
+    off.push(await ports.listen(event, handler));
+  };
+  const authenticate = authenticateFor(options.person);
+  let hub: Hub | null = null;
+  let leading = joined.leading;
+  let leader = joined.leader;
+  let epoch = joined.epoch;
+  /** Which window each client of the hub is in. */
+  const windowOf = new Map<string, string>();
+  let remote: Remote | null = null;
+  let saving: Promise<string | null> | null = null;
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  const waitingSaves = new Map<number, (text: string | null) => void>();
+  let saveIds = 0;
+
+  /** Starts the authority in this window, from `log` when there is one to begin from. */
+  const host = async (
+    base: string,
+    log: { base: string; records: string[] } | null,
+  ): Promise<Hub> => {
+    await ports.walStart(path, epoch, log ? log.base : base);
+    const wal = new PortLog(ports, path, epoch);
+    const authority = log
+      ? Authority.takeover({
+          base: log.base,
+          records: log.records.map((line) => JSON.parse(line) as WalRecord),
+          epoch: epoch - 1,
+          wal,
+          authenticate,
+        })
+      : new Authority({ base, epoch, wal, authenticate });
+    const made = new Hub(authority, wal);
+    made.onNotice((to, notice) => {
+      const label = windowOf.get(to);
+      if (label && label !== ports.label) {
+        void ports.send(label, EVENTS.notice, { clientID: to, notice }).catch(() => {});
+      }
+    });
+    made.onLogged(() => saveSoon());
+    return made;
+  };
+
+  const saveNow = (): Promise<string | null> => {
+    saving ??= (async () => {
+      try {
+        if (!hub) return null;
+        // What is shown is what the authority holds, or the file would lag behind the session.
+        for (let tries = 0; tries < 50; tries++) {
+          const settled =
+            binding.replica.pending.length === 0 &&
+            binding.replica.version === hub.authority.version;
+          if (settled) break;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        const text = await options.save();
+        if (text !== null) {
+          options.onSaved?.(text);
+          for (const label of new Set(windowOf.values())) {
+            if (label !== ports.label) {
+              void ports.send(label, EVENTS.saved, { text }).catch(() => {});
+            }
+          }
+        }
+        return text;
+      } finally {
+        saving = null;
+      }
+    })();
+    return saving;
+  };
+
+  function saveSoon(): void {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      void saveNow().catch((error: unknown) => console.error('Could not save the session', error));
+    }, options.saveDelayMs ?? 1000);
+  }
+
+  /** Answers the calls other windows make to this one, the leader. */
+  const serve = async () => {
+    await listen(EVENTS.call, (payload) => {
+      const { from, id, call } = payload as { from: string; id: number; call: Call };
+      if (!hub) return;
+      if (call.call === 'hello') windowOf.set(call.request.clientID, from);
+      void hub.handle(call).then((reply) => ports.send(from, EVENTS.reply, { id, reply }));
+    });
+    // A window closed: its client is out of the session, and its caret with it.
+    await listen(EVENTS.left, (payload) => {
+      const { window } = payload as { window: string };
+      for (const [id, label] of [...windowOf]) {
+        if (label !== window) continue;
+        windowOf.delete(id);
+        void hub?.handle({ call: 'leave', clientID: id });
+      }
+    });
+    await listen(EVENTS.save, (payload) => {
+      const { from, id } = payload as { from: string; id: number };
+      void saveNow()
+        .catch(() => null)
+        .then((text) => ports.send(from, EVENTS.saved, { id, text }));
+    });
+  };
+
+  const clientID = `${ports.label}`;
+  let transport: Switch;
+  if (leading) {
+    const left =
+      joined.left && joined.left.base === editor.view.state.doc.toString() ? joined.left : null;
+    hub = await host(editor.view.state.doc.toString(), left);
+    windowOf.set(clientID, ports.label);
+    transport = new Switch(memoryTransport(hub, clientID));
+    await serve();
+    if (left && hub.authority.text !== editor.view.state.doc.toString()) {
+      // What the last run confirmed and never saved comes back, as a reload does: unsaved.
+      editor.reloadDoc(hub.authority.text);
+    }
+  } else {
+    remote = new Remote(ports, leader);
+    transport = new Switch(remote);
+    await listen(EVENTS.reply, (payload) => {
+      const { id, reply } = payload as { id: number; reply: Reply };
+      remote?.replied(id, reply);
+    });
+    await listen(EVENTS.notice, (payload) => {
+      remote?.heard((payload as { notice: Notice }).notice);
+    });
+  }
+  await listen(EVENTS.saved, (payload) => {
+    const { id, text } = payload as { id?: number; text: string | null };
+    if (id !== undefined) {
+      waitingSaves.get(id)?.(text);
+      waitingSaves.delete(id);
+    }
+    if (text !== null) options.onSaved?.(text);
+  });
+
+  const binding = syncEditor(editor, {
+    transport,
+    clientID,
+    credential: { key: ports.label },
+    hosts: leading,
+    ...(leading && hub ? { version: hub.authority.version } : {}),
+    notice: (message) => options.notice?.(message),
+    onState: (state) => options.onState?.(state),
+    onLoaded: () => options.onLoaded?.(),
+    retryMs: 500,
+  });
+
+  // The app says who leads. A window that is now the leader takes the log over, and the others
+  // look for the new leader.
+  await listen(EVENTS.moved, (payload) => {
+    const moved = payload as Moved;
+    if (moved.path !== path) return;
+    epoch = moved.epoch;
+    leader = moved.leader;
+    if (moved.leader === ports.label) void takeOver();
+    else if (remote) {
+      remote.leader = moved.leader;
+      binding.client.rejoin();
+    }
+  });
+
+  async function takeOver(): Promise<void> {
+    try {
+      const log = await ports.walRead(path);
+      if (!log) throw new Error('The session has no log to take over from.');
+      leading = true;
+      windowOf.clear();
+      windowOf.set(clientID, ports.label);
+      hub = await host(log.base, log);
+      transport.use(memoryTransport(hub, clientID));
+      remote = null;
+      await serve();
+      binding.client.rejoin();
+      options.onLead?.();
+    } catch (error) {
+      console.error('Could not take over the session', error);
+      options.notice?.('The session could not go on in this window.');
+    }
+  }
+
+  const session: Session = {
+    path,
+    binding,
+    get leading() {
+      return leading;
+    },
+    get members() {
+      return hub ? Math.max(1, hub.members.length) : 1;
+    },
+    get confirmed() {
+      return binding.replica.pending.length === 0 && binding.client.state === 'synced';
+    },
+    save: () => {
+      if (leading) return saveNow();
+      const id = ++saveIds;
+      return new Promise<string | null>((resolve) => {
+        const timer = setTimeout(() => {
+          waitingSaves.delete(id);
+          resolve(null);
+        }, TIMEOUT);
+        waitingSaves.set(id, (text) => {
+          clearTimeout(timer);
+          resolve(text);
+        });
+        ports.send(leader, EVENTS.save, { from: ports.label, id }).catch(() => {
+          clearTimeout(timer);
+          waitingSaves.delete(id);
+          resolve(null);
+        });
+      });
+    },
+    stop: async () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      await binding.stop();
+      for (const stop of off) stop();
+      await ports.leave(path).catch(() => {});
+    },
+  };
+  void binding.settled();
+  return session;
+}

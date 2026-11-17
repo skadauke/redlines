@@ -30,6 +30,8 @@ export interface SyncOptions {
    * window that joins takes the authority's text in its place.
    */
   hosts: boolean;
+  /** For the window that hosts: the version of the log its text is (after a restore); 0 is a new log. */
+  version?: number;
   /** A short message for the person; defaults to the console. */
   notice?: (message: string) => void;
   onState?: (state: SyncState) => void;
@@ -73,7 +75,11 @@ function between(from: Text, to: Text): { from: number; to: number; insert: stri
 export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
   const { view } = editor;
   const notice = options.notice ?? ((message) => console.info(message));
-  const replica = new Replica<EditNote>(options.clientID, options.hosts ? view.state.doc : '', 0);
+  const replica = new Replica<EditNote>(
+    options.clientID,
+    options.hosts ? view.state.doc : '',
+    options.hosts ? (options.version ?? 0) : 0,
+  );
   const peers: Peer[] = [];
 
   const apply = (spec: { changes: ChangeSet | { from: number; to: number; insert: string } }) => {

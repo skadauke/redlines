@@ -14,6 +14,7 @@ export class Hub {
   private readonly log: DurableLog | null;
   private readonly listeners = new Set<NoticeListener>();
   private readonly clients = new Set<string>();
+  private readonly loggers = new Set<(version: number) => void>();
   /** Calls are answered in the order they came: the authority's log is one line. */
   private tail: Promise<unknown> = Promise.resolve();
 
@@ -26,6 +27,12 @@ export class Hub {
   onNotice(listener: NoticeListener): () => void {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
+  }
+
+  /** Called after each push the log took in and stored, with the log's version. */
+  onLogged(listener: (version: number) => void): () => void {
+    this.loggers.add(listener);
+    return () => void this.loggers.delete(listener);
   }
 
   /** The clients that said hello and have not left. */
@@ -65,6 +72,7 @@ export class Hub {
         if (!reply.ok) return reply;
         const stored = await this.stored();
         if (stored) return stored;
+        for (const listener of this.loggers) listener(reply.version);
         for (const id of this.clients) {
           if (id !== call.clientID) {
             this.tell(id, { kind: 'version', version: reply.version, epoch: reply.epoch });

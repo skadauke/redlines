@@ -94,6 +94,11 @@ pub struct WindowStart {
     /// or replaced (`Registry::report`), the file holds the text, and the app needn't keep a long
     /// answer for as long as the window is open, nor bring it back, unsaved, over a saved file.
     text: Option<String>,
+    /// The window joins the session of `path`, whose leader is another window: one document in
+    /// several windows (session.rs). It is the second window of a file, which is otherwise brought
+    /// forward and never opened twice.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    session: bool,
 }
 
 impl WindowStart {
@@ -108,7 +113,12 @@ impl WindowStart {
                 "A window opens for a file or for text, not both. Ask for one of them.".to_owned(),
             );
         }
-        Ok(Self { path, line, text })
+        Ok(Self {
+            path,
+            line,
+            text,
+            session: false,
+        })
     }
 }
 
@@ -633,10 +643,15 @@ pub fn open_window(
     path: Option<String>,
     line: Option<u32>,
     text: Option<String>,
+    session: Option<bool>,
 ) -> Result<String, String> {
-    let start = WindowStart::new(path, line, text)?;
+    let mut start = WindowStart::new(path, line, text)?;
+    // Another window on the document of a window that leads its session (`session_join`): it joins
+    // that session, and the file is not brought forward.
+    let joining = session == Some(true) && start.path.is_some();
+    start.session = joining;
     // A file that a window holds is not opened twice: that window comes forward.
-    if let Some(path) = start.path.as_deref() {
+    if let Some(path) = start.path.as_deref().filter(|_| !joining) {
         let holder = app.state::<Windows>().lock().holder(path);
         if let Some(label) = holder {
             bring_forward(&app, &label);
@@ -765,6 +780,9 @@ pub fn on_window_event(app: &AppHandle, label: &str, event: &WindowEvent) {
     match event {
         WindowEvent::Focused(true) => windows.lock().focus(label),
         WindowEvent::Destroyed => {
+            // A window that was one of a document's, with others, is gone from its session; the
+            // next one leads (session.rs).
+            crate::session::window_closed(app, label);
             let (was_asking, front) = {
                 let mut registry = windows.lock();
                 (registry.remove(label), registry.frontmost())
@@ -1412,6 +1430,7 @@ mod tests {
                 path: some("/docs/a.md"),
                 line: Some(7),
                 text: None,
+                session: false,
             })
         );
         assert_eq!(
@@ -1562,6 +1581,7 @@ mod tests {
                 path: Some("/docs/a.md".to_owned()),
                 line: Some(7),
                 text: None,
+                session: false,
             })
             .unwrap(),
             serde_json::json!({ "path": "/docs/a.md", "line": 7, "text": null })
@@ -1569,6 +1589,16 @@ mod tests {
         assert_eq!(
             serde_json::to_value(opened_for_text(ANSWER)).unwrap(),
             serde_json::json!({ "path": null, "line": null, "text": ANSWER })
+        );
+        // A window that joins a session is told so; the others are told nothing.
+        assert_eq!(
+            serde_json::to_value(WindowStart {
+                path: Some("/docs/a.md".to_owned()),
+                session: true,
+                ..WindowStart::default()
+            })
+            .unwrap(),
+            serde_json::json!({ "path": "/docs/a.md", "line": null, "text": null, "session": true })
         );
         assert_eq!(
             serde_json::to_value(WindowStart::default()).unwrap(),
