@@ -2645,13 +2645,15 @@ it, one per line:
   is never written with a pipe or a line break of a row in a change that its author did not type.
   Where the only way to keep a backslash or an underscore apart from a marker beside it would be to
   write the pipe at the edge of a cell again, in a change of its own (a cell with no space between
-  its text and its pipe, next to a marker such as a comment point), rejecting half of it would leave
-  the row a cell too many or too few, and the key is refused: "This key can't be written here with
-  Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending
-  change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the
-  change next to it first, or turn off Track Changes." A cell with a space after its text and a
-  closing pipe after that takes the key. A row with no closing pipe may refuse it, in these words
-  or in those of §3.1 (rules 4 and 5).
+  its text and its pipe, next to a marker such as a comment point), the key is written as a
+  replacement of the table (§3.12): the old table, with its pending marks, is the old text, so every
+  order of decisions reads the row alike. Only where no unit holds the replacement is the key refused,
+  in the words "This key can't be written here with Track Changes on: it would have to rewrite a
+  pipe or a line break of the table next to a pending change, and Markdown would read the row
+  otherwise in some order of decisions. Accept or reject the change next to it first, or turn off
+  Track Changes." A cell with a space after its text and a closing pipe after that takes the key
+  as typed. A row with no closing pipe may refuse it, in these words or in those of §3.1 (rules 4
+  and 5).
 - **A cell a row lacks.** GFM reads a row with fewer cells than the header as having blank cells
   after its last. The file has no text for them, so there is no place in it to type. Typing into one
   writes the pipes it needs first, plain: both versions have them, as in rule 7, so nothing reads
