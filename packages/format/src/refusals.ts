@@ -47,6 +47,30 @@ export function tierOfCode(code: EditErrorCode | undefined): RefusalTier {
 
 export const REFUSALS: readonly RefusalEntry[] = [
   [
+    'packages/editor/src/image-crop.ts',
+    'CROP_RAW',
+    'disable',
+    "Crop… is disabled in Raw, with this reason as the menu item's hint (#624)",
+  ],
+  [
+    'packages/editor/src/image-crop.ts',
+    'CROP_MOVED',
+    'info',
+    'the cropped copy is written, and the image it was made from is gone from the text meanwhile: there is nothing to point, and the notice says so (#624)',
+  ],
+  [
+    'packages/editor/src/image-crop.ts',
+    'CROP_NOT_POINTED',
+    'info',
+    'the cropped copy is written and the reference could not be set to it: a notice that tells, the original is untouched (#624)',
+  ],
+  [
+    'packages/editor/src/image-crop.ts',
+    'error instanceof Error ? error.message : String(error)',
+    'info',
+    "the host's own sentence about why the copy could not be written, which has its own tier (#624)",
+  ],
+  [
     'packages/editor/src/image-size.ts',
     'IMAGE_IN_HEADING',
     'widen',

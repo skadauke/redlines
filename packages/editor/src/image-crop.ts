@@ -130,20 +130,13 @@ export function startCrop(
   notice: (message: string) => void,
 ): CropSession | null {
   const image = imageInSelection(view.state);
-  if (!image) {
-    notice(CROP_NO_IMAGE);
-    return null;
-  }
+  // The command is disabled, with its reason (`disabledReason`), where there is no picture to crop:
+  // none selected, a remote one, or one not drawn (yet), so none of these is a refusal here.
+  if (!image) return null;
   const local = localImageAt(view.state);
-  if (local === null) {
-    notice(CROP_REMOTE);
-    return null;
-  }
+  if (local === null) return null;
   const img = drawnImage(view, image.from, image.to);
-  if (!img || !img.complete || img.naturalWidth === 0) {
-    notice(CROP_NO_IMAGE);
-    return null;
-  }
+  if (!img || !img.complete || img.naturalWidth === 0) return null;
   const { from: at, to: end } = image;
   const written = view.state.sliceDoc(at, end);
   const path: string = local;
