@@ -35,7 +35,7 @@ interface Seen {
 function made(
   doc: string,
   tracking: boolean,
-  random: (n: number) => Uint8Array = randomFor('b2b2'),
+  random: ((n: number) => Uint8Array) | null = randomFor('b2b2'),
 ) {
   const parent = document.createElement('div');
   document.body.append(parent);
@@ -45,7 +45,10 @@ function made(
     author: { handle: 'ada', name: 'Ada Lovelace' },
     tracking,
     extensions: [
-      editSourceFacet.of({ now: () => new Date('2026-11-01T10:00:30Z'), random }),
+      editSourceFacet.of({
+        now: () => new Date('2026-11-01T10:00:30Z'),
+        ...(random ? { random } : {}),
+      }),
       EditorView.updateListener.of((update) => {
         for (const tr of update.transactions) {
           const intent = intentOf(tr);
@@ -148,6 +151,16 @@ describe('deriving an intent', () => {
     const a = json(deriveIntent(state, typing(intent)));
     expect(json(deriveIntent(state, typing(intent)))).toBe(a);
     expect(a).not.toContain('<!--ins b2b2-->');
+  });
+
+  it('derives an edit made with the system source, the same each time', () => {
+    const { editor, seen } = made('Hello world\n', true, null);
+    type(editor, 5, 5, ' there');
+    const { start, intent } = seen[0]!;
+    expect(typing(intent).drawn).toEqual([]);
+    const a = json(deriveIntent(start, typing(intent)));
+    expect(json(deriveIntent(start, typing(intent)))).toBe(a);
+    expect(a).toContain('<!--ins ');
   });
 
   it('covers every edit of random typing, tracked and not', () => {
