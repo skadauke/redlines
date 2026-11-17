@@ -27,7 +27,7 @@ The others are planned:
 | `math`       | Math formulas                                             |
 | `diagrams`   | Mermaid diagrams                                          |
 | `paste`      | Paste handlers                                            |
-| `word`       | Copy for Word, and `.docx` import and export              |
+| `word`       | Copy for Word, and the menu commands for `.docx` (the code is `packages/word`) |
 | `print`      | Printing and PDF export                                   |
 | `export`     | Export to HTML, clean Markdown and the review view        |
 | `workspace`  | The folder sidebar, Quick Open and folder search; desktop |

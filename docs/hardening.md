@@ -30,8 +30,9 @@ isn't held*, and a gap is a bug.
    with other people's pending changes in its old text, or, where no unit can be written, made
    without tracking after the person is asked ([format.md](format.md) §3.12, §3.13). A refusal is
    kept only where every write would leave the file wrong (an unreadable ledger, forged markup, an
-   agent's quote that is not there), in words that name the cause. A key that does nothing and says
-   nothing is a bug. `refusals.node.test.ts` holds it: every place in the sources that refuses an
+   agent's quote that is not there), in words that name the cause; one more is kept for now, where
+   the unit's old text holds another person's pending mark (the guard of #808, below). A key that
+   does nothing and says nothing is a bug. `refusals.node.test.ts` holds it: every place in the sources that refuses an
    edit has a tier in `refusals.ts`, and a new one is a red test.
 3. **No line of a paragraph, heading, list item, quote, footnote or table row begins with a
    marker.** In CommonMark a line that starts with `<!--` starts an HTML block, which changes how
@@ -258,16 +259,46 @@ its case; each is a bug. The list is what has been found, not a count of what is
   what renders (#136). It writes the break as two line breaks that read as one now, a stray blank
   line in the file that no reader sees, and the issue is still open.
 
-**Refusals that are still thrown.** The engine that replaces them (`widen.ts`, format §3.12) is
-written and held by `widen-random.test.ts`, `widen-pairs.test.ts` and `payload-marks.test.ts`, and
-the writers call it one unit at a time (tables, lists, blocks, code, then the alert and the disabled
-commands). Until one does, it still refuses. `refusals.ts` says which of the refusals in the sources
-becomes what, and the test that holds it fails on a new one. What is not held of the engine itself:
-a replacement is found by a reader of lines that knows quotes, items, fences, indented code, raw
-text and tables, and not every Markdown form (a table that interrupts a paragraph, display math with
-a blank line in it, setext headings in a container); where its gate (the views, the shape of the
-lists, the two decisions of the replacement) does not catch what micromark reads otherwise, the
-random suite is what does.
+**The guard: refusals that widening keeps (#808).** The engine that replaces refusals (`widen.ts`,
+format §3.12) is called by the writers for tables (#657, #863), lists (#797), blocks (#813) and
+code (#810), and an edit that no unit can hold, or that is in front matter or in Plain, is asked
+about before it is made untracked (#714, #730, format §3.13). One refusal is kept on purpose. When
+the unit that holds an edit has another person's pending mark in its old text, `widen` reports it
+(`heldByOthers`) and the writers for lists, blocks and code (`edits-widen.ts`) keep the refusal the
+fine writer had, because rejecting every mark in a random order after such a replacement does not
+always give the original view. Tables are the exception: a table operation, and an edit or a format
+in a table's cell, are written as a replacement of the table with other people's marks left in its
+old text (#657, #863), and only a format change outside a cell keeps the refusal (`table-widen.ts`). The cases that made the guard are in #808:
+`typing-order.test.ts` seeds 12 and 27, and a block move over a widened list in `walk.test.ts`
+(two caret misses next to blocks inserted whole are #811, and are on main too). That is a cost, not a hole: the edit is not written, so nothing is silently
+wrong, but a person (or an agent) whose edit lands in a block that holds someone else's pending
+change is refused where the policy says to widen. In the lane's random run of agent suggestions over
+other people's marks, about 11 in 100 were refused for this reason; the run is not kept in the
+repository, so the figure is a measure of that run, not a bound. The tests that pin it say
+`(#808)` in their comments (`code-substitution.test.ts`, `block-widen.test.ts`, `issues.test.ts`
+for #107). Widening over other people's marks is not done: the guard keeps the refusal there. Also not held:
+
+- A unit of more than eight top-level blocks (`WIDEN_MOST_BLOCKS`) is not written; the edit is asked
+  about and made untracked, and in an embed with no asker a table operation that no tracked write
+  holds is made untracked without a question, where typing refuses (#863).
+- With `REDLINES_FUZZ=400`, a whole-table deletion beside a pending move or comment can still end
+  with "a marker would be left alone on its line" (the random table test names it; #863).
+- A join onto a setext heading inside a list or quote is still refused (`SETEXT_JOIN`): the block's
+  replacement does not read right there yet (#813). The caret after a widened join onto a setext
+  heading is one character off in rare numbered joins.
+- A widened table cell format leaves the selection in the old text (`hidden-caret`, skipped in
+  `cells-marks.test.ts` with the reason; #657).
+
+`refusals.ts` says which of the refusals in the sources is widened, asked about, disabled or kept,
+and the test that holds it fails on a new one. What is not held of the engine itself: a replacement
+is found by a reader of lines that knows quotes, items, fences, indented code, raw text and tables,
+and not every Markdown form (a table that interrupts a paragraph, display math with a blank line in
+it, setext headings in a container; HTML blocks of types 1 to 5 in `widen-units.ts`); where its gate
+(the views, the shape of the lists, the two decisions of the replacement) does not catch what
+micromark reads otherwise, the random suites are what does (`widen-random.test.ts`,
+`widen-pairs.test.ts`, `payload-marks.test.ts`, and `list-widen.test.ts`, `block-widen.test.ts` and
+the table suites through `expectWidened` in `oracle.ts`: every edit that the fine form refuses is
+written, reads alike in every order, and rejects back).
 
 **What the spec names.** [format.md](format.md) §13 lists what is not yet tested, among it Word
 import into full history and live sessions with several authors in full history. §7 says what
