@@ -151,6 +151,7 @@ export function rederiveIntent(state: EditorState, anchored: AnchoredIntent): Re
   const notices: string[] = [];
   let moved = false;
   const placed: IntentEdit[] = [];
+  let lost = false;
   parts.forEach((part, i) => {
     const edit = intent.edits[i]!;
     const here = text.slice(part.window.from, part.window.from + part.window.text.length);
@@ -159,6 +160,18 @@ export function rederiveIntent(state: EditorState, anchored: AnchoredIntent): Re
       return;
     }
     moved = true;
+    if (intent.exact) {
+      // Text's own changes, markers and all, can't be placed among visible words: they go where
+      // the same source stands now, with its neighbours, or not at all.
+      const near = best(occurrences(text, part.window.text), () => 0, part.window.from);
+      if (near === null) {
+        lost = true;
+        return;
+      }
+      const shift = near - part.window.from;
+      placed.push({ ...edit, from: edit.from + shift, to: edit.to + shift });
+      return;
+    }
     let from: number;
     let to: number;
     if (part.removed) {
@@ -198,6 +211,7 @@ export function rederiveIntent(state: EditorState, anchored: AnchoredIntent): Re
       main: edit.main,
     });
   });
+  if (lost) return { ok: false, reason: 'the text it changed was changed by someone else' };
   // Edits that now overlap can't be written together; the later ones go (the filter widens only a
   // single edit, and refuses the rest, as it does for the first time).
   placed.sort((x, y) => x.from - y.from || x.to - y.to);

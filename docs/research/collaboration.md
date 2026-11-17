@@ -482,6 +482,70 @@ Limits, beyond those of the fourth simulation:
 - No outside edit (a `git pull`, an agent writing the file) takes part. It would be an intent with
   no known place in the order.
 
+## The sessions over the editor's own writers
+
+The fourth simulation and the replay called the format library as the first simulations did. By
+now the editor has intents of its own (typing, formats, comments, replies and decisions kept as
+what the person did, with the guard on a decision), so the matrix was run again with each intent
+derived by the editor's code (`packages/collab-sim/src/real.ts`): typing, deleting and replacing
+through a headless editor's tracking filter, formats, comments, replies and decisions through
+`writeFormat`, `writeReview` and `guardDecision`. The sessions, seeds, network and oracle are those
+of the fourth simulation; the oracle checks every confirmed state, and every state a replica
+showed. `REDLINES_REAL=60 pnpm exec vitest run packages/collab-sim/src/real.test.ts` reruns it;
+`REDLINES_REAL_WRITERS=format` runs the same cells over the library's writers, the baseline below.
+Deep runs stay off CI, which only holds the two checks that follow.
+
+- **One person's file is the same bytes.** On 627 derivations over seeded sessions, each on the text
+  its intent was made on, the editor wrote what the library writes, byte for byte, but for one that
+  drew other ids (the editor tries the fine form first and widens when it is refused, which draws
+  more ids). It declined none of what the library wrote.
+- **Sessions over the editor settle and converge**, with an authority and without (`real.test.ts`).
+
+Results, 60 sessions per row (the earlier tables have 200; the seeds are the same for the two
+columns here), first number the share corrupted at the end, second the share that confirmed invalid
+markup at any point:
+
+| Workload | c2, library | c2, editor | Replay, library | Replay, editor |
+| -------- | ----------- | ---------- | --------------- | -------------- |
+| hot      | 8.3% / 0.0% | 8.3% / 0.0% | 11.7% / 0.0%   | 11.7% / 0.0%   |
+| typical  | 6.7% / 6.7% | 5.0% / 5.0% | 5.0% / 3.3%    | 5.0% / 3.3%    |
+| spread   | 10.0% / 0.0% | 10.0% / 0.0% | 5.0% / 1.7%   | 5.0% / 1.7%    |
+| review   | 6.7% / 1.7% | 6.7% / 1.7% | 10.0% / 0.0%    | 10.0% / 0.0%   |
+
+One person alone (60 operations): 3.3%, 5.0% and 5.0% corrupted at the end, the same with either
+writer. Not one session of 960 ended with copies that differed.
+
+- **The numbers are the library's, to within the noise of 60 sessions** (typical/c2: 6.7% with the library, 5.0% with the editor). The causes are the same two: the body not reading as the newest
+  view (`render`, which one person alone makes too), and a typed word inside someone else's change
+  (`misattributed`). No text was lost, swallowed, duplicated, revived or left untracked at the level
+  the oracle sees, except one session in each of two cells (a revived word, as before).
+- **The editor declines some edits, and says so.** Over 4,800 intents in the hot cell, 33 (0.7%)
+  were declined: the editor asked or alerted, and wrote nothing. The first run of the matrix counted
+  these as written, and the oracle called them "typed word lost"; a declined edit is an edit not
+  made, and the harness now turns it away (`declined`). Of the declines, deletes and replacements
+  across other people's pending insertions are most.
+- **The replay costs what it cost.** 17.1% of merges rewrote history, 4.0 intents were derived again
+  each time, and 0.5–1.2% of intents were applied where their person made them and dropped in the
+  final order.
+
+### Verdict on a session with no host
+
+[Multiuser §8, decision 7](multiuser.md#8-decisions) asked for the replay merge to be built only if
+it holds up. On the editor's own intents it **holds up on the three things measured**: safety is the
+authority's (shares of sessions corrupted within a few sessions of 60 of each other, from the same
+causes, with either writer),
+replicas that know the same intents have the same bytes (0 of 960 differed, five replicas and
+offline periods included), and a decision is one intent among the others, dropped alike in every
+replica when its mark changed first.
+
+It is **not built in phases 0 and 1.** What it gives up is the thing the plan needs next: no state
+is ever final. A version that a role check, a save, a decision's "accepted a moment ago", per-person
+undo or the app's one writer can rely on needs a settled order, which an authority gives and the
+replay cannot until every replica has been heard from (median 188 ms, p95 5.2 s here, longer when
+someone is away). Phase 1's authority in the app core stays. The replay is kept as the answer to
+the one case with no host to be the authority, Macs that are offline together (phase 5's replicas),
+and its code stays in the harness for when that is built.
+
 ## Yjs as the intent log
 
 The question: could a Yjs `Y.Array` of intents replace the replay merge's own log and flooding,

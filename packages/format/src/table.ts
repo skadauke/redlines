@@ -275,6 +275,17 @@ export function blankTrailingMarkers(text: string): string {
   return text.replace(TRAILING_MARKERS, (marker) => ' '.repeat(marker.length));
 }
 
+/** Where the markers that end the line stand from `at` on: the end of those that `readTables` leaves out of the
+ * cell (`blankTrailingMarkers`), or `at` when none follows. The mark of an alignment change goes after them
+ * (format §3.7, "Where the mark stands"): a comment's closer that ends a header with no closing pipe is
+ * one of the marks that end the text. */
+export function trailingMarkersEnd(text: string, at: number): number {
+  const eol = text.indexOf('\n', at);
+  const line = text.slice(at, eol === -1 ? text.length : eol).replace(/\r$/, '');
+  const found = /^[ \t]*(?:<!--(?:split [a-z0-9]{4}|\/[a-z0-9]{4})-->)+(?=[ \t]*$)/.exec(line);
+  return found ? at + found[0].length : at;
+}
+
 /** The marker of an inserted row or column as it is written, `<!--ins ID row-->` or `col`. */
 const TABLE_MARKER =
   /<!--ins [bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz23456789]{3} (?:row|col)-->/y;

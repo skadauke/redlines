@@ -824,6 +824,13 @@ export function deriveIntent(state: EditorState, intent: TypingIntent): ChangeSe
     : null;
   // The text the edits were made to: the start text, or with a composition taken back.
   const text = revert ? revert.apply(state.doc).toString() : state.doc.toString();
+  if (intent.exact) {
+    const written = ChangeSet.of(
+      intent.edits.map(({ from, to, insert }) => ({ from, to, insert })),
+      text.length,
+    );
+    return revert ? revert.compose(written) : written;
+  }
   const parsed = revert ? parse(text, state.field(parsedField)) : state.field(parsedField);
   const made = (
     intent.tracking
