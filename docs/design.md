@@ -2246,11 +2246,13 @@ when a login shell can't find the `redlines` command, which the skill runs, and 
 where the command line is installed; Install Skill doesn't install it itself, which may ask for an
 administrator's password. Each copy ends with the version it has (`<!-- redlines-skill 1 -->`), and
 the app carries its own, so that an installed copy that is older shows Update Skill, which keeps the
-old file as `SKILL.md.bak` (a copy edited by hand reads as older, and is replaced). Only a copy of
+old file as `SKILL.md.bak`, or as the next free `SKILL.md.bak.1`, `.2` …, so that no earlier backup is lost (a copy edited by hand reads as older, and is replaced). Only a copy of
 this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
 in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
 The Claude Code skill is also a plugin, and this repository a marketplace for it
-(`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
+(`.claude-plugin/marketplace.json`). Claude Code loads both a plugin's skill and a personal one, so
+someone who has both sees it listed twice (`redlines` and `redlines:redlines`); the app installs the
+copy only, never the plugin, and the Claude Code row says to keep one. Publishing the skill on ClawHub, OpenClaw's registry, is its
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks

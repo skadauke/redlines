@@ -23,7 +23,6 @@ import {
   readRowCells,
   type TextChange,
   Untrackable,
-  widenedPaste,
 } from '@redlines/format';
 import {
   markupViewFacet,
@@ -47,6 +46,7 @@ import { fillRows } from './paste-intent.ts';
 import { intentAnnotation, newIntentId } from '../tracked/intent.ts';
 import type { StepsIntent, TypingIntent, Unnamed } from '../tracked/intent.ts';
 import type { TableIntent } from './intent.ts';
+import { type WidenedPasteIntent, writeWidenedPaste } from './widened-paste.ts';
 
 /** The cell of a row at a column, if the row has it. */
 const cellAtCol = (table: Table, row: Table['rows'][number], col: number): Cell | undefined =>
@@ -290,15 +290,20 @@ function write(view: EditorView, plan: Plan): boolean {
   const { table } = plan;
   const tracked = state.field(trackingField);
   let done = compute(view, plan, false);
+  let widened: WidenedPasteIntent | undefined;
   // The rows and columns it needs, where the table's own rules refuse them (another person's change
   // in the table): the table as a replacement, with the paste made in it (format §3.12).
   if ('why' in done && tracked && (plan.extra > 0 || (plan.extraCols ?? 0) > 0)) {
     try {
-      const wide = widenedPaste(
-        state.doc.toString(),
-        { table: table.from, range: plan.range, top: plan.top, left: plan.left },
-        contextFor(state),
-      );
+      const ctx = contextFor(state);
+      const wide = writeWidenedPaste(state.doc.toString(), {
+        paste: { table: table.from, range: plan.range, top: plan.top, left: plan.left },
+        author: ctx.author,
+        time: ctx.time,
+        ...(ctx.dialect === undefined ? {} : { dialect: ctx.dialect }),
+        ...(ctx.random ? { random: ctx.random } : {}),
+      });
+      widened = { ...wide.intent, id: newIntentId() };
       done = { total: ChangeSet.of(wide.changes, state.doc.length), steps: [] };
     } catch (error) {
       if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
@@ -317,8 +322,9 @@ function write(view: EditorView, plan: Plan): boolean {
   if ('why' in done) return refuse(view, done.why);
   const total = done.total;
   // One write is its own intent (rows that are filled need the steps' derive); several, each on the text the one before left, are steps.
-  const intent: StepsIntent | TypingIntent | TableIntent | undefined =
-    done.steps.length === 1 && !(done.steps[0]?.kind === 'table' && done.steps[0].filled)
+  const intent: StepsIntent | TypingIntent | TableIntent | WidenedPasteIntent | undefined = widened
+    ? widened
+    : done.steps.length === 1 && !(done.steps[0]?.kind === 'table' && done.steps[0].filled)
       ? done.steps[0]
       : done.steps.length
         ? { kind: 'steps', id: newIntentId(), steps: done.steps }

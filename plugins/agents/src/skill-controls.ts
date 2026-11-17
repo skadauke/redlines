@@ -33,6 +33,12 @@ export interface PaneSkill {
   install(): Promise<SkillInstalled>;
   /** Another agent that reads the same folder, which the line that says where it went names. */
   alsoReadBy?: string;
+  /**
+   * What to say of a plugin that carries the same skill: Claude Code loads a plugin's skill as well
+   * as a personal one, under the plugin's name, so someone who has both sees it listed twice. The
+   * row says so, beside an installed skill; it doesn't look for the plugin.
+   */
+  alsoAPlugin?: string;
 }
 
 /** What the row says of the Redlines skill in the agent's folder; `done` is what was just done. */
@@ -44,7 +50,7 @@ function skillText(skill: SkillState, done: 'installed' | 'updated' | null): str
       return `Redlines skill ${done ?? 'installed'} in ${skill.folder}.`;
     case 'older':
       // Update replaces the file, whatever was written in it by hand, and keeps what was there.
-      return `Redlines skill installed in ${skill.folder}, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak.`;
+      return `Redlines skill installed in ${skill.folder}, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak (or the next free SKILL.md.bak.1, .2 …), so no earlier backup is lost.`;
     case 'newer':
     case 'other':
       // Left as it is, and the sentence says why.
@@ -112,7 +118,13 @@ export function skillControls(options: {
       skillLine.textContent = 'Couldn’t look at the Redlines skill.';
       return;
     }
-    skillLine.textContent = skillText(skill, skillDone);
+    const installed = skill.state === 'current' || skill.state === 'older';
+    skillLine.textContent = [
+      skillText(skill, skillDone),
+      installed ? agent.skill?.alsoAPlugin : undefined,
+    ]
+      .filter(Boolean)
+      .join(' ');
     const next =
       skill.state === 'missing' ? 'Install' : skill.state === 'older' ? 'Update' : undefined;
     if (next !== undefined) {

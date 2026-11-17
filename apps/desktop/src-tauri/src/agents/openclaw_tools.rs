@@ -35,6 +35,12 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 /// grace a stopped run is given for that event (`ABORT_GRACE` in `openclaw_chat.rs`).
 pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// How often a wait that Stop may end looks at whether it has.
+const LOOK: Duration = Duration::from_millis(50);
+
+/// Why a registration stopped when its run was stopped.
+const STOPPED: &str = "The run was stopped.";
+
 /// How long the window may take to answer the handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -60,34 +66,110 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// The line to one run's window: the program's end of a relay.
 struct Line {
-    /// Held while a call is in flight, so that calls go one at a time, in order.
+    /// Held while a call is in flight (by whoever has its turn).
     stream: Mutex<Wire>,
+    /// The calls of the run in the order they came: one at a time, each within its own deadline.
+    queue: Mutex<Queue>,
+    turn: Condvar,
     /// The same socket, for ending the line from outside a call.
     control: UnixStream,
+}
+
+/// A run's calls, by ticket. A call that gives up before its turn leaves its ticket in `gave_up`,
+/// which the turn passes over.
+#[derive(Default)]
+struct Queue {
+    next: u64,
+    serving: u64,
+    gave_up: std::collections::HashSet<u64>,
+}
+
+impl Queue {
+    /// Moves the turn on past the tickets that gave up.
+    fn advance(&mut self) {
+        self.serving += 1;
+        while self.gave_up.remove(&self.serving) {
+            self.serving += 1;
+        }
+    }
+}
+
+impl Line {
+    /// Asks the window for a `tools/call` in its turn, after the calls that came before it, and all
+    /// within `wait` of now: a call that has waited its whole time for its turn is not made at all,
+    /// so the agent is never told it failed and then has the edit land.
+    fn ask_in_turn(&self, params: Value, wait: Duration) -> Result<Value, String> {
+        let until = Instant::now() + wait;
+        let mut queue = locked(&self.queue);
+        let ticket = queue.next;
+        queue.next += 1;
+        while queue.serving != ticket {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                queue.gave_up.insert(ticket);
+                return Err("The document didn’t answer in time.".to_owned());
+            }
+            queue = self
+                .turn
+                .wait_timeout(queue, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        drop(queue);
+        let answered = locked(&self.stream).ask(
+            "tools/call",
+            params,
+            until.saturating_duration_since(Instant::now()),
+        );
+        locked(&self.queue).advance();
+        self.turn.notify_all();
+        answered
+    }
 }
 
 struct Wire {
     writer: UnixStream,
     reader: BufReader<UnixStream>,
     next_id: u64,
+    /// The start of a line that a read timed out in: kept, so that the rest of it joins it.
+    partial: String,
 }
 
 impl Wire {
     /// Sends a request and waits for the answer to it.
     fn ask(&mut self, method: &str, params: Value, wait: Duration) -> Result<Value, String> {
+        self.ask_unless(method, params, wait, &|| false)
+    }
+
+    /// `ask`, looking every `LOOK` at whether the run has been told to stop, which ends the wait.
+    fn ask_unless(
+        &mut self,
+        method: &str,
+        params: Value,
+        wait: Duration,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<Value, String> {
+        let until = Instant::now() + wait;
         let id = self.next_id;
         self.next_id += 1;
         let line = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         self.send(&line)?;
-        self.reader
-            .get_ref()
-            .set_read_timeout(Some(wait))
-            .map_err(|error| error.to_string())?;
         loop {
-            let mut text = String::new();
-            match self.reader.read_line(&mut text) {
+            if stopped() {
+                return Err(STOPPED.to_owned());
+            }
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err("The document didn’t answer in time.".to_owned());
+            }
+            self.reader
+                .get_ref()
+                .set_read_timeout(Some(left.min(LOOK)))
+                .map_err(|error| error.to_string())?;
+            match self.reader.read_line(&mut self.partial) {
                 Ok(0) => return Err("The run has ended.".to_owned()),
                 Ok(_) => {
+                    let text = std::mem::take(&mut self.partial);
                     if let Ok(message) = serde_json::from_str::<Value>(&text)
                         && message["id"] == json!(id)
                     {
@@ -100,7 +182,7 @@ impl Wire {
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                     ) =>
                 {
-                    return Err("The document didn’t answer in time.".to_owned());
+                    // Not yet: the deadline and the stop are looked at at the top.
                 }
                 Err(_) => return Err("The run has ended.".to_owned()),
             }
@@ -207,8 +289,17 @@ impl RunTools {
     /// Connects to the run's relay (`socket`, the window's own) as the program does, and from then
     /// until the registration ends, answers calls made from `session`. A session that already has
     /// a live run isn't taken over: the first holds it.
-    pub fn register(self: &Arc<Self>, session: &str, socket: &str) -> Result<Registration, String> {
-        self.register_within(session, socket, SETTLE_TIMEOUT)
+    ///
+    /// Registering can wait for the thread's last run (up to `SETTLE_TIMEOUT`) and for the window's
+    /// handshake (up to `HANDSHAKE_TIMEOUT`); `stopped` is looked at throughout, and when it says
+    /// so the registration is given up at once, so that Stop is not held for that long.
+    pub fn register(
+        self: &Arc<Self>,
+        session: &str,
+        socket: &str,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<Registration, String> {
+        self.register_within(session, socket, SETTLE_TIMEOUT, stopped)
     }
 
     /// `register`, waiting at most `wait` for the thread's last run to be over.
@@ -217,6 +308,7 @@ impl RunTools {
         session: &str,
         socket: &str,
         wait: Duration,
+        stopped: &dyn Fn() -> bool,
     ) -> Result<Registration, String> {
         {
             let key = thread_of(session);
@@ -228,8 +320,15 @@ impl RunTools {
                     draining.remove(key);
                     break;
                 }
-                let left = drain.until.min(deadline).saturating_duration_since(now);
-                if left.is_zero() {
+                if stopped() {
+                    return Err(STOPPED.to_owned());
+                }
+                let left = drain
+                    .until
+                    .min(deadline)
+                    .saturating_duration_since(now)
+                    .min(LOOK);
+                if left.is_zero() || drain.until.min(deadline) <= now {
                     // This wait has run out: the old run's calls are refused as the new one
                     // isn't registered yet, and the next ones are the new run's.
                     break;
@@ -249,12 +348,14 @@ impl RunTools {
             writer,
             reader,
             next_id: 0,
+            partial: String::new(),
         };
         // What a toolbox sees before any call.
-        let hello = wire.ask(
+        let hello = wire.ask_unless(
             "initialize",
             json!({"protocolVersion": "2025-06-18", "capabilities": {}}),
             HANDSHAKE_TIMEOUT,
+            stopped,
         )?;
         if hello.get("error").is_some() {
             return Err("Redlines’ tools for this run didn’t start.".to_owned());
@@ -262,6 +363,8 @@ impl RunTools {
         wire.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))?;
         let line = Arc::new(Line {
             stream: Mutex::new(wire),
+            queue: Mutex::default(),
+            turn: Condvar::new(),
             control,
         });
         let key = thread_of(session).to_owned();
@@ -301,8 +404,7 @@ impl RunTools {
         let Some(line) = line else {
             return refused(NOT_LIVE);
         };
-        let answered =
-            locked(&line.stream).ask("tools/call", request["params"].clone(), CALL_TIMEOUT);
+        let answered = line.ask_in_turn(request["params"].clone(), CALL_TIMEOUT);
         // A run that ended while the call waited is a run that is not live.
         let still_live = locked(&self.live)
             .get(session)
@@ -387,7 +489,9 @@ mod tests {
         let temp = folder("live");
         let (socket, window) = window(&temp);
         let tools = Arc::new(RunTools::default());
-        let registration = tools.register("agent:main:redlines-1", &socket).unwrap();
+        let registration = tools
+            .register("agent:main:redlines-1", &socket, &|| false)
+            .unwrap();
         assert!(tools.is_live("agent:main:redlines-1"));
 
         let reply = call(&tools, Some("agent:main:redlines-1"), "str_replace");
@@ -418,7 +522,7 @@ mod tests {
         let temp = folder("bare");
         let (socket, _window) = window(&temp);
         let tools = Arc::new(RunTools::default());
-        let _held = tools.register("redlines-0a", &socket).unwrap();
+        let _held = tools.register("redlines-0a", &socket, &|| false).unwrap();
         assert_ne!(
             text(&call(&tools, Some("agent:main:redlines-0a"), "view")),
             NOT_LIVE
@@ -434,7 +538,9 @@ mod tests {
         let first = folder("late-1");
         let (socket_1, _window_1) = window(&first);
         let tools = Arc::new(RunTools::default());
-        let old = tools.register("agent:main:redlines-0a", &socket_1).unwrap();
+        let old = tools
+            .register("agent:main:redlines-0a", &socket_1, &|| false)
+            .unwrap();
         // Stop: tools end now, the run isn't over at the Gateway yet.
         old.end();
         // The next run of the thread is told to wait, in a thread of its own.
@@ -444,7 +550,12 @@ mod tests {
             let tools = Arc::clone(&tools);
             thread::spawn(move || {
                 tools
-                    .register_within("agent:main:redlines-0a", &socket_2, Duration::from_secs(5))
+                    .register_within(
+                        "agent:main:redlines-0a",
+                        &socket_2,
+                        Duration::from_secs(5),
+                        &|| false,
+                    )
                     .map(|registration| (registration, Instant::now()))
             })
         };
@@ -471,13 +582,18 @@ mod tests {
         let first = folder("lost-1");
         let (socket_1, _window_1) = window(&first);
         let tools = Arc::new(RunTools::default());
-        let old = tools.register("redlines-0a", &socket_1).unwrap();
+        let old = tools.register("redlines-0a", &socket_1, &|| false).unwrap();
         old.leave();
         let second = folder("lost-2");
         let (socket_2, _window_2) = window(&second);
         // It isn't let go of when its registration is: the next run waits as long as it is told.
         let began = Instant::now();
-        let _ = tools.register_within("redlines-0a", &socket_2, Duration::from_millis(300));
+        let _ = tools.register_within(
+            "redlines-0a",
+            &socket_2,
+            Duration::from_millis(300),
+            &|| false,
+        );
         assert!(began.elapsed() >= Duration::from_millis(300));
     }
 
@@ -486,13 +602,13 @@ mod tests {
         let first = folder("stale-1");
         let (socket_1, _window_1) = window(&first);
         let tools = Arc::new(RunTools::default());
-        let a = tools.register("redlines-0a", &socket_1).unwrap();
+        let a = tools.register("redlines-0a", &socket_1, &|| false).unwrap();
         a.end();
         // A's wait runs out, and B takes the thread, and is stopped.
         let second = folder("stale-2");
         let (socket_2, _window_2) = window(&second);
         locked(&tools.draining).clear();
-        let b = tools.register("redlines-0a", &socket_2).unwrap();
+        let b = tools.register("redlines-0a", &socket_2, &|| false).unwrap();
         b.end();
         // A's final event comes late.
         a.finish();
@@ -506,13 +622,18 @@ mod tests {
         let first = folder("long-1");
         let (socket_1, _window_1) = window(&first);
         let tools = Arc::new(RunTools::default());
-        let old = tools.register("redlines-0a", &socket_1).unwrap();
+        let old = tools.register("redlines-0a", &socket_1, &|| false).unwrap();
         old.end();
         let second = folder("long-2");
         let (socket_2, _window_2) = window(&second);
         let began = Instant::now();
         let _next = tools
-            .register_within("redlines-0a", &socket_2, Duration::from_millis(200))
+            .register_within(
+                "redlines-0a",
+                &socket_2,
+                Duration::from_millis(200),
+                &|| false,
+            )
             .unwrap();
         assert!(began.elapsed() >= Duration::from_millis(200));
         assert!(began.elapsed() < Duration::from_secs(3));
@@ -523,7 +644,9 @@ mod tests {
         let temp = folder("stopped");
         let (socket, window) = window(&temp);
         let tools = Arc::new(RunTools::default());
-        let registration = tools.register("agent:main:redlines-1", &socket).unwrap();
+        let registration = tools
+            .register("agent:main:redlines-1", &socket, &|| false)
+            .unwrap();
         assert!(text(&call(&tools, Some("agent:main:redlines-1"), "view")).contains("view"));
         registration.end();
         assert!(!tools.is_live("agent:main:redlines-1"));
@@ -540,11 +663,48 @@ mod tests {
         let temp = folder("twice");
         let (first, _first_window) = window(&temp);
         let tools = Arc::new(RunTools::default());
-        let _held = tools.register("agent:main:redlines-1", &first).unwrap();
+        let _held = tools
+            .register("agent:main:redlines-1", &first, &|| false)
+            .unwrap();
         let other = folder("twice-2");
         let (second, _second_window) = window(&other);
-        assert!(tools.register("agent:main:redlines-1", &second).is_err());
+        assert!(
+            tools
+                .register("agent:main:redlines-1", &second, &|| false)
+                .is_err()
+        );
         assert!(tools.is_live("agent:main:redlines-1"));
+    }
+
+    #[test]
+    fn a_runs_calls_go_in_the_order_they_came_and_one_that_gave_up_is_passed_over() {
+        let mut queue = Queue {
+            next: 4,
+            serving: 0,
+            gave_up: [1, 2].into(),
+        };
+        queue.advance();
+        assert_eq!(
+            queue.serving, 3,
+            "tickets 1 and 2 gave up before their turn"
+        );
+        queue.advance();
+        assert_eq!(queue.serving, 4);
+
+        // And in a line: calls made one after another from threads are asked in that order.
+        let (socket, _window) = window(&folder("order"));
+        let tools = Arc::new(RunTools::default());
+        let _held = tools.register("redlines-0c", &socket, &|| false).unwrap();
+        let mut waiting = Vec::new();
+        for name in ["a", "b", "c", "d"] {
+            let tools = Arc::clone(&tools);
+            waiting.push(thread::spawn(move || {
+                text(&call(&tools, Some("redlines-0c"), name))
+            }));
+            thread::sleep(Duration::from_millis(30));
+        }
+        let answers: Vec<String> = waiting.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(answers.iter().all(|a| !a.is_empty()));
     }
 
     #[test]
@@ -552,7 +712,7 @@ mod tests {
         let tools = Arc::new(RunTools::default());
         assert!(
             tools
-                .register("agent:main:redlines-1", "/nonexistent/rl-socket")
+                .register("agent:main:redlines-1", "/nonexistent/rl-socket", &|| false)
                 .is_err()
         );
     }
@@ -584,7 +744,7 @@ mod tests {
         });
         let tools = Arc::new(RunTools::default());
         let registration = tools
-            .register("agent:main:redlines-1", socket.to_str().unwrap())
+            .register("agent:main:redlines-1", socket.to_str().unwrap(), &|| false)
             .unwrap();
         let waiting = {
             let tools = Arc::clone(&tools);

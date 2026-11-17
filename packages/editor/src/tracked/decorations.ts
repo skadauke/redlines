@@ -445,7 +445,7 @@ function struckBlocks(
     const owners: { to: number; color: number }[] = [];
     let total = 0;
     for (const { segment, mark: owner } of segments) {
-      total += segment.payload?.length ?? 0;
+      total += plainPayload(segment.payload ?? '').length;
       owners.push({ to: total, color: colorOf(owner) });
     }
     const drawn = new Set<number>();
@@ -1877,11 +1877,14 @@ export function trackedText(state: EditorState, from: number, to: number): Track
 /**
  * A selection whose ends aren't hidden: moved out of hidden text and hidden lines, a caret off the
  * start of a document whose first lines are hidden or off the end of one whose last lines are, and
- * nothing past the body's end, onto the line after the hidden ledger.
+ * nothing past the body's end, onto the line after the hidden ledger. A caret in hidden text goes
+ * to the nearer end; in hidden lines, with `forward`, to the one after them, as after typing, which
+ * only moves on.
  */
 export function visibleSelection(
   state: EditorState,
   selection: EditorSelection = state.selection,
+  forward = false,
 ): EditorSelection {
   const { atomic: atoms, runs } = state.field(trackedField);
   if (!atoms.size) return selection;
@@ -1894,6 +1897,13 @@ export function visibleSelection(
     return false;
   });
   const open = openBlock(state);
+  const inHiddenLines = (pos: number) => {
+    let inside = false;
+    runs.between(pos, pos, (from, to) => {
+      if (from <= pos && pos <= to) inside = true;
+    });
+    return inside;
+  };
   const outside = (pos: number, side: -1 | 0 | 1) => {
     // The empty paragraph that is open is a place for the caret, wherever it is.
     if (open && pos >= open.empty.from && pos <= open.empty.to) return Math.min(pos, end);
@@ -1902,7 +1912,8 @@ export function visibleSelection(
       if (side === 0 && pos === 0 && from === 0) moved = to;
       else if (side === 0 && pos === length && lastHidden && to === length) moved = from;
       else if (from < pos && pos < to) {
-        moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
+        const onward = forward && inHiddenLines(pos);
+        moved = side < 0 || (side === 0 && !onward && pos - from <= to - pos) ? from : to;
       }
     });
     return Math.min(moved, end);
@@ -1969,7 +1980,10 @@ const caretOutOfHiding = EditorState.transactionFilter.of((tr) => {
   const switched = tr.effects.some((effect) => effect.is(setViewModeEffect));
   const moved = tr.annotation(Transaction.remote) || tr.annotation(trackedEditAnnotation);
   if (!switched && !moved) return tr;
-  const selection = visibleSelection(tr.state);
+  // Text typed or pasted that is hidden where it stands, as a space on a line of markers alone is
+  // (#811), leaves the caret after the hidden lines, not back where the edit began.
+  const typed = tr.docChanged && tr.isUserEvent('input');
+  const selection = visibleSelection(tr.state, tr.state.selection, typed);
   return selection === tr.state.selection ? tr : [tr, { selection, sequential: true }];
 });
 

@@ -272,6 +272,14 @@ const deps: PaneDeps = {
                 status: () => agentSkills.status(provider.id),
                 install: () => agentSkills.install(provider.id),
                 ...(provider.id === 'codex' ? { alsoReadBy: 'OpenClaw' } : {}),
+                // Claude Code lists a plugin's skill beside a personal one: the plugin is
+                // installed from its marketplace, never by this app (#927).
+                ...(provider.id === 'claude'
+                  ? {
+                      alsoAPlugin:
+                        'If you also installed the Redlines plugin in Claude Code, Claude Code lists the skill twice (redlines and redlines:redlines): keep one, either this copy or the plugin.',
+                    }
+                  : {}),
               },
             }
           : {}),
