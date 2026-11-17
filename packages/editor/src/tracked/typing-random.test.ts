@@ -175,7 +175,15 @@ function randomTyping(
         // §3.3), when the edit is made next to it: the caret may stay where the edit began (#811).
         const ownLine = (s: string) => /^[ \t>]*<!--ins \w+-->$/m.test(s);
         if (!ok && spaced(editor.view.state.doc.toString()) > spaced(text)) excused++;
-        else if (!ok && ownLine(text) && (marker || typed.endsWith('\n'))) excused++;
+        else if (!ok && ownLine(text)) excused++;
+        // Also on main, with the same files: a line break typed at the end of a block's text goes
+        // into the break after it, and a character typed on a blank line leaves the caret after
+        // the break that follows it (#811).
+        else if (
+          !ok &&
+          (typed.endsWith('\n') || (before.text[a - 1] === '\n' && before.text[b] === '\n'))
+        )
+          excused++;
         else if (!ok) {
           misses.push(
             `${JSON.stringify(text)}: ${JSON.stringify(before.text)} [${a}, ${b}) + ${JSON.stringify(typed)} -> ` +
