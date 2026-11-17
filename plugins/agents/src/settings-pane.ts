@@ -11,6 +11,7 @@ import type { AgentModel, AgentState } from '@redlines/plugin-api';
 import { privacyMessage } from './blocked-message.ts';
 import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
 import { defaultAgentRow, type DefaultChoice } from './default-agent-field.ts';
+import { forgetting, readableAgain, readableAgainText } from './widened.ts';
 import { modelField } from './model-field.ts';
 import { isNewer } from './versions.ts';
 import { handleField } from './handle-field.ts';
@@ -282,6 +283,8 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
     scope.append(option);
   }
   scope.value = deps.settings().agentScope;
+  /** The setting as it was when last drawn, to tell what a widening brings back. */
+  let scopeWas = deps.settings().agentScope;
   // The note comes with the widest choice, where the risk is, and goes with it.
   // The risk is said where the choice is made, and a screen reader says it with the choice and
   // again when the choice changes it.
@@ -332,14 +335,32 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   };
   scope.addEventListener('change', () => {
     const chosen = scope.value;
+    const next = chosen === 'document' || chosen === 'everything' ? chosen : 'folder';
+    showAgain(readableAgain(deps.settings().consent, scopeWas, next, (agent) => names.has(agent)));
+    scopeWas = next;
     deps.update({
       agentScope: chosen === 'document' || chosen === 'everything' ? chosen : 'folder',
     });
     showScopeNote();
     lookForRefusals();
   });
+  // Answers that stand again when the setting is widened (#382): said right under it, with a way to
+  // forget them, rather than asking again folder by folder.
+  const again = el('div', 'rl-pref-note');
+  again.setAttribute('role', 'status');
+  const showAgain = (keys: readonly string[]) => {
+    again.replaceChildren();
+    if (keys.length === 0) return;
+    const forget = button('Forget them');
+    forget.addEventListener('click', () => {
+      deps.update({ consent: forgetting(deps.settings().consent, keys) });
+      again.replaceChildren();
+      drawRemembered();
+    });
+    again.append(el('span', undefined, `${readableAgainText(keys.length)} `), forget);
+  };
   const scopeExtras = el('div');
-  scopeExtras.append(scopeNote, holdingBack);
+  scopeExtras.append(scopeNote, again, holdingBack);
   container.append(row('What agents may read', scope, scopeExtras));
 
   // Web access (#529): one switch for every agent, off by default. Off, an agent that wants the web
