@@ -30,7 +30,7 @@ function drawn(editor: Editor) {
   const { state } = editor.view;
   previewDecorations(state).between(0, state.doc.length, (from, to, value) => {
     const spec = value.spec as { class?: string };
-    if (spec.class?.includes('rl-h')) lines.push(spec.class);
+    if (spec.class && /\brl-h[1-6]\b/.test(spec.class)) lines.push(spec.class);
     if (value.point && from < to) hidden.push(state.sliceDoc(from, to));
   });
   return { lines, hidden };

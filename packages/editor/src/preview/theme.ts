@@ -197,15 +197,18 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-html-block': {
     position: 'relative',
     margin: '0.4em 0',
+    padding: '4px 0',
     borderRadius: '6px',
-    outline: '1px solid transparent',
-    outlineOffset: '4px',
     cursor: 'default',
   },
   '.rl-html-block:hover, .rl-html-block-selected': {
-    outlineColor: 'var(--rl-rule)',
+    boxShadow: '0 0 0 1px var(--rl-rule)',
   },
-  '.rl-html-block-selected': { outlineColor: 'var(--rl-ink-3)' },
+  '.rl-html-block-selected': {
+    outline: '1px solid var(--rl-ink-3)',
+    outlineOffset: '0',
+    boxShadow: 'none',
+  },
   '.rl-html-label': {
     position: 'absolute',
     top: '-0.9em',

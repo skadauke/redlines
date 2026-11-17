@@ -47,6 +47,7 @@ export const LONG_SOURCE_LINES = 60;
 
 /** The most a drawn block holds: past either, the rest is left out. */
 const MAX_NODES = 5000;
+const MAX_SOURCE = 20_000;
 const MAX_DEPTH = 100;
 const MAX_TEXT = 500;
 
@@ -93,6 +94,8 @@ export function isRenderedBlock(state: EditorState, node: SyntaxNode): boolean {
   // An exact Markdown twin is edited as Markdown (blocks/twin.ts); one with no exact twin, a table
   // with a span or a caption, is drawn here, whatever the reason the twin's commands give.
   const above = from > 0 ? state.doc.lineAt(from - 1).text : '';
+  // A source this long is left as source: drawing it would cost more than it shows.
+  if (to - from > MAX_SOURCE) return false;
   if ('twin' in htmlTwin(source, { afterText: above.trim() !== '' })) return false;
   // A pending change in the block is seen and decided in its text.
   const parsed = state.field(parsedField, false);
@@ -252,7 +255,7 @@ function isWhole(range: { from: number; to: number }, b: HtmlBlock): boolean {
 /** A range that keeps the source open: the caret anywhere in the block, even at its ends. */
 function keeps(range: Sel, b: HtmlBlock): boolean {
   if (range.empty) return range.head >= b.from && range.head <= b.to;
-  return !isWhole(range, b) && range.from <= b.to && range.to >= b.from;
+  return !isWhole(range, b) && range.from < b.to && range.to > b.from;
 }
 
 function sameSet(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
@@ -267,16 +270,20 @@ export const openedField = StateField.define<Opened>({
     if (!tr.docChanged && !tr.selection && !hold && !opens.length) return value;
     let { keys, found } = value;
     if (tr.docChanged) {
-      keys = new Set([...keys].map((key) => tr.changes.mapPos(key, -1)));
-      if (found !== null) found = tr.changes.mapPos(found, -1);
+      keys = new Set([...keys].map((key) => tr.changes.mapPos(key, 1)));
+      if (found !== null) found = tr.changes.mapPos(found, 1);
     }
     const { state } = tr;
+    // A tree that has not reached the end can not name the blocks: what is open stays open.
+    if (syntaxTree(state).length < state.doc.length && !opens.length && !hold) {
+      return keys === value.keys && found === value.found ? value : { keys, found };
+    }
     const place = (pos: number) => htmlBlockAt(state, pos);
     const next = new Set<number>();
     for (const key of keys) {
       const block = place(key);
-      if (block && block.from === key && state.selection.ranges.some((r) => keeps(r, block))) {
-        next.add(key);
+      if (block && state.selection.ranges.some((r) => keeps(r, block))) {
+        next.add(block.from);
       }
     }
     for (const effect of opens) {
@@ -294,8 +301,8 @@ export const openedField = StateField.define<Opened>({
     if (hold) nextFound = place(hold.value)?.from ?? null;
     else if (found !== null) {
       const block = place(found);
-      if (block && block.from === found && state.selection.ranges.some((r) => keeps(r, block))) {
-        nextFound = found;
+      if (block && state.selection.ranges.some((r) => keeps(r, block))) {
+        nextFound = block.from;
       }
     }
     if (nextFound !== null && next.has(nextFound)) nextFound = null;
@@ -394,7 +401,7 @@ export function htmlBlock(b: BlockSink, node: SyntaxNode): boolean {
       if (line.to === block.to) classes.push('rl-html-source-last');
       b.push(Decoration.line({ class: classes.join(' ') }).range(line.from));
     }
-    return false;
+    return true;
   }
   const selected = state.selection.ranges.some((range) => isWhole(range, block));
   const widget = new HtmlBlockWidget(state.sliceDoc(block.from, block.to), selected);
@@ -463,6 +470,7 @@ const presses = EditorView.domEventHandlers({
   mousedown(event, view) {
     const target = event.target;
     if (!(target instanceof Element) || event.button !== 0) return false;
+    if (event.shiftKey || event.metaKey || event.ctrlKey) return false;
     const done = target.closest('.rl-html-done');
     if (done) {
       const head = done.closest('.rl-html-source-head');
@@ -489,6 +497,12 @@ const presses = EditorView.domEventHandlers({
     if (!(target instanceof Element) || !view.contentDOM.contains(target)) return false;
     if (!target.closest('.rl-html-block')) return false;
     event.preventDefault();
+    // The label with the keyboard (Tab, then Return or Space) is a click with no pointer.
+    const wrap = target.closest('.rl-html-block');
+    if (event.detail === 0 && target.closest('.rl-html-label') && wrap) {
+      const block = blockOfDom(view, wrap);
+      if (block) openSource(view, block);
+    }
     return true;
   },
 });
