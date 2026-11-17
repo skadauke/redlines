@@ -102,7 +102,19 @@ export interface DocumentParts {
   imageUrl?: (written: string) => string | null;
   /** A block of HTML as the sanitized HTML that is drawn of it; null leaves it as text. */
   html?: (source: string) => string | null;
+  /**
+   * Draw for a program that pastes (Word, Google Docs): `<s>` for a strike, a code color of its own,
+   * borders and widths on every table cell, a quote that reads without its rule, and no class.
+   */
+  office?: boolean;
+  /** Which images (by destination) come out as their alt text. */
+  altOnly?: (href: string) => boolean;
 }
+
+const OFFICE_CODE = 'background:#f2f2f2;color:#24292f;';
+const OFFICE_CELL = 'border:1px solid #8c8c8c;padding:4px 8px;';
+const OFFICE_QUOTE =
+  'margin:0 0 0 1.5em;padding:0 0 0 1em;border-left:3px solid #b0b0b0;color:#555555';
 
 /** A footnote's mark in prose: `[^1]`, not followed by the colon of its definition. */
 const FOOTNOTE_MARK = /\[\^([^\]\s&]+)\](?!:)/g;
@@ -114,6 +126,15 @@ function render(
   emoji: EmojiLookup = () => undefined,
   doc?: DocumentParts,
 ): string {
+  const office = doc?.office === true;
+  // A picture as data is what a program that pastes can always draw.
+  const pictureOk = (href: string) =>
+    safe(href) || (office && /^data:image\/(?:png|jpe?g|gif|webp);base64,[\w+/=]+$/i.test(href));
+  if (doc?.altOnly) {
+    const first = keepAsText;
+    const also = doc.altOnly;
+    keepAsText = (href) => first(href) || also(href);
+  }
   const tree = markdown.parse(src);
   // Reference links take the address of their definition, when the copy has it.
   const definitions = new Map<string, string>();
@@ -143,7 +164,7 @@ function render(
     const value = (name: string) => attributes.find((a) => a.name === name)?.value ?? null;
     const href = value('src') ?? '';
     if (!href) return null;
-    if (!safe(href) || keepAsText(href)) return escape(value('alt') ?? '');
+    if (!pictureOk(href) || keepAsText(href)) return escape(value('alt') ?? '');
     const shown = doc?.imageUrl ? doc.imageUrl(href) : href;
     if (shown === null) return escape(value('alt') ?? '');
     const width = /^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$/i.exec(value('width') ?? '')?.[1];
@@ -217,7 +238,7 @@ function render(
       case 'StrongEmphasis':
         return wrap('strong', node, 'EmphasisMark');
       case 'Strikethrough':
-        return wrap('del', node, 'StrikethroughMark');
+        return wrap(office ? 's' : 'del', node, 'StrikethroughMark');
       case 'Subscript':
         return wrap('sub', node, 'SubscriptMark');
       case 'Superscript':
@@ -226,7 +247,7 @@ function render(
         const marks = node.getChildren('CodeMark');
         const from = marks[0]?.to ?? node.from;
         const to = marks.length > 1 ? marks[marks.length - 1]!.from : node.to;
-        return `<code${style(fonts.mono)}>${text(from, to)}</code>`;
+        return `<code style="font-family:${escape(fonts.mono)}${office ? `;${OFFICE_CODE}` : ''}">${text(from, to)}</code>`;
       }
       case 'Link':
         return link(node);
@@ -238,7 +259,7 @@ function render(
         const href = destination(slice(url.from, url.to));
         // An image the preview doesn't fetch is not one a target should: its alt text only.
         const shown = doc?.imageUrl ? doc.imageUrl(href) : href;
-        return safe(href) && !keepAsText(href) && shown !== null
+        return pictureOk(href) && !keepAsText(href) && shown !== null
           ? `<img src="${escape(shown)}" alt="${escape(alt)}">`
           : escape(alt);
       }
@@ -281,6 +302,7 @@ function render(
     }
   }
 
+  let columns = 1;
   function cells(row: SyntaxNode, tag: string, aligns: string[]): string {
     inCell = true;
     try {
@@ -297,7 +319,11 @@ function render(
         .getChildren('TableCell')
         .map((cell, i) => {
           const align = aligns[i];
-          return `<${tag}${align ? ` style="text-align:${align}"` : ''}>${inlines(cell)}</${tag}>`;
+          const css =
+            (office
+              ? `${OFFICE_CELL}width:${Math.floor(100 / columns)}%;${tag === 'th' ? 'background:#f2f2f2;font-weight:bold;' : ''}`
+              : '') + (align ? `text-align:${align}` : '');
+          return `<${tag}${css ? ` style="${css}"` : ''}>${inlines(cell)}</${tag}>`;
         })
         .join('') +
       '</tr>'
@@ -325,8 +351,9 @@ function render(
       });
     const head = node.getChild('TableHeader');
     const rows = node.getChildren('TableRow');
+    columns = Math.max(1, aligns.length, head?.getChildren('TableCell').length ?? 0);
     return (
-      '<table>' +
+      (office ? '<table style="border-collapse:collapse;width:100%">' : '<table>') +
       (head ? `<thead>${cells(head, 'th', aligns)}</thead>` : '') +
       (rows.length
         ? `<tbody>${rows.map((row) => cells(row, 'td', aligns)).join('')}</tbody>`
@@ -351,7 +378,7 @@ function render(
         parts.push(block(child));
       }
     }
-    const task = doc && parts.some((part) => /^[\u2610\u2611]/.test(part));
+    const task = doc && !office && parts.some((part) => /^[\u2610\u2611]/.test(part));
     return `<li${task ? ' class="rl-task"' : ''}>${parts.join('')}</li>`;
   }
 
@@ -401,7 +428,9 @@ function render(
       case 'Blockquote': {
         const body = blocks(node);
         const alert = doc ? /^<p>\[!([A-Za-z][A-Za-z0-9-]*)\][ \t]*/.exec(body) : null;
-        if (!alert) return `<blockquote>${body}</blockquote>`;
+        if (!alert) {
+          return `<blockquote${office ? ` style="${OFFICE_QUOTE}"` : ''}>${body}</blockquote>`;
+        }
         const type = alert[1]!.toLowerCase();
         const title = type.charAt(0).toUpperCase() + type.slice(1);
         return `<blockquote class="rl-callout rl-callout-${escape(type)}"><p class="rl-callout-title">${escape(title)}</p><p>${body.slice(alert[0].length)}</blockquote>`;

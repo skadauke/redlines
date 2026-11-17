@@ -32,6 +32,15 @@ export interface DocumentHtmlOptions {
   fonts?: FontStacks;
   /** Draws HTML blocks as the sanitizer allows. On by default when there is a DOM. */
   htmlBlocks?: boolean;
+  /**
+   * For a program that pastes, Word or Google Docs, not a page: inline styles instead of the
+   * stylesheet's, `<s>` for a strike, borders on table cells, a quote that reads without its rule.
+   */
+  office?: boolean;
+  /** Which images (by destination) come out as their alt text. */
+  altOnly?: (href: string) => boolean;
+  /** An image as a `data:` address, which a program that pastes can't fail to load; else null. */
+  embedImage?: (shown: string) => string | null;
 }
 
 /** The fonts of the page the HTML goes in, by its CSS variables. */
@@ -82,7 +91,12 @@ export function documentHtml(
     return null;
   };
   const parts: DocumentParts = {
-    imageUrl,
+    imageUrl: (written) => {
+      const url = imageUrl(written);
+      return url !== null && options.embedImage ? (options.embedImage(url) ?? url) : url;
+    },
+    office: options.office,
+    altOnly: options.altOnly,
     html: options.htmlBlocks === false ? undefined : (source) => drawnHtml(source, imageUrl),
   };
   return markdownToDocumentHtml(
