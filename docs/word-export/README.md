@@ -139,6 +139,28 @@ Redlines syntax:
 7. **Open with Track Changes on** (`trackRevisions: true`) so edits made in
    Word come back as revisions too.
 
+### What the exporter writes beyond the core
+
+`packages/word` writes these as well. What has no Word form is said in the second column, and the
+export's `report` (an option, a list of `{kind, message}`) names the ones that need a person.
+
+| Redlines                              | Word                                                                 | What does not map                                                                 |
+| ------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Inserted row (`ins … row`)            | `w:ins` in the row's properties, its text as inserted runs           |                                                                                   |
+| Deleted row (`del … row=N`)           | A row of deleted text at its place, `w:del` in its properties        |                                                                                   |
+| Cell edit                             | `w:ins` and `w:del` runs in the cell                                 |                                                                                   |
+| Inserted column (`ins … col`)         | The new cells' text as inserted runs                                 | Word can't track a new column: rejecting the text leaves an empty column. Reported |
+| Deleted column (`del … col=N`)        | A cell of deleted text in each row, and a comment on the header's    | Word tracks no deleted column: the column stays after accepting. Reported         |
+| Column alignment, alignment change    | `w:jc` on each cell's paragraph; `w:pPrChange` with the old `w:jc`   |                                                                                   |
+| Inline format change (`fmt +bold`…)   | `w:rPrChange` with the old properties: bold, italic, strike, code (font), sub, sup | Link changes (`+link`, `link=`) and `+html`, `@attr` have no run property; the text is exported as it now is |
+| Block format change (`fmt was=…`)     | `w:pPrChange` with the old style, list or indent                     | Callout types (`was=callout-…`) and the number a list item had                    |
+| Split (`<!--split-->`)                | The paragraph mark before it is inserted                             |                                                                                   |
+| Join (a deletion of `\n\n` and prefix) | The paragraph mark is deleted, so that accepting joins the two      |                                                                                   |
+| Move (a deletion and an insertion of the same text in one `group`, or named by `move`) | `w:moveFrom` and `w:moveTo` with one range name | A move that was widened into one substitution is exported as a substitution; a move whose two texts differ is a deletion and an insertion |
+| Image                                 | An inline picture (PNG, JPEG, GIF, BMP) of its own size, at most 6.5 inches wide, with alt text and title; an inserted image is a tracked insertion | Pictures whose bytes are not given (a `data:` address carries them; others through the `images` option), SVG and WebP: the description stands in, `[Image: alt]`. Reported |
+| Comment on deleted text (`about` a deletion) | A comment range around the deleted runs                       | Word drops such a comment when the deletion is accepted                           |
+| Task item                             | A box, `☐` or `☒`, and no bullet; a checked or unchecked box is the old box deleted and the new inserted | Word has no tracked checkbox: a task is only text                       |
+
 ## Proof of concept
 
 The script used for the checks above (`npm i docx@^9.8`, then `node gen.mjs`):
