@@ -1,0 +1,78 @@
+# The Quarto check (docs/research/quarto-check.md): renders a marked-up .qmd with a pinned Quarto and
+# checks that the newest text comes out. Optional, as decided in #930: it runs on a schedule, of the
+# open Epic branch (main when none is open, as ci.yml's schedule does), and on pull requests that touch
+# Quarto code, and on no other. It runs the markdown engine only; the engines need R or Jupyter.
+name: Quarto
+
+on:
+  pull_request:
+    paths:
+      - 'packages/format/**'
+      - 'apps/desktop/scripts/quarto-check.ts'
+      - 'apps/desktop/src/quarto-check.node.test.ts'
+      - 'docs/research/fixtures/**'
+      - '.github/workflows/quarto.yml'
+  # A schedule always runs the workflow file of main; `target` finds the branch.
+  schedule:
+    - cron: '47 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quarto-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Which commit
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EPIC_BRANCH: ${{ vars.EPIC_BRANCH }}
+        shell: bash
+        run: |
+          ref="$GITHUB_SHA"
+          if [ "$EVENT" = schedule ]; then
+            branch="$EPIC_BRANCH"
+            if [ -z "$branch" ]; then
+              branch=$(gh api "repos/$REPO/git/matching-refs/heads/epic/" --jq '.[].ref' \
+                | sed 's#^refs/heads/##' | grep -v '^epic/collab$' | sort -V | tail -n 1 || true)
+            fi
+            if [ -n "$branch" ]; then
+              found=$(gh api "repos/$REPO/git/ref/heads/$branch" --jq '.object.sha' || true)
+              [ -n "$found" ] && ref="$found"
+            fi
+            echo "The scheduled run tests: ${branch:-main} at $ref"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.target.outputs.ref }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Pinned to a commit, and to the Quarto release that the note was written against.
+      - uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b
+        with:
+          version: 1.11.9
+
+      - name: Run the check
+        working-directory: apps/desktop
+        run: node scripts/quarto-check.ts --markdown | tee "$GITHUB_STEP_SUMMARY"
