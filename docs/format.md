@@ -252,7 +252,8 @@ early, must stay on one line, and must not let other tools act on what it contai
   take the same line breaks. A new ledger takes the line break that the file had before the edit
   that makes it, so that a change that takes the file's last CRLF out of the body leaves the
   ledger, and with it the file, CRLF.
-- **A line break keeps its own kind.** Rejecting a change gives the old text back byte for byte, so
+- **A line break keeps its own kind.** The editor writes it the same as the command line does (it
+  edits and decides the file's own text, not its LF-only document: #924). Rejecting a change gives the old text back byte for byte, so
   an LF in a CRLF file comes back as an LF, a CRLF in an LF file as a CRLF, and a CR alone as a CR.
   In a payload, `\n` is a line break of the file's kind, as it always was, so a file of one kind
   needs nothing more, and every file written before reads the same. A break of the other kind is
