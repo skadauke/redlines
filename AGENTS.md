@@ -175,6 +175,14 @@ repo root.
   preview, register the app (`lsregister -f -R -trusted`, `pluginkit -a <the .appex>`) and run
   `qlmanage -p file.md`; the steps are in [docs/releasing.md](docs/releasing.md#the-quick-look-extension).
   The renderer's tests are ordinary Vitest tests (`apps/desktop/quicklook/src`).
+  The Finder thumbnails are a second extension, `RedlinesThumbnail.appex` (the same script builds,
+  signs and checks both, and `--check-app` reads both). What decides the picture Finder draws for a
+  `.md` file: Quick Look's thumbnail service asks every registered `com.apple.quicklook.thumbnail`
+  extension whose `QLSupportedContentTypes` the file's type conforms to; if one answers, its picture
+  is drawn, and the document icon of the default app (`document-types.plist`) is only what is drawn
+  when none does. So with Redlines as the default app and no thumbnail extension, Finder shows
+  Redlines' document icon, and with it, the page. `qlmanage -t` uses the old generators and never
+  asks the extension: to see Finder's picture, ask `QLThumbnailGenerator`.
 - Website: in `website/`, `npm ci`, `npm run embed` (builds the embed first), `npm test`,
   `npm run compare:check`, `npm run icons:check`, `npm run sync-release:check`, `npm run build` and
   `npm run test:e2e` (the browser smoke test of `out/`, in Chromium and WebKit) and `npm run perf`
