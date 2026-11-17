@@ -376,6 +376,9 @@ const editor = createEditor(element('#editor'), {
       return url === null ? null : imageWatch.url(file, url);
     });
   },
+  // A copy embeds the bytes of the selection's local images, read as an agent's are: only inside the
+  // document's folder, as PNG, JPEG, GIF or WebP, up to 3.5 MB; any other keeps its address.
+  imageData: (src) => readImageForAgent(src).catch(() => null),
   imageSize: (src) => {
     const path = imageDocument;
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;

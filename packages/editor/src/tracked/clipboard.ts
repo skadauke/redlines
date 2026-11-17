@@ -14,7 +14,7 @@
 
 import { syntaxTree } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
-import { EditorView, ViewPlugin } from '@codemirror/view';
+import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import {
   newestView,
   parse,
@@ -25,7 +25,7 @@ import {
 } from '@redlines/format';
 import { type FontStacks, destination, fontStack } from '../clipboard/copy-html.ts';
 import { documentHtml } from '../clipboard/document-html.ts';
-import { imageResolver } from '../preview/image.ts';
+import { imageReader, imageResolver, sourceOf } from '../preview/image.ts';
 import { htmlToMarkdown, htmlToRange } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
 import { pasteListItems } from '../blocks/keys.ts';
@@ -174,12 +174,55 @@ function fontsOf(view: EditorView): FontStacks {
   };
 }
 
+/** The files of a selection's local images, read ahead by the host: the URL they show at, as data. */
+const fetched = new WeakMap<EditorView, Map<string, string>>();
+const IMAGE_MARKUP = /!\[[^\]]*\]\(\s*(<[^>\n]*>|[^\s)]+)|\bsrc="([^"\n]*)"/g;
+/** The most text of a selection that is searched for images, and the images read for one. */
+const SEARCHED = 400_000;
+const MOST_IMAGES = 12;
+
+/**
+ * Reads the local images of the selection through the host, while the person reaches for the copy
+ * key, so that the copy (which can only write the clipboard before its event ends) has the bytes.
+ * An image not read in time is copied by its address.
+ */
+function readAhead(view: EditorView): void {
+  const reader = view.state.facet(imageReader);
+  const resolve = view.state.facet(imageResolver);
+  if (!reader || !resolve) return;
+  const { from, to } = view.state.selection.main;
+  if (from === to) return;
+  const text = view.state.sliceDoc(from, Math.min(to, from + SEARCHED));
+  // Each selection reads its images again, so that a file saved since is not copied as it was, and
+  // nothing outlives the selection it was read for.
+  const known = new Map<string, string>();
+  fetched.set(view, known);
+  const seen = new Set<string>();
+  for (const match of text.matchAll(IMAGE_MARKUP)) {
+    const found = sourceOf(destination(match[1] ?? match[2] ?? ''));
+    if (found.kind !== 'local' || seen.size >= MOST_IMAGES) continue;
+    const shown = resolve(found.path);
+    if (shown === null || seen.has(shown)) continue;
+    seen.add(shown);
+    reader(found.path)
+      .then((file) => {
+        // A newer selection has its own map by now; this one is dropped.
+        if (file && fetched.get(view) === known) {
+          known.set(shown, `data:${file.mimeType};base64,${file.data}`);
+        }
+      })
+      .catch(() => undefined);
+  }
+}
+
 /**
  * An image the editor has drawn, as a `data:` address, which Word and Google Docs load where they
  * fail a remote or local one. Null when it isn't loaded here or the page may not read its pixels.
  */
 function embedded(view: EditorView, shown: string): string | null {
   if (shown.startsWith('data:') || typeof document === 'undefined') return shown;
+  const read = fetched.get(view)?.get(shown);
+  if (read) return read;
   for (const img of Array.from(view.dom.querySelectorAll('img'))) {
     if (img.src !== shown && img.getAttribute('src') !== shown) continue;
     if (!img.complete || !img.naturalWidth) return null;
@@ -338,6 +381,9 @@ export function clipboard(): Extension {
       view.dom.addEventListener('copy', copied);
       view.dom.addEventListener('cut', copied);
       return {
+        update: (update: ViewUpdate) => {
+          if (update.selectionSet && !raw(update.state)) readAhead(view);
+        },
         destroy: () => {
           view.dom.removeEventListener('copy', copied);
           view.dom.removeEventListener('cut', copied);
