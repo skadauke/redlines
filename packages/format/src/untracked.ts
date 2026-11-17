@@ -670,12 +670,13 @@ function edited(
   const ledger = workingLedger(parsed.ledger);
   const created: string[] = [];
   let closers = '';
+  let around: Seg[] = [];
   let openers = '';
   /** The mark that typed text splits, or the one next to the edit: a refusal names it. */
   let named: MarkRange | undefined;
   for (const i of [g, g - 1, g + 1, g - 2]) named ??= kept[i]?.marker?.mark;
   if (typed !== '') {
-    const around = segs
+    around = segs
       .filter((seg) => isContainer(seg) && at.get(seg.open)! < g && g <= at.get(seg.close)!)
       .toSorted((a, b) => at.get(a.open)! - at.get(b.open)!);
     named = around[0]?.mark ?? named;
@@ -806,7 +807,18 @@ function edited(
     const typedAt = startOf(insertion) + (ahead ? 0 : closers.length);
     const close = inspectPlace(mid, hidden, ahead ? startOf(closing) : startOf(insertion));
     const open = inspectPlace(mid, hidden, typedAt + typed.length);
-    if (close.kind !== 'ok' || (openers !== '' && open.kind !== 'ok' && open.kind !== 'block')) {
+    // A table's old rows stay with the first part of the replacement they are in, so text typed in the middle
+    // of its new rows would come out of the old table, after its last pipe, in the original (#955).
+    const tableOld = around.some(
+      (seg) =>
+        seg.segment.payload?.includes('|') &&
+        /\|/.test(mid.slice(lineStart(mid, typedAt), lineEnd(mid, typedAt))),
+    );
+    if (
+      close.kind !== 'ok' ||
+      tableOld ||
+      (openers !== '' && open.kind !== 'ok' && open.kind !== 'block')
+    ) {
       throw new EditError(
         `Text can't be typed here with Track Changes off: it would split ${name} where Markdown can't hold its hidden marks, such as at the start of a line or inside a link. ${wayAround(named)}`,
         'no-legal-placement',
