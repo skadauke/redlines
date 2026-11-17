@@ -1154,7 +1154,14 @@ mod tests {
         assert_eq!(last["redlines"], "end");
         assert_eq!(last["stopped"], true);
         assert_eq!(last["code"], serde_json::Value::Null);
-        assert_eq!(last["signal"], libc::SIGINT);
+        // A stop sends SIGINT, and SIGTERM when that doesn't end the run in the grace. Which of the
+        // two ends it depends on the system's `sleep` (uutils' ends on SIGTERM under `sh`), so the
+        // test holds to what a stop guarantees: the run ends by one of the two, never by SIGKILL.
+        let signal = last["signal"].as_i64().unwrap();
+        assert!(
+            signal == i64::from(libc::SIGINT) || signal == i64::from(libc::SIGTERM),
+            "{signal}"
+        );
     }
 
     #[test]
