@@ -4281,8 +4281,8 @@ A file changes only when its content does.
   holds its newest code. Chunk options are kept byte for byte.
 - Fenced divs (`:::`, callouts, columns, tabsets) and cross-references. Pandoc takes a fence only
   when nothing else is on its line, and reads `@fig-x`, `@sec-x` and `[@a; @b]` as one key, so
-  these are held in every file type, since the library reads a file of any type alike (§9.1): a
-  marker never stands on a `:::` line or inside a reference (§3.1, rule 9). An edit that touches
+  these are held in a file of the pandoc dialect (§9.1), where a marker never stands on a `:::`
+  line or inside a reference (§3.1, rule 9); in a `.md` file they are text. An edit that touches
   a fence line is a replacement of the unit that holds it (§3.12), the div's paragraph or the
   whole div, and an edit that touches a reference is one of the whole reference (a deletion of all
   of it is a deletion, and text typed next to it stands outside it). A div typed with Track Changes
