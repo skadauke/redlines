@@ -39,9 +39,9 @@ function load() {
   const crops: CropRect[] = [];
   const session = startCrop(
     editor.view,
-    async (_src, crop) => {
+    (_src, crop) => {
       crops.push(crop);
-      return 'cat-crop.png';
+      return Promise.resolve('cat-crop.png');
     },
     () => {},
   );
