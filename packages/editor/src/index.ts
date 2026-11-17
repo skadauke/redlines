@@ -314,6 +314,9 @@ export type { AgentIntent } from './tracked/agent-intent.ts';
 export { anchorChanges, rebaseAgentEdit } from './tracked/agent-rebase.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
+export { addLineBreakStyles, docFileText, fileLineBreak, loadFile } from './line-breaks.ts';
+export type { BreakStyle } from './line-breaks.ts';
+export { FileView } from './tracked/file-view.ts';
 export {
   anchorFormat,
   anchorMove,

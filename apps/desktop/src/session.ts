@@ -21,7 +21,7 @@ import {
   type WalRecord,
 } from '@redlines/collab';
 import type { Editor } from '@redlines/editor';
-import { PALETTE, syncEditor, type SyncBinding, type SyncState } from '@redlines/sync';
+import { PALETTE, syncEditor, syncText, type SyncBinding, type SyncState } from '@redlines/sync';
 
 /** What the app answers a window that joins a document's session. */
 export interface Joined {
@@ -464,11 +464,11 @@ export async function joinSession(
   await serve();
   if (leading) {
     const left =
-      joined.left && joined.left.base === editor.view.state.doc.toString() ? joined.left : null;
-    hub = await host(editor.view.state.doc.toString(), left);
+      joined.left && joined.left.base === syncText(editor.view.state) ? joined.left : null;
+    hub = await host(syncText(editor.view.state), left);
     windowOf.set(clientID, ports.label);
     transport = new Switch(memoryTransport(hub, clientID));
-    if (left && hub.authority.text !== editor.view.state.doc.toString()) {
+    if (left && hub.authority.text !== syncText(editor.view.state)) {
       // What the last run confirmed and never saved comes back, as a reload does: unsaved.
       editor.reloadDoc(hub.authority.text);
     }

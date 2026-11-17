@@ -49,7 +49,17 @@ class LineBreak extends RangeValue {
  * undo gives back. Its ranges map through changes, as the history maps what it keeps.
  */
 const resetLineBreaks = StateEffect.define<RangeSet<LineBreak>>({
-  map: (breaks, mapping) => breaks.map(mapping),
+  // The history keeps this record as it was before an edit, and maps it over the changes that
+  // others make after it (a session's windows). Where the record isn't on the text the mapping
+  // starts from, the kinds are given up and the file's own stands: Undo restores a break of the
+  // file's kind, rather than the window stopping (#1057).
+  map: (breaks, mapping) => {
+    try {
+      return breaks.map(mapping);
+    } catch {
+      return RangeSet.empty as RangeSet<LineBreak>;
+    }
+  },
 });
 
 /** Makes a file the editor's: the one it was loaded with, or the one an undo gives back. */
@@ -355,6 +365,20 @@ function textOf(
   let text = doc.line(1).text;
   for (let n = 2; n <= doc.lines; n++) text += breaks[n - 2]! + doc.line(n).text;
   return text;
+}
+
+/**
+ * The file's text for the document in `state`, line breaks of every kind as the editor has them
+ * written (the open paragraph stays, as in `mixedFileText`), or null when the document is its own
+ * file text: an LF file with no break of another kind. This is the text a session's replicas and
+ * authority hold, whose offsets are the file's (#1057); a window's document keeps LF breaks.
+ */
+export function docFileText(state: EditorState): string | null {
+  const file = state.field(fileField, false);
+  if (!file) return null;
+  const kept = state.field(lineBreaks, false) ?? (RangeSet.empty as RangeSet<LineBreak>);
+  if (!kept.size && file.lineBreak === '\n' && file.formatBreak === '\n') return null;
+  return textOf(state, state.doc, kept, state.field(parsedField, false)?.ledgerRange ?? null);
 }
 
 /** The line break the file writes for a new one, or null when the editor has no file. */

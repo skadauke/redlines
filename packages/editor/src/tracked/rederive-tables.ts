@@ -20,6 +20,8 @@ import type { Part, Rederived } from './rederive.ts';
 import { partOf, placed } from './rederive-other.ts';
 import { deriveIntent } from './typing.ts';
 import type { StepsIntent } from './intent.ts';
+import { fileLineBreak, mixedFileText } from '../line-breaks.ts';
+import { FileView } from './file-view.ts';
 import { deriveReview } from './review-intent.ts';
 import type { ReviewIntent, ReviewOp } from './review-intent.ts';
 
@@ -430,7 +432,12 @@ export function rederiveReview(state: EditorState, anchored: AnchoredReview): Re
     op = { ...op, range };
   }
   try {
-    const done = deriveReview(text, intent, op);
+    // A decision in a file with line breaks of more than one kind is written on the file's own
+    // text, so that a break it restores has the kind its payload names, and brings that kind back
+    // in the styles (#924, #1057).
+    const file = op.op === 'decide' ? mixedFileText(state, true) : null;
+    const onFile = file === null ? null : new FileView(file);
+    const done = deriveReview(text, intent, op, onFile ? onFile.text : text);
     if (!done.ok) {
       return none(
         text.length,
@@ -439,12 +446,18 @@ export function rederiveReview(state: EditorState, anchored: AnchoredReview): Re
           : 'Someone changed a suggestion you decided on, so your decision was not applied. Review it again.',
       );
     }
+    const brought = onFile?.changesToDoc(done.changes, fileLineBreak(state) ?? '\n');
     return {
       ok: true,
       changes: ChangeSet.of(
-        done.changes.map(({ from, to, insert }) => ({ from, to, insert })),
+        (brought ? brought.changes : done.changes).map(({ from, to, insert }) => ({
+          from,
+          to,
+          insert,
+        })),
         text.length,
       ),
+      ...(brought?.styles.length ? { styles: brought.styles } : {}),
       notices: done.skipped?.length
         ? [
             'Some suggestions you decided on were changed by someone else, and were left as they are.',
