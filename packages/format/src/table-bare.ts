@@ -9,15 +9,18 @@ import { applyChanges } from './changes.ts';
 import { changesBetween } from './edit-support.ts';
 import { randomFor } from './ids.ts';
 import { parse } from './parse.ts';
+import { EditError } from './errors.ts';
 import { tablesOfText } from './table.ts';
 import { tableExtent } from './table-rules.ts';
-import { trackedEdit } from './track.ts';
+import { Untrackable } from './widen.ts';
+import type { TableRead } from './table.ts';
+import { tableEdit } from './table-ops.ts';
 import type { MarkRange, Parsed, TextChange } from './types.ts';
 
 /**
- * The changes that reject `marks`, the inserted columns that are every column of a table whose only
- * other pending change is the deletion of one column, as the deletion of the table in that deletion's
- * mark; or undefined for any other decision. `rejectBoth` rejects the marks given, which with that
+ * The changes that reject `marks`, the inserted columns that are every column of a table with one
+ * pending deletion of a column, as the deletion of the table in that deletion's mark, the table's other
+ * pending changes in its payload (§3.12); or undefined for any other decision. `rejectBoth` rejects the marks given, which with that
  * deletion gives the original table back.
  */
 export function wholeTableDeleted(
@@ -34,27 +37,14 @@ export function wholeTableDeleted(
   for (const table of tablesOfText(text, parsed)) {
     const mine = table.colMarks.filter((c) => ids.has(c.mark.id));
     if (mine.length !== marks.length || mine.length !== table.aligns.length) continue;
-    const [line, ...more] = table.deletions;
-    if (!line || more.length > 0 || line.axis !== 'col' || line.mark.entry.move !== undefined) {
-      return undefined;
-    }
+    // One pending deletion of a column is the table's deletion (below). Several can't be one deletion:
+    // `decideCols` widens the decision to the table's columns, which come back with it (format §3.7).
+    const colLines = table.deletions.filter((d) => d.axis === 'col');
+    const [line] = colLines;
+    if (!line || colLines.length > 1 || line.mark.entry.move !== undefined) return undefined;
     const deletion = line.mark;
-    // Nothing else is pending in it: a mark with a marker in the table, but for comments and the
-    // columns decided, is another change, and the column keeps its refusal.
-    const extent = tableExtent(text, table);
-    const other = parsed.marks.some(
-      (mark) =>
-        mark.kind !== 'cmt' &&
-        mark.kind !== 'hl' &&
-        mark.id !== deletion.id &&
-        !ids.has(mark.id) &&
-        mark.segments.some((segment) =>
-          [segment.open, segment.close].some(
-            (range) => range !== undefined && extent.from <= range.from && range.to <= extent.to,
-          ),
-        ),
-    );
-    if (other) return undefined;
+    // Every other pending change in the table (rows, other deletions, alignment) stays pending in the
+    // deletion's payload (format §3.12), written by the edit that deletes the table.
     const original = applyChanges(text, rejectBoth([...marks, deletion]));
     const back = tablesOfText(original, parse(original)).find((t) => t.from === table.from);
     if (!back) return undefined;
@@ -62,17 +52,45 @@ export function wholeTableDeleted(
       handle: deletion.entry.by,
       name: deletion.entry.by,
     };
-    const edit = trackedEdit(
-      original,
-      { from: back.from, to: back.to, insert: '' },
-      {
-        author,
-        time: deletion.entry.at,
-        random: randomFor(deletion.id),
-        ...(deletion.entry.note === undefined ? {} : { note: deletion.entry.note }),
-      },
-    );
+    // The deletion of the whole table as the table's own operation writes it (rule 6): the other changes
+    // pending in the table stay pending in its payload (§3.12).
+    let edit: TextChange[];
+    try {
+      edit = tableEdit(
+        original,
+        { kind: 'deleteTable', table: back.from },
+        {
+          author,
+          time: deletion.entry.at,
+          random: randomFor(deletion.id),
+          ...(deletion.entry.note === undefined ? {} : { note: deletion.entry.note }),
+        },
+      ).changes;
+    } catch (error) {
+      if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
+      // No unit holds the table with those changes in it (it is the whole text, and the closer of a
+      // replacement would stand alone): the decision is widened to the table's changes, which are
+      // all rejected with it, the table as it was. Every order reads alike, since the changes are
+      // gone with the decision, whichever of them was decided before.
+      return rejectBoth(everyChangeIn(text, parsed, table));
+    }
     return changesBetween(text, applyChanges(original, edit));
   }
   return undefined;
+}
+
+/** Every change with a marker in the lines of the table: its inserted and deleted columns and rows,
+ * its alignment change and any other mark but a comment or a highlight. */
+function everyChangeIn(text: string, parsed: Parsed, table: TableRead): MarkRange[] {
+  const extent = tableExtent(text, table);
+  return parsed.marks.filter(
+    (mark) =>
+      mark.kind !== 'cmt' &&
+      mark.kind !== 'hl' &&
+      mark.segments.some((segment) =>
+        [segment.open, segment.close].some(
+          (range) => range !== undefined && extent.from <= range.from && range.to <= extent.to,
+        ),
+      ),
+  );
 }

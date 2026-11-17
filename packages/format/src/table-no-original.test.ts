@@ -10,6 +10,7 @@ import { tableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import {
+  ada,
   bo,
   bodyOf,
   context,
@@ -121,5 +122,109 @@ describe('other shapes of a table with no column of its original (#477)', () => 
     expect(trim(gone)).toBe('Before.\n\n<!--cmt c9qf-->\n\nText.');
     expect(parse(gone).ledger.comments.map((t) => t.id)).toEqual(['c9qf']);
     expect(parse(gone).marks.map((m) => m.id)).toContain('c9qf');
+  });
+});
+
+describe('a table with no column of its original, beside other pending changes (#891)', () => {
+  type Step = [typeof ada, WithoutTable<TableOp>, string[]];
+  const make = (base: string, steps: Step[]) => {
+    let text = file(base);
+    for (const [person, o, ids] of steps) {
+      const table = readTables(text, parse(text))[0]?.from ?? 0;
+      const edit = tableEdit(text, { ...o, table }, context(person, ids));
+      text = applyChanges(text, edit.changes);
+    }
+    return text;
+  };
+  const check = (label: string, text: string) => {
+    expectEveryOrderAlike(label, text, exactly);
+    expectNoDecisionRefused(label, text);
+  };
+  const TWO = 'Before.\n\n| a | b |\n| - | - |\n| x | y |\n| z | w |\n\nText.';
+  const ONE = 'Before.\n\n| a |\n| - |\n| x |\n| z |\n\nText.';
+  const ids = (...more: string[]) => ['v6xz', 'v7aa', 'v8bb', 'v9cc', 'w2dd', 'w3ee', ...more];
+
+  it("another person's inserted row beside the one deleted column", () => {
+    check(
+      'a row inserted by Ada',
+      make(ONE, [
+        [bo, { kind: 'insertCols', after: 1, count: 1 }, ['t6vw']],
+        [bo, { kind: 'deleteCols', cols: [0] }, ids()],
+        [ada, { kind: 'insertRows', after: 1, count: 1 }, ['r4ab', 'r5cd', 'r6ef']],
+      ]),
+    );
+  });
+
+  it("another person's deleted row beside the one deleted column", () => {
+    check(
+      'a row deleted by Ada',
+      make(ONE, [
+        [bo, { kind: 'insertCols', after: 1, count: 1 }, ['t6vw']],
+        [bo, { kind: 'deleteCols', cols: [0] }, ids()],
+        [ada, { kind: 'deleteRows', rows: [1] }, ['r4ab', 'r5cd']],
+      ]),
+    );
+  });
+
+  it('two deleted columns', () => {
+    const steps: Step[] = [
+      [bo, { kind: 'insertCols', after: 2, count: 1 }, ['t6vw']],
+      [bo, { kind: 'deleteCols', cols: [0, 1] }, ids()],
+    ];
+    check('both in one operation', make(TWO, steps));
+    check(
+      'a row inserted by Ada',
+      make(TWO, [
+        ...steps,
+        [ada, { kind: 'insertRows', after: 1, count: 1 }, ['r4ab', 'r5cd', 'r6ef']],
+      ]),
+    );
+  });
+
+  it('every other kind of pending change in the table, by Bo or by Ada', () => {
+    const others: WithoutTable<TableOp>[] = [
+      { kind: 'insertRows', after: 1, count: 1 },
+      { kind: 'deleteRows', rows: [1] },
+      { kind: 'moveRows', rows: [1], to: 2 },
+      { kind: 'align', cols: [0], align: 'right' },
+      { kind: 'align', cols: [1], align: 'center' },
+      { kind: 'moveCols', cols: [0], to: 2 },
+    ];
+    let built = 0;
+    for (const person of [bo, ada]) {
+      for (const other of others) {
+        for (const base of [ONE, TWO]) {
+          const last = base === ONE ? 1 : 2;
+          const steps: Step[] = [
+            [bo, { kind: 'insertCols', after: last, count: 1 }, ['t6vw']],
+            [bo, { kind: 'deleteCols', cols: base === ONE ? [0] : [0, 1] }, ids()],
+            [person, other, ['r4ab', 'r5cd', 'r6ef', 'r7gh', 'r8jk', 'r9mn']],
+          ];
+          let text: string;
+          try {
+            text = make(base, steps);
+          } catch {
+            continue;
+          }
+          built++;
+          check(
+            `${person.handle} ${JSON.stringify(other)} in ${base === ONE ? 'one' : 'two'}`,
+            text,
+          );
+        }
+      }
+    }
+    expect(built).toBeGreaterThan(8);
+  });
+
+  it('two deleted columns, one by each of two people', () => {
+    check(
+      'two people',
+      make(TWO, [
+        [bo, { kind: 'insertCols', after: 2, count: 1 }, ['t6vw']],
+        [bo, { kind: 'deleteCols', cols: [0] }, ids()],
+        [ada, { kind: 'deleteCols', cols: [0] }, ids('x4ff')],
+      ]),
+    );
   });
 });
