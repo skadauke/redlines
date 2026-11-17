@@ -107,6 +107,8 @@ export interface DocumentParts {
    * borders and widths on every table cell, a quote that reads without its rule, and no class.
    */
   office?: boolean;
+  /** A selection of a document, not a whole one: footnotes, alerts and HTML blocks stay text. */
+  clip?: boolean;
   /** Which images (by destination) come out as their alt text. */
   altOnly?: (href: string) => boolean;
 }
@@ -127,6 +129,8 @@ function render(
   doc?: DocumentParts,
 ): string {
   const office = doc?.office === true;
+  // The parts of the language that a whole page draws and a selection leaves as text.
+  const page = doc && !doc.clip ? doc : undefined;
   // A picture as data is what a program that pastes can always draw.
   const pictureOk = (href: string) =>
     safe(href) || (office && /^data:image\/(?:png|jpe?g|gif|webp);base64,[\w+/=]+$/i.test(href));
@@ -182,7 +186,7 @@ function render(
 
   /** Text of a document's prose, in which a footnote's mark is a superscript. */
   const prose = (from: number, to: number) =>
-    doc ? text(from, to).replace(FOOTNOTE_MARK, '<sup>$1</sup>') : text(from, to);
+    page ? text(from, to).replace(FOOTNOTE_MARK, '<sup>$1</sup>') : text(from, to);
 
   /** The children of `node` between `from` and `to`, with the text between them. */
   function inlines(node: SyntaxNode, from = node.from, to = node.to): string {
@@ -378,8 +382,10 @@ function render(
         parts.push(block(child));
       }
     }
-    const task = doc && !office && parts.some((part) => /^[\u2610\u2611]/.test(part));
-    return `<li${task ? ' class="rl-task"' : ''}>${parts.join('')}</li>`;
+    const task = doc && parts.some((part) => /^[\u2610\u2611]/.test(part));
+    // A task item is its box alone, with no bullet (Word and Docs draw one beside it otherwise).
+    const mark = !task ? '' : office ? ' style="list-style-type:none"' : ' class="rl-task"';
+    return `<li${mark}>${parts.join('')}</li>`;
   }
 
   function list(node: SyntaxNode): string {
@@ -418,7 +424,7 @@ function render(
     if (level) return heading(node, Number(level));
     switch (node.name) {
       case 'Paragraph': {
-        const note = doc ? /^\[\^([^\]\s]+)\]:[ \t]*/.exec(slice(node.from, node.to)) : null;
+        const note = page ? /^\[\^([^\]\s]+)\]:[ \t]*/.exec(slice(node.from, node.to)) : null;
         if (note) {
           const body = inlines(node, node.from + note[0].length);
           return `<p class="rl-footnote"><sup>${escape(note[1]!)}</sup> ${body}</p>`;
@@ -427,7 +433,7 @@ function render(
       }
       case 'Blockquote': {
         const body = blocks(node);
-        const alert = doc ? /^<p>\[!([A-Za-z][A-Za-z0-9-]*)\][ \t]*/.exec(body) : null;
+        const alert = page ? /^<p>\[!([A-Za-z][A-Za-z0-9-]*)\][ \t]*/.exec(body) : null;
         if (!alert) {
           return `<blockquote${office ? ` style="${OFFICE_QUOTE}"` : ''}>${body}</blockquote>`;
         }
@@ -446,7 +452,7 @@ function render(
       case 'Table':
         return table(node);
       case 'LinkReference': {
-        const note = doc
+        const note = page
           ? /^\[\^([^\]\s]+)\]:[ \t]*([\s\S]*)$/.exec(slice(node.from, node.to))
           : null;
         if (note) {
@@ -457,11 +463,11 @@ function render(
       case 'HTMLBlock': {
         const picture = tagPicture(slice(node.from, node.to));
         if (picture !== null) return `<p>${picture}</p>`;
-        if (doc) {
+        if (page) {
           // A comment is not shown; other HTML is drawn as the sanitizer allows.
           const source = slice(node.from, node.to);
           if (/^\s*<!--(?:(?!-->)[\s\S])*-->\s*$/.test(source)) return '';
-          const drawn = doc.html?.(source);
+          const drawn = page.html?.(source);
           if (drawn !== null && drawn !== undefined) return `<div class="rl-html">${drawn}</div>`;
         }
         return `<p>${text(node.from, node.to).replace(/\n/g, '<br>')}</p>`;

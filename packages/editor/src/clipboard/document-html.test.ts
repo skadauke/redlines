@@ -182,3 +182,21 @@ describe('documentHtml for Word and Google Docs (office)', () => {
     expect(html).not.toContain('h.png');
   });
 });
+
+describe('documentHtml of a selection (clip)', () => {
+  it('keeps a selection that starts with a rule, and leaves alerts as text', () => {
+    const html = documentHtml('---\nsome words\n---\n\n> [!NOTE]\n> hi', 'clean', {
+      office: true,
+      clip: true,
+    });
+    expect(html).toContain('<hr>');
+    expect(html).toContain('some words');
+    expect(html).not.toContain('rl-callout');
+  });
+
+  it('draws a task item as its box with no bullet', () => {
+    const html = documentHtml('- [x] done\n- [ ] open', 'clean', { office: true, clip: true });
+    expect(html).toContain('<li style="list-style-type:none">☑ done</li>');
+    expect(html).toContain('☐ open');
+  });
+});

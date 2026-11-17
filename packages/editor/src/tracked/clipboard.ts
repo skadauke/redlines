@@ -183,13 +183,17 @@ function embedded(view: EditorView, shown: string): string | null {
   for (const img of Array.from(view.dom.querySelectorAll('img'))) {
     if (img.src !== shown && img.getAttribute('src') !== shown) continue;
     if (!img.complete || !img.naturalWidth) return null;
+    // A picture too large to copy in a keystroke stays an address.
+    if (img.naturalWidth * img.naturalHeight > 12_000_000) return null;
     try {
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
-      canvas.getContext('2d')?.drawImage(img, 0, 0);
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      context.drawImage(img, 0, 0);
       const url = canvas.toDataURL('image/png');
-      return url.startsWith('data:image') ? url : null;
+      return url.startsWith('data:image') && url.length < 8_000_000 ? url : null;
     } catch {
       return null;
     }
@@ -322,6 +326,7 @@ export function clipboard(): Extension {
             ? partsToHtml(own.parts, fontsOf(view), altOnly, lookup)
             : documentHtml(text, 'clean', {
                 office: true,
+                clip: true,
                 fonts: fontsOf(view),
                 emoji: lookup,
                 altOnly,
