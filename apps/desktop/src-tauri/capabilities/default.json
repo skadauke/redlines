@@ -44,6 +44,7 @@
     "allow-identity",
     "allow-image-sizes",
     "allow-image-for-agent",
+    "allow-image-for-crop",
     "allow-image-stamps",
     "allow-keep-running",
     "allow-list-folder",

@@ -13,6 +13,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { Facet, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { MarkdownDialect } from './api.ts';
+import { destination } from './images.ts';
 import { refusedEditEffect } from './tracked/typing.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -599,6 +600,53 @@ export function setImageAlt(view: EditorView, alt: string, at?: number): boolean
   view.dispatch({
     changes: change,
     userEvent: 'input.image.alt',
+    annotations: isolateHistory.of('full'),
+  });
+  return view.state.doc !== before;
+}
+
+/**
+ * The change that points `image` at the file `src` (a path relative to the document, decoded), or null where it points there already. Only the address changes: the alt
+ * text, the title, the width and the alignment stay as they are written (Crop, #624).
+ */
+export function srcEdit(state: EditorState, image: ImageElement, src: string): TextEdit | null {
+  // The address as a link writes it, so that a path with a space is not written twice over.
+  const address = destination(src);
+  if (image.src === address) return null;
+  let insert: string;
+  if (image.form === 'tag') {
+    const own = image.attributes.find((attribute) => attribute.name === 'src');
+    const written = `src="${escapeAttribute(address, image.inTable)}"`;
+    const tag = state.sliceDoc(image.from, image.to);
+    if (!own || !tag.includes(own.source)) return null;
+    insert = tag.replace(own.source, () => written);
+  } else {
+    let node: SyntaxNode | null = syntaxTree(state).resolveInner(image.from + 1, 1);
+    while (node && node.name !== 'Image') node = node.parent;
+    const url = node?.getChild('URL');
+    if (!node || !url) return null;
+    insert = state.sliceDoc(image.from, url.from) + address + state.sliceDoc(url.to, image.to);
+  }
+  return insert === state.sliceDoc(image.from, image.to)
+    ? null
+    : { from: image.from, to: image.to, insert };
+}
+
+/**
+ * Points the image at `at` (default: the one under the caret or in the selection) at the file
+ * `src`, as one change: with Track Changes on, the editing rules write it as the substitution of
+ * the image (an image is atomic content), an ordinary tracked change, and one Undo takes it back.
+ * False when there is no such image or it points there already.
+ */
+export function setImageSrc(view: EditorView, src: string, at?: number): boolean {
+  const image = at === undefined ? imageInSelection(view.state) : imageAt(view.state, at);
+  if (!image) return false;
+  const change = srcEdit(view.state, image, src);
+  if (!change) return false;
+  const before = view.state.doc;
+  view.dispatch({
+    changes: change,
+    userEvent: 'input.image.src',
     annotations: isolateHistory.of('full'),
   });
   return view.state.doc !== before;

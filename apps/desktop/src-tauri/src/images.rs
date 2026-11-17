@@ -364,6 +364,40 @@ pub fn image_for_agent(app: AppHandle, path: String) -> Result<AgentImage, Strin
     }
 }
 
+/// The picture at `path` for the page to crop (Crop, #624), or what is said to the person when it
+/// can't be read: the file as the preview reads it, of any type it shows, as large as one may be. The
+/// page draws the part that is kept to a canvas, which it can't do with the picture it loads from
+/// the app's own address (the canvas would be tainted), and saves that as a copy.
+fn crop_image(images: &Images, path: &str) -> Result<AgentImage, String> {
+    use base64::Engine;
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return Err("Couldn’t read the image.".into());
+    }
+    let (kind, bytes) = read_image(images, path, MAX_IMAGE_BYTES).map_err(|status| {
+        if status == StatusCode::NOT_FOUND {
+            "The image file isn’t there.".to_string()
+        } else {
+            "Redlines can’t read that image: it is outside the folders it shows, or isn’t a picture.".to_string()
+        }
+    })?;
+    Ok(AgentImage {
+        mime_type: kind,
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+/// The one picture the page crops: the file at `path`, an absolute path, only where the page may
+/// load it (`Images::may_load`), read whole. It gives the page no other file and no path to read;
+/// the cropped copy goes back through `add_pasted_image` like any image added.
+#[tauri::command(async)]
+pub fn image_for_crop(app: AppHandle, path: String) -> Result<AgentImage, String> {
+    match app.try_state::<Images>() {
+        Some(images) => crop_image(&images, &path),
+        None => Err("Couldn’t read the image.".into()),
+    }
+}
+
 /// The answer to the page's request for `asset://localhost/<path>`: the image at `path`, if the
 /// page may load it (`image`), and otherwise nothing, with the status Tauri's own asset protocol
 /// gives: 403 for a file the page may not load, 404 for one that isn't there.
@@ -656,6 +690,27 @@ mod tests {
         assert!(at("other/owl.png").is_err());
         assert!(at("repo/gone.png").unwrap_err().contains("isn’t there"));
         assert!(agent_image(&images, "repo/cat.png").is_err());
+    }
+
+    #[test]
+    fn hands_the_page_one_picture_to_crop_and_nothing_else() {
+        let folder = folder("crop-image");
+        make(
+            &folder,
+            &["repo/.gi\u{74}/", "repo/docs/plan.md", "other/owl.png"],
+        );
+        let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+        fs::write(folder.join("repo/cat.png"), png).unwrap();
+        fs::write(folder.join("other/owl.png"), png).unwrap();
+        let app = tauri::test::mock_app();
+        let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
+        allow_shown(&images, &projects);
+        projects.show(&folder.join("repo/docs/plan.md"));
+        let at = |name: &str| crop_image(&images, &folder.join(name).to_string_lossy());
+        assert_eq!(at("repo/cat.png").unwrap().mime_type, "image/png");
+        assert!(at("other/owl.png").is_err());
+        assert!(at("repo/gone.png").unwrap_err().contains("isn’t there"));
+        assert!(crop_image(&images, "repo/cat.png").is_err());
     }
 
     #[test]
