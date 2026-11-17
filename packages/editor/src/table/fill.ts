@@ -24,6 +24,7 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from '../tracked/field.ts';
+import { recordedAs } from '../tracked/intent.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import { annotationsOf, cellText } from './escape.ts';
 import { cellAt } from './model.ts';
@@ -96,7 +97,11 @@ const fillOnTyping = Prec.lowest(
           ? [setViewModeEffect.of(start.facet(markupViewFacet))]
           : []),
       ],
-      annotations: [...annotationsOf(tr), trackedEditAnnotation.of(true)],
+      annotations: [
+        ...annotationsOf(tr),
+        trackedEditAnnotation.of(true),
+        ...(done.intent ? [recordedAs(done.intent)] : []),
+      ],
       scrollIntoView: tr.scrollIntoView,
     };
   }),

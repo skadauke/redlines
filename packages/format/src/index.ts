@@ -1,5 +1,7 @@
 export type * from './types.ts';
 export { EditError } from './errors.ts';
+export { dialectOfName } from './dialect.ts';
+export type { MarkdownDialect } from './dialect.ts';
 export type { EditErrorCode } from './errors.ts';
 export { closerRange, frontMatterEnd, openerRange } from './blocks.ts';
 export { deletedBlocks, deletedTable } from './deleted-blocks.ts';

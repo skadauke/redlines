@@ -65,6 +65,8 @@ export interface DroppedImages {
 export interface WindowStart {
   path: string | null;
   line: number | null;
+  /** The window was opened to join the session of `path`, whose text it takes from its leader. */
+  session?: boolean;
   /**
    * The text of the Untitled document the window starts with, which is unsaved: never an empty
    * string, and null for a window opened for a file or for nothing. A page that reloads asks again
@@ -208,7 +210,7 @@ export interface Host {
    * an Untitled document that holds `text`, which is unsaved. A window opens for a file or for
    * text, not both: the app refuses that, and this rejects with its reason.
    */
-  openWindow(path?: string, line?: number, text?: string): Promise<void>;
+  openWindow(path?: string, line?: number, text?: string, session?: boolean): Promise<void>;
   /** What this window was opened for. */
   windowStart(): Promise<WindowStart>;
   /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
@@ -591,8 +593,13 @@ function createTauriHost(): Host {
       getCurrentWebviewWindow().listen<DroppedImages>('images-dropped', ({ payload }) =>
         onDrop(payload),
       ),
-    async openWindow(path, line, text) {
-      await invoke('open_window', { path: path ?? null, line: line ?? null, text: text ?? null });
+    async openWindow(path, line, text, session) {
+      await invoke('open_window', {
+        path: path ?? null,
+        line: line ?? null,
+        text: text ?? null,
+        ...(session ? { session } : {}),
+      });
     },
     windowStart: () => invoke<WindowStart>('window_start'),
     // Through the app: the menu bar is not a gesture in the page, which the page's own clipboard
