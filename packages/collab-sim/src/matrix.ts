@@ -19,6 +19,25 @@ export const MATRIX: Cell[] = [
   { name: 'hot/c2/5', workload: 'hot', strategy: 'c2', clients: 5 },
   { name: 'typical/c2/5', workload: 'typical', strategy: 'c2', clients: 5 },
   { name: 'hot/c2/online', workload: 'hot', strategy: 'c2', offlineP: 0 },
+  // One person alone, as a baseline for what the format does by itself.
+  ...WORKLOADS.filter((w) => w !== 'review').map((workload) => ({
+    name: `solo/${workload}`,
+    workload,
+    strategy: 'c2' as const,
+    clients: 1,
+    ops: 60,
+    offlineP: 0,
+  })),
+  // The no-host replay merge.
+  ...WORKLOADS.map((workload) => ({
+    name: `${workload}/replay`,
+    workload,
+    strategy: 'c2' as const,
+    engine: 'replay' as const,
+  })),
+  { name: 'hot/replay/5', workload: 'hot', strategy: 'c2', engine: 'replay', clients: 5 },
+  { name: 'typical/replay/5', workload: 'typical', strategy: 'c2', engine: 'replay', clients: 5 },
+  { name: 'hot/replay/online', workload: 'hot', strategy: 'c2', engine: 'replay', offlineP: 0 },
 ];
 
 export type Results = Record<string, SessionSummary[]>;
@@ -152,6 +171,89 @@ export function guardTable(results: Results): string {
   });
   return table(
     ['Cell', 'Sessions', 'Corrupted at end / invalid at any point', 'Decisions turned away'],
+    rows,
+  );
+}
+
+/** The replay merge against the authority's c2: the same oracle, and what the merge costs a
+ * person. */
+export function replayTable(results: Results): string {
+  const rows = WORKLOADS.flatMap((w) => {
+    const cell = results[`${w}/replay`];
+    const c2 = results[`${w}/c2`];
+    if (!cell || !c2) return [];
+    const s = statsOf(cell);
+    const r = cell.map((x) => x.replay);
+    const sum = (f: (x: NonNullable<SessionSummary['replay']>) => number) =>
+      r.reduce((a, x) => a + (x ? f(x) : 0), 0);
+    return [
+      [
+        w,
+        endAndAny(statsOf(c2)),
+        endAndAny(s),
+        pct(
+          sum((x) => x.applied),
+          sum((x) => x.intents),
+        ),
+        pct(
+          sum((x) => x.rewrites),
+          sum((x) => x.merges),
+        ),
+        (
+          sum((x) => x.rewound) /
+          Math.max(
+            1,
+            sum((x) => x.rewrites),
+          )
+        ).toFixed(1),
+        pct(
+          sum((x) => x.vanished),
+          sum((x) => x.intents),
+        ),
+        pct(
+          sum((x) => x.appeared),
+          sum((x) => x.intents),
+        ),
+        msOf(s.medianMs),
+        msOf(s.p95Ms),
+        String(s.diverged),
+      ],
+    ];
+  });
+  return table(
+    [
+      'Workload',
+      'c2: corrupted / invalid',
+      'Replay: corrupted / invalid',
+      'Intents that changed the text',
+      'Merges that rewrote history',
+      'Intents re-derived per rewrite',
+      'Seen by their author, gone in the final order',
+      'Not seen, there in the final order',
+      'Median until every replica has it',
+      'p95',
+      'Sessions that did not converge',
+    ],
+    rows,
+  );
+}
+
+export function replaySizeTable(results: Results): string {
+  const names = [
+    'hot/replay',
+    'hot/replay/5',
+    'typical/replay',
+    'typical/replay/5',
+    'hot/replay/online',
+  ];
+  const rows = names.flatMap((n) => {
+    const cell = results[n];
+    if (!cell) return [];
+    const s = statsOf(cell);
+    return [[n, String(s.sessions), endAndAny(s), String(s.diverged)]];
+  });
+  return table(
+    ['Cell', 'Sessions', 'Corrupted at end / invalid at any point', 'Not converged'],
     rows,
   );
 }

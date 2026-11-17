@@ -12,6 +12,8 @@ import {
   ledgerTable,
   mainTable,
   MATRIX,
+  replaySizeTable,
+  replayTable,
   sizeTable,
   speedTable,
 } from './matrix.ts';
@@ -87,6 +89,8 @@ async function main(): Promise<void> {
   console.log(ledgerTable(results), '\n');
   console.log(guardTable(results), '\n');
   console.log(sizeTable(results), '\n');
+  console.log(replayTable(results), '\n');
+  console.log(replaySizeTable(results), '\n');
   console.log(codesTable(results, Object.keys(results)));
 }
 
