@@ -1144,7 +1144,7 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
     },
     sections: [{ children }],
   });
-  const bytes = new Uint8Array(await Packer.toBuffer(document));
+  const bytes = new Uint8Array(await Packer.toArrayBuffer(document));
   const parts = readParts(bytes);
   const xml = partText(parts, 'word/document.xml');
   let changed = false;

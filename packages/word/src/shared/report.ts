@@ -11,3 +11,6 @@ export interface ReportEntry {
 export interface ImportReport {
   entries: ReportEntry[];
 }
+
+/** What an export couldn't keep, in the same words as an import's. */
+export type ExportReport = ImportReport;

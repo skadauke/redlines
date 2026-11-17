@@ -126,6 +126,9 @@ class FakeHost implements Host {
   print() {
     return Promise.resolve();
   }
+  exportWord() {
+    return Promise.resolve(null);
+  }
   openDefault() {
     return Promise.resolve();
   }

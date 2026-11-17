@@ -224,8 +224,10 @@ The window, on the desktop:
   page has said what it holds: a quit or a restart is refused then, as a Cancel would be, with a
   notice to try again (§8.5).
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
-  in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
-  Print. There is no Export or Open Word File there yet: the Word library (§5.10) isn't in the app. Printing holds the whole document in light ink and prints the view as it shows, without
+  in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close,
+  Export to Word… (a save panel, then a notification, never a dialog, that says what Word can't hold; in the
+  development page the file downloads) and Print. `redlines export-docx <file> [-o out.docx]` does the same
+  from the command line. Printing holds the whole document in light ink and prints the view as it shows, without
   the rail: Redlines in its simple look prints the newest text with its change bars. Saving a
   document that has no file yet opens the Save dialog in the default folder for new documents
   (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
@@ -1299,9 +1301,9 @@ fixtures until real captures replace them), and Copy as HTML is built. `@redline
 writes a `.docx` from a Redlines file (tracked changes, comments, replies, tables, format changes,
 splits, joins, moves, images and task lists, with the data a round trip needs, #834, #847, #845),
 reads a `.docx` with its revisions and comments (#840) and maps the result to Markdown with its
-marks and ledger (#866), and has Google Docs' differences (#838). No command of the app calls it
-yet: File has no Export to Word or Open Word File, and Copy for Word, HTML and PDF export and the
-Word round trip are still to be wired in; File › Print is built.
+marks and ledger (#866), and has Google Docs' differences (#838). File › Export to Word… calls
+the writer (#841); no command calls the reader yet, so File has no Open .docx…, and Copy for Word,
+PDF export and the Word round trip are still to be wired in; File › Print is built.
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
