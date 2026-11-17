@@ -46,11 +46,13 @@ export function between(from: string, to: string): TextChange | null {
  * What a transaction did, as changes of the file's text; null when the document is its own file
  * text before and after (an LF file), and its changes are the file's as they are.
  */
-export function fileChanges(tr: Transaction): ChangeSet | null {
+export function fileChanges(tr: Transaction): { changes: ChangeSet; start: Text } | null {
   const was = docFileText(tr.startState);
   const now = docFileText(tr.state);
   if (was === null && now === null) return null;
-  return fileChangesOf(was ?? tr.startState.doc.toString(), now ?? tr.state.doc.toString(), tr);
+  const before = was ?? tr.startState.doc.toString();
+  const changes = fileChangesOf(before, now ?? tr.state.doc.toString(), tr);
+  return { changes, start: was === null ? tr.startState.doc : Text.of(before.split('\n')) };
 }
 
 function fileChangesOf(before: string, after: string, tr: Transaction): ChangeSet {
@@ -93,11 +95,35 @@ export function intoDoc(
   } else {
     list.push(changes);
   }
-  const plain = docFileText(state) === null && !list.some((change) => change.insert.includes('\r'));
-  if (plain) return { changes, effects: [] };
-  const brought = new FileView(fileOf(state)).changesToDoc(list, fileLineBreak(state) ?? '\n');
+  const text = docFileText(state);
+  if (text === null && !list.some((change) => change.insert.includes('\r'))) {
+    return { changes, effects: [] };
+  }
+  const before = text ?? state.doc.toString();
+  const brought = new FileView(before).changesToDoc(
+    list.map((change) => wholeBreaks(before, change)),
+    fileLineBreak(state) ?? '\n',
+  );
   return {
     changes: brought.changes,
     effects: brought.styles.length ? [addLineBreakStyles.of(brought.styles)] : [],
   };
+}
+
+/**
+ * A change of the file widened to whole line breaks: one that starts or ends between a CR and its
+ * LF takes the whole CRLF in, with the character it takes in written again, so that the document,
+ * which has one LF there, can make it.
+ */
+function wholeBreaks(text: string, change: TextChange): TextChange {
+  let { from, to, insert } = change;
+  if (from > 0 && text[from - 1] === '\r' && (text[from] === '\n' || insert.startsWith('\n'))) {
+    from--;
+    insert = `\r${insert}`;
+  }
+  if (text[to] === '\n' && (insert.endsWith('\r') || (to > 0 && text[to - 1] === '\r'))) {
+    to++;
+    insert = `${insert}\n`;
+  }
+  return { from, to, insert };
 }

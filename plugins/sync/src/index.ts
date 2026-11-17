@@ -33,7 +33,7 @@ import {
 import type { Editor, Intent, Rederived } from '@redlines/editor';
 import type { TextChange } from '@redlines/format';
 import { EditorView } from '@codemirror/view';
-import { fileChanges, fileDoc, fileViewOf, intoDoc, between as diff } from './file-space.ts';
+import { fileChanges, fileDoc, fileOf, fileViewOf, intoDoc, between as diff } from './file-space.ts';
 import { placeLedgerWrite } from './ledger.ts';
 import { ensureStyle, peersShown, presenceExtension, showPeers } from './presence.ts';
 import type { PeerView } from './presence.ts';
@@ -132,6 +132,24 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
     });
   };
 
+  /**
+   * Shows what the session's text became in a file whose line breaks aren't all alike: the window's
+   * document and the record of its break kinds are checked against it, and where a change of a
+   * break's kind alone left the record as it was (a CRLF made an LF, a break the other way), the
+   * file is loaded again, which is no edit of the person's.
+   */
+  let reloading = false;
+  const showFile = (make: () => void, expected: string) => {
+    make();
+    if (fileOf(view.state) === expected) return;
+    reloading = true;
+    try {
+      editor.reloadDoc(expected);
+    } finally {
+      reloading = false;
+    }
+  };
+
   /** What a window is called: its name from the authority, or the author's handle. */
   const nameOf = (clientID: string, by: string): string =>
     peers.find((peer) => peer.clientID === clientID)?.name ?? `${by} (another window)`;
@@ -207,10 +225,11 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
       if (!update.docChanged) return;
       let local = false;
       for (const tr of update.transactions) {
-        if (!tr.docChanged || tr.annotation(received)) continue;
+        if (!tr.docChanged || tr.annotation(received) || reloading) continue;
         // The session speaks the file's offsets; the intent stays on the document it was made on.
-        const changes = fileChanges(tr) ?? tr.changes;
-        replica.local(changes, fileDoc(tr.startState), {
+        const file = fileChanges(tr);
+        const changes = file ? file.changes : tr.changes;
+        replica.local(changes, file ? file.start : tr.startState.doc, {
           intent: intentOf(tr),
           made: changes,
           origin: tr.startState.doc,
@@ -237,16 +256,25 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
     },
     onPeers: heard,
     showRemote: (remote: Remote) => {
-      apply(
-        intoDoc(view.state, remote.changes),
-        // A window of the same person is another editor for Undo, as another person is.
-        { person: `${remote.by}:${remote.clientID}`, name: nameOf(remote.clientID, remote.by) },
-      );
+      const spec = intoDoc(view.state, remote.changes);
+      const plain = docFileText(view.state) === null && spec.effects.length === 0;
+      const expected = plain ? '' : remote.changes.apply(fileDoc(view.state)).toString();
+      const make = () =>
+        apply(
+          spec,
+          // A window of the same person is another editor for Undo, as another person is.
+          { person: `${remote.by}:${remote.clientID}`, name: nameOf(remote.clientID, remote.by) },
+        );
+      if (plain) make();
+      else showFile(make, expected);
       placePeers();
     },
     showAll: (doc) => {
       const change = between(fileDoc(view.state), doc);
-      if (change) apply(intoDoc(view.state, change));
+      if (!change) return;
+      const spec = intoDoc(view.state, change);
+      if (docFileText(view.state) === null && spec.effects.length === 0) apply(spec);
+      else showFile(() => apply(spec), doc.toString());
     },
     load: (text) => {
       editor.setDoc(text);
@@ -342,7 +370,7 @@ function rederive(
           changes: placed.changes,
           effects: placed.styles?.length ? [addLineBreakStyles.of(placed.styles)] : [],
         };
-        changes = fileChanges(state.update({ ...into, filter: false })) ?? placed.changes;
+        changes = fileChanges(state.update({ ...into, filter: false }))?.changes ?? placed.changes;
         notices.push(...placed.notices);
       } else {
         notices.push(`An edit of yours was taken back: ${placed.reason}`);
