@@ -883,6 +883,30 @@ fn export_docx_embeds_a_picture_that_lies_beside_the_document() {
     let png = fs::read(folder.at("out").join("media").join("image1.png")).unwrap();
     assert_eq!(&png[1..4], b"PNG");
 
+    // A picture outside the document's folder is not read, by an absolute path or by `..`.
+    folder.file("above.png", DOT);
+    let wild = format!(
+        "![Up](../above.png)\n\n![Abs]({}/above.png)\n",
+        folder.0.display()
+    );
+    let inner = folder.at("inner");
+    fs::create_dir(&inner).unwrap();
+    let wild = {
+        let path = inner.join("wild.md");
+        fs::write(&path, wild).unwrap();
+        path
+    };
+    let done = redlines(&wild, "export-docx", &[]);
+    assert_eq!(done.code, Some(0), "{}", done.stderr);
+    assert_eq!(
+        done.stderr
+            .matches("An image is written as its description")
+            .count(),
+        2,
+        "{}",
+        done.stderr
+    );
+
     // A picture that isn't there is written as its description, and the program says so.
     let lost = folder.file("lost.md", "![Gone](media/gone.png)\n");
     let done = redlines(&lost, "export-docx", &[]);

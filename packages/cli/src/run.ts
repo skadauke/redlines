@@ -127,7 +127,8 @@ function parseArguments(command: Command, argv: readonly string[]): CommandLine 
 }
 
 /** The pictures of a document: the file that an address names, beside the document. An address with
- * a scheme (`https:`, `data:`) is not a file, and a file that can't be read is no picture. */
+ * a scheme (`https:`, `data:`) is not a file, a path that leaves the document's folder is not one
+ * it may read, and a file that can't be read is no picture. */
 function pictureReader(
   document: string,
   io: CliIo,
@@ -142,8 +143,10 @@ function pictureReader(
     } catch {
       return undefined;
     }
-    if (name === '') return undefined;
-    return io.readBytes?.(name.startsWith('/') ? name : folder + name).catch(() => undefined);
+    // Only a file in the document's own folder or below it: no absolute path, no `..`.
+    if (name === '' || name.startsWith('/') || name.includes('\\')) return undefined;
+    if (name.split('/').includes('..')) return undefined;
+    return io.readBytes?.(folder + name).catch(() => undefined);
   };
 }
 
@@ -172,7 +175,10 @@ async function exportDocx(rest: string[], io: CliIo): Promise<number> {
   const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.docx';
   if (target === file)
     throw new EditError(`${file} is the file to export; give another name with -o.`);
-  const { bytes, notes } = await io.exportDocx(text, pictureReader(file, io));
+  const { bytes, notes } = await io.exportDocx(text, pictureReader(file, io)).catch((error) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new EditError(`${file} could not be written as a Word file: ${reason}`);
+  });
   await io.writeBytes(target, bytes).catch(cannot('write', target));
   for (const note of notes) io.stderr(`${note}\n`);
   io.stdout(`${target}\n`);
