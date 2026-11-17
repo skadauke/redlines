@@ -915,6 +915,12 @@ function deleteTable(
 /** The operation at the grain it was made, refused where its rules say so (`tableEdit` widens). */
 export function fineTableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
   const parsed = parse(text);
+  // A table in the new text of a pending replacement takes no mark of its own there (a decision of
+  // the replacement would hide it): the operation is written into the replacement's new text, as a
+  // replacement of the table does (`tableEdit` widens what is refused here).
+  if (op.kind !== 'deleteTable' && inReplacementText(text, op)) {
+    throw new EditError(IN_REPLACEMENT, 'no-legal-placement');
+  }
   const table = tableOf(text, parsed, op);
   if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, ctx);
   if (op.kind === 'fillCells') return fillCells(text, parsed, table, op, ctx);
@@ -1647,6 +1653,8 @@ function relocatedPatch(text: string, table: TableRead, index: number): TextChan
   const marker = rowMarker(text, table.rows[index] as TableRowRead);
   return marker ? [{ ...marker, insert: '' }] : [];
 }
+
+const IN_REPLACEMENT = 'A mark of its own cannot stand in the new text of a pending replacement.';
 
 /**
  * A tracked table operation. Where the rules refuse it because of another person's pending changes

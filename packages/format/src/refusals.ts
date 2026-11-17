@@ -572,6 +572,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'keep',
     'an argument error: a paste that changes no cell has nothing to write',
   ],
+  [
+    'packages/format/src/table-ops.ts',
+    'IN_REPLACEMENT',
+    'widen',
+    'the fine form is refused so that `tableEdit` writes the operation into the replacement (#449)',
+  ],
   ['packages/format/src/table-align.ts', 'LOST', 'disable', 'inventory #41'],
   ['packages/format/src/table-align.ts', 'MARK_PLACE', 'widen', 'inventory #105'],
   [
