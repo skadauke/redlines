@@ -62,6 +62,29 @@ it attaches.
 A pre-release (`--prerelease`) gets its files too, but it never becomes the latest release, so
 neither the website nor installed copies take any notice of it.
 
+## Before a release: the real-agent limits check
+
+By hand, on a Mac that has the agent programs installed and Claude signed in, never in CI: a Claude
+run costs a cent or two and needs a sign-in, and CI has neither. It shows that what an agent may
+read at "This folder and my home folder" still holds with the current versions of the programs
+(a newer one may change how a limit reads). Nothing in it reads a credential.
+
+1. Install, or update to, the version each provider names as its minimum
+   (`MIN_VERSION` in `plugins/agent-claude/src/index.ts` and `plugins/agent-codex/src/index.ts`)
+   and, as a second run, the newest version.
+2. From the repository root, run:
+
+   ```sh
+   REDLINES_REAL_AGENTS=codex,claude pnpm vitest run apps/desktop/src/agent-limits.real.node.test.ts
+   ```
+
+3. Every check must pass: a file inside the scope is read, and a file in a hidden folder, a `.env`
+   and `~/Library`'s own are refused. A failure is a limit that no longer holds: fix the provider's
+   command line (`claudeArgs`, `codexArgs`) before releasing, or raise `MIN_VERSION` if only older
+   versions fail.
+
+The checks that need cloud files in online-only mode or a clean Mac are steps of the Test Drive.
+
 ## Test builds
 
 Actions › Release › Run workflow, on `main`, or:
