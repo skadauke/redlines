@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.3",
+    "docx": "9.15.1",
     "redlines": "workspace:*",
     "vite": "^8.3.4"
   }

@@ -7,7 +7,15 @@
 // Nothing calls this yet: the writers that refuse today will call it in their turn. It is the one
 // writer all of them share: they differ in why the fine form failed, not in what to write.
 
-import { scaffold, continuationPrefix, bodyStart } from './blocks.ts';
+import { scaffold, continuationPrefix, bodyStart, lineEnd, lineStart } from './blocks.ts';
+import { micromark } from 'micromark';
+import {
+  gfmAutolinkLiteral,
+  gfmAutolinkLiteralHtml,
+} from 'micromark-extension-gfm-autolink-literal';
+import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
+import { gfmTable, gfmTableHtml } from 'micromark-extension-gfm-table';
+import { gfmTaskListItem, gfmTaskListItemHtml } from 'micromark-extension-gfm-task-list-item';
 import { applyChanges, eolOf } from './changes.ts';
 import { accept, isDecidable, reject, rejectMarks } from './decide.ts';
 import { addPerson, changesBetween, paragraphBreaks, workingLedger } from './edit-support.ts';
@@ -134,6 +142,12 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
   const others = (range: Range) => othersIn(parsed, range, ctx);
   const id = newId(idsIn(text), ctx.random);
   let rung = rungOf(units, sourceFrom, sourceTo);
+  // Where no unit of its own holds the edit, the unit and the block after it are replaced together.
+  let fromSpare = false;
+  let spare =
+    rung && atBlockBoundary(text, edits) && !(rung.parent && rung.kind === 'code')
+      ? withNext(units, rung)
+      : undefined;
   // A unit that closure brought back to one already tried would go up and down for ever.
   const tried = new Set<string>();
   for (let index = 0; rung; index++) {
@@ -166,8 +180,13 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
       blocks,
       region,
     );
-    if (done) return done;
-    rung = widerThan(closed);
+    // The unit with the block after it is kept only where micromark reads its file as the newest
+    // view (the check of the oracle's reader), else the ladder ends in an alert.
+    if (done && !(fromSpare && readsOtherMicromark(text, done.changes))) return done;
+    const wider = widerThan(closed);
+    fromSpare = !wider && spare !== undefined;
+    rung = wider ?? spare;
+    spare = undefined;
   }
   trace?.('ladder-end');
   throw new Untrackable(
@@ -246,6 +265,17 @@ function rungOf(units: readonly Unit[], from: number, to: number): Rung | undefi
 }
 
 /** The next larger unit around a rung: the unit that holds it. Undefined at the top. */
+/** A unit with the one after it: the rung that holds both, for an edit that falls in the gap between
+ * them (a line break typed after a bare marker, #588) or code that a list line follows (#601). */
+function withNext(units: Unit[], rung: Rung): Rung | undefined {
+  const [only] = rung.units;
+  if (rung.units.length !== 1 || !only) return undefined;
+  const siblings = rung.parent ? rung.parent.children : units;
+  const at = siblings.indexOf(only);
+  const next = siblings[at + 1];
+  return at < 0 || !next ? undefined : rungOfUnits([only, next], rung.parent);
+}
+
 function widerThan(rung: Rung): Rung | undefined {
   const parent = rung.parent;
   return parent ? rungOfUnits([parent], parent.parent) : undefined;
@@ -435,7 +465,15 @@ function tryRung(
   ) {
     return giveUp('delimiter');
   }
+  // An HTML block goes on over the line after it, a closer included: the closer stands after a blank
+  // line, where it is an HTML block of its own (#597).
+  const html = HTML_LINE.test(lastLineOf(now, rung.prefix));
+  // (a setext underline or a rule is a line of its own, which the closer cannot join)
+  const bare =
+    endsInBare(now) && !/(?:^|\n)[ \t>]*(?:[-*+][ \t]+)*(?:-{2,}|={2,})[ \t]*$/.test(now);
+  if (html && (rung.prefix !== '' || rung.kind === 'table')) return giveUp('html');
   const atomic =
+    html ||
     rung.atomic ||
     rung.kind === 'table' ||
     endsInFence(old) ||
@@ -456,7 +494,6 @@ function tryRung(
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
   const closer = `<!--/${id}-->`;
-  if (HTML_LINE.test(lastLineOf(now, rung.prefix))) return giveUp('html');
   // The lines before and after the unit stand in its container, whose tightness is the item's: a
   // list's own tightness (it holds a blank line) says nothing of the blank line before it.
   const tight = rung.kind === 'list' && rung.parent ? rung.parent.tight : rung.tight;
@@ -466,7 +503,7 @@ function tryRung(
   let end = to;
   if (atomic) {
     const line = `${continuationPrefix(rung.prefix)}${closer}`;
-    written = `${opener}${lead}${body}${eol}${line}`;
+    written = `${opener}${lead}${body}${html || (bare && rung.prefix === '') ? eol : ''}${eol}${line}`;
     if (blankAfter) end = to + eol.length;
   } else {
     written = `${opener}${lead}${body}${closer}`;
@@ -641,7 +678,9 @@ function failure(
   ].find(grew);
   if (bad) return `warning ${bad}`;
   if (paragraphBreaks(newestView(after).text) !== paragraphBreaks(intended)) return 'newest';
-  if (shapeOf(unitsOf(after, read)) !== shapeOf(unitsOf(intended, parse(intended)))) return 'shape';
+  if (shapeOf(unitsOf(after, read)) !== shapeOf(unitsOf(intended, parse(intended)))) {
+    return 'shape';
+  }
   if (paragraphBreaks(originalView(after).text) !== paragraphBreaks(originalView(text).text)) {
     return 'original';
   }
@@ -655,4 +694,73 @@ function failure(
     throw error;
   }
   return undefined;
+}
+
+/** The syntax of a block's first line, up to where an edit starts. */
+const SYNTAX_PREFIX =
+  /^(?:#{1,6}[ \t]*|[-*+][ \t]*|\d{1,9}[.)][ \t]*|<[^\s>]*|`{3,}[^`]*|~{3,}.*)$/;
+const LIST_LINE = /^[ \t>]*(?:\d{1,9}[.)]|[-*+])(?:[ \t]|$)/;
+
+/**
+ * Whether an edit is where a fine write can read otherwise in the file than in the newest view: it
+ * starts inside a block's syntax (the `>` of a tag, the space of `## `, right behind a bare
+ * marker), or it is in indented code with a list item close below it. Only these are read by
+ * micromark (`readsOtherMicromark`), so that a keystroke elsewhere costs what it did.
+ */
+export function atBlockBoundary(text: string, edits: readonly TextChange[]): boolean {
+  return edits.some((edit) => {
+    const start = lineStart(text, edit.from);
+    const prefix = text
+      .slice(start, edit.from)
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/^[ \t]*(?:>[ \t]*)*/, '');
+    // A key typed into an empty line (a block start typed into an empty paragraph or item) is the
+    // typed-syntax code's, not this check's.
+    const typed =
+      edit.from === edit.to &&
+      edit.insert !== '' &&
+      !/[\n\t]/.test(edit.insert) &&
+      /^[ \t]*(?:<!--[^]*?-->[ \t]*)*(?:\r?\n|$)/.test(text.slice(edit.from));
+    if (
+      !typed &&
+      prefix !== '' &&
+      SYNTAX_PREFIX.test(prefix) &&
+      ((edit.insert.includes('\n') && (edit.from < edit.to || !/[ \t]$/.test(prefix))) ||
+        !/[ \t]$/.test(prefix))
+    ) {
+      return true;
+    }
+    // Text typed in indented code or an item's text never changes the blocks: only a line break can.
+    if (!edit.insert.includes('\n') && edit.from === edit.to) return false;
+    if (!/^(?: {4}|\t)/.test(text.slice(start))) return false;
+    let at = lineEnd(text, edit.to);
+    for (let i = 0; i < 4 && at < text.length; i++) {
+      const next = lineEnd(text, at + 1);
+      if (LIST_LINE.test(text.slice(at + 1, next))) return true;
+      at = next;
+    }
+    return false;
+  });
+}
+
+/** Whether micromark reads the file the changes make otherwise than its newest view. */
+export function readsOtherMicromark(text: string, changes: readonly TextChange[]): boolean {
+  const file = applyChanges(text, changes);
+  const ledger = parse(file).ledgerRange;
+  const read = (source: string) =>
+    micromark(source, {
+      allowDangerousHtml: true,
+      extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+      htmlExtensions: [
+        gfmAutolinkLiteralHtml(),
+        gfmStrikethroughHtml(),
+        gfmTableHtml(),
+        gfmTaskListItemHtml(),
+      ],
+    })
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/ ?(<[^>]*>) ?/g, '$1')
+      .trim();
+  return read(ledger ? file.slice(0, ledger.from) : file) !== read(newestView(file).text);
 }

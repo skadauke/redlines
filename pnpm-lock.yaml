@@ -108,6 +108,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.12.3
         version: 2.12.3
+      docx:
+        specifier: 9.15.1
+        version: 9.15.1
       redlines:
         specifier: workspace:*
         version: link:../../packages/cli
@@ -297,12 +300,18 @@ importers:
       micromark:
         specifier: 4.0.2
         version: 4.0.2
+      micromark-extension-gfm-autolink-literal:
+        specifier: 2.1.0
+        version: 2.1.0
       micromark-extension-gfm-strikethrough:
         specifier: 2.1.0
         version: 2.1.0
       micromark-extension-gfm-table:
         specifier: 2.1.1
         version: 2.1.1
+      micromark-extension-gfm-task-list-item:
+        specifier: 2.1.0
+        version: 2.1.0
 
   packages/plugin-api: {}
 

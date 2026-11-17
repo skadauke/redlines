@@ -1398,6 +1398,11 @@ const commands: MenuCommands = {
         controller.untouched || !isTauri
           ? controller.createWith(markdown)
           : host.openWindow(undefined, undefined, markdown),
+      folderName: () => loadSettings().imageFolderName,
+      openFile: (path) =>
+        controller.untouched || !isTauri
+          ? openHere(path)
+          : openInNewWindow(path).then(() => undefined),
       show: (options) => void notifications.show(options),
     }).catch((error: unknown) => {
       console.error('Could not open the Word file', error);

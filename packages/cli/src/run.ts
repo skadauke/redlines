@@ -38,7 +38,9 @@ export interface CliIo {
   /** The bytes of a file. Absent where `importDocx` is. */
   readBytes?(path: string): Promise<Uint8Array>;
   /** A .docx as Markdown, with what could not be kept. Absent where `exportDocx` is. */
-  importDocx?(bytes: Uint8Array): Promise<{ markdown: string; notes: string[] }>;
+  importDocx?(
+    bytes: Uint8Array,
+  ): Promise<{ markdown: string; notes: string[]; media: Record<string, Uint8Array> }>;
   exportDocx?(text: string): Promise<{ bytes: Uint8Array; notes: string[] }>;
 }
 
@@ -177,7 +179,7 @@ async function importDocx(rest: string[], io: CliIo): Promise<number> {
   const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.md';
   if (target === file)
     throw new EditError(`${file} is the file to import; give another name with -o.`);
-  const { markdown, notes } = await io.importDocx(bytes).catch(() => {
+  const { markdown, notes, media } = await io.importDocx(bytes).catch(() => {
     throw new EditError(`${file} is not a Word file that redlines can read.`);
   });
   // Never over a file that is there, whatever its name came from.
@@ -188,6 +190,31 @@ async function importDocx(rest: string[], io: CliIo): Promise<number> {
     )
   ) {
     throw new EditError(`${target} is there already; give another name with -o.`);
+  }
+  // The pictures go beside the Markdown, where its links name them (`media/image1.png`), and
+  // never over a file that is there.
+  const folder = target.includes('/') ? target.slice(0, target.lastIndexOf('/') + 1) : '';
+  if (Object.keys(media).length > 0 && !io.writeBytes) {
+    throw new EditError('This copy of redlines cannot write the pictures of a file.');
+  }
+  const pictures = Object.entries(media).filter(
+    ([name]) => /^media\/[^/\\]+$/.test(name) && name !== 'media/..',
+  );
+  if (pictures.length < Object.keys(media).length) {
+    notes.push('Some pictures have names redlines does not write, and were left out.');
+  }
+  for (const [name] of pictures) {
+    if (
+      await io.realpath(folder + name).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      throw new EditError(`${folder + name} is there already; give another folder with -o.`);
+    }
+  }
+  for (const [name, picture] of pictures) {
+    await io.writeBytes?.(folder + name, picture).catch(cannot('write', folder + name));
   }
   await io.writeFile(target, markdown).catch(cannot('write', target));
   for (const note of notes) io.stderr(`${note}\n`);

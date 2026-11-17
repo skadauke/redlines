@@ -287,6 +287,26 @@ describe('links, images and notes', () => {
     expect(file).toBe('[here](https://example.org/a%20b) and there\n');
   });
 
+  it('names a picture and hands over its bytes, and says when a picture could not be carried', () => {
+    const png = new Uint8Array([1, 2, 3]);
+    const picture = (path: string) => ({
+      type: 'image' as const,
+      path,
+      alt: 'A chart',
+      width: 0,
+      height: 0,
+    });
+    const { file, result } = map(
+      [para([run('See '), picture('word/media/image1.png'), picture('word/media/image2.emf')])],
+      { media: { 'word/media/image1.png': png, 'word/media/image2.emf': new Uint8Array([9]) } },
+    );
+    expect(file).toBe('See ![A chart](media/image1.png)\n');
+    expect(Object.keys(result.media)).toEqual(['media/image1.png']);
+    expect(result.report.entries.map((entry) => entry.message)).toContain(
+      'A picture in a format Markdown can’t show (EMF or WMF) was left out.',
+    );
+  });
+
   it('writes a footnote with its text', () => {
     const { file } = map([para([run('Claim.'), { type: 'note', kind: 'footnote', id: 2 }])], {
       footnotes: [{ id: 2, blocks: [para([run('The source.')])] }],
