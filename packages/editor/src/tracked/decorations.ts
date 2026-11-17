@@ -38,6 +38,7 @@ import {
   type MarkRange,
   type Parsed,
   type Segment,
+  plainPayload,
 } from '@redlines/format';
 import {
   blankLines,
@@ -238,7 +239,8 @@ const BREAKS = /[ \t]*(?:(?:\r\n?|\n)[ \t]*)+/g;
  * break, draw nothing, and in deleted text they are a space, so that its words don't run together
  * or into the text beside it, as a whole paragraph deleted would into the next.
  */
-const deletedText = (text: string, marks: boolean) => {
+const deletedText = (payload: string, marks: boolean) => {
+  const text = plainPayload(payload);
   if (marks) return text.replace(LINE_BREAK, '¶');
   return text.replace(BREAKS, /\S/.test(text) ? ' ' : '');
 };
@@ -361,7 +363,7 @@ function struckBlocks(
     // A deletion of whole blocks, or a substitution of one block of code (format §3.5).
     const replaced =
       mark.kind === 'sub' && mark.segments.length === 1 && !!mark.segments[0]?.carrier
-        ? replacedCode(mark.segments[0].payload ?? '')
+        ? replacedCode(plainPayload(mark.segments[0].payload ?? ''))
         : null;
     if (
       (mark.kind !== 'del' && !replaced) ||

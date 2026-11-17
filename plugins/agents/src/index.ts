@@ -55,3 +55,35 @@ export type {
   AltTextOptions,
   AltWriter,
 } from './alt-text/index.ts';
+export { tailscaleView } from './openclaw/tailscale.ts';
+export type {
+  Check as TailscaleCheck,
+  TailscaleAction,
+  TailscalePeer,
+  TailscaleStatus,
+  TailscaleView,
+} from './openclaw/tailscale.ts';
+export { authorHandle, isSetUp, LEVELS } from './openclaw/connection.ts';
+export type {
+  Level as OpenClawLevel,
+  NewOpenClawConnection,
+  OpenClawChange,
+  OpenClawConnection,
+} from './openclaw/connection.ts';
+export { failure, FAILURE_IDS } from './openclaw/failures.ts';
+export type { Failure, FailureAction, FailureId, Subject } from './openclaw/failures.ts';
+export { gatewayView } from './openclaw/gateway.ts';
+export type { GatewayProbe, GatewayView } from './openclaw/gateway.ts';
+export { renderGuided, ago, folderName } from './openclaw/guided.ts';
+export type { GuidedDeps, GuidedOptions } from './openclaw/guided.ts';
+export { openSheet } from './openclaw/sheet.ts';
+export type { Sheet, SheetDeps, SheetOptions, Step as SheetStep } from './openclaw/sheet.ts';
+export { connectionLine, failureOf } from './openclaw/node.ts';
+export type { NodeStatus } from './openclaw/node.ts';
+export {
+  codeRequestPrompt,
+  gatewayPrompt,
+  localPrompt,
+  setupPrompt,
+  toolsPrompt,
+} from './openclaw/prompt.ts';

@@ -3,7 +3,8 @@
 
 import { CONTAINER_PREFIX, carrierEnd, LineIndex, lineStart, markerEnd } from './blocks.ts';
 import { isAlignPayload } from './format-ops.ts';
-import { emptyLedger, findLedger, readSpan } from './ledger-read.ts';
+import { emptyLedger, findLedgers, readSpan } from './ledger-read.ts';
+import { idPositions, ledgerAfter, mergeLedgers } from './ledger-join.ts';
 import type { LedgerRead } from './ledger-read.ts';
 import { MOST_PAYLOAD_DEPTH } from './ledger-order.ts';
 import { holdsMarks, scan, scanChanged, scanPayload } from './scan.ts';
@@ -322,7 +323,7 @@ function held(site: PayloadMarks): boolean {
 }
 
 /** Each parse's ledger, as read, by the parse; for later parses of the same file. */
-const ledgerReads = new WeakMap<Parsed, { source: string; read: LedgerRead }>();
+const ledgerReads = new WeakMap<Parsed, Map<string, LedgerRead>>();
 
 /**
  * Parses a file. Never throws. Given the parse of an earlier version of the same file, a ledger
@@ -333,17 +334,36 @@ const ledgerReads = new WeakMap<Parsed, { source: string; read: LedgerRead }>();
  */
 export function parse(text: string, previous?: Parsed, change?: Change): Parsed {
   const scanned = (previous && change && scanChanged(previous.text, text, change)) || scan(text);
-  const span = findLedger(text, scanned);
-  const known = span && previous ? ledgerReads.get(previous) : undefined;
-  let read: LedgerRead | null = null;
-  if (span && !span.crLines && known?.source === span.source) {
+  const spans = findLedgers(text, scanned);
+  const span = spans.at(-1) ?? null;
+  const known = spans.length > 0 && previous ? ledgerReads.get(previous) : undefined;
+  const reads = new Map<string, LedgerRead>();
+  const readOf = spans.map((one) => {
+    const before = one.crLines ? undefined : known?.get(one.source);
     // Its warnings point at the whole ledger, which may have moved.
-    const warnings = known.read.warnings.map((warning) => ({ ...warning, range: span.range }));
-    read = { ...known.read, warnings };
-  } else if (span) read = readSpan(span);
+    const read = before
+      ? {
+          ...before,
+          warnings: before.warnings.map((warning) => ({ ...warning, range: one.range })),
+        }
+      : readSpan(one);
+    if (!one.crLines) reads.set(one.source, read);
+    return read;
+  });
+  const read: LedgerRead | null = readOf.at(-1) ?? null;
   const body = span ? text.slice(0, span.range.from) : text;
-  const ledger = read?.ledger ?? emptyLedger();
-  const warnings: Warning[] = read ? [...read.warnings] : [];
+  // A marker reads the first ledger after it, and the last when none is (format §5.1).
+  const starts = spans.map((one) => one.start);
+  const positions = spans.length > 1 ? idPositions(scanned) : new Map<string, number>();
+  const ledger =
+    spans.length > 1
+      ? mergeLedgers(
+          readOf.map((one) => one.ledger),
+          starts,
+          positions,
+        )
+      : (read?.ledger ?? emptyLedger());
+  const warnings: Warning[] = readOf.flatMap((one) => one.warnings);
   const warn = (code: WarningCode, message: string, range: Range, id?: string) =>
     warnings.push(id === undefined ? { code, message, range } : { code, message, range, id });
 
@@ -369,7 +389,8 @@ export function parse(text: string, previous?: Parsed, change?: Change): Parsed 
       kind === 'cmt' && thread ? { by: thread.by, at: thread.at } : ledger.marks[id];
     if (!entry) {
       entry = { by: 'unknown', at: '' };
-      if (read?.valid !== false)
+      const reader = spans.length > 1 ? readOf[ledgerAfter(starts, positions.get(id) ?? 0)] : read;
+      if (reader?.valid !== false)
         warn('missing-entry', `The mark ${id} has no ledger entry`, firstSegment.open, id);
     }
 
@@ -424,10 +445,11 @@ export function parse(text: string, previous?: Parsed, change?: Change): Parsed 
     marks,
     ledger,
     ledgerRange: span?.range ?? null,
+    earlierLedgers: spans.slice(0, -1).map((one) => one.range),
     warnings,
     payloads,
   };
   // A ledger with CR line breaks is not read, whatever its YAML, so it gives nothing to keep.
-  if (span && read && !span.crLines) ledgerReads.set(parsed, { source: span.source, read });
+  if (reads.size > 0) ledgerReads.set(parsed, reads);
   return parsed;
 }

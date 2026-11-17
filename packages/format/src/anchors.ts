@@ -18,7 +18,7 @@ import {
 } from './blocks.ts';
 import { readBlocks } from './block-read.ts';
 import { EditError } from './errors.ts';
-import { snapOut } from './edit-support.ts';
+import { plainPayload, snapOut } from './edit-support.ts';
 import type { MarkerRange } from './edit-support.ts';
 import { hitsIn, inspectPlace, stepLeft, stepRight, visible } from './inline.ts';
 import { scan } from './scan.ts';
@@ -172,7 +172,8 @@ function outOfRejected(
     if (marker.to <= cursor) continue;
     visibleTo(Math.max(marker.from, cursor));
     cursor = Math.max(cursor, marker.to);
-    const payload = marker.mark?.kind === 'del' ? marker.segment?.payload : undefined;
+    const payload =
+      marker.mark?.kind === 'del' ? plainPayload(marker.segment?.payload ?? '') : undefined;
     if (marker.role === 'open' && payload) {
       for (const c of payload) {
         chars.push(c);

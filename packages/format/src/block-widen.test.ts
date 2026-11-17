@@ -18,16 +18,6 @@ import { newestView } from './views.ts';
 
 const IDS = ['m2bd', 'n8fx', 'p5qm', 'q6rs'];
 
-/** The document of the seed: two draws in three have no other person's pending change (theirs are
- * made the author's own), so that block widening itself is held to every order; the third keeps them, where the
- * guard of #808 keeps the refusal. */
-function drawn(seed: number, random: () => number): string {
-  const text = randomDocument(random);
-  if (seed % 3 === 0) return text;
-  // Every pending change is the author's own.
-  return text.replace(/\bby: (?!ada\b)\w+/g, 'by: ada');
-}
-
 function attempt<T>(run: () => T): T | undefined {
   try {
     return run();
@@ -45,7 +35,7 @@ describe('a refused edit in a block, written as a replacement of the block', () 
     let refused = 0;
     for (let seed = 1; seed <= runs; seed++) {
       const random = seeded(seed * 11 + 5);
-      const text = drawn(seed, random);
+      const text = randomDocument(random);
       const read = parse(text);
       // Every order of decisions is walked: a document with many marks is left to the walks.
       if (read.warnings.length > 0 || read.marks.length > 5 || text.startsWith('---')) continue;
@@ -76,7 +66,7 @@ describe('a refused edit in a block, written as a replacement of the block', () 
         if (attempt(() => fineEdits(text, [source], context(ada, IDS)))) continue;
         const done = attempt(() => trackedEdits(text, [source], context(ada, IDS)));
         if (!done) {
-          if (seed % 3 === 0) refused++;
+          refused++;
           continue;
         }
         widened++;
@@ -89,11 +79,12 @@ describe('a refused edit in a block, written as a replacement of the block', () 
       }
     }
     expect(widened, 'edits written as replacements').toBeGreaterThan(0);
-    expect(refused, 'edits kept refused by the guard').toBeGreaterThan(0);
+    // What no unit holds is asked about and made untracked (§3.13), never refused for a mark.
+    expect(refused, 'edits not written').toBeLessThan(widened / 10 + 1);
   }, 600_000);
 
   it('changes the type of a block: written and every order alike', () => {
-    let refused = 0;
+    let formatted = 0;
     const ops: FormatOp[] = [
       { kind: 'block', to: 'h1' },
       { kind: 'block', to: 'h3' },
@@ -104,7 +95,7 @@ describe('a refused edit in a block, written as a replacement of the block', () 
     ];
     for (let seed = 1; seed <= runs; seed++) {
       const random = seeded(seed * 13 + 1);
-      const text = drawn(seed, random);
+      const text = randomDocument(random);
       const read = parse(text);
       // Every order of decisions is walked: a document with many marks is left to the walks.
       if (read.warnings.length > 0 || read.marks.length > 5 || text.startsWith('---')) continue;
@@ -124,16 +115,14 @@ describe('a refused edit in a block, written as a replacement of the block', () 
           if (attempt(() => fineFormat(text, range, op, context(ada, IDS)))) continue;
           const done = attempt(() => trackedFormat(text, range, op, context(ada, IDS)));
           if (!done) {
-            if (seed % 3 === 0) refused++;
             continue;
           }
+          formatted++;
           expectWidened(`seed ${seed} ${JSON.stringify(op)} at ${at}`, text, done.changes, 'ada');
         }
     }
-    // The fine form writes every block change in a document with only the author's own changes
-    // (what is refused there is a mark overlap, which a replacement can't set right), so what is
-    // written as a replacement needs another person's change in the old text, which the guard of
-    // #808 keeps refused: the refusals are what is held here, until that is open.
-    expect(refused, 'block changes kept refused by the guard').toBeGreaterThan(0);
+    // What stays refused is not another person's mark: a block inside an alert, a heading over
+    // several lines, a quote of several paragraphs, where no replacement is written yet.
+    expect(formatted, 'block changes written as replacements').toBeGreaterThan(5);
   }, 600_000);
 });
