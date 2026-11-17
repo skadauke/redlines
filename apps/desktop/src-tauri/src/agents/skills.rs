@@ -321,7 +321,7 @@ pub struct Written {
 /// Writes this app's copy of the skill for an agent: where there is none, or an older one. A copy
 /// that is there already, of this version, is left; a newer one, and what isn't a copy of this
 /// skill, refuse with the sentence that says why. The file is written whole, and then moved into
-/// place, so that an agent never reads half of it. An older copy is kept, as `SKILL.md.bak`, since
+/// place, so that an agent never reads half of it. An older copy is kept, as `SKILL.md.bak` or the next free `SKILL.md.bak.N`, since
 /// what was added to it by hand is replaced with it.
 pub fn install(kind: Kind, home: &Path) -> Result<Written, String> {
     let folder = home.join(kind.relative_folder());
@@ -341,12 +341,39 @@ pub fn install(kind: Kind, home: &Path) -> Result<Written, String> {
         // `inspect` found a plain file that is a copy of the skill and no larger than `LARGEST`.
         let old = fs::read_to_string(folder.join(FILE))
             .map_err(|error| format!("Couldn’t read {shown}/{FILE}: {error}"))?;
-        write_whole(&folder, BACKUP, &old)
-            .map_err(|error| format!("Couldn’t keep {shown}/{BACKUP}: {error}"))?;
+        keep_backup(&folder, &old)
+            .map_err(|error| format!("Couldn’t keep a backup in {shown}: {error}"))?;
     }
     write_whole(&folder, FILE, kind.copy())
         .map_err(|error| format!("Couldn’t write {shown}/{FILE}: {error}"))?;
     Ok(written)
+}
+
+/// Keeps `old` as a backup in `folder`: as `SKILL.md.bak`, or, where something is there already
+/// that isn't a copy of `old`, as the first of `SKILL.md.bak.1`, `SKILL.md.bak.2`, … that is free,
+/// so that no update loses what an earlier one kept (a folder or a link of that name is passed
+/// over, not replaced). A backup that holds `old` already is the backup: nothing is written.
+fn keep_backup(folder: &Path, old: &str) -> io::Result<()> {
+    for number in 0..10_000u32 {
+        let name = match number {
+            0 => BACKUP.to_owned(),
+            n => format!("{BACKUP}.{n}"),
+        };
+        let path = folder.join(&name);
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return write_whole(folder, &name, old);
+            }
+            Err(error) => return Err(error),
+            Ok(found) if found.is_file() => {
+                if fs::read_to_string(&path).is_ok_and(|kept| kept == old) {
+                    return Ok(());
+                }
+            }
+            Ok(_) => {}
+        }
+    }
+    Err(io::Error::other("there are too many backups"))
 }
 
 /// Writes `text` as the file `name` in `folder`: to a file of its own name first, which is then
@@ -582,6 +609,45 @@ mod tests {
                 .join(Kind::Claude.relative_folder())
                 .join(BACKUP)
                 .exists()
+        );
+    }
+
+    #[test]
+    fn a_second_update_keeps_the_first_backup_and_adds_its_own() {
+        let temp = TempFolder::new("skill-backups");
+        let first = format!("{}\nFirst rule.\n", older_copy(Kind::Claude, Some(0)));
+        let folder = put(temp.path(), Kind::Claude, &first);
+        install(Kind::Claude, temp.path()).unwrap();
+        // The user edits the new copy by hand, which reads as older, and updates again.
+        let second = format!("{}\nSecond rule.\n", Kind::Claude.copy());
+        fs::write(folder.join(FILE), &second).unwrap();
+        install(Kind::Claude, temp.path()).unwrap();
+        assert_eq!(fs::read_to_string(folder.join(BACKUP)).unwrap(), first);
+        assert_eq!(
+            fs::read_to_string(folder.join(format!("{BACKUP}.1"))).unwrap(),
+            second
+        );
+        // The same text again is not kept twice.
+        fs::write(folder.join(FILE), &second).unwrap();
+        install(Kind::Claude, temp.path()).unwrap();
+        assert!(!folder.join(format!("{BACKUP}.2")).exists());
+    }
+
+    #[test]
+    fn a_folder_named_like_the_backup_is_passed_over() {
+        let temp = TempFolder::new("skill-backup-folder");
+        let edited = format!("{}\nMy own rule.\n", older_copy(Kind::Claude, Some(0)));
+        let folder = put(temp.path(), Kind::Claude, &edited);
+        fs::create_dir(folder.join(BACKUP)).unwrap();
+        install(Kind::Claude, temp.path()).unwrap();
+        assert!(folder.join(BACKUP).is_dir());
+        assert_eq!(
+            fs::read_to_string(folder.join(format!("{BACKUP}.1"))).unwrap(),
+            edited
+        );
+        assert_eq!(
+            fs::read_to_string(folder.join(FILE)).unwrap(),
+            Kind::Claude.copy()
         );
     }
 
