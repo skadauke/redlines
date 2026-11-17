@@ -108,6 +108,27 @@ export function codeLanguages(info: string): LanguageDescription | null {
   return word === '' ? null : LanguageDescription.matchLanguageName(languages, word, true);
 }
 
+/**
+ * The language of a chunk's info string in a pandoc file: `{r}`, `{r, echo=FALSE}`, `{python}` and
+ * `{r label, opt=1}` are `r` and `python`, the word the braces start with. A plain info string is
+ * read as `codeLanguages` does.
+ */
+export function chunkLanguage(info: string): LanguageDescription | null {
+  const chunk = /^\s*\{\s*\.?([A-Za-z0-9_+#-]+)/.exec(info);
+  return chunk ? codeLanguages(chunk[1]!) : codeLanguages(info);
+}
+
+/**
+ * `codeLanguages` for the editor of a file whose path `path` gives: in a `.qmd` or `.Rmd` file the
+ * language is read out of a chunk's braces; every other file keeps the first word (#1029).
+ */
+export function codeLanguagesFor(
+  path: () => string | null | undefined,
+): (info: string) => LanguageDescription | null {
+  return (info) =>
+    /\.(?:qmd|rmd)$/i.test(path() ?? '') ? chunkLanguage(info) : codeLanguages(info);
+}
+
 /** Loads a language by its info string, as the editor does when it meets the block. */
 export async function loadCodeLanguage(info: string): Promise<void> {
   await codeLanguages(info)?.load();
