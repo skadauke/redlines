@@ -44,7 +44,7 @@ import {
   Transaction,
 } from '@codemirror/state';
 import { EditorView, type KeyBinding } from '@codemirror/view';
-import { rejectMarks } from '@redlines/format';
+import { parse, rejectMarks, type Parsed, type TextChange } from '@redlines/format';
 import { parsedField } from '../tracked/field.ts';
 import type { AgentStep } from '../api.ts';
 import type { StepLabel } from './names.ts';
@@ -78,6 +78,30 @@ export interface StepMeta {
   touchedBy: string | null;
   /** Whether another person typed inside the step's text, which rejecting its marks would take. */
   tainted?: boolean;
+  /**
+   * The text the step's tracked deletions took out (their payloads), where each stands in the text
+   * after the step, while its mark is there.
+   */
+  deleted?: readonly DeletedText[];
+  /**
+   * The same, once another person rejected the deletion: its text is back in the file, and the
+   * step's changes would put it there a second time.
+   */
+  reinstated?: readonly DeletedText[];
+}
+
+/** The old text of a tracked deletion, and where its marker stands. */
+export interface DeletedText {
+  id: string;
+  at: number;
+  text: string;
+}
+
+/** What one tracked step is made of, for `HistoryConfig.stepInfo`. */
+export interface StepInfo {
+  person: string | null;
+  marks: readonly string[];
+  deleted?: readonly DeletedText[];
 }
 
 const NO_META: StepMeta = { person: null, marks: [], touchedBy: null };
@@ -88,12 +112,6 @@ const NO_META: StepMeta = { person: null, marks: [], touchedBy: null };
  * other person's id, `name` as people read it.
  */
 export const remoteStep = Annotation.define<{ person: string; name: string }>();
-
-/**
- * Comes with the notice that Undo leaves a step alone because someone changed its text: the step
- * is dropped from the steps done, so the next Undo reaches the step below it.
- */
-export const dropStaleEffect = StateEffect.define<null>();
 
 const fromHistory = Annotation.define<FromHistory>();
 
@@ -191,7 +209,18 @@ export interface HistoryConfig {
    * Whose a transaction's step is (per-person undo): the person's id, and the ids of the marks it
    * wrote when it was tracked. By default, nobody's.
    */
-  stepInfo?: (tr: Transaction) => { person: string | null; marks: readonly string[] };
+  stepInfo?: (tr: Transaction) => StepInfo;
+  /**
+   * The changes that write `edits` (offsets of `text`, whose parse is `parsed`) the way the person's
+   * own edits are written: tracked when Track Changes is on. Null when they can't be. Undo takes
+   * back what another person decided of a tracked step with it (per-person undo).
+   */
+  takeBack?: (
+    state: EditorState,
+    text: string,
+    parsed: Parsed,
+    edits: readonly TextChange[],
+  ) => ChangeSet | null;
 }
 
 const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
@@ -207,6 +236,7 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
         visibleCaret: (tr: Transaction) => tr.state.selection,
         label: () => null,
         stepInfo: () => ({ person: null, marks: [] }),
+        takeBack: () => null,
       },
       {
         minDepth: Math.max,
@@ -219,6 +249,7 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
         visibleCaret: (a: Required<HistoryConfig>['visibleCaret']) => a,
         label: (a: Required<HistoryConfig>['label']) => a,
         stepInfo: (a: Required<HistoryConfig>['stepInfo']) => a,
+        takeBack: (a: Required<HistoryConfig>['takeBack']) => a,
       },
     );
   },
@@ -260,8 +291,7 @@ const historyField_ = StateField.define<HistoryState>({
       );
     }
     const remote = tr.annotation(remoteStep);
-    if (remote && !tr.changes.empty) return state.addRemote(tr.changes.desc, remote);
-    if (tr.effects.some((effect) => effect.is(dropStaleEffect))) return state.dropStale();
+    if (remote && !tr.changes.empty) return state.addRemote(tr.changes.desc, remote, tr);
     const drop = tr.effects.find((effect) => effect.is(dropStepsEffect));
     if (drop) {
       // The text is as before those steps again: the steps below them need no mapping of it.
@@ -422,6 +452,19 @@ class HistEvent {
     this.owner = owner;
     this.label = label;
     this.meta = meta;
+  }
+
+  withMeta(meta: StepMeta): HistEvent {
+    return new HistEvent(
+      this.changes,
+      this.effects,
+      this.mapped,
+      this.startSelection,
+      this.selectionsAfter,
+      this.owner,
+      this.label,
+      meta,
+    );
   }
 
   withTouched(name: string, tainted: boolean): HistEvent {
@@ -614,8 +657,16 @@ function mapEvent(
     selections,
     event.owner,
     event.label,
-    event.meta,
+    mappedMeta(event.meta, mapping),
   );
+}
+
+/** The meta of an event with the places it keeps mapped over a change made to the text. */
+function mappedMeta(meta: StepMeta, mapping: ChangeDesc): StepMeta {
+  if (!meta.deleted?.length && !meta.reinstated?.length) return meta;
+  const at = (list: readonly DeletedText[] | undefined) =>
+    list?.map((entry) => ({ ...entry, at: mapping.mapPos(entry.at, -1) }));
+  return { ...meta, deleted: at(meta.deleted), reinstated: at(meta.reinstated) };
 }
 
 /**
@@ -631,7 +682,7 @@ function joinedLabel(first: StepLabel | null, next: StepLabel | null): StepLabel
 
 function metaOf(config: Required<HistoryConfig>, tr: Transaction): StepMeta {
   const info = config.stepInfo(tr);
-  return { person: info.person, marks: info.marks, touchedBy: null };
+  return { person: info.person, marks: info.marks, touchedBy: null, deleted: info.deleted };
 }
 
 /**
@@ -672,6 +723,24 @@ function insertsInside(changes: ChangeSet, remote: ChangeDesc): boolean {
   return inside;
 }
 
+/**
+ * Whether `tr` inserted text inside the content of any of the marks `ids`, text that rejecting the
+ * marks would take with their own. A tracked insertion of another person splits a mark's segments
+ * around itself, and is then no part of them.
+ */
+function typedInsideMarks(ids: readonly string[], tr: Transaction): boolean {
+  const parsed = tr.state.field(parsedField, false);
+  if (!parsed) return true;
+  let inside = false;
+  const contents = parsed.marks
+    .filter((mark) => ids.includes(mark.id))
+    .flatMap((mark) => mark.segments.map((segment) => segment.content));
+  tr.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+    if (toB > fromB && contents.some((c) => fromB >= c.from && toB <= c.to)) inside = true;
+  });
+  return inside;
+}
+
 /** The changes that take back a tracked step by rejecting its own marks, or null if they are gone. */
 function rejection(event: HistEvent, state: EditorState): ChangeSet | null {
   if (!event.meta.marks.length || event.meta.tainted) return null;
@@ -688,15 +757,113 @@ function rejection(event: HistEvent, state: EditorState): ChangeSet | null {
 }
 
 /**
- * Who has changed the text of the step Undo would take back since it was made, when Undo can't
- * take it back without taking their work with it: an untracked step whose text they touched, or a
- * tracked one whose marks are gone. Null otherwise.
+ * What Undo writes for a tracked step that another person touched, or null when the step's own
+ * changes, mapped over theirs, are the write (their typing inside it stays, whatever else they did
+ * stays). Three cases, by what is left of its marks:
+ * - all there and untouched inside: the marks are rejected by id;
+ * - all there, with their typing inside: null (the mapped inverse takes your text, keeps theirs);
+ * - some decided by them (accepted or rejected): what is left of the step is written as the
+ *   person's own edit, tracked when Track Changes is on: its insertion's text deleted, its
+ *   deletion's text inserted. What they rejected leaves nothing to take back ('nothing': Undo goes
+ *   on to the step below).
  */
-export function staleUndo(state: EditorState): string | null {
-  const done = state.field(historyField_, false)?.done;
-  const event = done?.[done.length - 1];
-  if (!event?.changes || !event.meta.person || !event.meta.touchedBy) return null;
-  return rejection(event, state) ? null : event.meta.touchedBy;
+function takenBack(event: HistEvent, state: EditorState): ChangeSet | 'nothing' | null {
+  if (!event.meta.marks.length) return null;
+  const parsed = state.field(parsedField, false);
+  if (!parsed) return null;
+  const alive = new Set(parsed.marks.map((mark) => mark.id));
+  const present = event.meta.marks.filter((id) => alive.has(id));
+  if (present.length === event.meta.marks.length) return rejection(event, state);
+  if (present.length && event.meta.tainted) return null;
+  const doc = state.doc.toString();
+  let first: ChangeSet;
+  try {
+    first = ChangeSet.of(present.length ? rejectMarks(doc, present) : [], doc.length);
+  } catch {
+    return null;
+  }
+  const text = first.apply(state.doc).toString();
+  const edits: TextChange[] = [];
+  event.changes!.map(first).iterChanges((from, to, _fromB, _toB, inserted) => {
+    edits.push({ from, to, insert: inserted.toString() });
+  });
+  // What another person rejected is back in the file: the step's changes put it a second time.
+  for (const entry of event.meta.reinstated ?? []) {
+    const twice = edits.find((edit) => edit.insert.includes(entry.text));
+    if (twice) twice.insert = twice.insert.replace(entry.text, '');
+  }
+  for (let i = edits.length - 1; i >= 0; i--) {
+    if (edits[i]!.from === edits[i]!.to && !edits[i]!.insert) edits.splice(i, 1);
+  }
+  edits.sort((a, b) => a.from - b.from || a.to - b.to);
+  // An insertion that falls inside a deletion goes to its end.
+  let end = 0;
+  for (const edit of edits) {
+    if (edit.from === edit.to && edit.from < end) {
+      edit.from = end;
+      edit.to = end;
+    }
+    end = Math.max(end, edit.to);
+  }
+  if (!edits.length) return first.empty ? 'nothing' : first;
+  const config = state.facet(historyConfig);
+  let written: ChangeSet | null;
+  try {
+    written = config.takeBack(state, text, parse(text), edits);
+  } catch {
+    written = null;
+  }
+  // The write the format has no tracked form for is made plain, which is still a correct write.
+  written ??= ChangeSet.of(edits, text.length);
+  return first.compose(written);
+}
+
+/**
+ * The event with the deletions that another person rejected in `tr` noted: their text is back in
+ * the file, and nothing of them is left to take back. One they accepted is gone with its text, and
+ * the step's changes, mapped over theirs, put it back.
+ */
+function decidedBy(event: HistEvent, tr: Transaction): HistEvent {
+  const before = tr.startState.field(parsedField, false);
+  const after = tr.state.field(parsedField, false);
+  if (!before || !after) return event;
+  const alive = new Set(after.marks.map((mark) => mark.id));
+  const deleted: DeletedText[] = [];
+  const reinstated = [...(event.meta.reinstated ?? [])];
+  for (const entry of event.meta.deleted ?? []) {
+    const mark = before.marks.find((candidate) => candidate.id === entry.id);
+    if (alive.has(entry.id) || !mark) {
+      deleted.push(entry);
+      continue;
+    }
+    const open = mark.segments[0]!.open;
+    let rejected = false;
+    tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+      if (
+        fromA <= open.from &&
+        open.to <= toA &&
+        tr.state.doc.sliceString(fromB, toB).includes(entry.text)
+      )
+        rejected = true;
+    });
+    if (rejected) reinstated.push(entry);
+  }
+  return event.withMeta({ ...event.meta, deleted, reinstated });
+}
+
+/** The deleted text of a step joined to an earlier one: the earlier step's, moved over it. */
+function joinedDeleted(
+  last: StepMeta,
+  event: HistEvent,
+): Pick<StepMeta, 'deleted' | 'reinstated' | 'tainted'> {
+  const forward = event.changes!.invertedDesc;
+  const moved = (list: readonly DeletedText[] | undefined) =>
+    list?.map((entry) => ({ ...entry, at: forward.mapPos(entry.at, -1) }));
+  return {
+    deleted: [...(moved(last.deleted) ?? []), ...(event.meta.deleted ?? [])],
+    reinstated: moved(last.reinstated),
+    tainted: last.tainted,
+  };
 }
 
 const joinableUserEvent = /^(input\.type|delete)($|\.)/;
@@ -798,6 +965,7 @@ class HistoryState {
             person: lastEvent.meta.person ?? event.meta.person,
             marks: [...lastEvent.meta.marks, ...event.meta.marks],
             touchedBy: lastEvent.meta.touchedBy,
+            ...joinedDeleted(lastEvent.meta, event),
           },
         ),
       );
@@ -883,33 +1051,28 @@ class HistoryState {
     );
   }
 
-  /** Without the newest step, which Undo left alone: the steps below are mapped over it. */
-  dropStale(): HistoryState {
-    const last = this.done[this.done.length - 1];
-    if (!last?.changes || !last.meta.touchedBy) return this;
-    const forward = last.changes.invertedDesc;
-    const mapping = last.mapped ? last.mapped.composeDesc(forward) : forward;
-    return new HistoryState(
-      addMappingToBranch(this.done.slice(0, -1), mapping),
-      this.undone,
-      this.prevTime,
-      this.prevUserEvent,
-      true,
-      this.trimmed,
-    );
-  }
-
   /** Another person's change: the steps it touched, and then it is mapped away like any other. */
-  addRemote(mapping: ChangeDesc, remote: { person: string; name: string }): HistoryState {
+  addRemote(
+    mapping: ChangeDesc,
+    remote: { person: string; name: string },
+    tr?: Transaction,
+  ): HistoryState {
     const done = this.done.slice();
     let m = mapping;
     for (let i = done.length - 1; i >= 0; i--) {
       const event = done[i]!;
       if (!event.changes) continue;
-      const { person, touchedBy } = event.meta;
-      if (person && person !== remote.person && !touchedBy && touches(event.changes, m)) {
-        done[i] = event.withTouched(remote.name, insertsInside(event.changes, m));
+      const { person, touchedBy, tainted } = event.meta;
+      if (person && person !== remote.person && touches(event.changes, m)) {
+        done[i] = event.withTouched(
+          touchedBy ?? remote.name,
+          (tainted ?? false) ||
+            (tr && event.meta.marks.length
+              ? typedInsideMarks(event.meta.marks, tr)
+              : insertsInside(event.changes, m)),
+        );
       }
+      if (tr && done[i]!.meta.deleted?.length) done[i] = decidedBy(done[i]!, tr);
       // The change in the text from before this step.
       m = m.mapDesc(event.changes);
     }
@@ -962,10 +1125,39 @@ class HistoryState {
     } else {
       let rest: Branch = branch.length === 1 ? none : branch.slice(0, branch.length - 1);
       if (event.mapped) rest = addMappingToBranch(rest, event.mapped);
-      // Per-person undo: a tracked step that others have touched is taken back by rejecting its own
-      // marks, which leaves their text; the caret goes to what it gave back.
-      const personal =
-        side === DONE && event.meta.person && event.meta.touchedBy ? rejection(event, state) : null;
+      // Per-person undo: a step that others have touched is taken back as what is left of it.
+      // Its marks are rejected by id when they are all there, or what they left is written as the
+      // person's own edit; else the step's changes, mapped over theirs, take your text and keep
+      // theirs. The caret goes to what it gave back.
+      const touched = side === DONE && !!event.meta.person && !!event.meta.touchedBy;
+      const personal = touched ? takenBack(event, state) : null;
+      if (personal === 'nothing') {
+        // Nothing of the step is left: Undo goes on to the step below, with no message.
+        const below = new HistoryState(
+          rest,
+          this.undone,
+          this.prevTime,
+          this.prevUserEvent,
+          this.isolated,
+          this.trimmed,
+        ).pop(side, state, onlySelection);
+        return (
+          below ??
+          state.update({
+            annotations: fromHistory.of({
+              side,
+              rest,
+              selection,
+              owner: null,
+              label: null,
+              meta: NO_META,
+            }),
+            filter: false,
+            userEvent: 'undo',
+          })
+        );
+      }
+      const meta = touched ? { ...event.meta, touchedBy: null, tainted: false } : event.meta;
       if (personal) {
         let from = -1;
         let to = 0;
@@ -982,15 +1174,13 @@ class HistoryState {
             selection,
             owner: null,
             label: event.label,
-            meta: { ...event.meta, touchedBy: null },
+            meta,
           }),
           filter: false,
           userEvent: 'undo',
           scrollIntoView: true,
         });
       }
-      // An untracked step that others touched is not taken back: the text has changed since.
-      if (side === DONE && event.meta.person && event.meta.touchedBy) return null;
       const spec = {
         changes: event.changes,
         selection: event.startSelection,
@@ -1001,7 +1191,7 @@ class HistoryState {
           selection,
           owner: event.owner,
           label: event.label,
-          meta: event.meta,
+          meta,
         }),
         filter: false,
         userEvent: side === DONE ? 'undo' : 'redo',
