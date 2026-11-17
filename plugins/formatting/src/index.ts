@@ -497,6 +497,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         tracking: tracked,
         ranges,
         op,
+        compose: true,
         writer: tracked && (op.kind === 'inline' || op.kind === 'clear') ? 'ranges' : 'tracked',
         ...(group === undefined ? {} : { group }),
         author: person,

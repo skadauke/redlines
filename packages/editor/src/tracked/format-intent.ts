@@ -34,6 +34,7 @@ export interface FormatIntent {
   ranges: readonly Range[];
   op: FormatOp;
   writer: FormatWriter;
+  compose?: boolean;
   /** The group of the marks of several ranges, decided together. */
   group?: string;
   author: Person | null;
@@ -49,6 +50,9 @@ export interface FormatRequest {
   ranges: readonly Range[];
   op: FormatOp;
   writer?: FormatWriter;
+  /** Write even one range as several are (each on the text before it, composed), as the Format
+   * menu's commands over a selection of cells always did. */
+  compose?: boolean;
   group?: string;
   author: Person | null;
   time: string;
@@ -71,7 +75,7 @@ export function writeFormat(
   const writer = request.writer ?? 'tracked';
   const drawing = recording(request.random);
   const ctx = (): EditContext => ({
-    author: author as Person,
+    author: needAuthor(author, tracking),
     time,
     random: drawing.random,
     ...(group === undefined ? {} : { group }),
@@ -107,12 +111,19 @@ export function writeFormat(
       ranges,
       op,
       writer,
+      ...(request.compose ? { compose: true } : {}),
       ...(group === undefined ? {} : { group }),
       author,
       time: tracking ? time : '',
       drawn: drawing.drawn,
     },
   };
+}
+
+function needAuthor(author: Person | null, tracking: boolean): Person {
+  // A tracked intent is always written by someone: a missing author is a bug of the caller's.
+  if (!author && tracking) throw new TypeError('A tracked format needs an author.');
+  return author as Person;
 }
 
 function one(
@@ -153,6 +164,7 @@ export function deriveFormat(
     ranges,
     op: intent.op,
     writer: intent.writer,
+    ...(intent.compose ? { compose: true } : {}),
     ...(intent.group === undefined ? {} : { group: intent.group }),
     author: intent.author,
     time: intent.time,
