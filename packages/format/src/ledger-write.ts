@@ -243,6 +243,10 @@ export function keepsLedger(ledger: Ledger): boolean {
 export interface SetLedgerOptions {
   /** Replace or remove a ledger that can't be read, and with it whatever is in it. */
   replaceUnreadable?: boolean;
+  /** The file's line break before the edit that this ledger goes with: a new ledger is written in
+   * it, so that a payload's line breaks, which are the file's own kind unless they say otherwise,
+   * mean what they meant when a change took the file's last CRLF away (format §2.5). */
+  eol?: Eol;
 }
 
 /** The file's last line break, which stays its last (format §5.1). A CR alone is one too, as in
@@ -293,7 +297,7 @@ export function setLedger(
   if (!keepsLedger(ledger)) {
     return existing ? [{ from: existing.range.from, to: existing.range.to, insert: '' }] : [];
   }
-  const eol = eolOf(text, existing?.range ?? null);
+  const eol = existing ? eolOf(text, existing.range) : (options.eol ?? eolOf(text, null));
   const written = serializeLedger(ledger).replaceAll('\n', eol);
   if (existing && !existing.crLines) {
     if (text.slice(existing.start, existing.range.to) === written) return [];

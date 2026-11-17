@@ -7,7 +7,7 @@
 // original view leaves out the break a `split` stands for (format §3.4).
 
 import { closerRange, openerRange, splitEnd } from './blocks.ts';
-import { applyChanges, eolOf } from './changes.ts';
+import { applyChanges, eolOf, plainPayload } from './changes.ts';
 import { EditError } from './errors.ts';
 import { decidesFormat, isAlignOps, opsOf, parseFormatOps } from './format-ops.ts';
 import { alignChange, alignHide, alignLabel } from './table-align.ts';
@@ -402,9 +402,9 @@ function notation(
     case 'ins':
       return segment.close ? { open: '{++', close: `++}${tag}` } : { open: '', close: '' };
     case 'sub':
-      return { open: `{~~${segment.payload ?? ''}~>`, close: `~~}${tag}` };
+      return { open: `{~~${plainPayload(segment.payload ?? '')}~>`, close: `~~}${tag}` };
     case 'del':
-      return { open: `{--${segment.payload ?? ''}--}${tag}`, close: '' };
+      return { open: `{--${plainPayload(segment.payload ?? '')}--}${tag}`, close: '' };
     case 'hl':
       return { open: '{==', close: `==}${tag}` };
     case 'fmt': {

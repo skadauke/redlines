@@ -16,6 +16,7 @@ import {
   acceptAll,
   applyChanges,
   decodePayload,
+  plainPayload,
   encodePayload,
   newestView,
   originalView,
@@ -326,10 +327,10 @@ export function shorten(text: string): string {
       }
       if (!kind || !id) return all;
       if (kind === 'split') return '<split>';
-      if (kind === 'del') return `<del ${decodePayload(payload ?? '')}>`;
+      if (kind === 'del') return `<del ${plainPayload(decodePayload(payload ?? ''))}>`;
       kinds.set(id, kind);
       if (kind === 'ins') return '<ins>';
-      if (kind === 'sub') return `<sub ${decodePayload(payload ?? '')}>`;
+      if (kind === 'sub') return `<sub ${plainPayload(decodePayload(payload ?? ''))}>`;
       return `<fmt ${payload ?? ''}>`;
     },
   );

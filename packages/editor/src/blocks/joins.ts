@@ -18,7 +18,13 @@ import {
   findClusterBreak,
   type Line,
 } from '@codemirror/state';
-import { decodePayload, EditError, type FormatOp, OUTDENT_NUMBERED_CHILD } from '@redlines/format';
+import {
+  decodePayload,
+  EditError,
+  plainPayload,
+  type FormatOp,
+  OUTDENT_NUMBERED_CHILD,
+} from '@redlines/format';
 import { onlyHidden } from '../tracked/decorations.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
 import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
@@ -172,9 +178,11 @@ function originalRow(row: string): string | null {
   const text = row
     .replace(/<!--ins [a-z0-9]+-->[^]*?<!--\/[a-z0-9]+-->/g, '')
     .replace(/<!--sub [a-z0-9]+ ([^]*?)-->[^]*?<!--\/[a-z0-9]+-->/g, (_all, payload: string) =>
-      decodePayload(payload),
+      plainPayload(decodePayload(payload)),
     )
-    .replace(/<!--del [a-z0-9]+ ([^]*?)-->/g, (_all, payload: string) => decodePayload(payload))
+    .replace(/<!--del [a-z0-9]+ ([^]*?)-->/g, (_all, payload: string) =>
+      plainPayload(decodePayload(payload)),
+    )
     .replace(/<!--\/[a-z0-9]+-->|<!--(?:cmt|hl) [a-z0-9]+(?: [^]*?)?-->/g, '');
   return /<!--(?:split|fmt) /.test(text) ? null : text;
 }

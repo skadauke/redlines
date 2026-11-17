@@ -86,6 +86,8 @@ import {
   inEol,
   markerRanges,
   nameOf,
+  plainPayload,
+  restoredPayload,
   snapOut,
   visibleText,
   workingLedger,
@@ -110,7 +112,7 @@ import {
 } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
-import { encodePayload } from './payload.ts';
+import { encodePayload, encodePayloadText, payloadText } from './payload.ts';
 import { scan } from './scan.ts';
 import type { Verbatim } from './scan.ts';
 import {
@@ -618,11 +620,17 @@ function deletionChanges(
 ): TextChange[] {
   const items: Item[] = pieces.map((piece): Item => {
     if (piece.how === 'join') {
-      return { from: piece.from, to: piece.to, kind: 'delete', text: piece.text, isBreak: true };
+      return {
+        from: piece.from,
+        to: piece.to,
+        kind: 'delete',
+        text: payloadText(piece.text, plan.eol),
+        isBreak: true,
+      };
     }
     return piece.how === 'cancel' || piece.container?.own
       ? { from: piece.from, to: piece.to, kind: 'remove' }
-      : { from: piece.from, to: piece.to, kind: 'delete', text: piece.text };
+      : { from: piece.from, to: piece.to, kind: 'delete', text: payloadText(piece.text, plan.eol) };
   });
   // A split of the author's own that is cancelled goes with its break.
   for (const piece of pieces) {
@@ -678,7 +686,7 @@ function deletionChanges(
       plan.markers.some((m) => m.from < range.to && m.to > range.from);
     if (rest.some(between)) continue;
     const kept = rest.map((range) => plan.text.slice(range.from, range.to)).join('');
-    if (kept.replaceAll('\r\n', '\n') !== (c.mark.segments[0]?.payload ?? c.mark.payload)) continue;
+    if (payloadText(kept, plan.eol) !== (c.mark.segments[0]?.payload ?? c.mark.payload)) continue;
     items.push(
       { from: c.open.from, to: c.open.to, kind: 'shell' },
       { from: c.close.from, to: c.close.to, kind: 'shell' },
@@ -709,7 +717,7 @@ function deletionChanges(
       const id = joined?.kind === 'absorbed' ? joined.id : (sharedId ??= newMark(plan));
       if (joined) plan.touched.push(id);
       const text = parts.map((p) => p.text).join('');
-      insert = `<!--del ${id} ${encodePayload(text)}-->`;
+      insert = `<!--del ${id} ${encodePayloadText(text)}-->`;
     }
     changes.push({ from: first.from, to: last.to, insert });
   }
@@ -797,7 +805,7 @@ function replaceOne(plan: Plan, piece: Piece, typing: Typing): TextChange {
     return { from: piece.from, to: piece.to, insert: typing.inner + typing.trail };
   }
   const id = newMark(plan);
-  const old = encodePayload(piece.text);
+  const old = encodePayload(piece.text, plan.eol);
   return {
     from: piece.from,
     to: piece.to,
@@ -2018,9 +2026,9 @@ function ownTakes(
     return;
   }
   const was = c.mark.kind === 'sub' ? (c.mark.payload ?? '') : '';
-  const old = was + text.slice(c.close.to, end).replaceAll('\r\n', '\n');
+  const old = was + payloadText(text.slice(c.close.to, end), plan.eol);
   plan.changes.push(
-    { from: c.open.from, to: c.open.to, insert: `<!--sub ${id} ${encodePayload(old)}-->` },
+    { from: c.open.from, to: c.open.to, insert: `<!--sub ${id} ${encodePayloadText(old)}-->` },
     { from: edit.from, to: edit.to, insert: edit.typed },
     { from: c.close.from, to: c.close.to, insert: '' },
     { from: end, to: end, insert: `<!--/${id}-->` },
@@ -2152,7 +2160,7 @@ function ownBackslashLeft(plan: Plan, from: number, to: number, typed: string): 
   const { text } = plan;
   const c = ownPlain(plan, 'sub', from, to);
   if (!c || c.open.to !== c.content.from) return false;
-  const old = inEol(c.mark.payload ?? '', plan.eol);
+  const old = restoredPayload(c.mark.payload ?? '', plan.eol);
   const tail = c.content.to - old.length;
   if (old === '' || tail < c.content.from || to > tail || text.slice(tail, c.content.to) !== old) {
     return false;
@@ -2927,7 +2935,9 @@ function originalBetween(plan: Plan, from: number, to: number): string {
   return plan.markers
     .filter((m) => m.role === 'open' && m.from >= from && m.to <= to)
     .map((m) =>
-      m.mark?.kind === 'del' || m.mark?.kind === 'sub' ? (m.segment?.payload ?? '') : '',
+      m.mark?.kind === 'del' || m.mark?.kind === 'sub'
+        ? plainPayload(m.segment?.payload ?? '')
+        : '',
     )
     .join('');
 }
@@ -3524,7 +3534,7 @@ function quoteRunSub(plan: Plan, from: number, to: number): boolean {
   // Written as three changes, opener, the edit and closer, around the text that stays: an edit of
   // the same keystroke inside it (the editor's Enter that leaves a quote takes the markers of two
   // blank lines at once) still finds its text there, in the new text of the substitution.
-  const opener = `<!--sub ${id} ${encodePayload(old.replaceAll('\r\n', '\n'))}-->`;
+  const opener = `<!--sub ${id} ${encodePayload(old, plan.eol)}-->`;
   plan.changes.push(
     { from: at, to: at, insert: opener },
     { from, to, insert: '' },
@@ -3646,7 +3656,7 @@ function hardBreakReturn(plan: Plan, from: number, to: number, typed: string): b
   const old = text.slice(from, wordEnd);
   const id = newMark(plan);
   plan.changes.push(
-    { from, to: from, insert: `<!--sub ${id} ${encodePayload(old.replaceAll('\r\n', '\n'))}-->` },
+    { from, to: from, insert: `<!--sub ${id} ${encodePayload(old, plan.eol)}-->` },
     { from, to, insert: typed },
     { from: wordEnd, to: wordEnd, insert: `<!--/${id}-->` },
   );
@@ -5371,7 +5381,7 @@ function codeEdits(
     text.startsWith(plan.eol + plan.eol, block.to) &&
     block.to + 2 * plan.eol.length <= body;
   const closer = `<!--/${id}-->`;
-  const payload = (roomy ? old + plan.eol : old).replace(/\r\n?/g, '\n');
+  const payload = payloadText(roomy ? old + plan.eol : old, plan.eol);
   const tail = roomy ? block.to + plan.eol.length : block.to;
   // A block with no closing fence gets one: the closer would stand inside its code otherwise. The
   // old block is the payload and stays as it was, so rejecting gives the unclosed block back.
@@ -5388,7 +5398,7 @@ function codeEdits(
       {
         from: block.from,
         to: block.from,
-        insert: `${block.prefix}<!--sub ${id} ${encodePayload(payload)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
+        insert: `${block.prefix}<!--sub ${id} ${encodePayloadText(payload)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
       },
       ...typed,
       // The closing fence (an unclosed block's) and the closer follow the block's last character.

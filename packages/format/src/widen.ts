@@ -493,8 +493,8 @@ function tryRung(
   if (blankAfter && /(?:^|\n)( {4}|\t)[^\n]*$/.test(now) && /^\r?\n\r?\n( {4}|\t)/.test(next)) {
     return giveUp('code goes on');
   }
-  const payload = blankAfter ? `${old}\n` : old;
-  const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
+  const payload = blankAfter ? `${old}${eol}` : old;
+  const opener = `<!--sub ${id} ${encodePayload(payload, eol)}-->`;
   const closer = `<!--/${id}-->`;
   // The lines before and after the unit stand in its container, whose tightness is the item's: a
   // list's own tightness (it holds a blank line) says nothing of the blank line before it.
