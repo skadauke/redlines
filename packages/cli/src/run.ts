@@ -138,6 +138,8 @@ async function exportDocx(rest: string[], io: CliIo): Promise<number> {
   }
   const text = await readText(io, file);
   const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.docx';
+  if (target === file)
+    throw new EditError(`${file} is the file to export; give another name with -o.`);
   const { bytes, notes } = await io.exportDocx(text);
   await io.writeBytes(target, bytes).catch(cannot('write', target));
   for (const note of notes) io.stderr(`${note}\n`);

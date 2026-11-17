@@ -479,10 +479,10 @@ function createTauriHost(): Host {
         filters: [{ name: 'Word document', extensions: ['docx'] }],
       });
       if (!path) return null;
-      // The panel may take a name without the extension, off the Mac; a Word file needs it.
-      const named = path.toLowerCase().endsWith('.docx') ? path : `${path}.docx`;
-      await writeFile(named, bytes);
-      return named;
+      // Written where the panel said: only that path is in the window's scope. The Mac's panel
+      // adds the extension itself.
+      await writeFile(path, bytes);
+      return path;
     },
     watch: watchDocument,
     // src-tauri/src/project.rs.
