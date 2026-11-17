@@ -15,6 +15,7 @@ import {
   type SetupResult,
   type SkillInstalled,
   type SkillState,
+  type TailscaleStatus,
 } from '@redlines/agents';
 import type { HostProcesses } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
@@ -105,6 +106,17 @@ export const agentSetup = {
 export const agentSkills = {
   status: (agent: string) => invoke<SkillState>('skill_status', { agent }),
   install: (agent: string) => invoke<SkillInstalled>('skill_install', { agent }),
+};
+
+/**
+ * This Mac's Tailscale, for the setup of an OpenClaw agent on another computer (agents/tailscale.rs):
+ * looking changes nothing; the app and the download page only open, and Redlines never starts,
+ * stops or signs in Tailscale.
+ */
+export const tailscale = {
+  status: () => invoke<TailscaleStatus>('tailscale_status'),
+  openApp: () => invoke<void>('tailscale_open_app'),
+  download: () => invoke<void>('tailscale_download'),
 };
 
 /**

@@ -513,7 +513,10 @@ pub fn run() {
             #[cfg(unix)]
             agents::relay::relay_answer,
             #[cfg(unix)]
-            agents::relay::relay_close
+            agents::relay::relay_close,
+            agents::tailscale::tailscale_download,
+            agents::tailscale::tailscale_open_app,
+            agents::tailscale::tailscale_status
         ])
         .on_page_load(|webview, payload| {
             // A window's page that loads again, as a reload does, watches what it needs itself.

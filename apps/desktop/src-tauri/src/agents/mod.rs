@@ -24,6 +24,7 @@ mod reach;
 pub mod relay;
 mod setup;
 mod skills;
+pub mod tailscale;
 mod which;
 
 use std::path::{Path, PathBuf};
