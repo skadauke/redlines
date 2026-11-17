@@ -304,6 +304,12 @@ export interface EditorOptions {
    */
   resolveImage?: (src: string) => string | null;
   /**
+   * The bytes of a local image's file (base64 and its MIME type), given the path as `resolveImage`
+   * is, or null when it can't be read. A copy embeds the images of the selection with them, since
+   * Word and Google Docs fail to load an address of the app's own. Default: none.
+   */
+  imageData?: (src: string) => Promise<{ mimeType: string; data: string } | null>;
+  /**
    * The size in px of a local image's file, given the path as `resolveImage` is: read from the
    * file's header, so that the page holds the image's room before it loads and doesn't move when
    * it arrives. May answer later (a promise); null for a size not known. Default: none.

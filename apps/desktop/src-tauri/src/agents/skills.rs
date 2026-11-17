@@ -39,6 +39,8 @@ const OPENCLAW_COPY: &str =
 
 /// The name of the file an agent reads, and of the folder it is in.
 const FILE: &str = "SKILL.md";
+/// What an older copy is kept as when an update replaces it.
+const BACKUP: &str = "SKILL.md.bak";
 
 /// The most of an installed file that is read to tell what it is: a skill is a few thousand bytes.
 const LARGEST: u64 = 256 * 1024;
@@ -164,8 +166,13 @@ pub fn version_of(text: &str) -> Option<u32> {
         .then(|| number.parse().ok())?
 }
 
+/// The headings copies of this skill have had. A copy written before its marker was added has one
+/// of them; a renamed heading goes in this list, so that an older app's copy is still its.
+const HEADINGS: [&str; 1] = ["# Working in a Redlines file"];
+
 /// Whether a text is a copy of this skill, of any version: its front matter names `redlines`, and
-/// it has the heading every copy has. A skill of somebody's own with the same name isn't.
+/// it ends with the skill's marker (which a copy of any version since the first does), or has a
+/// heading a copy has had. A skill of somebody's own with the same name isn't.
 fn is_ours(text: &str) -> bool {
     let Some((front, body)) = text
         .strip_prefix("---\n")
@@ -174,7 +181,7 @@ fn is_ours(text: &str) -> bool {
         return false;
     };
     front.lines().any(|line| line == "name: redlines")
-        && body.contains("# Working in a Redlines file")
+        && (version_of(text).is_some() || HEADINGS.iter().any(|heading| body.contains(heading)))
 }
 
 /// What was found at a skill folder.
@@ -314,7 +321,8 @@ pub struct Written {
 /// Writes this app's copy of the skill for an agent: where there is none, or an older one. A copy
 /// that is there already, of this version, is left; a newer one, and what isn't a copy of this
 /// skill, refuse with the sentence that says why. The file is written whole, and then moved into
-/// place, so that an agent never reads half of it.
+/// place, so that an agent never reads half of it. An older copy is kept, as `SKILL.md.bak`, since
+/// what was added to it by hand is replaced with it.
 pub fn install(kind: Kind, home: &Path) -> Result<Written, String> {
     let folder = home.join(kind.relative_folder());
     let shown = tilde(&folder, home);
@@ -329,14 +337,22 @@ pub fn install(kind: Kind, home: &Path) -> Result<Written, String> {
         State::Missing | State::Older => {}
     }
     fs::create_dir_all(&folder).map_err(|error| format!("Couldn’t make {shown}: {error}"))?;
-    write_whole(&folder, kind.copy())
+    if found.state == State::Older {
+        // `inspect` found a plain file that is a copy of the skill and no larger than `LARGEST`.
+        let old = fs::read_to_string(folder.join(FILE))
+            .map_err(|error| format!("Couldn’t read {shown}/{FILE}: {error}"))?;
+        write_whole(&folder, BACKUP, &old)
+            .map_err(|error| format!("Couldn’t keep {shown}/{BACKUP}: {error}"))?;
+    }
+    write_whole(&folder, FILE, kind.copy())
         .map_err(|error| format!("Couldn’t write {shown}/{FILE}: {error}"))?;
     Ok(written)
 }
 
-/// Writes `text` as the skill's file in `folder`: to a file of its own name first, which is then
-/// moved over the skill's file, so that a reader sees the old file or the new one.
-fn write_whole(folder: &Path, text: &str) -> io::Result<()> {
+/// Writes `text` as the file `name` in `folder`: to a file of its own name first, which is then
+/// moved over `name` (a link there is replaced, not followed), so that a reader sees the old file
+/// or the new one.
+fn write_whole(folder: &Path, name: &str, text: &str) -> io::Result<()> {
     // Never a name another call of this process has, which the clock alone doesn't promise: a
     // loser's cleanup would otherwise remove the file the winner is about to move into place.
     static NEXT: AtomicU32 = AtomicU32::new(0);
@@ -354,7 +370,7 @@ fn write_whole(folder: &Path, text: &str) -> io::Result<()> {
             file.write_all(text.as_bytes())?;
             file.sync_all()
         })
-        .and_then(|()| fs::rename(&temporary, folder.join(FILE)));
+        .and_then(|()| fs::rename(&temporary, folder.join(name)));
     if written.is_err() {
         let _ = fs::remove_file(&temporary);
     }
@@ -543,6 +559,50 @@ mod tests {
             assert_eq!(fs::read_to_string(file).unwrap(), Kind::Claude.copy());
             assert_eq!(status(Kind::Claude, temp.path()).state, State::Current);
         }
+    }
+
+    #[test]
+    fn an_update_keeps_what_it_replaces_as_a_backup_even_when_it_was_read_only() {
+        let temp = TempFolder::new("skill-backup");
+        let edited = format!("{}\nMy own rule.\n", older_copy(Kind::Claude, Some(0)));
+        let folder = put(temp.path(), Kind::Claude, &edited);
+        let file = folder.join(FILE);
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o444)).unwrap();
+        // Text after the marker hides the version, so the copy reads as older.
+        assert_eq!(status(Kind::Claude, temp.path()).state, State::Older);
+        install(Kind::Claude, temp.path()).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), Kind::Claude.copy());
+        assert_eq!(fs::read_to_string(folder.join(BACKUP)).unwrap(), edited);
+        // A first install has nothing to keep.
+        let fresh = TempFolder::new("skill-no-backup");
+        install(Kind::Claude, fresh.path()).unwrap();
+        assert!(
+            !fresh
+                .path()
+                .join(Kind::Claude.relative_folder())
+                .join(BACKUP)
+                .exists()
+        );
+    }
+
+    #[test]
+    fn a_copy_is_ours_by_its_name_and_marker_whatever_its_heading_says() {
+        let copy = Kind::Claude.copy();
+        assert!(is_ours(copy));
+        // The heading renamed by a newer app: the marker still says whose it is.
+        let renamed = copy.replace("# Working in a Redlines file", "# Another heading");
+        assert_ne!(renamed, copy);
+        assert!(is_ours(&renamed));
+        // A copy from before the marker has the heading instead.
+        let without_marker = older_copy(Kind::Claude, None);
+        assert!(is_ours(&without_marker));
+        // Somebody's own skill of the same name has neither.
+        let own = "---\nname: redlines\n---\n# My own skill\n";
+        assert!(!is_ours(own));
+        // And a marker alone, without the front matter, isn't a copy.
+        assert!(!is_ours(
+            "# Working in a Redlines file\n<!-- redlines-skill 2 -->\n"
+        ));
     }
 
     #[test]

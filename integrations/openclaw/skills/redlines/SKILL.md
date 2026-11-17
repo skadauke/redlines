@@ -39,6 +39,9 @@ letter and is never `unknown` or a word YAML reads as a boolean (`y`, `n`, `yes`
 else their name, with other characters turned into `-`: `Jane.Doe@example.org` is `jane-doe`.
 Ask if you are not sure of either.
 
+If the file's `people:` list already has you as an agent for your person, give that handle as
+`--as`, not a new one: the command refuses a handle that the file has for someone else.
+
 ## Read
 
 - `redlines view <file> --review`: the text with the pending changes and comments in CriticMarkup,
@@ -111,4 +114,4 @@ Only when your person asks, and only the changes they name: `redlines accept <fi
 When you are done, run `redlines view <file> --review` and tell your person what you suggested,
 with the ids.
 
-<!-- redlines-skill 1 -->
+<!-- redlines-skill 2 -->

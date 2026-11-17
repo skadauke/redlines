@@ -41,7 +41,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { watchAgentsChanged } from './agent-changes.ts';
-import { acpAgents, createProcesses, createRelay, homeAccess, homeReach } from './agent-host.ts';
+import {
+  acpAgents,
+  createProcesses,
+  createRelay,
+  homeAccess,
+  homeReach,
+  listedAcpAgents,
+} from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
@@ -376,6 +383,9 @@ const editor = createEditor(element('#editor'), {
       return url === null ? null : imageWatch.url(file, url);
     });
   },
+  // A copy embeds the bytes of the selection's local images, read as an agent's are: only inside the
+  // document's folder, as PNG, JPEG, GIF or WebP, up to 3.5 MB; any other keeps its address.
+  imageData: (src) => readImageForAgent(src).catch(() => null),
   imageSize: (src) => {
     const path = imageDocument;
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
@@ -468,7 +478,7 @@ const agents =
           ...(isTauri
             ? {
                 more: async () =>
-                  (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
+                  (await listedAcpAgents()).map(({ id, name, program, args, bridge }) =>
                     createAcpProvider(processes, {
                       id,
                       name,

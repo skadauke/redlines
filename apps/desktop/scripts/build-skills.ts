@@ -148,7 +148,11 @@ export const PLUGIN = 'integrations/claude-code/.claude-plugin/plugin.json';
 
 /**
  * The plugin's manifest. Its version follows the skill's, so that an installed plugin updates when
- * the skill changes and not otherwise (a plugin without one updates with every commit).
+ * the skill changes and not otherwise (a plugin without one updates with every commit). That holds
+ * while the skill is all the plugin has: a plugin that gets a hook or an MCP configuration must
+ * bump its version for those too, and `skills.node.test.ts` fails until this rule says how.
+ * (Someone who installs the plugin and also copies the skill may see it listed twice: the
+ * plugin's is `redlines:redlines`. Not verified.)
  */
 export function pluginManifest(version: number): string {
   const manifest = {
