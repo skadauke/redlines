@@ -8,6 +8,7 @@ import { forceParsing, syntaxTree } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from './decorations.ts';
+import { baseThemeSpec } from './theme.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -131,5 +132,40 @@ describe('inline HTML tags', () => {
     const editor = editorAt(doc, doc.length);
     expect(nodes(editor, 'HtmlElement')).toEqual([]);
     expect(nodes(editor, 'HtmlDropped')).toEqual([]);
+  });
+});
+
+describe('the look of the inline tags (#687)', () => {
+  const rule = (selector: string): Record<string, string> =>
+    (baseThemeSpec[selector] ?? {}) as Record<string, string>;
+  const find = (name: string) =>
+    Object.keys(baseThemeSpec).find((key) => key.split(/,\s*/).includes(`.rl-h-${name}`));
+
+  it('<ins>, <del> and <s> take the text ink: underline or strike, no color of their own', () => {
+    for (const name of ['ins', 'del', 's', 'strike']) {
+      const key = find(name);
+      expect(key, name).toBeDefined();
+      expect(Object.keys(rule(key!)), name).toEqual(['textDecoration']);
+    }
+    expect(rule(find('ins')!)['textDecoration']).toBe('underline');
+    expect(rule(find('del')!)['textDecoration']).toBe('line-through');
+  });
+
+  it('they are drawn with no class of a pending change, in the Redlines look', () => {
+    const editor = editorAt('A <ins>added</ins> and <del>gone</del> and <s>struck</s> text.\n');
+    editor.setViewMode('redlines');
+    expect(editor.view.contentDOM.innerHTML).not.toMatch(/rl-(?:ins|del)\b/);
+    for (const tag of ['ins', 'del', 's']) {
+      expect(editor.view.contentDOM.querySelector(`${tag}.rl-h-${tag}`)).not.toBeNull();
+    }
+  });
+
+  it('<mark> is GitHub yellow in light and in dark, with the text ink', () => {
+    const style = rule(find('mark')!);
+    const found = /^light-dark\((.+?), (rgba\(.+\))\)$/.exec(style['backgroundColor']!);
+    expect(found?.[1]).toBe('#fff8c5');
+    // A translucent amber over the dark page: it stays yellow, and the ink stays readable.
+    expect(found?.[2]).toMatch(/^rgba\(187, 128, 9, /);
+    expect(style['color']).toBe('inherit');
   });
 });

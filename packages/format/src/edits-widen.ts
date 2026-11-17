@@ -5,6 +5,7 @@
 
 import { EditError } from './errors.ts';
 import { SYNTAX_ONLY } from './inline.ts';
+import { parse } from './parse.ts';
 import { PENDING_PIPE } from './table-rules.ts';
 import { tierOfCode } from './refusals.ts';
 import type { TrackedEdits } from './track.ts';
@@ -45,6 +46,7 @@ export function widenedAtOnce(
   edits: readonly TextChange[],
   ctx: EditContext,
   cells = false,
+  optional = false,
 ): TrackedEdits | undefined {
   if (edits.length === 0) return undefined;
   if (edits.some((edit) => !(cells ? widensHere : widensEditHere)(text, edit.from, edit.to)))
@@ -56,11 +58,29 @@ export function widenedAtOnce(
       from: view.map.fromSource(edit.from),
       to: view.map.fromSource(edit.to),
     }));
-    const done = widen(text, made, ctx);
+    const done = widen(text, made, ctx, !cells);
     // Another person's pending marks in the old text stay in it, as in a table's cells: every order
     // of decisions reads alike (format §3.12, #808). A mark of theirs that ends at the unit's edge
     // does not read alike in every order (#107), and keeps the refusal.
     if (!cells && done.touchingOthers.length > 0) return undefined;
+    // Where the fine write stands if this is not taken (`optional`), an edit that joins blocks, with a
+    // format change of theirs on either side, is not held in the old text: rejecting leaves the
+    // marker behind.
+    if (
+      optional &&
+      done.held.length > 0 &&
+      edits.some((edit) => /\n[ \t>]*\n/.test(text.slice(edit.from, edit.to)))
+    ) {
+      const before = parse(text);
+      if (
+        before.marks.some(
+          (mark) =>
+            (done.held.includes(mark.id) && mark.segments.length > 1) || mark.kind === 'fmt',
+        )
+      ) {
+        return undefined;
+      }
+    }
     return { changes: done.changes, markIds: [done.id], extendedIds: [] };
   } catch (error) {
     if (error instanceof Untrackable || error instanceof EditError) return undefined;
