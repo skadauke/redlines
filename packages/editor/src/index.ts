@@ -86,6 +86,7 @@ import {
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { quartoRefs } from './preview/quarto-refs.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
@@ -408,6 +409,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableMouse(),
     tableReach(),
     tableWidths(),
+    quartoRefs(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
