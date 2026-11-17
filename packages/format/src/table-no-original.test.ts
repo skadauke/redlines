@@ -10,6 +10,7 @@ import { tableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
 import {
+  ada,
   bo,
   bodyOf,
   context,
@@ -121,5 +122,96 @@ describe('other shapes of a table with no column of its original (#477)', () => 
     expect(trim(gone)).toBe('Before.\n\n<!--cmt c9qf-->\n\nText.');
     expect(parse(gone).ledger.comments.map((t) => t.id)).toEqual(['c9qf']);
     expect(parse(gone).marks.map((m) => m.id)).toContain('c9qf');
+  });
+});
+
+describe('a table with no column of its original, beside other pending changes (#891)', () => {
+  type Step = [typeof ada, WithoutTable<TableOp>, string[]];
+  const make = (base: string, steps: Step[]) => {
+    let text = file(base);
+    for (const [person, o, ids] of steps) {
+      const table = readTables(text, parse(text))[0]?.from ?? 0;
+      const edit = tableEdit(text, { ...o, table }, context(person, ids));
+      text = applyChanges(text, edit.changes);
+    }
+    return text;
+  };
+  const check = (label: string, text: string) => {
+    expectEveryOrderAlike(label, text, exactly);
+    expectNoDecisionRefused(label, text);
+  };
+  const TWO = 'Before.\n\n| a | b |\n| - | - |\n| x | y |\n| z | w |\n\nText.';
+  const ONE = 'Before.\n\n| a |\n| - |\n| x |\n| z |\n\nText.';
+  const ids = (...more: string[]) => ['v6xz', 'v7aa', 'v8bb', 'v9cc', 'w2dd', 'w3ee', ...more];
+
+  it("another person's inserted row beside the one deleted column", () => {
+    check(
+      'a row inserted by Ada',
+      make(ONE, [
+        [bo, { kind: 'insertCols', after: 1, count: 1 }, ['t6vw']],
+        [bo, { kind: 'deleteCols', cols: [0] }, ids()],
+        [ada, { kind: 'insertRows', after: 1, count: 1 }, ['r4ab', 'r5cd', 'r6ef']],
+      ]),
+    );
+  });
+
+  it("another person's deleted row beside the one deleted column", () => {
+    check(
+      'a row deleted by Ada',
+      make(ONE, [
+        [bo, { kind: 'insertCols', after: 1, count: 1 }, ['t6vw']],
+        [bo, { kind: 'deleteCols', cols: [0] }, ids()],
+        [ada, { kind: 'deleteRows', rows: [1] }, ['r4ab', 'r5cd']],
+      ]),
+    );
+  });
+
+  it('two deleted columns', () => {
+    const steps: Step[] = [
+      [bo, { kind: 'insertCols', after: 2, count: 1 }, ['t6vw']],
+      [bo, { kind: 'deleteCols', cols: [0, 1] }, ids()],
+    ];
+    check('both in one operation', make(TWO, steps));
+    check(
+      'a row inserted by Ada',
+      make(TWO, [
+        ...steps,
+        [ada, { kind: 'insertRows', after: 1, count: 1 }, ['r4ab', 'r5cd', 'r6ef']],
+      ]),
+    );
+  });
+
+  it("another person's row, pending in the table beside the one deleted column (written by hand)", () => {
+    // No operation writes this state (a table operation beside another person's change is a replacement),
+    // so the file is made as a merge makes it: the carrier of the table's deletion holds the row.
+    const table = '| <!--ins t5vw col--> |\n| --- |\n|  |\n| <!--ins r4ab row--> |';
+    const gone = '<!--del v6xz col=1  a \\n - \\n x -->';
+    const ledger = { t5vw: 'bo', v6xz: 'bo', r4ab: 'ada' };
+    for (const [label, body] of [
+      ['in a document', `Before.\n\n${table}\n\n${gone}\n\nText.`],
+      ['the whole text', `${table}\n\n${gone}`],
+    ] as const) {
+      const text = file(body, ledger);
+      check(label, text);
+      const rejected = applyChanges(text, reject(text, 't5vw'));
+      // The table is deleted whole, with the row still pending in it, or all of it is rejected with the
+      // column where no unit holds the table: no change of the table is left outside the deletion.
+      expect(
+        parse(rejected).marks.some((m) => m.id === 't5vw'),
+        label,
+      ).toBe(false);
+      expect(trim(originalView(rejected).text), label).toContain('| a |');
+    }
+  });
+
+  it('two deleted columns, one by each of two people', () => {
+    check(
+      'two people',
+      make(TWO, [
+        [bo, { kind: 'insertCols', after: 2, count: 1 }, ['t6vw']],
+        [bo, { kind: 'deleteCols', cols: [0] }, ids()],
+        [ada, { kind: 'deleteCols', cols: [0] }, ids('x4ff')],
+      ]),
+    );
   });
 });
