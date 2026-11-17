@@ -108,6 +108,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.12.3
         version: 2.12.3
+      docx:
+        specifier: 9.15.1
+        version: 9.15.1
       redlines:
         specifier: workspace:*
         version: link:../../packages/cli

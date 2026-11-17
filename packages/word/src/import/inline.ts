@@ -264,8 +264,16 @@ export class InlineWriter {
       this.ctx.note('image', 'A linked picture has no file in the document and was left out.');
       return '';
     }
-    const bytes = this.ctx.model.media[image.path];
     const name = image.path.replace(/^word\//, '');
+    // Markdown has nowhere to show these, and neither does a browser: said, not linked.
+    if (/\.(emf|wmf)$/i.test(name)) {
+      this.ctx.note(
+        'image',
+        'A picture in a format Markdown can’t show (EMF or WMF) was left out.',
+      );
+      return '';
+    }
+    const bytes = this.ctx.model.media[image.path];
     if (bytes) this.ctx.media[name] = bytes;
     const alt = image.alt.replace(/[[\]\\]/g, (c) => `\\${c}`).replace(/\s+/g, ' ');
     return `![${alt}](${linkTarget(name)})`;
