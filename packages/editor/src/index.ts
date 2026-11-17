@@ -257,6 +257,8 @@ export {
   trackingField,
 } from './tracked/typing.ts';
 export { intentAnnotation, intentOf } from './tracked/intent.ts';
+export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
+export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
 export type { Intent, IntentEdit, TypingIntent } from './tracked/intent.ts';
 export {
   UNTRACKED_DETAILS,
