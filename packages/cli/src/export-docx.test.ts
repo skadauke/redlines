@@ -47,6 +47,10 @@ describe('redlines import-docx', () => {
       // Beside the .docx, the name is taken by plan.md.
       expect(await run(['import-docx', docx], io)).toBe(1);
       expect(await run(['import-docx'], io)).toBe(2);
+      // An -o that names a file that is there is refused too, and a corrupt file is a message.
+      expect(await run(['import-docx', docx, '-o', file], io)).toBe(1);
+      await writeFile(join(folder, 'bad.docx'), 'not a zip');
+      expect(await run(['import-docx', join(folder, 'bad.docx')], io)).toBe(1);
     });
   });
 });

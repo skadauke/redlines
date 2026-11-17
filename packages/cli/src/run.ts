@@ -177,13 +177,15 @@ async function importDocx(rest: string[], io: CliIo): Promise<number> {
   const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.md';
   if (target === file)
     throw new EditError(`${file} is the file to import; give another name with -o.`);
-  const { markdown, notes } = await io.importDocx(bytes);
+  const { markdown, notes } = await io.importDocx(bytes).catch(() => {
+    throw new EditError(`${file} is not a Word file that redlines can read.`);
+  });
+  // Never over a file that is there, whatever its name came from.
   if (
-    out === undefined &&
-    (await io.readFile(target).then(
+    await io.realpath(target).then(
       () => true,
       () => false,
-    ))
+    )
   ) {
     throw new EditError(`${target} is there already; give another name with -o.`);
   }
