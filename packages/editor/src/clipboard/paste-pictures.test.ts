@@ -157,3 +157,103 @@ describe('pasting Google Docs’ picture', () => {
     expect(notices[0]).toMatch(/linked to its web address/);
   });
 });
+
+describe('pasting Google Docs’ picture, with a host that fetches it', () => {
+  const URL = 'https://lh7-rt.googleusercontent.com/docsz/AD_4nXe?key=abc';
+  const html = (src = URL) =>
+    `<b id="docs-internal-guid-1"><p>Before</p><p><img src="${src}" alt="Chart"></p><p>After</p></b>`;
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]);
+  const fetched = { bytes: png, type: 'image/png', extension: 'png' };
+
+  it('saves it through the host and links the file, Track Changes off', async () => {
+    const asked: string[] = [];
+    const { editor, saved, notices } = load('Start\n\n', {
+      onFetchImage: (url) => {
+        asked.push(url);
+        return Promise.resolve(fetched);
+      },
+    });
+    pasteHtml(editor, 'Start\n\n'.length, html());
+    await tick();
+    await tick();
+    expect(asked).toEqual([URL]);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ name: 'image.png', type: 'image/png' });
+    expect(editor.getDoc()).toContain('![Chart](images/image-2026-11-17-1.png)');
+    expect(editor.getDoc()).not.toContain('googleusercontent');
+    expect(notices).toEqual([]);
+  });
+
+  it('is one undo step', async () => {
+    const { editor } = load('Start\n\n', { onFetchImage: () => Promise.resolve(fetched) });
+    pasteHtml(editor, 'Start\n\n'.length, html());
+    await tick();
+    await tick();
+    expect(editor.getDoc()).toContain('![Chart](images/');
+    editor.undo();
+    // The paste, text and picture, goes in one step: nothing of it is left after one Undo.
+    expect(editor.getDoc().trim()).toBe('Start');
+  });
+
+  it('is the paster’s own insertion with Track Changes on', async () => {
+    const { editor } = load('Start\n\n', {
+      tracking: true,
+      onFetchImage: () => Promise.resolve(fetched),
+    });
+    pasteHtml(editor, 'Start\n\n'.length, html());
+    await tick();
+    await tick();
+    const doc = editor.getDoc();
+    expect(doc).toContain('<!--ins');
+    expect(newestView(doc).text).toContain('![Chart](images/image-2026-11-17-1.png)');
+    expect(parse(doc).warnings).toEqual([]);
+  });
+
+  it('keeps the address as a link, and says so, when the fetch fails', async () => {
+    const { editor, saved, notices } = load('Start\n\n', {
+      onFetchImage: () => Promise.resolve(null),
+    });
+    pasteHtml(editor, 'Start\n\n'.length, html());
+    await tick();
+    await tick();
+    expect(saved).toHaveLength(0);
+    expect(editor.getDoc()).toContain(`![Chart](${URL})`);
+    expect(editor.getDoc()).toContain('Before');
+    expect(editor.getDoc()).toContain('After');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatch(/linked to its web address/);
+  });
+
+  it('keeps the address when the fetch throws, or the host won’t save the bytes', async () => {
+    const thrown = load('Start\n\n', {
+      onFetchImage: () => Promise.reject(new Error('offline')),
+    });
+    pasteHtml(thrown.editor, 'Start\n\n'.length, html());
+    await tick();
+    await tick();
+    expect(thrown.editor.getDoc()).toContain(`![Chart](${URL})`);
+    expect(thrown.notices[0]).toMatch(/linked to its web address/);
+
+    const refused = load('Start\n\n', { onFetchImage: () => Promise.resolve(fetched) }, false);
+    pasteHtml(refused.editor, 'Start\n\n'.length, html());
+    await tick();
+    await tick();
+    expect(refused.editor.getDoc()).toContain(`![Chart](${URL})`);
+    expect(refused.notices[0]).toMatch(/linked to its web address/);
+  });
+
+  it('never asks the host for an address that is not on Google’s image hosts', async () => {
+    const asked: string[] = [];
+    const { editor, notices } = load('Start\n\n', {
+      onFetchImage: (url) => {
+        asked.push(url);
+        return Promise.resolve(fetched);
+      },
+    });
+    pasteHtml(editor, 'Start\n\n'.length, html('https://example.com/a.png'));
+    await tick();
+    expect(asked).toEqual([]);
+    expect(editor.getDoc()).toContain('![Chart](https://example.com/a.png)');
+    expect(notices[0]).toMatch(/linked to its web address/);
+  });
+});
