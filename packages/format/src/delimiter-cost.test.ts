@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { ada, context, file } from './test-helpers.ts';
 import { trackedEdits } from './track.ts';
+import { readsOtherMicromark } from './widen.ts';
 
 const L = 'bcdfghjkmnpqrstvwxz';
 const idOf = (i: number) =>

@@ -874,18 +874,70 @@ function changedStretch(
   return from === Infinity ? undefined : { from, to };
 }
 
-/** Text that a stretch read alone would read otherwise than in the file: a block that goes on past a blank line. */
-const CONTEXT = /^[ \t]*(?:`{3,}|~{3,})|<(?:pre|script|style|textarea)\b/im;
+/** Raw HTML that goes on past a blank line: a tag of raw text, a processing instruction, a declaration. */
+const RAW_HTML = /<(?:pre|script|style|textarea)\b|<\?|<![A-Za-z[]/i;
+
+/**
+ * Whether text above a stretch can leave a block open in it: a fence that isn't plainly one (not
+ * at the start of a line, or of the other kind, or not closed), raw HTML, or a comment that
+ * isn't closed.
+ */
+function opensBlock(above: string): boolean {
+  const fences = above.match(/^.*(?:`{3,}|~{3,}).*$/gm) ?? [];
+  if (fences.length % 2 === 1) return true;
+  let kind = '';
+  for (const line of fences) {
+    const plain = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (!plain) return true;
+    if (kind && kind !== plain[1]![0]) return true;
+    kind = plain[1]![0]!;
+  }
+  return RAW_HTML.test(above) || above.split('<!--').length !== above.split('-->').length;
+}
+
+/**
+ * The paragraphs the changes are in, between blank lines, of `body` (the file without its ledger),
+ * where reading them alone reads them as the file does: no fence or raw HTML open above or in them,
+ * no mark across their edges, no CRLF; undefined where it is not so.
+ */
+function stretchOf(
+  body: string,
+  parsed: Parsed,
+  changes: readonly TextChange[],
+): string | undefined {
+  const stretch = changedStretch(changes, body.length);
+  if (!stretch || stretch.to > body.length || body.length <= 2000 || body.includes('\r')) {
+    return undefined;
+  }
+  const lastBreak = body.lastIndexOf('\n\n', Math.max(0, stretch.from - 1));
+  const nextBreak = body.indexOf('\n\n', stretch.to);
+  const from = lastBreak < 0 ? 0 : lastBreak + 2;
+  const to = nextBreak < 0 ? body.length : nextBreak;
+  const here = body.slice(from, to);
+  if (opensBlock(body.slice(0, from)) || opensBlock(here)) return undefined;
+  // A mark that runs across a blank line is cut in two by the stretch.
+  const across = (at: number) =>
+    parsed.marks.some((mark) =>
+      mark.segments.some(
+        (segment) => segment.open.from < at && (segment.close?.to ?? Infinity) > at,
+      ),
+    );
+  return across(from) || across(to) ? undefined : here;
+}
 
 /**
  * Whether micromark reads the file the changes make otherwise than its newest view. Only the
- * paragraphs the changes are in are read, between blank lines, where nothing that goes on past a
- * blank line (a fence, a raw HTML block) is open or in them; otherwise the whole file is read, which
- * costs the size of the file, 380 ms for a key in 100 KB.
+ * paragraphs the changes are in are read (`stretchOf`); otherwise, or with `whole`, the whole file,
+ * which costs the size of the file: 380 ms for a key in 100 KB.
  */
-export function readsOtherMicromark(text: string, changes: readonly TextChange[]): boolean {
+export function readsOtherMicromark(
+  text: string,
+  changes: readonly TextChange[],
+  whole = false,
+): boolean {
   const file = applyChanges(text, changes);
-  const ledger = parse(file).ledgerRange;
+  const parsed = parse(file);
+  const ledger = parsed.ledgerRange;
   const read = (source: string) =>
     micromark(source, {
       allowDangerousHtml: true,
@@ -902,22 +954,7 @@ export function readsOtherMicromark(text: string, changes: readonly TextChange[]
       .replace(/ ?(<[^>]*>) ?/g, '$1')
       .trim();
   const body = ledger ? file.slice(0, ledger.from) : file;
-  const stretch = changedStretch(changes, body.length);
-  if (stretch && stretch.to <= body.length && body.length > 2000) {
-    const lastBreak = body.lastIndexOf('\n\n', Math.max(0, stretch.from - 1));
-    const nextBreak = body.indexOf('\n\n', stretch.to);
-    const from = lastBreak < 0 ? 0 : lastBreak + 2;
-    const to = nextBreak < 0 ? body.length : nextBreak;
-    const here = body.slice(from, to);
-    // Whether a fence is open above it: an odd number of fence lines before it.
-    const fences = body.slice(0, from).match(/^[ \t]*(?:`{3,}|~{3,})/gm)?.length ?? 0;
-    if (
-      fences % 2 === 0 &&
-      !CONTEXT.test(here) &&
-      !/<(?:pre|script|style|textarea)\b/i.test(body.slice(0, from))
-    ) {
-      return read(here) !== read(newestView(here).text);
-    }
-  }
+  const here = whole ? undefined : stretchOf(body, parsed, changes);
+  if (here !== undefined) return read(here) !== read(newestView(here).text);
   return read(body) !== read(newestView(file).text);
 }
