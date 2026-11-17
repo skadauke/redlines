@@ -5,11 +5,10 @@
 // a filter turns the typing, the paste or the drop at the caret into the format's `fillCells` (which
 // the format would otherwise refuse as a text after a row's last pipe, a cell GFM doesn't show).
 //
-// An input method that starts to compose there writes the pipes first (a step of its own, when the
-// composition starts), so that the composed text is in a real cell, an empty one as any other, while
-// the input method works on it; and a press on a cell that a row lacks puts the caret in it.
+// An input method that composes there writes the pipes with its first composed text (not when the
+// composition starts: one cancelled before any text leaves the file, undo and redo as they were), so
+// that the rest of the composition is in a real cell, as in any other; and a press on a cell that a row lacks puts the caret in it.
 
-import { isolateHistory } from '@codemirror/commands';
 import {
   ChangeSet,
   EditorSelection,
@@ -18,8 +17,7 @@ import {
   StateEffect,
   Transaction,
 } from '@codemirror/state';
-import { EditorView, ViewPlugin } from '@codemirror/view';
-import type { TextChange } from '@redlines/format';
+import { EditorView } from '@codemirror/view';
 import {
   markupViewFacet,
   setViewModeEffect,
@@ -35,7 +33,8 @@ import { plannedIn } from './ops.ts';
 /** What a person does that puts text in at the caret: typing, pasting, dropping, a key's own input. */
 const isTyped = (tr: Transaction) =>
   tr.isUserEvent('input') &&
-  !tr.isUserEvent('input.type.compose') &&
+  // An input method's first composed text counts; its later updates are in a real cell by then.
+  (!tr.isUserEvent('input.type.compose') || tr.isUserEvent('input.type.compose.start')) &&
   !tr.annotation(trackedEditAnnotation) &&
   !tr.annotation(Transaction.remote);
 
@@ -103,53 +102,6 @@ const fillOnTyping = Prec.lowest(
   }),
 );
 
-/**
- * An input method that starts to compose with the caret in a cell its row lacks: the pipes are written
- * first, plain, as a step of their own, and the caret goes to the cell now there, so that the input
- * method composes in an empty cell as in any other. The listener is in the capture phase, as
- * `compose.ts`'s is, before the editor's own handler.
- */
-const fillOnCompose = ViewPlugin.fromClass(
-  class {
-    readonly view: EditorView;
-
-    constructor(view: EditorView) {
-      this.view = view;
-      view.dom.addEventListener('compositionstart', this.start, true);
-    }
-
-    readonly start = () => this.begin();
-
-    begin(): void {
-      const { view } = this;
-      const lacking = missingCaret(view.state);
-      if (!lacking) return;
-      const done = plannedIn(view.state, {
-        kind: 'fillCells',
-        table: lacking.table.from,
-        row: lacking.row.index,
-        col: lacking.cell.col,
-      });
-      if ('refusal' in done) {
-        view.dispatch({ effects: refusedEditEffect.of(done.refusal) });
-        return;
-      }
-      view.dispatch({
-        changes: done.changes.map(({ from, to, insert }: TextChange) => ({ from, to, insert })),
-        selection: EditorSelection.cursor(done.caret),
-        // No mark and no ledger entry, whatever Track Changes says: the pipes are no change.
-        annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
-        userEvent: 'table.fill',
-        scrollIntoView: true,
-      });
-    }
-
-    destroy(): void {
-      this.view.dom.removeEventListener('compositionstart', this.start, true);
-    }
-  },
-);
-
 /** A press on a cell a row lacks: the caret goes to the end of the row, in that cell. */
 const pressOnMissing = EditorView.domEventHandlers({
   mousedown(event, view) {
@@ -178,5 +130,5 @@ const pressOnMissing = EditorView.domEventHandlers({
 
 /** Typing into the cells a row lacks, an input method composing there, and a press on one. */
 export function tableFill() {
-  return [fillOnTyping, fillOnCompose, pressOnMissing];
+  return [fillOnTyping, pressOnMissing];
 }
