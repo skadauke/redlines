@@ -588,7 +588,7 @@ README-style snippets) holds the editor to it.
   or an end of a selection is inside the block, while the current match of Find is in it, and while
   a pending change touches it (a change is seen and decided in its text, never drawn away). Edits
   in the source are ordinary edits, tracked or not, written by the same rules as any text; none is
-  refused. An image in a rendered block is a small box with its alt text: nothing is loaded.
+  refused. An image in a rendered block is drawn when it is a local one, through the host's resolver, at its numeric `width` and `height`; a `<picture>` draws the `<source>` that matches the window's appearance (`prefers-color-scheme`), else its `<img>`. Any other image is a small box with its alt text: nothing remote is loaded.
 - **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
   WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
   `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`

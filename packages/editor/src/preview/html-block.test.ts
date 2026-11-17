@@ -90,6 +90,61 @@ describe('the sanitizing', () => {
   });
 });
 
+describe('images in an HTML block (#818)', () => {
+  const local = (written: string) => `asset://${written}`;
+  const PIC =
+    '<picture><source media="(prefers-color-scheme: dark)" srcset="d.png 2x"><img src="l.png" alt="logo" width="120" height="40"></picture>';
+
+  it('draws a local image through the resolver at its numeric width and height', () => {
+    const out = html(
+      renderHtml('<img src="a.png" alt="A" width="50" height="x">', document, local),
+    );
+    expect(out).toContain('src="asset://a.png"');
+    expect(out).toContain('width="50"');
+    expect(out).not.toContain('height');
+  });
+
+  it('draws a picture with the source of the appearance, the img otherwise', () => {
+    const light = html(renderHtml(PIC, document, local, false));
+    expect(light).toContain('src="asset://l.png"');
+    expect(light).not.toContain('d.png');
+    const dark = html(renderHtml(PIC, document, local, true));
+    expect(dark).toContain('src="asset://d.png"');
+    expect(dark).toContain('width="120"');
+    expect(dark).not.toContain('<source');
+  });
+
+  it('gives the host only local paths, never a remote or data address', () => {
+    const asked: string[] = [];
+    const record = (path: string) => (asked.push(path), `asset://${path}`);
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const doc =
+      '<p><img src="https://x.dev/a.png"> <img src="//x.dev/b.png"> <img src="data:image/png;base64,AA"> <img src="file:///c.png"></p>\n\nAfter.\n';
+    const editor = createEditor(parent, { doc, author: ada, resolveImage: record });
+    editors.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    expect(editor.view.contentDOM.querySelector('.rl-html-block img')).toBeNull();
+    expect(asked.filter((path) => /x\.dev|^data|^file/.test(path))).toEqual([]);
+  });
+
+  it('never loads a remote image: the editor draws only what the host resolves', () => {
+    const editor = load('<picture><img src="https://x.dev/a.png" alt="far"></picture>\n');
+    expect(editor.view.contentDOM.querySelector('.rl-html-block img')).toBeNull();
+  });
+
+  it('draws a local image in the editor through resolveImage', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const doc = '<p align="center"><img src="pics/a.png" alt="A" width="40"></p>\n\nAfter.\n';
+    const editor = createEditor(parent, { doc, author: ada, resolveImage: local });
+    editors.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    const img = editor.view.contentDOM.querySelector('.rl-html-block img');
+    expect(img?.getAttribute('src')).toBe('asset://pics/a.png');
+  });
+});
+
 describe('what is drawn rendered', () => {
   it('draws a block of HTML with no Markdown twin, and keeps the Markdown around it', () => {
     const editor = load(DOC);
