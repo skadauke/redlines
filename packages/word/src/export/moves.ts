@@ -5,7 +5,7 @@
 // ids are renamed, and each side is wrapped in its range, which carries the move's name.
 
 import type { MarkRange } from '@redlines/format';
-import { decodePayload } from '@redlines/format';
+import { decodePayload, plainPayload } from '@redlines/format';
 
 export interface MoveHalf {
   side: 'from' | 'to';
@@ -24,7 +24,7 @@ export function movesOf(marks: MarkRange[], text: string): Map<string, MoveHalf>
   const contentOf = (mark: MarkRange) =>
     mark.segments.map((segment) => text.slice(segment.content.from, segment.content.to)).join('');
   const oldOf = (mark: MarkRange) =>
-    mark.segments.map((segment) => segment.payload ?? mark.payload ?? '').join('');
+    mark.segments.map((segment) => plainPayload(segment.payload ?? mark.payload ?? '')).join('');
   let count = 0;
   const pair = (from: MarkRange, to: MarkRange) => {
     if (halves.has(from.id) || halves.has(to.id)) return;

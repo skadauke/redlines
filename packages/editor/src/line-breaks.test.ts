@@ -261,7 +261,11 @@ describe('a file whose change is decided (format §5.1, #56)', () => {
     const from = editor.view.state.doc.toString().indexOf('Two');
     editor.view.dispatch({ selection: { anchor: from, head: from + 3 } });
     editor.view.dispatch(editor.view.state.replaceSelection('Deux'), { userEvent: 'input.type' });
-    expect(editor.getDoc()).toBe(written);
+    // The editor's document has LF line breaks only, and the kind a file's break had is its own
+    // record: the editor writes the change's old text with the breaks as `\n`, where the command
+    // line, which reads the file's bytes, writes an LF of a CRLF file as `\x0a` (format §2.5, #924).
+    // What this test holds is the blank line in front of the ledger, which is the same bytes.
+    expect(editor.getDoc()).toBe(written.replaceAll('\\x0a', '\\n'));
   });
 });
 

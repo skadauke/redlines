@@ -21,6 +21,10 @@ Each release carries:
 | `latest.json`                   | The update manifest that installed copies read                             |
 | `SHA256SUMS.txt`                | The SHA-256 of each file above                                             |
 
+Releases, and the website's deploy, always come from `main`. An Epic's work reaches `main` as one
+merge commit from its integration branch (`epic/<issue>`), after that branch's full CI and the final
+sweep; see AGENTS.md's CI section. `release.yml` and `deploy-website.yml` never run on an Epic branch.
+
 The website's download button links to `releases/latest/download/Redlines-macOS.dmg`, so it always
 serves the newest release.
 

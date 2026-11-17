@@ -15,7 +15,7 @@ import {
   linePrefixAt,
   withoutMarkers,
 } from './blocks.ts';
-import { inEol, eolOf, markerRanges, nameOf } from './edit-support.ts';
+import { eolOf, markerRanges, nameOf, restoredPayload } from './edit-support.ts';
 import type { MarkerRange } from './edit-support.ts';
 import type { Ledger, MarkKind, Parsed, Person } from './types.ts';
 
@@ -459,12 +459,12 @@ function dependentBreaks(
           at.through = close.to;
         }
         if (role === 'open' && (mark.kind === 'del' || mark.kind === 'sub') && payload) {
-          at.restores = inEol(payload, eol);
+          at.restores = restoredPayload(payload, eol);
         }
         if (role === 'open' && mark.kind === 'split') at.breakEnd = breakEnd(text, to, limit);
         if (role === 'close' && (mark.kind === 'ins' || mark.kind === 'sub')) {
           at.opens = segment.open.from;
-          if (mark.kind === 'sub' && payload) at.restores = inEol(payload, eol);
+          if (mark.kind === 'sub' && payload) at.restores = restoredPayload(payload, eol);
         }
         return [[from, at] as const];
       }),
