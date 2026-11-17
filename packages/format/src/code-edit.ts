@@ -567,7 +567,9 @@ export function assertStillBlock(block: CodeBlock, now: string): void {
 export function closesAtEnd(block: CodeBlock, now: string): boolean {
   const lines = linesOf(now);
   const run = OPEN_FENCE.exec(block.open)?.[2] ?? '```';
-  const fence = CLOSE_FENCE.exec(lines.at(-1) ?? '')?.[1] ?? '';
+  const last = lines.at(-1) ?? '';
+  const rest = last.startsWith(block.prefix) ? last.slice(block.prefix.length) : last;
+  const fence = INDENT_CLOSE_FENCE.exec(rest)?.[1] ?? '';
   return !!block.unclosed && lines.length > 1 && fence[0] === run[0] && fence.length >= run.length;
 }
 

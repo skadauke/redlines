@@ -1,7 +1,7 @@
 // Reading the ledger (format §5): finding the comment, parsing its YAML, and turning the result into
 // a `Ledger`. Nothing here throws: a ledger that can't be read becomes an empty one and a warning.
 
-import { isNode, isScalar, parseDocument, visit } from 'yaml';
+import { isScalar, parseDocument, visit } from 'yaml';
 import { isId } from './ids.ts';
 import { decodeText } from './payload.ts';
 import { scan } from './scan.ts';
@@ -219,9 +219,9 @@ function parseYamlUnique(source: string): unknown {
     Map(_, map) {
       const seen = new Set<unknown>();
       for (const pair of map.items) {
-        const name: unknown = isScalar(pair.key)
-          ? pair.key.value
-          : JSON.stringify(isNode(pair.key) ? pair.key.toJSON() : pair.key);
+        // Only scalar keys repeat: the `yaml` package takes two collections or aliases for two keys.
+        if (!isScalar(pair.key)) continue;
+        const name: unknown = pair.key.value;
         if (seen.has(name)) throw new Error('Map keys must be unique');
         seen.add(name);
       }

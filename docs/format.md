@@ -244,7 +244,8 @@ early, must stay on one line, and must not let other tools act on what it contai
 
 - A reader decodes left to right, after turning CRLF and CR into LF. The escapes are `\\`, `\n`,
   `\-`, `\xHH`, `\u2028`, `\u2029`, `\|`, `\{` and `\%`. A backslash before the letters `u2028` or
-  `u2029` of the text is written `\\`, as one before `n` is. Any other backslash is literal, so Markdown escapes such as
+  `u2029` of the text is written `\\`, as one before `n` is (a file written before this rule that
+  holds those letters after one backslash reads as the separator). Any other backslash is literal, so Markdown escapes such as
   `\*` are kept as written. When a payload goes back into the text, as when a deletion is
   rejected, its line breaks are written as the rule on line breaks below says.
 - The file writes line breaks as its body has them: CRLF when the body has a CRLF, and when it has
@@ -3824,7 +3825,7 @@ same values.
   written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
   and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
   `-\x2d`, a YAML escape, so that `--` never appears in the ledger.
-  A line break in a key is written `\n` (or `\r`), since a key is on one line.
+  A line break in a key is written `\n` (or `\r`), and U+2028 and U+2029 `\u2028` and `\u2029`, since a key is on one line.
 - The text of a comment and of a reply, and the quote a comment keeps of the text it covered, is
   always a literal block (`|-`). Text a person types may
   start with `@`, contain `: ` or ` #`, or say `No`; as a plain or flow scalar, each of these broke
