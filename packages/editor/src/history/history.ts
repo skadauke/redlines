@@ -1378,7 +1378,7 @@ class HistoryState {
       // A step whose ledger changes another person's edit has made stale is made again, on the
       // body, with its ledger from its notes.
       const changes =
-        event.meta.ledgerStale && event.meta.entries && !personal
+        event.meta.entries && !personal
           ? settled(
               state.doc.toString(),
               bodyEdits(event.changes, state.doc.toString()),

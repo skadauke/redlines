@@ -84,8 +84,14 @@ async function settle(...bindings: SyncBinding[]): Promise<void> {
   for (let round = 0; round < 30; round++) {
     await Promise.all(bindings.map((b) => b.settled()));
     const versions = new Set(bindings.map((b) => b.replica.version));
-    if (versions.size === 1 && bindings.every((b) => b.replica.pending.length === 0)) return;
+    if (versions.size === 1 && bindings.every((b) => b.replica.pending.length === 0)) break;
     await new Promise((resolve) => setTimeout(resolve, 3));
+  }
+  // However the edits were placed, a file holds one ledger at most.
+  for (const b of bindings) {
+    expect(b.replica.text.toString().match(/^<!-- redlines/gm) ?? []).toHaveLength(
+      b.replica.text.toString().includes('<!-- redlines') ? 1 : 0,
+    );
   }
 }
 
@@ -768,5 +774,59 @@ describe('commands over another window’s edit', () => {
     // Either the reject was placed on the suggestion as it is now, or Bo is told it wasn't.
     const gone = !newestView(text).text.includes('ADA');
     expect(gone || bo.notices.some((notice) => /suggestion/.test(notice))).toBe(true);
+  });
+
+  it('redoes a bold before the other window’s ledger write arrives, with one ledger', async () => {
+    const { hub, ada, bo } = await session();
+    const remove = createFormatting(bo.editor, {
+      author: { handle: 'bo', name: 'Bo' },
+      notice: (message) => bo.notices.push(message),
+    });
+    const at = bo.editor.view.state.doc.toString().indexOf('Second paragraph');
+    bo.editor.view.dispatch({ selection: { anchor: at + 7, head: at + 16 } });
+    expect(bo.editor.commands.run('format.bold')).toBe(true);
+    await settle(ada.binding, bo.binding);
+    await later();
+    type(ada.editor, 'Second', ' ADA');
+    bo.editor.undo();
+    await settle(ada.binding, bo.binding);
+    // Ada writes the ledger, and Bo's Redo runs before it arrives.
+    type(ada.editor, 'Third', ' MORE');
+    bo.editor.redo();
+    await settle(ada.binding, bo.binding);
+    remove();
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(bo.said).toEqual([]);
+    expect(text.match(/<!-- redlines/g)).toHaveLength(1);
+    expect(newestView(text).text).toContain('**paragraph**');
+    expect(newestView(text).text).toContain(' MORE');
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('undoes a move before the other window’s typing inside the moved paragraph arrives', async () => {
+    const { hub, ada, bo } = await session();
+    const at = bo.editor.view.state.doc.toString().indexOf('Third paragraph');
+    bo.editor.view.dispatch({ selection: { anchor: at + 2 } });
+    moveBlocks(bo.editor.view, true);
+    await settle(ada.binding, bo.binding);
+    await later();
+    type(ada.editor, 'Third para', 'X');
+    bo.editor.undo();
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(bo.said).toEqual([]);
+    expect(text.match(/<!-- redlines/g) ?? []).toHaveLength(1);
+    // The same as when Ada's typing had arrived first: the move is undone, and her X stays.
+    expect(newestView(text).text.split('\n\n').slice(0, 3)).toEqual([
+      'First paragraph here.',
+      'XSecond paragraph here.',
+      'Third paragraph here.\n',
+    ]);
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
   });
 });
