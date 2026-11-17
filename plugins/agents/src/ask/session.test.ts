@@ -262,6 +262,15 @@ describe('an Ask', () => {
     expect(session.state.turns[0]?.answer).toBe('Codex says.');
   });
 
+  it('keeps the name in the answered question: the turn holds the person’s own words (#384)', async () => {
+    const { session } = setup();
+    session.ask('@Codex what does this mean?');
+    expect(session.state.pending).toBe('@Codex what does this mean?');
+    await done(session);
+    expect(session.state.pending).toBeNull();
+    expect(session.state.turns[0]?.question).toBe('@Codex what does this mean?');
+  });
+
   it('keeps each answer with the agent that gave it, though a follow-up names another', async () => {
     const { session, claude, codex } = setup();
     session.ask('What is a lien?');
