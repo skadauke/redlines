@@ -110,6 +110,7 @@ import {
   stepRight,
   textLike,
   underliningBullet,
+  visible,
 } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
@@ -1798,6 +1799,18 @@ function visibleAfter(plan: Plan, position: number): string {
   return visibleText(plan.text, plan.markers, position, end).split(/\r?\n/)[0] ?? '';
 }
 
+/** Where markers stand in `visibleAfter(plan, position)`, as the indices of the characters that one
+ * is in front of, `shift` later in a text that something is written in front of. */
+function marksAfter(plan: Plan, position: number, shift: number): Set<number> {
+  const end = Math.min(plan.text.length, position + 64);
+  const { offsets } = visible(plan.text, plan.markers, position, end);
+  const marks = new Set<number>();
+  for (let i = 1; i < offsets.length; i++) {
+    if ((offsets[i] ?? 0) - (offsets[i - 1] ?? 0) > 1) marks.add(shift + i);
+  }
+  return marks;
+}
+
 /** The text that comes before `position` on its line, without the markers: a few characters. */
 function visibleBefore(plan: Plan, position: number): string {
   const start = Math.max(0, position - 64);
@@ -2561,7 +2574,10 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     const first = firstChar(content);
     // A prefix that the change takes away is no place for the marker, but what it leaves is.
     const where = from === start && at !== undefined ? at : from;
-    const open = inspectPlace(text, markers, where, { after: content + visibleAfter(plan, to) });
+    const open = inspectPlace(text, markers, where, {
+      after: content + visibleAfter(plan, to),
+      afterMarks: marksAfter(plan, to, content.length),
+    });
     // A table that the deletion covers whole goes as a block, its first row an opener's place.
     if (open.kind === 'refuse') {
       if (coversTable(plan, where, from, to)) {
