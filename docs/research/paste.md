@@ -88,7 +88,15 @@ In order:
   - drop every HTML comment;
   - drop hidden content and controls.
 - Office: Word's styled paragraphs become real nested lists, and Office class styles become inline
-  formatting.
+  formatting. Word's `MsoQuote` styles, and in Docs and Word a paragraph indented a quarter inch
+  or more, become a blockquote (consecutive ones one quote). The Word forms are written from its
+  documented HTML (tests marked hand-written) until a real capture replaces them.
+- Code from Docs and Word: consecutive paragraphs all in a monospace font, whatever the color of
+  each run, become one fenced block (a lone monospace paragraph stays inline code, unless in Docs'
+  code font, Roboto Mono).
+- A table's column alignment is read from the paragraphs in its cells too, where Docs and Word set it.
+- RTF is not read: Word and Docs always put HTML on the clipboard, and RTF would only matter with
+  none.
 - Math is recovered as TeX from MediaWiki, KaTeX, MathML and MathJax 2. MathJax 3 can't be
   recovered; a notice says so.
 - Formatting:
