@@ -148,7 +148,7 @@ const QMD = 'pandoc' as const;
 /** Seeds that fail and are filed (the seeds are of this generator and these INSERTS: change either and
  * they draw something else, so check them again), with the issue: they are skipped by name, not drawn out of the
  * suite, so that every other seed holds. */
-const KNOWN: Record<number, string> = { 197: '#1087', 226: '#1088', 287: '#1088' };
+const KNOWN: Record<number, string> = { 287: '#1088' };
 
 /** The marks of a file that are decided one at a time, those in the old text of a replacement too. */
 function undecided(text: string) {

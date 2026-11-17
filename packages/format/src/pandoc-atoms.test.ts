@@ -47,6 +47,33 @@ describe('a citation in the text and a span are whole in a .qmd', () => {
   }
 });
 
+describe('fence and include lines take no marker (#1087, #1088)', () => {
+  it('a partial edit of an include line puts the closer on the line after it', () => {
+    const start = file('{{< include _part.qmd >}}\n\nText here.');
+    const done = trackedEdits(
+      start,
+      [{ from: 16, to: 21, insert: '' }],
+      context(ada, ['k3x9'], QMD),
+    );
+    const after = applyChanges(start, done.changes);
+    expect(bodyOf(after)).toContain('{{< include _par >}}\n<!--/k3x9-->');
+    expectEveryOrderRead('include', after);
+  });
+
+  it('a div closed in typed text in a quote has no marker on its closing fence', () => {
+    const start = file('> A line of text here.\n\nAfter.');
+    const at = newestView(start).text.indexOf('here.') + 5;
+    const done = trackedEdits(
+      start,
+      [{ from: at, to: at, insert: ' ::: {.callout-tip}\nText\n:::' }],
+      context(ada, ['k3x9', 'm4yz', 'p5qr', 'w8nn'], QMD),
+    );
+    const after = applyChanges(start, done.changes);
+    expect(bodyOf(after)).not.toMatch(/:::[ \t]*<!--/);
+    expectEveryOrderRead('div in a quote', after);
+  });
+});
+
 describe('typed text that joins a key (#1074)', () => {
   it('tracked: the change takes the rest of the key in, so no marker stands in it', () => {
     const start = file('alpha 42 beta');

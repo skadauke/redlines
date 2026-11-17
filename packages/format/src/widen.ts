@@ -8,7 +8,14 @@
 // writer all of them share: they differ in why the fine form failed, not in what to write.
 
 import { isPandoc, withDialect } from './dialect.ts';
-import { scaffold, continuationPrefix, bodyStart, lineEnd, lineStart } from './blocks.ts';
+import {
+  INCLUDE_LINE,
+  scaffold,
+  continuationPrefix,
+  bodyStart,
+  lineEnd,
+  lineStart,
+} from './blocks.ts';
 import { micromark } from 'micromark';
 import {
   gfmAutolinkLiteral,
@@ -678,6 +685,8 @@ function riskyEnd(text: string, prefix: string): boolean {
   const line = lastLineOf(text, prefix);
   // The fence of a pandoc div: nothing but the fence may be on its line (format §3.1, rule 9).
   if (isPandoc() && /^[ \t>]*:{3,}/.test(line)) return true;
+  // A Quarto include line, alone on its line, takes no marker after it either (#1087).
+  if (isPandoc() && INCLUDE_LINE.test(line)) return true;
   return RISKY_LINES.some((risky) => risky.test(line));
 }
 
