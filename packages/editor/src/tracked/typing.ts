@@ -377,14 +377,19 @@ function pastHiddenText(state: EditorState, edits: Edit[], forward: boolean): Ed
 /**
  * Enter, whose commands delete the spaces after the caret, or before it when they continue a list,
  * keeps them while Track Changes is on: the line break goes after them, the caret to the start of
- * the new line, and no deletion of a space appears beside the break.
+ * the new line, and no deletion of a space appears beside the break. Spaces that are selected are
+ * replaced by the break, as by any key.
  */
 function keepingSpaces(tr: Transaction, edits: Edit[]): Edit[] {
   // CodeMirror's Enter commands, and only they, give their edits this user event.
   if (tr.annotation(Transaction.userEvent) !== 'input') return edits;
-  const { doc } = tr.startState;
+  const { doc, selection } = tr.startState;
   return edits.map((edit) => {
-    const spaces = edit.from < edit.to && /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to));
+    // A selection that is the spaces is Enter's to replace, as any key replaces it (#1030): only the
+    // spaces that Enter itself takes, after or before the caret, are kept.
+    const selected = selection.ranges.some((r) => r.from === edit.from && r.to === edit.to);
+    const spaces =
+      !selected && edit.from < edit.to && /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to));
     return spaces && edit.insert.startsWith('\n') ? { ...edit, from: edit.to } : edit;
   });
 }
