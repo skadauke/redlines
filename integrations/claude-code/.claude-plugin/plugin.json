@@ -1,6 +1,6 @@
 {
   "name": "redlines",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Teaches Claude Code to read a Redlines file with its review view and to change it only through the redlines command line, so that its edits are tracked suggestions in its name.",
   "author": {
     "name": "skadauke",

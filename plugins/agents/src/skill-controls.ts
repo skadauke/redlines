@@ -43,7 +43,8 @@ function skillText(skill: SkillState, done: 'installed' | 'updated' | null): str
     case 'current':
       return `Redlines skill ${done ?? 'installed'} in ${skill.folder}.`;
     case 'older':
-      return `Redlines skill installed in ${skill.folder}, and this app has a newer one.`;
+      // Update replaces the file, whatever was written in it by hand, and keeps what was there.
+      return `Redlines skill installed in ${skill.folder}, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak.`;
     case 'newer':
     case 'other':
       // Left as it is, and the sentence says why.
@@ -76,10 +77,13 @@ export function skillControls(options: {
   const skillSaid = el('div', 'rl-pref-note');
   skillSaid.setAttribute('role', 'status');
 
-  /** A button that waits while the skill is being written (`busy`). */
+  /**
+   * A button that waits while the skill is being written (`busy`). It stays enabled, since a
+   * disabled button loses the focus, and `installSkill` ignores a press that comes meanwhile.
+   */
   const make = (text: string, label: string, run: () => void, busy: boolean) => {
     const made = button(text, label);
-    made.disabled = busy;
+    if (busy) made.setAttribute('aria-disabled', 'true');
     made.addEventListener('click', () => run());
     return made;
   };
@@ -93,6 +97,12 @@ export function skillControls(options: {
   let skillAsked = 0;
 
   const drawSkill = () => {
+    if (installing && skill !== null && skill !== 'failed') {
+      // The button that was pressed stays, with the focus on it, until the skill is written.
+      skillLine.textContent = 'Installing the Redlines skill…';
+      skillActions.querySelector('button')?.setAttribute('aria-disabled', 'true');
+      return;
+    }
     skillActions.replaceChildren();
     if (skill === null) {
       skillLine.textContent = '';
