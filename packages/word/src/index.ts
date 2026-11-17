@@ -7,3 +7,5 @@ export type { Author } from './shared/people.ts';
 export type { ImportReport, ReportEntry } from './shared/report.ts';
 export { partText, readParts, setPartText, writeParts } from './shared/zip.ts';
 export type { Parts } from './shared/zip.ts';
+export { docsRoundTripNotes } from './google/notes.ts';
+export { DOCS_FILE_NOTES, isGoogleDocx, normalizeGoogleDocx } from './google/normalize.ts';
