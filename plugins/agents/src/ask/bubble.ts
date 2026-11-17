@@ -116,11 +116,11 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
   who.hidden = true;
   const whoName = el('span', 'rl-qa-who-name');
   const whoSelect = el('select', 'rl-qa-model');
-  whoSelect.addEventListener('change', () =>
-    handlers.chooseModel?.(whoSelect.value === '' ? undefined : whoSelect.value),
-  );
-  // The list takes the keyboard when it is used, and gives it back to the field when it closes.
-  whoSelect.addEventListener('keydown', (event) => event.stopPropagation());
+  whoSelect.addEventListener('change', () => {
+    handlers.chooseModel?.(whoSelect.value === '' ? undefined : whoSelect.value);
+    // The keyboard goes back to the field, for the question.
+    field.focus({ preventScroll: true });
+  });
   who.append(whoName, whoSelect);
   row.append(
     who,
