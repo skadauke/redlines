@@ -212,6 +212,7 @@ function fakeEditor() {
       expect(step.group).toBeTruthy();
       doc = text;
       onChange(text);
+      return { rebased: false, dropped: [] };
     }),
     /** Records the view in the file's ledger, which a save asks for: nothing, unless a test says. */
     recordView: vi.fn(() => {}),
@@ -1121,6 +1122,16 @@ describe('the view a save records (format §5.6)', () => {
     await controller.applyAgentEdit('One agent\n', { group: 'run-1', agent: 'Claude' });
     expect(editor.recordView).not.toHaveBeenCalled();
     expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'One agent\n' }]);
+  });
+
+  it('places an agent’s edit on a document that moved since its tool read it, and leaves the file', async () => {
+    const { host, editor, controller } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    const step = { group: 'run-1', agent: 'Claude' };
+    // Someone typed after the tool read 'Zero\n': the edit is placed, not written as it is.
+    await controller.applyAgentEdit('Zero agent\n', step, 'Zero\n');
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith('Zero agent\n', step, 'Zero\n');
+    expect(host.writes).toEqual([]);
   });
 });
 

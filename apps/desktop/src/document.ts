@@ -460,10 +460,13 @@ export class DocumentController {
    * the order they came, and never over a file that changed elsewhere meanwhile, which instead
    * leaves them unsaved, with the notice that says so. Resolves once it is written, or isn't to be.
    */
-  applyAgentEdit(next: string, step: AgentStep): Promise<void> {
+  applyAgentEdit(next: string, step: AgentStep, base?: string): Promise<void> {
     const path = this.#state.path;
-    if (path === null || this.#state.dirty || this.#disk === null) {
-      this.#editor.applyAgentEdit(next, step);
+    // A document that is no longer the text the agent worked from has the edit placed on it
+    // (`base`), so what was typed meanwhile stays; it is then not the file's text to write.
+    const stale = base !== undefined && base !== this.#editor.getDoc();
+    if (path === null || this.#state.dirty || this.#disk === null || stale) {
+      this.#applyToEditor(next, step, base);
       return Promise.resolve();
     }
     // Set first: the edit reports an edit, which compares against it, and must find a write
@@ -472,7 +475,7 @@ export class DocumentController {
     this.#base = next;
     this.#pending(1);
     try {
-      this.#editor.applyAgentEdit(next, step);
+      this.#applyToEditor(next, step, base);
     } catch (error) {
       // Nothing changed, and nothing is to be written.
       this.#base = before;
@@ -483,6 +486,12 @@ export class DocumentController {
     // A write that went wrong doesn't hold up the next, or Save.
     this.#agentWrites = written.catch(() => {});
     return written;
+  }
+
+  /** Hands the edit to the editor, with the text its tool read when it has one. */
+  #applyToEditor(next: string, step: AgentStep, base?: string): void {
+    if (base === undefined) this.#editor.applyAgentEdit(next, step);
+    else this.#editor.applyAgentEdit(next, step, base);
   }
 
   async #writeAgentEdit(path: string, next: string): Promise<void> {
