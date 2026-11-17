@@ -436,19 +436,38 @@ describe.skipIf(!process.env['REDLINES_COST'])(
 // more, each time with the parse, before it fails.
 const MOVE_PARSES = 6;
 
+function parseOnce(doc: string): number {
+  const start = performance.now();
+  const view = new EditorView({
+    state: EditorState.create({ doc, extensions: [markdown({ extensions: [GFM] })] }),
+    parent: document.body,
+  });
+  forceParsing(view, doc.length, 10_000);
+  const took = performance.now() - start;
+  view.destroy();
+  return took;
+}
+
 function parseTime(doc: string): number {
+  parseOnce(doc);
   const runs: number[] = [];
-  for (let i = 0; i < 6; i++) {
-    const start = performance.now();
-    const view = new EditorView({
-      state: EditorState.create({ doc, extensions: [markdown({ extensions: [GFM] })] }),
-      parent: document.body,
-    });
-    forceParsing(view, doc.length, 10_000);
-    if (i > 0) runs.push(performance.now() - start);
-    view.destroy();
-  }
+  for (let i = 0; i < 5; i++) runs.push(parseOnce(doc));
   return median(runs);
+}
+
+/**
+ * A timing against a multiple of the document's parse, the two taking turns (#432): a runner slowed
+ * for a few seconds slows both, as it did the code key and the paragraph key, where the parse timed
+ * once before the runs left the bound as it was. Each is the median of its turns.
+ */
+function againstParse(timing: () => number, doc: () => string, parses: number): Held {
+  const ours: number[] = [];
+  const parse: number[] = [];
+  for (let turn = 0; turn < 5; turn++) {
+    ours.push(timing());
+    parse.push(parseOnce(doc()));
+  }
+  return { ours: median(ours), limit: parses * median(parse) + 2 };
 }
 
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a row in a table', () => {
@@ -478,12 +497,8 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a row in a ta
         return (performance.now() - start) / 8;
       };
       pair();
-      const attempt = (): Held => {
-        const limit = MOVE_PARSES * parseTime(view.state.doc.toString()) + 2;
-        const runs: number[] = [];
-        for (let i = 0; i < 5; i++) runs.push(pair());
-        return { ours: median(runs), limit };
-      };
+      parseOnce(view.state.doc.toString());
+      const attempt = (): Held => againstParse(pair, () => view.state.doc.toString(), MOVE_PARSES);
       const result = held(attempt(), attempt);
       console.log(
         `cost: row move, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
@@ -534,12 +549,9 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a
         return (performance.now() - start) / 8;
       };
       pair();
-      const attempt = (): Held => {
-        const limit = COLUMN_PARSES * parseTime(view.state.doc.toString()) + 2;
-        const runs: number[] = [];
-        for (let i = 0; i < 5; i++) runs.push(pair());
-        return { ours: median(runs), limit };
-      };
+      parseOnce(view.state.doc.toString());
+      const attempt = (): Held =>
+        againstParse(pair, () => view.state.doc.toString(), COLUMN_PARSES);
       const result = held(attempt(), attempt);
       console.log(
         `cost: column move, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
@@ -585,12 +597,9 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in
         return (performance.now() - start) / 8;
       };
       pair();
-      const attempt = (): Held => {
-        const limit = COLUMN_PARSES * parseTime(view.state.doc.toString()) + 2;
-        const runs: number[] = [];
-        for (let i = 0; i < 5; i++) runs.push(pair());
-        return { ours: median(runs), limit };
-      };
+      parseOnce(view.state.doc.toString());
+      const attempt = (): Held =>
+        againstParse(pair, () => view.state.doc.toString(), COLUMN_PARSES);
       const result = held(attempt(), attempt);
       console.log(
         `cost: alignment, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,

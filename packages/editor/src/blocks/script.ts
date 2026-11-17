@@ -974,17 +974,22 @@ export const sampledDecisions = Object.assign(sampleDecisions, { decide: decided
  * (exactly, the text), where any order reads otherwise, and any file left with marks no decision
  * can be made on.
  */
-export function decisionProblems(file: string): string[] {
+export function decisionProblems(
+  file: string,
+  decideOne: (text: string, id: string, how: 'a' | 'r') => string | undefined = decided,
+): string[] {
   const all = marksOf(file);
   if (all.length === 0) return [];
   // A long file with many marks (a widened replacement holds the marks in its old text) is sampled:
   // the full walk parses it at every step.
   if (all.length > DECISION_LIMIT || file.length > 800) {
-    return sampleDecisions(file, all);
+    return sampleDecisions(file, all, decideOne);
   }
   const outcomes = new Map<string, Set<string>>();
   const problems: string[] = [];
   const seen = new Set<string>();
+  // A decision that is refused in every state of the walk is one a person can't make (#591).
+  const worked = new Set<string>();
   const walk = (text: string, path: string[]) => {
     const key = `${text}\u0000${path.toSorted().join(' ')}`;
     if (seen.has(key)) return;
@@ -1000,29 +1005,61 @@ export function decisionProblems(file: string): string[] {
     let any = false;
     for (const id of left) {
       for (const how of ['a', 'r'] as const) {
-        const next = decided(text, id, how);
+        const next = decideOne(text, id, how);
         if (next === undefined) continue;
         any = true;
+        worked.add(`${how}${id}`);
         walk(next, [...path, `${how}${id}`]);
       }
     }
     if (!any) problems.push(`no decision can be made on ${notation(bodyOf(text))}`);
   };
   walk(file, []);
+  for (const id of all) {
+    for (const how of ['a', 'r'] as const) {
+      if (!worked.has(`${how}${id}`)) {
+        problems.push(
+          `${how === 'a' ? 'accepting' : 'rejecting'} ${id} is refused in every state, in ${notation(bodyOf(file))}`,
+        );
+      }
+    }
+  }
   for (const [set, results] of outcomes) {
     if (results.size > 1) {
       problems.push(`${set || 'no decisions'} reads ${[...results].map(notation).join(' or ')}`);
     }
   }
-  const allOf = (how: string) =>
-    all
-      .map((id) => `${how}${id}`)
-      .toSorted()
-      .join(' ');
-  const accepted = [...(outcomes.get(allOf('a')) ?? [])];
-  const rejected = [...(outcomes.get(allOf('r')) ?? [])];
+  // The outcomes where every decision was made the one way. A decision may remove marks that were
+  // not decided (those inside a replacement's old text), so the set need not name every mark.
+  const allWays = (how: 'a' | 'r') => {
+    const found: string[] = [];
+    for (const [set, results] of outcomes) {
+      const tokens = set.split(' ').filter(Boolean);
+      if (tokens.every((token) => token.startsWith(how))) found.push(...results);
+    }
+    return found;
+  };
+  // acceptAll and rejectAll, over every mark, comments and highlights too.
+  const everything = (changes: () => ReturnType<typeof acceptAll>) => {
+    try {
+      return newestView(applyChanges(file, changes())).text;
+    } catch (error) {
+      if (error instanceof EditError) return undefined;
+      throw error;
+    }
+  };
+  if (everything(() => acceptAll(file)) !== newestView(file).text) {
+    problems.push('acceptAll does not give the newest view');
+  }
+  if (everything(() => rejectAll(file)) !== originalView(file).text) {
+    problems.push('rejectAll does not give the original view');
+  }
+  const accepted = allWays('a');
+  const rejected = allWays('r');
   const newest = newestView(file).text;
   const original = originalView(file).text;
+  if (accepted.length === 0) problems.push('no order of decisions accepts every mark');
+  if (rejected.length === 0) problems.push('no order of decisions rejects every mark');
   if (accepted.length && accepted[0] !== newest) {
     problems.push(`accepting every mark gives ${notation(accepted[0] ?? '')}, not the newest view`);
   }
