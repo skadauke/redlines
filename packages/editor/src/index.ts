@@ -1,6 +1,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
+import type { LanguageSupport } from '@codemirror/language';
 import {
   type ChangeSet,
   Compartment,
@@ -42,6 +43,7 @@ import {
   disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
+import { htmlWithoutComments } from './html-comments.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
@@ -343,6 +345,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const markdownSupport = markdown({
     extensions: [GFM, tabItems, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
     codeLanguages: options.codeLanguages,
+    htmlTagLanguage: htmlWithoutComments() as unknown as LanguageSupport,
   });
   const extensions = [
     markdownSupport,
