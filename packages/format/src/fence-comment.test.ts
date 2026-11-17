@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment, deleteThread } from './comments.ts';
+import { reject } from './decide.ts';
+import { trackedFormat } from './formatting.ts';
 import { addHighlight } from './highlights.ts';
 import { ada, bodyOf, context } from './test-helpers.ts';
 import { newestView, originalView } from './views.ts';
@@ -173,5 +175,46 @@ describe('a comment on a fence in a .md file', () => {
   it('is still the Markdown rules: the colons are text', () => {
     const { changes } = addComment(QMD, at(FENCE), 'x', context(ada, ['c2bd']));
     expect(applyChanges(QMD, changes)).not.toContain(':::\n<!--/c2bd-->');
+  });
+});
+
+describe('the edges of a div', () => {
+  const TIGHT = 'Intro.\n\n::: {.callout-note}\nUse the form.\n:::\nResults.\n';
+
+  it('gives the bytes back where no blank line follows the closing fence', () => {
+    for (const text of [TIGHT, TIGHT.replaceAll('\n', '\r\n')]) {
+      const open = text.indexOf(':::') + 1;
+      const done = addComment(text, { from: open, to: open }, 'x', ctx());
+      const after = applyChanges(text, done.changes);
+      expect(newestView(after).text).toBe(text);
+      expect(applyChanges(after, deleteThread(after, done.id))).toBe(text);
+    }
+  });
+
+  it('puts the new marks outside a pending change of the callout, so that no two cross', () => {
+    const base = applyChanges(
+      QMD,
+      trackedFormat(QMD, at(FENCE), { kind: 'callout', type: 'warning' }, ctx('m2bd')).changes,
+    );
+    const fence = base.indexOf('::: {.callout-warning}') + 1;
+    const done = addComment(base, { from: fence, to: fence }, 'x', ctx('c2bd'));
+    const after = applyChanges(base, done.changes);
+    expect(after.indexOf('<!--cmt c2bd-->')).toBeLessThan(after.indexOf('<!--fmt m2bd'));
+    expect(after.indexOf('<!--/m2bd-->')).toBeLessThan(after.indexOf('<!--/c2bd-->'));
+    const back = bodyOf(applyChanges(after, reject(after, 'm2bd')));
+    expect(back).toContain('<!--cmt c2bd-->\n::: {.callout-note}');
+    expect(back).not.toContain('fmt');
+    fencesAlone(back);
+  });
+
+  it('takes a point at the first column of a body, and a range with the fence’s line break', () => {
+    const body = QMD.indexOf('Report');
+    const point = applyChanges(QMD, addComment(QMD, { from: body, to: body }, 'x', ctx()).changes);
+    expect(newestView(point).text).toBe(QMD);
+    const from = QMD.indexOf(FENCE);
+    const to = QMD.indexOf('\n:::\n') + 5;
+    const whole = applyChanges(QMD, addComment(QMD, { from, to }, 'x', ctx()).changes);
+    fencesAlone(whole);
+    expect(newestView(whole).text).toBe(QMD);
   });
 });

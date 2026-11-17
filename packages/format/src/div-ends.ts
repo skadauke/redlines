@@ -6,7 +6,7 @@
 // on a fence, is pulled in to the div's body. Pandoc files only.
 
 import { isPandoc } from './dialect.ts';
-import { frontMatterEnd, lineEnd } from './blocks.ts';
+import { frontMatterEnd, lineEnd, lineStart } from './blocks.ts';
 import type { AroundInclude } from './include.ts';
 import type { Range } from './types.ts';
 
@@ -53,6 +53,44 @@ function divsOf(text: string): Div[] {
   return divs;
 }
 
+const OPENER_LINE = /^<!--(?:cmt|hl|fmt) [^>]*-->\r?$/;
+const CLOSER_LINE = /^(?:<!--\/\w+-->)+\r?$/;
+
+/** The start of the lines above `at` that hold only the openers of marks around the div that starts
+ * there (a change of a callout's type has a blank line under its opener, which goes with it). */
+function outsideOpeners(text: string, at: number): number {
+  let start = at;
+  while (start > 0) {
+    const above = lineStart(text, start - 1);
+    const content = text.slice(above, start - 1).replace(/\r$/, '');
+    if (OPENER_LINE.test(content)) {
+      start = above;
+      continue;
+    }
+    if (content.trim() === '' && above > 0) {
+      const over = lineStart(text, above - 1);
+      if (/^<!--fmt [^>]*-->\r?$/.test(text.slice(over, above - 1))) {
+        start = over;
+        continue;
+      }
+    }
+    break;
+  }
+  return start;
+}
+
+/** The end of the lines under `at` that hold only the closers of the marks around the div. */
+function outsideClosers(text: string, at: number): number {
+  let end = at;
+  for (;;) {
+    const below = end + (text[end] === '\r' ? 2 : 1);
+    if (end >= text.length || below > text.length) return end;
+    const last = lineEnd(text, below);
+    if (!CLOSER_LINE.test(text.slice(below, last))) return end;
+    end = last;
+  }
+}
+
 /** What a range comes to once its ends are off the fences. */
 export interface FencedRange {
   /** The range to place with the usual rules, none of whose ends is on a fence line. */
@@ -83,6 +121,11 @@ export function aroundFences(text: string, range: Range): FencedRange {
   const same: FencedRange = { inner: range, apply: (placed) => placed };
   if (!isPandoc() || !text.includes(':::')) return same;
   const divs = divsOf(text);
+  // A range that ends with the line break of a closing fence ends on the fence.
+  if (range.to > range.from && text[range.to - 1] === '\n') {
+    const end = range.to - (text[range.to - 2] === '\r' ? 2 : 1);
+    if (divs.some((div) => div.close.to === end)) range = { from: range.from, to: end };
+  }
   const first = fenceAt(divs, range.from);
   const last = fenceAt(divs, range.to);
   const bodyStart = (div: Div) => div.open.to + (text[div.open.to] === '\r' ? 2 : 1);
@@ -99,43 +142,20 @@ export function aroundFences(text: string, range: Range): FencedRange {
   if (first) startAt = inBody(first, range.to) ? bodyStart(first) : first.open.from;
   else if (firstLine) startAt = range.from;
   if (last) endAt = inBody(last, range.from) ? bodyEnd(last) : last.close.to;
-  const closerUnder = new Map<number, { at: number; eolBefore: boolean; eolAfter: boolean }>();
-  if (last && endAt === last.close.to) {
-    const below = last.close.to + (text[last.close.to] === '\r' ? 2 : 1);
-    if (last.close.to >= text.length || text[last.close.to] === undefined) {
-      closerUnder.set(endAt, { at: endAt, eolBefore: true, eolAfter: false });
-    } else if (
-      below <= text.length &&
-      text
-        .slice(below, lineEnd(text, below))
-        .replace(/<!--\/\w+-->/g, '')
-        .trim() === ''
-    ) {
-      // The line after the fence is blank, or holds the closers of marks already around the div:
-      // the closer goes at its end.
-      closerUnder.set(endAt, { at: lineEnd(text, below), eolBefore: false, eolAfter: false });
-    } else {
-      closerUnder.set(endAt, { at: below, eolBefore: false, eolAfter: true });
-    }
-  }
+  // Marks already around the div stand outside it: their openers above its opening fence, and their
+  // closers under its closing fence. The new ones go outside them, so that no two cross.
+  if (startAt !== undefined && first && startAt === first.open.from)
+    startAt = outsideOpeners(text, startAt);
+  if (endAt !== undefined && last && endAt === last.close.to) endAt = outsideClosers(text, endAt);
   const apply = (placed: AroundInclude): AroundInclude => {
     const a = startAt ?? placed.from;
     const b = endAt ?? placed.to;
-    const result: AroundInclude = {
+    return {
       from: a,
       to: Math.max(a, b),
       openerLine: startAt !== undefined || placed.openerLine,
       closerLine: endAt !== undefined || placed.closerLine,
     };
-    // The closer under a closing fence takes the blank line after it, so that no line break is added;
-    // where none is blank, it is a line of its own at the start of the next line.
-    const under = endAt === undefined ? undefined : closerUnder.get(endAt);
-    if (under) {
-      result.to = Math.max(a, under.at);
-      result.closerLine = under.eolBefore;
-      if (under.eolAfter) result.closerEol = true;
-    }
-    return result;
   };
   if (startAt !== undefined && endAt !== undefined) {
     return {
@@ -145,6 +165,14 @@ export function aroundFences(text: string, range: Range): FencedRange {
     };
   }
   // The other end is placed as a point, by the usual rules, and the end on the fence is set after.
+  // (A point at the first column of a body is the opener's alone.)
+  if (startAt !== undefined && !first && range.from === range.to) {
+    return {
+      inner: range,
+      whole: apply({ from: startAt, to: startAt, openerLine: false, closerLine: false }),
+      apply,
+    };
+  }
   const other = startAt === undefined ? range.from : range.to;
   return { inner: { from: other, to: other }, apply };
 }

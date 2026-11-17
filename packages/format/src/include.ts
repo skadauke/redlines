@@ -20,8 +20,6 @@ function includeAt(text: string, position: number): Range | undefined {
 export interface AroundInclude extends Range {
   openerLine: boolean;
   closerLine: boolean;
-  /** The closer is a line of its own with its line break after it, written at the start of the next line. */
-  closerEol?: boolean;
 }
 
 const OPENERS = /^(?:<!--(?:cmt|hl) \w+-->)+\r?$/;

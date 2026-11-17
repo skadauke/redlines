@@ -109,7 +109,7 @@ export function addComment(
       anchors.push({
         from: to,
         to,
-        insert: `${around.closerLine ? eol : ''}<!--/${id}-->${around.closerEol ? eol : ''}`,
+        insert: `${around.closerLine ? eol : ''}<!--/${id}-->`,
       });
     }
     const changes = commitEdit(text, anchors, ledger, {

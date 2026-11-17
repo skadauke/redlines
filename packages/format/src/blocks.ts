@@ -1445,14 +1445,12 @@ export function closerRange(text: string, close: Range): Range {
   const next = text.indexOf('\n', close.to);
   if (text.slice(close.to, next === -1 ? text.length : next).trim() !== '') return close;
   const eol = text[close.from - 2] === '\r' ? 2 : 1;
-  // A closer alone on the last line of a div's body, right above its closing fence (div-ends.ts).
+  // A closer of a comment or a highlight alone on the last line of a div's body, right above its
+  // closing fence (div-ends.ts).
   const id = /^<!--\/(\w+)-->$/.exec(text.slice(close.from, close.to))?.[1];
-  if (
-    id !== undefined &&
-    next !== -1 &&
-    FENCE_CLOSE.test(text.slice(next + 1, lineEnd(text, next + 1))) &&
-    (text.includes(`<!--cmt ${id}-->`) || text.includes(`<!--hl ${id}-->`))
-  ) {
+  const ofComment =
+    id !== undefined && (text.includes(`<!--cmt ${id}-->`) || text.includes(`<!--hl ${id}-->`));
+  if (ofComment && next !== -1 && FENCE_CLOSE.test(text.slice(next + 1, lineEnd(text, next + 1)))) {
     return { from: close.from - eol, to: close.to };
   }
   const lineEndAt = close.from - eol;
@@ -1460,7 +1458,11 @@ export function closerRange(text: string, close: Range): Range {
   const tagLine = text.slice(start, lineEndAt);
   // A Quarto include line, in the opener and the closers of the marks around it, each on a line of
   // its own: the closer takes its line break, so that no view reads them as text (include.ts).
-  if (/^<!--\/\w+-->$/.test(tagLine.replace(/\r$/, '')) || INCLUDE_LINE.test(tagLine)) {
+  if (
+    /^<!--\/\w+-->$/.test(tagLine.replace(/\r$/, '')) ||
+    INCLUDE_LINE.test(tagLine) ||
+    (ofComment && FENCE_CLOSE.test(tagLine))
+  ) {
     let at = start;
     let line = tagLine;
     while (/^<!--\/\w+-->\r?$/.test(line) && at > 0) {
@@ -1472,6 +1474,9 @@ export function closerRange(text: string, close: Range): Range {
     if (INCLUDE_LINE.test(line.replace(/\r$/, '')) && /^<!--[^/].*-->\r?$/.test(before)) {
       return { from: close.from - eol, to: close.to };
     }
+    // The closing fence of a div that a comment or a highlight is around, with its closer on a line
+    // of its own under the fence, or under the closers of marks already there.
+    if (ofComment && FENCE_CLOSE.test(line)) return { from: close.from - eol, to: close.to };
   }
   if (!HTML_START_7.test(tagLine)) return close;
   const above = start === 0 ? '' : text.slice(text.lastIndexOf('\n', start - 2) + 1, start - 1);
