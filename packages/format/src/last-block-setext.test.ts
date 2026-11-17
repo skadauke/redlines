@@ -22,7 +22,7 @@ import {
   expectEveryOrderAlike,
   file,
 } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The body of a file without the line breaks that end it. */

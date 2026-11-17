@@ -13,7 +13,7 @@ import { hunksOf, joinedHunks, runsOf } from './join.ts';
 import { tableSuggestion } from './table-diff.ts';
 import type { Hunk, JoinGuards } from './join.ts';
 import { parse } from './parse.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Parsed, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';

@@ -54,12 +54,15 @@ import {
   type Range,
   rangeEdge,
   type TextChange,
+  fineEdit,
+  fineFormat,
   trackedEdit,
   trackedFormat,
   type UnitKind,
   unitsOf,
   untrackedEdit,
   untrackedFormat,
+  widenedFirstEdits,
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
 import { lineChanges } from '../diff.ts';
@@ -125,6 +128,15 @@ export const refusedEditEffect = StateEffect.define<string>();
  * Changes writes for them share a group, and are decided together (format §3.7). */
 export const editGroupAnnotation = Annotation.define<boolean>();
 
+/** A transaction that is made only to learn whether the tracked layer takes it as marks at the grain
+ * of the edit, for a key that has another form to try: it is not written as a replacement of a unit
+ * (format §3.12), which is the last resort of the last form. */
+export const probeAnnotation = Annotation.define<boolean>();
+
+/** A transaction whose edit a key knows no fine form of reads right, though the format's own check
+ * takes one: it is written as a replacement of its unit at once (format §3.12). */
+export const widenFirstAnnotation = Annotation.define<boolean>();
+
 export const RAW_READ_ONLY =
   'Plain is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
 
@@ -165,9 +177,17 @@ export function contextFor(state: EditorState): EditContext {
  *
  * @throws EditError when the format refuses it.
  */
-export function blockFormatChanges(state: EditorState, range: Range, op: FormatOp): TextChange[] {
+export function blockFormatChanges(
+  state: EditorState,
+  range: Range,
+  op: FormatOp,
+  widening = false,
+): TextChange[] {
   const text = state.doc.toString();
-  if (state.field(trackingField)) return trackedFormat(text, range, op, contextFor(state)).changes;
+  if (state.field(trackingField)) {
+    const write = widening ? trackedFormat : fineFormat;
+    return write(text, range, op, contextFor(state)).changes;
+  }
   const { random } = state.facet(editSourceFacet);
   const editing = state.facet(authorFacet);
   const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
@@ -502,7 +522,51 @@ function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: b
   const below = edit.insert.endsWith('\n') ? hiddenAt(next, offset) : undefined;
   const opensBlock =
     below !== undefined && (below.from === 0 || after.text[below.from - 1] === '\n');
-  const pos = positionAt(next, offset, opensBlock || !(edit.insert || backward) ? 1 : -1);
+  // The new text of a replacement that this edit made (format §3.12) starts after its opener: the
+  // text typed at its start is in it, not in front of it.
+  const hidden = hiddenAt(next, offset);
+  const startsNew =
+    hidden !== undefined &&
+    after.marks.some(
+      (mark) =>
+        mark.kind === 'sub' &&
+        before.ledger.marks[mark.id] === undefined &&
+        mark.segments.some((segment) => {
+          const from = openerRange(segment).from;
+          const line = after.text.slice(after.text.lastIndexOf('\n', from - 1) + 1, from);
+          return (
+            from === hidden.from &&
+            /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(?:\[[ xX]\][ \t]+)?$/.test(line)
+          );
+        }),
+    );
+  const pos = positionAt(
+    next,
+    offset,
+    opensBlock || startsNew || !(edit.insert || backward) ? 1 : -1,
+  );
+  const end = bodyEnd(after);
+  return end === null ? pos : Math.min(pos, end);
+}
+
+/**
+ * Where the caret at `head` goes after `changes`, a replacement of a unit that the format wrote
+ * (format §3.12): in the newest text, which keeps what stands after the caret, the same characters
+ * from its end, in the new text of the replacement and not in the old text it holds.
+ */
+export function caretKeptFromEnd(
+  state: EditorState,
+  changes: readonly TextChange[],
+  head: number,
+): number {
+  const text = state.doc.toString();
+  const before = parse(text);
+  const after = parse(applyChanges(text, changes));
+  const old = newestOf(before);
+  const next = newestOf(after);
+  const kept = old.text.length - newestOffset(old, head);
+  const offset = Math.max(0, Math.min(next.text.length, next.text.length - kept));
+  const pos = positionAt(next, offset, -1);
   const end = bodyEnd(after);
   return end === null ? pos : Math.min(pos, end);
 }
@@ -529,6 +593,7 @@ function trackEdits(
   edits: readonly Edit[],
   backward: boolean,
   grouped: boolean | string = false,
+  widening: boolean | 'first' = false,
 ): Tracked {
   let ctx = contextFor(state);
   // A group of its own for several edits, or the one a caller has made for them.
@@ -537,9 +602,16 @@ function trackEdits(
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
-    if (edit.from !== edit.to) return trackedEdit(doc, edit, ctx);
+    const write =
+      widening === 'first'
+        ? (at: string, change: TextChange, made: typeof ctx) =>
+            widenedFirstEdits(at, [change], made).changes
+        : widening
+          ? trackedEdit
+          : fineEdit;
+    if (edit.from !== edit.to) return write(doc, edit, ctx);
     const at = rangeEdge(read, edit.from, edit.insert);
-    return trackedEdit(doc, { from: at, to: at, insert: edit.insert }, ctx);
+    return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
   });
 }
 
@@ -702,15 +774,27 @@ function trackedSpec(
 ): TransactionSpec | readonly (Transaction | TransactionSpec)[] {
   const start = tr.startState;
   let tracked: Tracked;
-  try {
-    tracked = trackEdits(
+  const track = (widening: boolean | 'first') =>
+    trackEdits(
       start,
       start.doc.toString(),
       start.field(parsedField),
       edits,
       backward,
       tr.annotation(editGroupAnnotation) === true,
+      widening,
     );
+  try {
+    try {
+      tracked = tr.annotation(widenFirstAnnotation) === true ? track('first') : track(false);
+    } catch (error) {
+      // No fine form: the unit that holds the edit is replaced, unless a key has another form to
+      // try first.
+      if (!(error instanceof EditError) || tr.annotation(probeAnnotation) === true) throw error;
+      // (Several edits are composed by position, which a replacement moves: they stay refused.)
+      if (edits.length > 1) throw error;
+      tracked = track(true);
+    }
   } catch (error) {
     if (error instanceof EditError) {
       // Front matter takes no mark: the person is asked first (design §3.1), where there is a host

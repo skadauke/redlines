@@ -7,10 +7,10 @@ import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import type { FormatOp } from './format-ops.ts';
-import { trackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat } from './formatting.ts';
 import { ada, bodyOf, context } from './test-helpers.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
-import { trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import type { Range, TextChange } from './types.ts';
 

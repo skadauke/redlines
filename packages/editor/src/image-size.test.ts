@@ -2,17 +2,18 @@
 // An image's size and alignment (#526): the text a size is written as, the commands for a host's
 // Image menu, Track Changes on and off, and Undo.
 import { forceParsing } from '@codemirror/language';
-import { parse } from '@redlines/format';
+import {
+  acceptAll,
+  applyChanges,
+  newestView,
+  originalView,
+  parse,
+  rejectAll,
+} from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, runScript, scriptRows } from './blocks/script.ts';
 import { undo } from './history/index.ts';
-import {
-  IMAGE_IN_HEADING,
-  IMAGE_PARTS_PARAGRAPH,
-  imageInSelection,
-  imageText,
-  lookEdit,
-} from './image-size.ts';
+import { IMAGE_IN_HEADING, imageInSelection, imageText, lookEdit } from './image-size.ts';
 import { createEditor, type Editor } from './index.ts';
 
 const open: Editor[] = [];
@@ -364,12 +365,20 @@ describe('with Track Changes on', () => {
     );
   });
 
-  it('says why an image with its paragraph under it is not resized, in words about the image', () => {
+  it('writes an image with its paragraph under it as a replacement of the paragraph, in every order', () => {
     const notices: string[] = [];
-    const editor = load('![](a.png)\nmore **text**', 0, notices);
+    const original = '![](a.png)\nmore **text**';
+    const editor = load(original, 0, notices);
     editor.setTracking(true, { inFile: false });
-    expect(editor.commands.run('image.size.medium')).toBe(false);
-    expect(notices).toEqual([IMAGE_PARTS_PARAGRAPH]);
-    expect(editor.view.state.doc.toString()).toBe('![](a.png)\nmore **text**');
+    expect(editor.commands.run('image.size.medium')).toBe(true);
+    expect(notices).toEqual([]);
+    const written = editor.view.state.doc.toString();
+    expect(written).toContain('<!--sub ');
+    expect(originalView(written).text).toBe(original);
+    expect(newestView(written).text).toMatch(/width="\d+"/);
+    expect(originalView(applyChanges(written, rejectAll(written))).text).toBe(original);
+    expect(newestView(applyChanges(written, acceptAll(written))).text).toBe(
+      newestView(written).text,
+    );
   });
 });

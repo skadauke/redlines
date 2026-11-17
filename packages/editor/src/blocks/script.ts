@@ -950,7 +950,11 @@ export function decisionProblems(file: string): string[] {
   ];
   const all = marksOf(file);
   if (all.length === 0) return [];
-  if (all.length > DECISION_LIMIT) return sampleDecisions(file, all);
+  // A long file with many marks (a widened replacement holds the marks in its old text) is sampled:
+  // the full walk parses it at every step.
+  if (all.length > DECISION_LIMIT || file.length > 800) {
+    return sampleDecisions(file, all);
+  }
   const outcomes = new Map<string, Set<string>>();
   const problems: string[] = [];
   const seen = new Set<string>();

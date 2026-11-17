@@ -26,7 +26,7 @@ import {
   file,
   TIME,
 } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import { atWrappedLine, wrappedLineStart } from './wrapped-line.ts';
 import { newestView, originalView } from './views.ts';

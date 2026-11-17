@@ -9,7 +9,7 @@ import { addComment } from './comments.ts';
 import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { formatChange } from './format-blocks.ts';
-import { trackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat } from './formatting.ts';
 import type { FormatOp } from './formatting.ts';
 import { encodeValue } from './format-ops.ts';
 import * as format from './index.ts';
@@ -42,7 +42,7 @@ import { outerPipeWrites } from './table-rules.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
 import { readTables } from './table.ts';
 import type { TableAlign, TableRead } from './table.ts';
-import { trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import {
   TIME,

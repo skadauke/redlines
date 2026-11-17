@@ -55,6 +55,30 @@ function click(editor: Editor, index: number): void {
   box?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
 }
 
+/** Every mark decided the same way, in a random order: the file as that decision reads it. */
+function decideAll(written: string, accepting: boolean, seed: number): string {
+  let random = seed;
+  let text = written;
+  for (let guard = 0; guard < 200; guard++) {
+    const marks = parse(text).marks;
+    if (marks.length === 0) break;
+    random = (random * 48271) % 2147483647;
+    const mark = marks[random % marks.length];
+    if (!mark) break;
+    text = applyChanges(text, accepting ? accept(text, mark.id) : reject(text, mark.id));
+  }
+  return text;
+}
+
+/** A write that reads the same in every order of decisions: the original view when all are
+ * rejected, the newest when all are accepted. */
+function expectOrderSafe(written: string, before: string): void {
+  for (let seed = 1; seed <= 6; seed++) {
+    expect(newestView(decideAll(written, false, seed)).text).toBe(originalView(before).text);
+    expect(newestView(decideAll(written, true, seed)).text).toBe(newestView(written).text);
+  }
+}
+
 const DOC = '- [ ] Buy milk\n- [x] Call Ada\n\nEnd.\n';
 
 describe('task boxes', () => {
@@ -212,16 +236,15 @@ describe('a box refused for how much is pending', () => {
     expect(before.match(/<!--ins /g)).toHaveLength(7);
   });
 
-  it('says so with six that bring a backtick, not that Track Changes is the trouble (#167)', () => {
+  it('writes the click as a replacement of the list with six that bring a backtick (#167)', () => {
     const notices: string[] = [];
     const editor = pending(6, notices, true);
     const before = editor.getDoc();
     click(editor, 0);
-    expect(editor.getDoc()).toBe(before);
-    expect(notices).toEqual([
-      expect.stringMatching(/^This box can't be changed while 6 changes in its list are pending/),
-    ]);
-    expect(notices.join()).not.toMatch(/Turn off Track Changes/);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).not.toBe(before);
+    expect(editor.getDoc()).toContain('<!--sub ');
+    expectOrderSafe(editor.getDoc(), before);
   });
 });
 
@@ -262,15 +285,15 @@ describe('a box clicked while an empty item is open (rule 6)', () => {
     expect(isOpen(editor)).toBe(true);
   });
 
-  it('says so, and leaves the item open, where it can’t check the list: eight pending changes', () => {
+  it('writes the click as a replacement, and leaves the item open, with eight pending changes', () => {
     const notices: string[] = [];
     const editor = withOpenItem(true, 8, notices);
     const before = editor.getDoc();
     click(editor, 1);
-    expect(editor.getDoc()).toBe(before);
-    expect(notices).toEqual([
-      expect.stringMatching(/^This box can't be changed while \d+ changes/),
-    ]);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).not.toBe(before);
+    expect(editor.getDoc()).toContain('<!--sub ');
+    expectOrderSafe(editor.getDoc(), before);
     expect(isOpen(editor)).toBe(true);
   });
 });

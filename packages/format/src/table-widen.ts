@@ -18,6 +18,7 @@ import type { TableEdit, TableOp } from './table-ops.ts';
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Range } from './types.ts';
 import { newestView } from './views.ts';
+import { scopeOf, widensHere } from './widen-scope.ts';
 import { Untrackable, widen } from './widen.ts';
 
 /**
@@ -58,7 +59,12 @@ export function widenedCellFormat(
     throw first;
   }
   const parsed = parse(text);
-  if (ranges.some((range) => !cellAt(text, parsed, range.from, range.to))) throw first;
+  // A cell of a table is the table's lane (R2), a list is the list's (R3).
+  const inLane = (range: Range) =>
+    scopeOf(text, range.from, range.to) === 'cell'
+      ? cellAt(text, parsed, range.from, range.to) !== undefined
+      : widensHere(text, range.from, range.to);
+  if (ranges.some((range) => !inLane(range))) throw first;
   try {
     const view = newestView(text);
     const edits = ranges.flatMap((range) =>
@@ -70,6 +76,13 @@ export function widenedCellFormat(
     );
     if (edits.length === 0) throw first;
     const done = widen(text, edits, ctx);
+    // Outside a table's cells, others' pending marks in the old text keep the refusal (#808).
+    if (
+      done.heldByOthers.length > 0 &&
+      ranges.some((r) => scopeOf(text, r.from, r.to) !== 'cell')
+    ) {
+      throw first;
+    }
     return { changes: done.changes, markIds: [done.id], extendedIds: [] };
   } catch (error) {
     // No unit holds it, or the format has no meaning there: the first refusal stands.

@@ -98,14 +98,14 @@ describe('Backspace at the start of a block', () => {
         doc: 'Head⏎===⏎⏎‸Two.',
         keys: BS,
         off: { caret: 'Head‸Two.⏎===' },
-        on: { caret: 'Head⏎===⏎⏎‸Two.', refusal: SETEXT_JOIN },
+        on: { caret: '<sub Head⏎===⏎⏎Two.>⏎⏎Head‸Two.⏎===⏎</sub>' },
       },
       {
         name: 'Delete at the end of a setext heading, a paragraph after it',
         doc: 'Head‸⏎---⏎⏎Two.',
         keys: DEL,
         off: { caret: 'Head‸Two.⏎---' },
-        on: { caret: 'Head‸⏎---⏎⏎Two.', refusal: SETEXT_JOIN },
+        on: { caret: '<sub Head⏎---⏎⏎Two.>⏎⏎Hea‸dTwo.⏎---⏎</sub>' },
       },
       {
         name: 'a paragraph after a setext heading in a quote',
@@ -771,7 +771,7 @@ describe('At the start of the document, Track Changes on', () => {
         doc: '> > ‸One.⏎> >⏎> > Two.',
         keys: BS,
         off: { caret: '> ‸One.⏎> ⏎> > Two.' },
-        on: { caret: '> > ‸One.⏎> >⏎> > Two.', refusal: DEEP_AT_START },
+        on: { caret: '‸> <sub > One.⏎> >⏎> > Two.>⏎>⏎> One.⏎> >⏎> > Two.</sub>' },
       },
       {
         name: 'the first item of a list in a quote',
@@ -972,8 +972,6 @@ const BELOW_CHANGES =
 /** The key's words where the line below would become text of the item, and the format refuses nothing. */
 const ABSORBED =
   "This item can't go up a level: the line after it would read as part of its text, since a number other than 1, an empty item or an underline can't start a block right under text. Put a blank line between them first.";
-const NUMBERED_IN_CONTAINER =
-  "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
 
 describe('Numbered items that would become text (walk seeds 332, 511, 887)', () => {
   scriptRows([
@@ -990,7 +988,7 @@ describe('Numbered items that would become text (walk seeds 332, 511, 887)', () 
         doc: '- plan‸⏎  1) alpha⏎  2) ship',
         keys: DEL,
         off: { caret: '- plan‸alpha⏎⏎  2) ship' },
-        on: { caret: '- plan‸⏎  1) alpha⏎  2) ship', refusal: NUMBERED_IN_CONTAINER },
+        on: { caret: '-‸ <sub plan⏎  1) alpha⏎  2) ship>⏎  planalpha⏎⏎  2) ship</sub>' },
       },
     ]),
     ...both([
@@ -1206,15 +1204,11 @@ describe('Numbered items that would become text (walk seeds 332, 511, 887)', () 
       },
     ]),
     {
-      name: 'Delete at the start of a soft-broken line before a numbered item that a deletion ends (seed 511), Track Changes on',
+      name: 'Delete at the start of a soft-broken line before a numbered item that a deletion ends (seed 511), Track Changes on: written as a replacement of the list item',
       doc: '1) ship plan<del  >⏎‸   gamma<del z>⏎2) alpha beta',
       keys: DEL,
       tc: true,
-      expect: {
-        caret: '1) ship plan<del  >⏎‸   gamma<del z>⏎2) alpha beta',
-        refusal:
-          'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
-      },
+      expect: { newest: '1) ship plan⏎  gamma⏎2) alpha beta' },
     },
   ]);
 });

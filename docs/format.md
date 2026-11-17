@@ -2072,16 +2072,19 @@ Next paragraph.
 - The code of a raw-text element is what stands between its opening tag's `>` and its closing tag
   (also on one line: `<title>Docs</title>`); of display math, what stands between its two `$$`.
   A change on a fence's line, in a tag, on a `$$` line outside the two `$$`, is not a change of the
-  code, and is refused (`no-legal-placement`): "A tracked change can't go on the line that opens or
-  closes code, math or raw text." No marker is ever written inside a block. So is an edit that
-  would end the block: a line of the code that closes the fence, `$$` or the closing tag, a line of
-  indented code that is not indented, or a line without the container's prefix ("This would end
-  the code block it is typed in."). An edit that crosses a block's edge is an edit of the text
-  around it and the block, and is refused as before.
+  code, and no marker is ever written inside a block: it is written as a replacement of the block
+  (§3.12), which holds the line as the edit leaves it. So is an edit that would end the block (a
+  line of the code that closes the fence, `$$` or the closing tag, a line of indented code that is
+  not indented, a line without the container's prefix), where the file as the edit leaves it reads
+  as the same blocks in every order of decisions; where it doesn't (a closing fence that is cut, or
+  one typed in, leaves the rest of the file inside a block or outside one) no unit holds it, and
+  the person is asked (§3.13), in the words that were the refusal's ("This would end the code
+  block it is typed in."). An edit that crosses a block's edge is an edit of the text around it and
+  the block, and is written as the unit that holds both.
 - Indented code that someone else's pending deletion of the blank line above it joins to the text
-  above (it is code in the original text and text of that block in the newest) takes no key until
-  it is decided: the edit is refused, naming the person, as for a marker in the block. Your own
-  marks never refuse.
+  above (it is code in the original text and text of that block in the newest) is written as a
+  replacement of the block, which holds that deletion in its old text, as for a marker in the
+  block.
 - Against the `$$` of display math, at the exact start of the opening line or the exact end of the
   closing line, only line breaks are written (as the text around the block), with the prefixes of
   the container's lines when the math is in a quote (`\n>\n> `) or a list item; text typed there
@@ -2100,11 +2103,13 @@ Next paragraph.
   the block's range, in its fence or tag lines or after the closing tag on its line, is another
   person's mark that the block's replacement takes into its payload (§3.12). A block whose line
   breaks are not all the file's is given back in the file's (§8, every restored text).
-- Indented code is changed this way at the top level only, and only when no marker stands in the
-  block or in the lines between it and the text above it, where a change that adds or takes away a
-  blank line would make it code in one view and text in the other (§2.1). Code that starts an item
-  of a list (`- ```js`), and indented code in a list item or a quote, are changed as part of their
-  item or their list (§3.12). With Track Changes off every key works in them as in any code. `pre` and `title` (and the
+- Indented code is changed this way where no marker stands in the block or in the lines between it
+  and the text above it, where a change that adds or takes away a blank line would make it code in
+  one view and text in the other (§2.1); where one does, the block is written as a replacement
+  (§3.12) that holds the marker in its old text. Code that starts an item of a list (`- ```js`),
+  and indented code in a list item or a quote, are written as the replacement of the block, with
+  the container's prefix on each line, or, where the text the edit leaves no longer stands in the
+  item, of the item or the list that holds it (§3.12). With Track Changes off every key works in them as in any code. `pre` and `title` (and the
   other raw-text elements) inside a quote or a list item are not read as raw text yet (#284): the
   scan finds raw text only where it starts at the left edge, so a change there is written as in
   any HTML block, and the promise that no marker goes inside them holds at the top level only. A `title` element is raw
@@ -3233,8 +3238,14 @@ table), and nothing about its markers differs from theirs.
 The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
 and the views read the replacements it writes, and the writers that refuse today call it one unit at
 a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format change in a cell),
-and the lists, blocks and code follow. Until a writer calls it, it still refuses, in the words of
-its own section.
+and so have the lists (`edits-widen.ts`, `widen-scope.ts`: a typed, pasted or key edit and a format
+or block change in a list item, which `trackedEdits` and `trackedFormat` write as a replacement of
+the item or the list when no fine form reads alike in every order, and keep their refusal when
+the unit's old text would hold another person's pending change: some order of decisions would not
+read as the original, #808), and so have the blocks (the same two, in a paragraph, a heading or a
+quote) and code (a typed, pasted or key edit in a fenced or indented block, display math or raw
+text, and a key that moves the lines under an item that leaves its list, with the same guard).
+Until a writer calls it, it still refuses, in the words of its own section.
 
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
 bullet outside), a list, a code block or a table. The edit is written as the replacement of the
@@ -3276,6 +3287,28 @@ When the new text is the unit as it reads with the marks of the old text accepte
 is removed, and the unit is as it was, with those marks pending. Another person's edit in the new
 text is written as a mark in it where a fine mark reads alike in every order, and else as a
 replacement of a unit of the new text, written inside the first replacement's text (above).
+
+**In a list** the edit is made on the newest text as Track Changes off makes it (Return, Tab,
+Shift-Tab, a change of the list's type, Backspace at the start of an item), and the unit is the
+list item, or the list where the item's form can't be written (a tight list takes no blank line
+before a closer, and an edit that makes an item two or takes its text out of the list changes the
+list). The lines before and after the unit stand in its container, so a list unit's own looseness
+says nothing of them: they are blank only where the item that holds it is loose. A line that
+Markdown reads as the item's own indented code, or as an HTML block that runs to the next blank
+line, is code, and no unit is written around it. A person's pending split or change that stops the
+fine write is kept in the old text.
+
+**In a block** (a paragraph, a heading, an alert, a quote's paragraph) a typed, pasted or key edit,
+and a change of the block's type, that no fine form writes so that every order of decisions reads
+alike is the replacement of the block, or of the quote that holds it. This takes the places where
+the fine forms refused today: a type typed in front of a block after another person's break, a join
+or a split next to another person's change, a join that has to write text again that holds another
+person's mark, a block change beside pending changes, and a join of a block whose text another
+person deleted. A key whose fine form the format accepts, although a reader of the file reads it
+otherwise than the newest view (the join of a paragraph onto a setext heading, at the top level, and
+the blank line that keeps a numbered item apart, in a list or a quote), is written as the
+replacement at once (`widenedFirstEdits`). Display math, code and raw HTML are the code's (§3.5),
+not the block's, and a join onto a setext heading inside a list or a quote is still refused.
 
 **The closer** stands at the end of the new text's last line, except where a marker there would
 read otherwise: after a closing fence, a table, a bare list marker or an emphasis delimiter or

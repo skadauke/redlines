@@ -77,6 +77,9 @@ export interface Widened {
   unit: WidenedUnit;
   /** The ids of other people's pending changes that are in its old text. */
   held: string[];
+  /** The part of `held` that is not the author's own, and others' marks that touch the unit's edges:
+   * those keep a widened edit refused (#808, #107). */
+  heldByOthers: string[];
   /** The ids of the author's own pending changes in the unit, which folded into the replacement:
    * its old text has them rejected. */
   folded: string[];
@@ -354,6 +357,9 @@ function tryRung(
   // Nothing left of the unit is a deletion of it, not a replacement.
   if (now.trim() === '') return giveUp('empty');
   const range = { from: rung.lineFrom, to: rung.to };
+  // The new text is one unit of the kind the old one was: an edit that makes an item two, or takes
+  // a block of it out of its container, is a change of the unit around it.
+  if (!sameFrame(rung.kind, rung.prefix, now)) return giveUp('frame');
   // Your own pending changes in the unit fold into the replacement: they are rejected in its old
   // text, as they would be by rejecting them, and their text is in the new text.
   const own = parsed.marks.filter(
@@ -424,11 +430,19 @@ function tryRung(
     rung.prefix === '' &&
     /^\r?\n\r?\n[ \t]*\S/.test(next) &&
     !/^\r?\n\r?\n<!-- redlines/.test(next);
+  // An indented line after the blank line goes on the indented code that the unit ends in: the closer
+  // standing in the blank line would cut that block in two.
+  if (blankAfter && /(?:^|\n)( {4}|\t)[^\n]*$/.test(now) && /^\r?\n\r?\n( {4}|\t)/.test(next)) {
+    return giveUp('code goes on');
+  }
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
   const closer = `<!--/${id}-->`;
   if (HTML_LINE.test(lastLineOf(now, rung.prefix))) return giveUp('html');
-  const lead = scaffold(rung.prefix, eol, rung.tight);
+  // The lines before and after the unit stand in its container, whose tightness is the item's: a
+  // list's own tightness (it holds a blank line) says nothing of the blank line before it.
+  const tight = rung.kind === 'list' && rung.parent ? rung.parent.tight : rung.tight;
+  const lead = scaffold(rung.prefix, eol, tight);
   const body = now.replaceAll('\r\n', '\n').replaceAll('\n', eol);
   let written: string;
   let end = to;
@@ -445,14 +459,55 @@ function tryRung(
   if (!passes(text, parsed, done, intended, id)) return undefined;
   const read = parse(done);
   const holder = read.marks.find((mark) => mark.id === id);
+  const held = holder ? payloadIdsOf(read, holder) : [];
   return {
     changes: changesBetween(text, done),
     text: done,
     id,
     unit: { kind: rung.kind, rung: index, from: rung.from, to: rung.to, blocks },
-    held: holder ? payloadIdsOf(read, holder) : [],
+    held,
+    heldByOthers: [
+      ...held.filter(
+        (held_id) => parsed.marks.find((m) => m.id === held_id)?.entry.by !== ctx.author.handle,
+      ),
+      // Another person's mark that ends at the unit's edge (a split's break right in front of it,
+      // an insertion right after it) is decided with the block next to it: the replacement would
+      // read differently in some order (#107).
+      ...parsed.marks
+        .filter(
+          (mark) =>
+            mark.entry.by !== ctx.author.handle &&
+            !held.includes(mark.id) &&
+            touches(mark, { from: rung.lineFrom - 2, to: rung.to + 2 }),
+        )
+        .map((mark) => mark.id),
+    ],
     folded: own.map((mark) => mark.id),
   };
+}
+
+/** Whether the new text of a unit makes one unit of its kind after the prefix of the old: an item
+ * stays one item, a list stays a list, a block of text stays one block. An edit that makes an item
+ * two, or takes its text out of the list, belongs to the unit around it. */
+function sameFrame(kind: UnitKind, prefix: string, now: string): boolean {
+  // Code in a container that an edit makes text of is no code: its closer, on a line of its own,
+  // would end a paragraph that the closer is no part of, so the unit around it takes it.
+  if (kind === 'code' && /^ +$/.test(prefix)) {
+    // A line of the text that stands less deep than its item leaves the item, and its code.
+    return now
+      .split(/\r?\n/)
+      .slice(1)
+      .every((line) => line.trim() === '' || line.startsWith(prefix));
+  }
+  if (kind !== 'item' && kind !== 'list') return true;
+  const source = `${prefix}${now}`;
+  const units = unitsOf(source, parse(source));
+  // The prefix may hold quote markers: look inside them for the list.
+  let top: readonly Unit[] = units;
+  while (top.length === 1 && top[0]?.kind === 'quote') top = top[0].children;
+  const [only] = top;
+  if (top.length !== 1 || only?.kind !== 'list') return false;
+  return kind === 'list' || only.children.length === 1;
 }
 
 /** Whether the last line of a text closes a fenced block: a closer written after it would be read
