@@ -40,7 +40,9 @@ export interface LogEntry {
 
 export type PushResult =
   | { status: 'ok'; version: number }
-  | { status: 'stale'; version: number; why: 'c1' | 'body' | 'ledger' };
+  | { status: 'stale'; version: number; why: 'c1' | 'body' | 'ledger' }
+  /** The changes don't apply to the text, which no derivation should produce. */
+  | { status: 'invalid'; version: number };
 
 export interface AuthorityStats {
   pushes: number;
@@ -144,8 +146,7 @@ export class Authority {
     try {
       after = applyChanges(this.text, changes);
     } catch {
-      this.stats.rejected++;
-      return { status: 'stale', version: this.version, why: 'c1' };
+      return { status: 'invalid', version: this.version };
     }
     const before = this.text;
     const entry: LogEntry = {

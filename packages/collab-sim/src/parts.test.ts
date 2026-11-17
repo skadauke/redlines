@@ -176,4 +176,11 @@ test('a link loses what is in flight when it drops, and keeps messages in order'
   link.send('up', () => got.push(11));
   clock.run();
   expect(got.at(-1)).toBe(11);
+  // Outages that overlap hold the link down until the last one ends.
+  link.disconnect();
+  link.disconnect();
+  link.connect();
+  expect(link.up).toBe(false);
+  link.connect();
+  expect(link.up).toBe(true);
 });

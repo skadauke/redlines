@@ -199,6 +199,16 @@ class Client {
 
   onReply(pushId: string, result: PushResult): void {
     if (this.syncing || this.inflight?.pushId !== pushId) return;
+    if (result.status === 'invalid') {
+      // Changes that don't apply are a bug in the derivation; the intent is given up.
+      const why = `${this.inflight.intent.body.kind}:invalid-changes`;
+      this.world.stats.turnedAway[why] = (this.world.stats.turnedAway[why] ?? 0) + 1;
+      this.world.crash('the authority could not apply a push');
+      this.pending.shift();
+      this.inflight = null;
+      this.pushNext();
+      return;
+    }
     if (result.status === 'stale') {
       this.inflight = null;
       this.waitFor = result.version;
@@ -351,8 +361,13 @@ export function runSession(config: SessionConfig): SessionResult {
 
   const final = world.authority.text;
   for (const client of clients) {
-    if (client.confirmed !== final || client.pending.length > 0) {
-      if (client.confirmed !== final) world.diverged(client);
+    if (client.confirmed !== final) world.diverged(client);
+    if (client.pending.length > 0) {
+      world.violations.push({
+        version: world.authority.version,
+        code: 'stuck',
+        detail: `${client.id} still has ${client.pending.length} intents that were never settled`,
+      });
     }
   }
   const endState = world.oracle.state(world.authority.version, final);
@@ -376,7 +391,9 @@ export function runSession(config: SessionConfig): SessionResult {
     config,
     violations: world.violations,
     invalidAtAnyPoint: world.violations.some((v) => INVALID_MARKUP.has(v.code)),
-    corruptedAtEnd: endState.length > 0 || world.violations.some((v) => DATA_LOSS.has(v.code)),
+    corruptedAtEnd:
+      endState.some((v) => DATA_LOSS.has(v.code) || INVALID_MARKUP.has(v.code)) ||
+      world.violations.some((v) => DATA_LOSS.has(v.code)),
     converged: world.converged,
     finalText: final,
     stats: world.stats,

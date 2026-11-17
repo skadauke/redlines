@@ -106,7 +106,11 @@ export class Link {
     return true;
   }
 
+  /** Outages that overlap hold the link down until the last one ends. */
+  private holds = 0;
+
   disconnect(): void {
+    this.holds++;
     if (!this.up) return;
     this.up = false;
     this.epoch++;
@@ -114,7 +118,8 @@ export class Link {
   }
 
   connect(): void {
-    if (this.up) return;
+    this.holds = Math.max(0, this.holds - 1);
+    if (this.up || this.holds > 0) return;
     this.up = true;
     this.lastArrival = { up: this.clock.now, down: this.clock.now };
     for (const listener of this.listeners) listener();

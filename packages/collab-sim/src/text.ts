@@ -6,7 +6,7 @@ import { newestView, originalView } from '@redlines/format';
 import type { Range } from '@redlines/format';
 
 /** No word boundary: two words that have been joined are still two tokens, and `joined` says so. */
-export const TOKEN = /u\d{3}|e[a-e]\d{3}/g;
+export const TOKEN = /u\d{3,}|e[a-e]\d{3,}/g;
 
 /** The people of a session, in order. */
 export const PEOPLE = [

@@ -62,7 +62,9 @@ export function footprintOf(text: string, changes: readonly TextChange[]): Footp
       ...ranges,
       ...spans.filter((span) => ranges.some((range) => touches(range, span))),
     ]);
-    const same = grown.length === ranges.length && grown.every((r, i) => r.to === ranges[i]?.to);
+    const same =
+      grown.length === ranges.length &&
+      grown.every((r, i) => r.from === ranges[i]?.from && r.to === ranges[i]?.to);
     ranges = grown;
     if (same) break;
   }
