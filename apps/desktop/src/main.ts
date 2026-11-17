@@ -1084,6 +1084,7 @@ const acceptAllAndStopTracking = () => {
     return notice.flash(error.message);
   }
   controller.dismissNotice(TRACKING_FOR_EVERYONE);
+  const accepted = editor.getDoc();
   // Said with the count, and with the way back: one Undo gives the changes and Track Changes back.
   notifications.show({
     key: 'accept-all',
@@ -1091,7 +1092,9 @@ const acceptAllAndStopTracking = () => {
     action: {
       label: 'Undo',
       run: (shown) => {
-        editor.undo();
+        // Only while nothing was written since: a later edit is Edit ▸ Undo's to take back.
+        if (editor.getDoc() === accepted) editor.undo();
+        else notice.flash('The document changed since. Use Edit ▸ Undo.');
         shown.close();
       },
     },

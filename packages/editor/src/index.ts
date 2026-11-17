@@ -529,6 +529,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
     const reasons = disabledReasons(commands.list(), state);
+    const acceptable = changesToAccept(state).length;
     return {
       kind: state.facet(plainOnlyFacet) ? 'plain-only' : 'markdown',
       view: state.field(viewModeField),
@@ -552,8 +553,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       redo: redoName(state),
       canUndo: undoHasSomething(state),
       canRedo: redoHasSomething(state),
-      canAcceptAll: changesToAccept(state).length > 0,
-      acceptAllCount: changesToAccept(state).length,
+      canAcceptAll: acceptable > 0,
+      acceptAllCount: acceptable,
     };
   };
   let reported = uiFor(initial);
@@ -585,7 +586,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     for (const tr of transactions) {
       const intent = intentOf(tr);
       if (intent?.kind !== 'review' || intent.op.op !== 'decide') continue;
+      // Only the marks it decided: those it was asked about that it left alone are not its own.
+      const before = new Set(tr.startState.field(parsedField).marks.map((mark) => mark.id));
+      const after = new Set(tr.state.field(parsedField).marks.map((mark) => mark.id));
       for (const id of intent.op.ids) {
+        if (!before.has(id) || after.has(id)) continue;
         decided.note(id, { by: intent.author.name, kind: intent.op.decision });
       }
     }

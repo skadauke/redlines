@@ -147,6 +147,25 @@ describe('Accept All carries the ids of the click', () => {
   });
 });
 
+describe('a group whose mark is gone', () => {
+  it('takes the rest of its group out of Accept All', () => {
+    const grouped = doc
+      .replace(
+        'b2b2: {by: bo, at: 2026-10-31T09:30Z}',
+        'b2b2: {by: bo, at: 2026-10-31T09:30Z, group: g1}',
+      )
+      .replace(
+        'c3c3: {by: bo, at: 2026-10-31T09:31Z}',
+        'c3c3: {by: bo, at: 2026-10-31T09:31Z, group: g1}',
+      );
+    const click = decision(grouped, 'accept', IDS, ada, true);
+    // Someone rejected b2b2 alone: its partner c3c3 is not accepted on its own.
+    const newer = applyAll(grouped, [decision(grouped, 'reject', ['b2b2'], cy)]);
+    const guarded = guardDecision(newer, click.op as never);
+    expect(guarded.apply).toEqual(['d4d4']);
+  });
+});
+
 describe('in the editor', () => {
   const open: Editor[] = [];
   afterEach(() => {

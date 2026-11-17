@@ -233,16 +233,27 @@ export function guardDecision(
     return skipped.length ? { apply: [], skipped: [skipped[0]!] } : { apply: [...op.ids], skipped };
   }
   const groupOf = (id: string) => marks.find((mark) => mark.id === id)?.entry.group;
+  // The group a mark was in when it was seen counts too: a mark that is gone, or left its group,
+  // still takes its old group out (the signature starts with its JSON header, the group last).
+  const seenGroup = (id: string): string | undefined => {
+    const signature = op.seen[op.ids.indexOf(id)];
+    if (!signature) return undefined;
+    try {
+      const header = JSON.parse(signature.slice(0, signature.indexOf('|'))) as unknown[];
+      const group = header[5];
+      return typeof group === 'string' ? group : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const groups = new Set<string>();
   for (const { id } of skipped) {
-    const group = groupOf(id);
-    if (group) groups.add(group);
+    for (const group of [groupOf(id), seenGroup(id)]) if (group) groups.add(group);
   }
   const out = new Set(skipped.map(({ id }) => id));
   const apply = op.ids.filter((id) => {
     if (out.has(id)) return false;
-    const group = groupOf(id);
-    if (group && groups.has(group)) {
+    if ([groupOf(id), seenGroup(id)].some((group) => group && groups.has(group))) {
       skipped.push({ id, reason: 'changed' });
       return false;
     }
