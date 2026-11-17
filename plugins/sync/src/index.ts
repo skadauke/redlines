@@ -261,8 +261,23 @@ function rederive(
     filter: false,
   }).state;
   const kept: Pending<EditNote>[] = [];
+  // The pending edits were mapped over each other as the session first wrote them. When one is
+  // written anew, or taken back, the ones after it no longer fit the text that follows it: `old`
+  // is the text the chain still thinks it is on, and `shift` carries its next edit to the text
+  // that is really there.
+  let old: Text = confirmed;
+  for (const edit of pending.slice(0, drop)) {
+    if (edit.changes.length === old.length) old = edit.changes.apply(old);
+  }
+  const shiftTo = (from: Text, to: Text): ChangeSet | null => {
+    const change = between(from, to);
+    return change ? ChangeSet.of(change, from.length) : null;
+  };
+  let shift: ChangeSet | null = shiftTo(old, state.doc);
   for (const edit of pending.slice(drop)) {
     const { intent } = edit.note;
+    const fits = edit.changes.length === old.length;
+    const mapped = fits && shift ? edit.changes.map(shift) : edit.changes;
     let changes: ChangeSet | null = null;
     if (intent?.kind === 'typing') {
       const placed = rederiveIntent(state, anchorIntent(edit.start.toString(), intent));
@@ -272,17 +287,20 @@ function rederive(
       } else {
         notices.push(`An edit of yours was taken back: ${placed.reason}`);
       }
-    } else if (edit.changes.length === state.doc.length) {
+    } else if (fits && mapped.length === state.doc.length) {
       // Mapped over what others did, but its ledger write is made again on the newest ledger.
       changes = edit.note.made
-        ? (placeLedgerWrite(state.doc, edit.changes, edit.start, edit.note.made) ?? edit.changes)
-        : edit.changes;
+        ? (placeLedgerWrite(state.doc, mapped, edit.start, edit.note.made) ?? mapped)
+        : mapped;
     } else {
       notices.push('A change of yours could not be placed after what others changed.');
     }
-    if (!changes || changes.empty) continue;
-    kept.push({ changes, start: state.doc, note: { ...edit.note, made: changes } });
-    state = state.update({ changes, filter: false }).state;
+    if (fits) old = edit.changes.apply(old);
+    if (changes && !changes.empty) {
+      kept.push({ changes, start: state.doc, note: { ...edit.note, made: changes } });
+      state = state.update({ changes, filter: false }).state;
+    }
+    if (fits) shift = shiftTo(old, state.doc);
   }
   return { pending: kept, notices: [...new Set(notices)] };
 }

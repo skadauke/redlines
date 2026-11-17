@@ -408,6 +408,26 @@ describe('undo in two windows', () => {
     expect(bo.editor.view.state.doc.toString()).toBe(hub.authority.text);
   });
 
+  it('places two Undos in a row over another window’s ledger write', async () => {
+    const { hub, ada, bo } = await session();
+    type(bo.editor, 'Second', ' KEEP');
+    await settle(ada.binding, bo.binding);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    type(bo.editor, 'Third', ' BO');
+    await settle(ada.binding, bo.binding);
+    type(ada.editor, 'First', ' ADA');
+    bo.editor.undo();
+    bo.editor.undo();
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(text).toContain(' ADA');
+    expect(text).not.toContain(' KEEP');
+    expect(text).not.toContain(' BO');
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
   it('keeps an Undo of a lone tracked mark over another window’s ledger write', async () => {
     const { hub, ada, bo } = await session();
     type(bo.editor, 'Third', ' BO');
