@@ -132,6 +132,14 @@ export function rederiveFormat(state: EditorState, anchored: AnchoredFormat): Re
         : { from: view.map.toSource(at.from, 1), to: view.map.toSource(at.to, -1) },
     );
   });
+  // Two ranges that came to the same words can't both be written: the later one goes, and is said.
+  ranges.sort((x, y) => x.from - y.from || x.to - y.to);
+  for (let i = ranges.length - 1; i > 0; i--) {
+    if (ranges[i]!.from < ranges[i - 1]!.to) {
+      ranges.splice(i, 1);
+      lost++;
+    }
+  }
   const notices: string[] = [];
   if (lost && !ranges.length) {
     return {
@@ -249,12 +257,14 @@ export function rederiveMove(state: EditorState, anchored: AnchoredMove): Rederi
   let topFit = 0;
   for (const gap of run.gaps) {
     const n = fit(view, gap, above, below);
-    if (n > topFit) {
+    const near = (g: BlockGap) => Math.abs(g.index - intent.gap.index);
+    if (n > topFit || (n === topFit && top && n > 0 && near(gap) < near(top))) {
       top = gap;
       topFit = n;
     }
   }
-  const wanted = Math.min(8, above.length + below.length);
+  // With words on one side only (a gap at an end), less is enough: a character typed nearby is likely.
+  const wanted = Math.min(above && below ? 8 : 3, above.length + below.length);
   if (!top || topFit < wanted) {
     return none(
       'The place you moved the blocks to was changed by someone else, so they were not moved.',
