@@ -31,9 +31,11 @@ and plans the work. The findings of the earlier note stand.
   takes). The person pastes the code into a secure field once. Redlines exchanges it, keeps what it
   gets in 0600 files, and never shows it again. The agent then approves a pairing request, which
   Redlines shows a short code for, so the person can check it is the right one.
-- **Replies and mentions go the other way** over the same WebSocket, as an _operator_ client (send a
-  message to a session, stream the answer), so a Mac without the `openclaw` program needs nothing
-  else. Today's `openclaw acp` bridge stays for a Mac that has it.
+- **Replies and mentions go the other way** over a second connection of the same device, as an
+  _operator_ client (`chat.send` into a session, then the run's `chat` events), because a node may
+  not chat. A Mac without the `openclaw` program needs nothing else. Built and checked live; see
+  [The other direction](#the-other-direction-redlines-asks-the-agent). Today's `openclaw acp` bridge
+  stays for a Mac that has it.
 - **Open points, all to be settled on a throwaway Gateway** (list below): the exact frames of the
   node and operator calls (the docs name them; the schemas are in OpenClaw's source), whether a
   third-party app may be a node at all (the docs describe only OpenClaw's own), which agent a tool
@@ -324,11 +326,10 @@ Two ways to be the node, in order:
   the Mac and a token file, and the agent's tools are the node's. Together, the node (for edits) and
   the bridge (for replies) already give a mention: Redlines sends the thread and document text
   through the bridge, the agent edits through the node's tools.
-- **Then native:** Redlines as an _operator_ client on the same WebSocket, sending the job to a
-  session and reading the streamed answer (the docs list session control, with run lifecycle, among
-  the RPC families; the method names are in the schema and were not in the pages read). An operator
-  always needs manual approval, so the approval flow has two requests: the node and the operator.
-  The setup code carries both, as the iPhone's does.
+- **Then native (built; see [The other direction](#the-other-direction-redlines-asks-the-agent)):**
+  Redlines as an _operator_ client, on a second connection, sending the message to a session with
+  `chat.send` and reading the run's `chat` events. The first guess here, that it could share the
+  node's WebSocket, was wrong: the Gateway gives a node no chat methods.
 - Each job keeps today's isolation: its own session key per thread
   (`redlines-<hash>`, never the document's path), the slash-directive escaping, one report back.
 
@@ -499,3 +500,77 @@ no model key, removed afterwards):
    agent.
 6. From a network that blocks Tailscale, the words `Health` gives.
 
+## The other direction: Redlines asks the agent
+
+Written November 17, 2026 from OpenClaw's source (`openclaw@2026.11.5`, read in its `dist/`) and a
+live check on a throwaway Gateway (own state directory, loopback, a stand-in model on a local port,
+no key). Where [the node connection](#first-live-test) carries the agent's tool calls *to*
+Redlines, this carries Redlines' message *to* the agent: an @-mention in a comment, or Ask.
+
+**How a client sends a message to an agent.** The method is `chat.send`, with `sessionKey`,
+`message` and an `idempotencyKey`. The Gateway answers `{runId, status: "started"}` (the run's id is
+the key), and then sends `chat` events for that run: `status` steps (`preparing_workspace`,
+`starting_model`), `delta` with `deltaText`, and an end that is `final` (with the whole `message`,
+whose `content` is a list of `{type, text}`), `aborted` or `error` (with `errorMessage`). A send the
+Gateway can't take at all (no model signed in) fails the request itself with
+`UNAVAILABLE`. `chat.abort` with `sessionKey` and `runId` stops a run. `sessions.send` also exists;
+`chat.send` is what OpenClaw's own apps use, and it needs the scope `operator.sessions.write`
+(which the client scopes `operator.write` give).
+
+**One connection can't do both.** The Gateway keeps node methods and operator methods apart
+(`isRoleAuthorizedForMethod`): a node that sends `chat.send` is answered `unauthorized role: node`
+(seen live). So Redlines opens a **second connection of the same device** as an operator:
+
+| | node connection | operator connection |
+|---|---|---|
+| `client.id`, `mode` | `node-host`, `node` | `gateway-client`, `backend` |
+| `role`, `scopes` | `node`, none | `operator`, `operator.read` and `operator.write` (never `operator.admin`) |
+| protocol | 3 (4 is also taken) | **4**: a live Gateway refuses an operator that offers 3 |
+| signed text | `v2\|id\|node-host\|node\|node\|\|at\|credential\|nonce` | `v2\|id\|gateway-client\|backend\|operator\|operator.read,operator.write\|at\|credential\|nonce` |
+| used for | the agent's tool calls | `chat.send`, the run's events, `chat.abort` |
+
+It needs no token of its own to be set up: the Gateway gave the same **setup code** both roles,
+and each role gets its own device token back in `hello-ok` (`auth.deviceToken`), which Redlines
+keeps as the connection's operator token (`Kind::OperatorToken`, a 0600 file, never shown).
+
+**The order matters.** Used by the node first, a setup code was then refused to the operator
+("already used") and the operator's request waited for approval ("role upgrade"). Used by the
+operator first, the same code then connected the node too, with both tokens issued. So when the
+person pastes a setup code, Redlines opens the operator connection first, keeps its token and
+closes it, and then starts the node with the same code. If the operator step fails (a Gateway on
+another computer asks to approve the operator device, as it does for any operator), the node still
+connects and Ask and @-mentions of this agent use `openclaw acp` if it was added, or aren't
+offered; a new setup code, with the request approved, adds chat. On loopback the operator is
+approved silently, as the node was. **A device that is already paired as a node only** (a
+connection made before this) asks its Gateway's owner to approve the upgrade: `openclaw devices
+approve <id>`.
+
+**How it runs in the app.** An OpenClaw connection that holds an operator token is one more agent
+in the @ picker and in Ask, by its handle (`openclaw_nodes::chat_agents`, listed by `acp_agents`
+with `gateway: true`). Starting it (`acp_start`) makes a run that is a thread of the app rather than
+a program (`Runs::start_thread`): it has a log, an owner, a Stop and an end like any run, and the
+window's messages pass the same gate as for `openclaw acp` (`acp_gate.rs`, no toolbox, one session
+key for each thread, `agent:<id>:redlines-<hash>` or `redlines-<hash>`). The run speaks the Agent
+Client Protocol to the window (`openclaw_agent.rs`): `session/new` keeps the thread's session key,
+`session/prompt` becomes one `chat.send` on a connection opened for that message
+(`openclaw_chat.rs`), the run's final text comes back as the agent's message and ends the turn, a
+failure comes back as an error in the Gateway's words, and `session/cancel` or Stop sends
+`chat.abort`. The window needs no change to draw the reply in the thread or in Ask's bubble, and
+everything it already does with a reply (the author as the agent, tracked suggestions) is the
+page's.
+
+**What it doesn't do yet.** The agent *works* on the document through the node's tools, and that
+half is the tool bridge, which isn't built: a call from the agent gets "Redlines isn't connected to
+a document for this call yet". Until it is, the prompt is the reply-only one (the thread and the
+document go in the message, `replyOnlyRequest`), so an agent answers and may quote a change but
+makes none. Streaming isn't shown: the answer arrives whole.
+
+**Checked live** (the stand-in model answers every request with one fixed sentence): a setup code
+used for an operator connection gave an operator token; a second connection with that token sent
+`chat.send` into a new session `agent:main:redlines-<hex>` and received the run's events up to
+`final`, whose text was the model's sentence (`live_chat` in `openclaw_chat.rs`, by hand:
+`REDLINES_LIVE_GATEWAY`, `REDLINES_LIVE_CODE`). An operator that offered protocol 3 was refused; a
+node's `chat.send` was refused. Not seen: a real model, a real tool call from the agent, an
+approval wait for the operator, a Gateway on another computer. The fake Gateway of the unit tests
+checks the operator's signature as a Gateway would, the scopes, the filtering of other runs'
+events, a refused send, a failed run and an abort.
