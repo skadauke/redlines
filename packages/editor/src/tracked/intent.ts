@@ -11,11 +11,12 @@
 // kinds of command join `Intent` as they get theirs.
 
 import { Annotation } from '@codemirror/state';
-import type { Transaction } from '@codemirror/state';
+import type { ChangeSet, EditorState, Transaction } from '@codemirror/state';
 import type { Person, TextChange } from '@redlines/format';
 import type { MoveIntent } from '../blocks/move-intent.ts';
 import type { TableIntent } from '../table/intent.ts';
 import type { WidenedPasteIntent } from '../table/widened-paste.ts';
+import { authorFacet } from './field.ts';
 import type { FormatIntent } from './format-intent.ts';
 
 /** An edit of an intent, in the offsets of the text it was made to. */
@@ -49,6 +50,12 @@ export interface TypingIntent {
    * text, and the transaction's changes are this one followed by what they wrote.
    */
   revert?: readonly TextChange[];
+  /**
+   * The edits are the text's own changes, written as they are and never through the format's
+   * writers (`plainIntent`): Undo, an agent's edit, a setting the file records. Derived again on
+   * newer text they are placed among the words as any edit is, and written as they are there.
+   */
+  exact?: true;
 }
 
 /**
@@ -70,6 +77,35 @@ export type Unnamed<T = Intent> = T extends unknown ? Omit<T, 'id'> : never;
 /** The annotation that records an intent a writer made, with an id of its own. */
 export function recordedAs(intent: Unnamed): ReturnType<typeof intentAnnotation.of> {
   return intentAnnotation.of({ ...intent, id: newIntentId() });
+}
+
+/**
+ * The edits as plain text changes, for a write that is, in the end, only that: Undo and Redo, an
+ * agent's whole-text edit, the file's own settings, accepting everything. A typing intent with
+ * Track Changes off and the changes as they were made, who made them and nothing else: the fallback
+ * that every command can have, so that no edit reaches a session without an intent
+ * (`intent-gap.test.ts` of the app holds every command and key to it).
+ */
+export function plainIntent(state: EditorState, changes: ChangeSet): Unnamed<TypingIntent> {
+  const edits: IntentEdit[] = [];
+  changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+    edits.push({ from, to, insert: inserted.toString(), main: false });
+  });
+  const last = edits.at(-1);
+  if (last) last.main = true;
+  const author = state.facet(authorFacet);
+  return {
+    kind: 'typing',
+    tracking: false,
+    exact: true,
+    edits,
+    backward: false,
+    grouped: false,
+    widening: false,
+    author: author ? { handle: author.handle, name: author.name } : null,
+    time: '',
+    drawn: [],
+  };
 }
 
 /** The intent a transaction was rewritten from, when the tracking filter made it. */

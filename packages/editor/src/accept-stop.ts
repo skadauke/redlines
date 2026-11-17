@@ -5,6 +5,7 @@ import { invertedEffects, isolateHistory } from '@codemirror/commands';
 import { type EditorState, Transaction } from '@codemirror/state';
 import { acceptAll, changesIn, type MarkRange } from '@redlines/format';
 import { parsedField, trackedEditAnnotation } from './tracked/field.ts';
+import { plainIntent, recordedAs } from './tracked/intent.ts';
 import { trackingField, trackingStepEffect } from './tracked/typing.ts';
 
 /**
@@ -39,13 +40,15 @@ export function acceptAndStop(state: EditorState) {
   if (!ids.size) return null;
   const changes = acceptAll(state.doc.toString(), (mark) => ids.has(mark.id));
   if (!changes.length) return null;
+  const done = state.changes(changes);
   return state.update({
-    changes,
+    changes: done,
     effects: trackingStepEffect.of({ set: false, back: state.field(trackingField) }),
     annotations: [
       trackedEditAnnotation.of(true),
       isolateHistory.of('full'),
       Transaction.userEvent.of('accept'),
+      recordedAs(plainIntent(state, done)),
     ],
   });
 }

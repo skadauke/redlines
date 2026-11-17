@@ -45,6 +45,7 @@ import {
 } from '@codemirror/state';
 import { EditorView, type KeyBinding } from '@codemirror/view';
 import type { AgentStep } from '../api.ts';
+import { plainIntent, recordedAs } from '../tracked/intent.ts';
 import type { StepLabel } from './names.ts';
 
 /** The branch a step is popped from: the steps done, or the steps undone. */
@@ -778,13 +779,17 @@ class HistoryState {
         changes: event.changes,
         selection: event.startSelection,
         effects: event.effects,
-        annotations: fromHistory.of({
-          side,
-          rest,
-          selection,
-          owner: event.owner,
-          label: event.label,
-        }),
+        annotations: [
+          fromHistory.of({
+            side,
+            rest,
+            selection,
+            owner: event.owner,
+            label: event.label,
+          }),
+          // Undo and Redo write the text as it was or is to be: plain edits, to a session.
+          recordedAs(plainIntent(state, event.changes)),
+        ],
         filter: false,
         userEvent: side === DONE ? 'undo' : 'redo',
         scrollIntoView: true,

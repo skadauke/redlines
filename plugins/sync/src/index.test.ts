@@ -191,6 +191,33 @@ describe('syncEditor', () => {
   });
 });
 
+describe('edits that are no typing', () => {
+  it('places Bo’s Undo and agent edit on Ada’s newer text, taking nothing back', async () => {
+    const { hub, ada, bo } = await session();
+    await settle(ada.binding, bo.binding);
+    type(bo.editor, 'Third', ' BO');
+    await settle(ada.binding, bo.binding);
+    // Ada types at once with Bo's Undo, and with an agent's edit made on the text from before.
+    type(ada.editor, 'First', ' ADA');
+    const base = bo.editor.getDoc();
+    bo.editor.undo();
+    bo.editor.applyAgentEdit(
+      base.replace('Second paragraph', 'Second AGENT paragraph'),
+      { group: 'g', agent: 'claude' },
+      base,
+    );
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(parse(text).warnings).toEqual([]);
+    expect(text).toContain('ADA');
+    expect(text).toContain('Second AGENT paragraph');
+    expect(text).not.toContain('BO');
+    expect([...ada.notices, ...bo.notices]).toEqual([]);
+  });
+});
+
 describe('a person who works alone', () => {
   it('writes the same file in a session of one window as with none, byte for byte', async () => {
     const edits = (editor: Editor) => {

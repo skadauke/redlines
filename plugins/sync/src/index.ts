@@ -9,8 +9,14 @@ import { EditorState, Annotation, ChangeSet, Text, Transaction } from '@codemirr
 import { SyncClient, Replica } from '@redlines/collab';
 import type { Pending, SyncState, Transport } from '@redlines/collab';
 import type { Credential, Peer } from '@redlines/collab';
-import { anchorIntent, intentOf, rederiveIntent } from '@redlines/editor';
-import type { Editor, Intent } from '@redlines/editor';
+import {
+  agentIntentOf,
+  anchorIntent,
+  intentOf,
+  rebaseAgentEdit,
+  rederiveIntent,
+} from '@redlines/editor';
+import type { AgentIntent, Editor, Intent } from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
 
 export type { SyncState } from '@redlines/collab';
@@ -18,6 +24,8 @@ export type { SyncState } from '@redlines/collab';
 /** What is kept with each edit made here. */
 export interface EditNote {
   intent: Intent | undefined;
+  /** An agent's edit, which is placed again on newer text as a push (`rebaseAgentEdit`). */
+  agent?: AgentIntent | undefined;
 }
 
 export interface SyncOptions {
@@ -99,7 +107,10 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
       if (!update.docChanged) return;
       for (const tr of update.transactions) {
         if (!tr.docChanged || tr.annotation(received)) continue;
-        replica.local(tr.changes, tr.startState.doc, { intent: intentOf(tr) });
+        replica.local(tr.changes, tr.startState.doc, {
+          intent: intentOf(tr),
+          agent: agentIntentOf(tr),
+        });
       }
       client.edited();
     }),
@@ -157,9 +168,18 @@ function rederive(
   }).state;
   const kept: Pending<EditNote>[] = [];
   for (const edit of pending.slice(drop)) {
-    const { intent } = edit.note;
+    const { intent, agent } = edit.note;
     let changes: ChangeSet | null = null;
-    if (intent?.kind === 'typing') {
+    if (agent && edit.start.toString() !== state.doc.toString()) {
+      // What the agent changed, placed on the newest text: what others typed meanwhile stays, and
+      // a change of the agent's whose text is gone is left out and said.
+      const placed = rebaseAgentEdit(state.doc.toString(), agent.base, agent.next);
+      const change = between(state.doc, Text.of(placed.text.split('\n')));
+      changes = change ? state.changes(change) : null;
+      if (placed.dropped.length) {
+        notices.push("Part of an agent's edit was left out: the text it changed is gone.");
+      }
+    } else if (intent?.kind === 'typing') {
       const placed = rederiveIntent(state, anchorIntent(edit.start.toString(), intent));
       if (placed.ok) {
         changes = placed.changes;
