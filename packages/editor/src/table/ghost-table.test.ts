@@ -657,6 +657,33 @@ describe('a file that is one table deleted whole', () => {
     keys(editor, ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
   });
 
+  it('keeps the ghost table when text is typed at the marker of the deletion Delete Table writes (#470)', () => {
+    const start = `${SMALL}\n`;
+    const found = readTables(start, parse(start))[0]!;
+    const made = applyChanges(
+      start,
+      tableEdit(
+        start,
+        { kind: 'deleteTable', table: found.from },
+        { author: ada, time: '2026-11-10T10:00Z' },
+      ).changes,
+    );
+    const marker = made.indexOf('<!--del');
+    const close = made.indexOf('-->', marker) + 3;
+    for (const point of [marker, close]) {
+      const editor = load(made, { tracking: true });
+      expect(ghostTables(editor)).toHaveLength(1);
+      editor.view.dispatch({
+        changes: { from: point, insert: 'x' },
+        selection: { anchor: point + 1 },
+        userEvent: 'input.type',
+      });
+      expect(ghostTables(editor), `typed at ${point}`).toHaveLength(1);
+      expect(parse(editor.getDoc()).marks.map((mark) => mark.kind)).toEqual(['del', 'ins']);
+      expect(newestView(editor.getDoc()).text.trim()).toBe('x');
+    }
+  });
+
   it('takes it as an insertion with Track Changes on, which rejecting takes out, the table back', () => {
     const editor = load(only, { tracking: true });
     const { view } = editor;
@@ -669,11 +696,12 @@ describe('a file that is one table deleted whole', () => {
       }),
     ).not.toThrow();
     const written = editor.getDoc();
-    expect(parse(written).marks.map((mark) => mark.kind)).toEqual(['ins', 'del']);
-    expect(newestView(written).text).toBe('x\n');
+    // The text goes after the deletion, a paragraph of its own, so that the ghost table stays (#470).
+    expect(parse(written).marks.map((mark) => mark.kind)).toEqual(['del', 'ins']);
+    expect(newestView(written).text.trim()).toBe('x');
     // Every change rejected: the typed text gone and the table as it was, whole.
-    expect(originalView(written).text).toBe(`${SMALL}\n`);
-    expect(ghostTables(editor)).toHaveLength(0);
+    expect(originalView(written).text.trim()).toBe(SMALL);
+    expect(ghostTables(editor)).toHaveLength(1);
     // The caret stands after what was typed.
     expect(written.slice(0, view.state.selection.main.head)).toMatch(/x$/);
     keys(editor, ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);

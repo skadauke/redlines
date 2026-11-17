@@ -5353,6 +5353,25 @@ export function fineEdit(text: string, edit: TextChange, ctx: EditContext): Text
   return fineEdits(text, [edit], ctx).changes;
 }
 
+/**
+ * Where text typed at `at` goes in a file that is a deletion of its blocks alone (a table deleted
+ * with nothing else in the file, format §3.4): after the deletion's marker, not before it. The
+ * newest view has nothing there, so the two places read alike, and after the marker the text is a
+ * paragraph of its own, below the deleted blocks, where the editor draws them (#470); before it the
+ * text shares the marker's line and the deleted table is drawn as source. Otherwise `at`.
+ */
+function pastLoneDeletion(text: string, at: number): number {
+  const parsed = parse(text);
+  const [only] = parsed.marks;
+  const segment = only?.segments[0];
+  if (parsed.marks.length !== 1 || only?.kind !== 'del' || only.segments.length !== 1) return at;
+  if (!segment || segment.carrier || segment.open.from !== at) return at;
+  const end = parsed.ledgerRange?.from ?? text.length;
+  if (!/^\s*$/.test(text.slice(0, at)) || !/^\s*$/.test(text.slice(segment.open.to, end)))
+    return at;
+  return segment.open.to;
+}
+
 function editsWidening(
   text: string,
   edits: readonly TextChange[],
@@ -5360,6 +5379,10 @@ function editsWidening(
   widening: boolean,
 ): TrackedEdits {
   for (const edit of edits) assertWholeCharacters(text, edit);
+  if (edits.length === 1 && edits[0]!.from === edits[0]!.to && edits[0]!.insert !== '') {
+    const at = pastLoneDeletion(text, edits[0]!.from);
+    if (at !== edits[0]!.from) edits = [{ ...edits[0]!, from: at, to: at }];
+  }
   // A block's start typed into an empty item is a block of its own in the newest view, and the file
   // reads it as text of the item (#583): the whole item is written as a replacement.
   if (edits.some((edit) => startsBlockInEmptyItem(text, edit))) {
