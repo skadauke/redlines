@@ -132,3 +132,71 @@ describe('documentHtml', () => {
     );
   });
 });
+
+describe('documentHtml for Word and Google Docs (office)', () => {
+  const md = [
+    '~~gone~~ `code` text',
+    '',
+    '> quoted',
+    '',
+    '| A | B |',
+    '| :- | -: |',
+    '| 1 | 2 |',
+    '',
+    '```ts',
+    'let x = 1;',
+    '```',
+    '',
+    '![pic](data:image/png;base64,AAAA)',
+    '',
+  ].join('\n');
+
+  it('writes <s>, a code color, bordered cells with widths, a quote that reads without its rule', () => {
+    const html = documentHtml(md, 'clean', { office: true });
+    expect(html).toContain('<s>gone</s>');
+    expect(html).not.toContain('<del>');
+    expect(html).toMatch(/<code style="[^"]*background:#f2f2f2;color:#24292f/);
+    expect(html).toMatch(/<td style="[^"]*border:1px solid[^"]*width:50%[^"]*text-align:left"/);
+    expect(html).toMatch(/<th style="[^"]*border:1px solid/);
+    expect(html).toMatch(/<blockquote style="margin:0 0 0 1\.5em;padding:0 0 0 1em/);
+    expect(html).toContain('<code class="language-ts">');
+    expect(html).toContain('src="data:image/png;base64,AAAA"');
+  });
+
+  it('leaves print and the page as they were', () => {
+    const html = documentHtml(md);
+    expect(html).toContain('<del>gone</del>');
+    expect(html).toContain('<blockquote>');
+    expect(html).not.toContain('border:1px');
+  });
+
+  it('embeds an image through the host and shows held ones as alt text', () => {
+    const embed = (u: string) => (u.startsWith('https:') ? 'data:image/png;base64,ZZ' : null);
+    const remote = '![r](https://example.org/a.png) ![h](https://example.org/h.png)';
+    const html = documentHtml(remote, 'clean', {
+      office: true,
+      embedImage: embed,
+      altOnly: (h) => h.endsWith('h.png'),
+    });
+    expect(html).toContain('<img src="data:image/png;base64,ZZ" alt="r">');
+    expect(html).not.toContain('h.png');
+  });
+});
+
+describe('documentHtml of a selection (clip)', () => {
+  it('keeps a selection that starts with a rule, and leaves alerts as text', () => {
+    const html = documentHtml('---\nsome words\n---\n\n> [!NOTE]\n> hi', 'clean', {
+      office: true,
+      clip: true,
+    });
+    expect(html).toContain('<hr>');
+    expect(html).toContain('some words');
+    expect(html).not.toContain('rl-callout');
+  });
+
+  it('draws a task item as its box with no bullet', () => {
+    const html = documentHtml('- [x] done\n- [ ] open', 'clean', { office: true, clip: true });
+    expect(html).toContain('<li style="list-style-type:none">☑ done</li>');
+    expect(html).toContain('☐ open');
+  });
+});
