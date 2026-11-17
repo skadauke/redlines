@@ -35,7 +35,11 @@ export interface AnchoredIntent {
   parts: readonly Part[];
 }
 
-/** Anchors an intent to the visible words of `text`, the text it was made on. */
+/**
+ * Anchors an intent to the visible words of `text`, the text it was made on. For an intent of text
+ * composed by an input method, that is the text with the composition taken back (its `revert`
+ * applied), since its edits are of that.
+ */
 export function anchorIntent(text: string, intent: TypingIntent): AnchoredIntent {
   const view = newestView(text);
   const parts = intent.edits.map((edit): Part => {

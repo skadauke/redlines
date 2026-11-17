@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, editSourceFacet, type Editor, intentOf } from '../index.ts';
 import type { TableIntent } from './intent.ts';
 import { deriveTable, writeTable } from './intent.ts';
+import { insertCols } from './ops.ts';
 
 const open: Editor[] = [];
 afterEach(() => {
@@ -76,6 +77,43 @@ describe.each([true, false])('Tab out of the last cell, Track Changes %s', (trac
     expect(intent.author?.handle).toBe('ada');
     expect(applyChanges(before, deriveTable(before, intent).changes)).toBe(after);
     expect(deriveTable(before, intent).changes).toEqual(deriveTable(before, intent).changes);
+  });
+});
+
+describe('a column operation on a long table', () => {
+  it('derives to the document the dispatched, coalesced change made', () => {
+    const rows = Array.from({ length: 10 }, (_, i) => `| ${i} | x |`).join('\n');
+    const long = `| a | b |\n| - | - |\n${rows}\n`;
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const seen: { before: string; after: string; intent: TableIntent }[] = [];
+    const editor = createEditor(parent, {
+      doc: long,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking: false,
+      extensions: [
+        EditorView.updateListener.of((update) => {
+          for (const tr of update.transactions) {
+            const intent = intentOf(tr);
+            if (intent?.kind === 'table') {
+              seen.push({
+                before: tr.startState.doc.toString(),
+                after: tr.state.doc.toString(),
+                intent,
+              });
+            }
+          }
+        }),
+      ],
+    });
+    open.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    editor.view.dispatch({ selection: { anchor: long.indexOf('x |') } });
+    insertCols(editor.view, false);
+    expect(seen).toHaveLength(1);
+    const { before, after, intent } = seen[0]!;
+    expect(deriveTable(before, intent).changes.length).toBeGreaterThanOrEqual(8);
+    expect(applyChanges(before, deriveTable(before, intent).changes)).toBe(after);
   });
 });
 

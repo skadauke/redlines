@@ -100,6 +100,7 @@ export function plannedIn(
       : writeTable(text, {
           tracking,
           op,
+          writer: fine ? 'fine' : asked ? 'asked' : 'tableEdit',
           author: editing ? { handle: editing.handle, name: editing.name } : null,
           time: '',
           ...(random ? { random } : {}),
