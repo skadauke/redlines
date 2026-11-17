@@ -472,14 +472,23 @@ fn shown_below(root: &Path, path: &Path, global_excludes: bool) -> Result<(), ()
     {
         return Err(());
     }
-    let listed = list_with(
-        root,
-        &root.join(above.iter().collect::<PathBuf>()),
-        global_excludes,
-    )
-    .map_err(|_| ())?
-    .into_iter()
-    .any(|entry| entry.name == last.to_string_lossy());
+    let folder = root.join(above.iter().collect::<PathBuf>());
+    // A link on the way may lead out of the project and back in, to a hidden folder.
+    let (Ok(real_root), Ok(real_folder)) =
+        (std::fs::canonicalize(root), std::fs::canonicalize(&folder))
+    else {
+        return Err(());
+    };
+    if real_folder
+        .strip_prefix(&real_root)
+        .is_ok_and(file_scope::is_hidden_below)
+    {
+        return Err(());
+    }
+    let listed = list_with(root, &folder, global_excludes)
+        .map_err(|_| ())?
+        .into_iter()
+        .any(|entry| entry.name == last.to_string_lossy());
     if listed { Ok(()) } else { Err(()) }
 }
 
@@ -1188,6 +1197,11 @@ mod tests {
         }
         // And the last name must be one the folder before it lists.
         assert!(shown_names(&shown, &repo, &repo.join("a/b/missing/x")).is_err());
+        // A link out of the project and back in to a hidden folder is no way in.
+        make(&disk, &["outside/", "repo/.secret/s/x.md"]);
+        symlink(repo.join(".secret"), disk.join("outside/back")).unwrap();
+        symlink(disk.join("outside"), repo.join("out")).unwrap();
+        assert!(shown_names(&shown, &repo, &repo.join("out/back/s")).is_err());
         fs::remove_dir_all(&disk).unwrap();
     }
 
