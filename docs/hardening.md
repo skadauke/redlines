@@ -262,8 +262,6 @@ its case; each is a bug. The list is what has been found, not a count of what is
   the last check sees it only where letters differ (#447, #418). So is a replacement inside the
   blank line of the break of the author's own pending split, and a line break typed there with
   letters as well (#419).
-- Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite
-  skips micromark's reading for that shape (#299).
 - A highlight that runs from the text above a table into its header row can make another person's
   pending column change impossible to decide (#396).
 - The backslash and emphasis fixes leave five cases in one shape wrong, as on main, and refuse

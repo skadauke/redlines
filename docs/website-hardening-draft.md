@@ -129,7 +129,6 @@ We would rather say it than have you find it.
   decided. Each is an open issue, and the list is what has been found, not a count of what is there:
   - a deletion inside a blank line of a quote between two paragraphs, in a few shapes (#447), and a
     change in the break of your own pending line break there (#419);
-  - typing over one `*` of a pending bold's `**` (#299);
   - a highlight that runs from the text above a table into its header row can make another person's
     pending column change impossible to decide (#396);
   - five cases in one shape of pastes next to another person's marks (#276);

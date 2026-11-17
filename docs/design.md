@@ -90,15 +90,15 @@ with its changes intact.
 ## 4. How Redlines compares
 
 Redlines as built on `main`, and what it plans: ✅ is built, and Planned is designed but not built
-yet; a row is built when all of it works on `main`. The other products as of October 2026, from
+yet; a row is built when all of it works on `main`. The other products as of November 2026, from
 their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The
-website shows eleven of these rows, and `npm run compare:check` in `website/` fails when they differ
+website shows eleven of these rows, those only Redlines has first, and `npm run compare:check` in `website/` fails when they differ
 from this table.
 
 | Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
 | ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
 | Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
-| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
+| Edits R Markdown and Quarto files           |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 | Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
@@ -113,7 +113,11 @@ from this table.
 | Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 
-The Mac app is built; Windows and Linux are planned (§10).
+The Mac app is built; Windows and Linux are planned (§10). The editor is not yet published as a
+package others can embed: the packages are private, and the website's embed is a demo. R Markdown
+and Quarto files are edited with their divs, callouts, citations, cross-references and includes
+drawn; running their code cells is not what Redlines does. Several windows of one document on one
+Mac work, but live collaboration with people means people on different computers.
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
 Docs, the AI edits only when asked, and its edits count as yours: Copilot edits the document under
@@ -480,8 +484,8 @@ Redlines covers everything in the Markdown Guide's
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
   while the caret is in the title line. Two alerts one blank line apart are two boxes with the space
-  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are not drawn in the editor yet; the Quick Look preview draws a
-  `.callout-*` div as a quiet labelled box and any other div as its text.
+  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are drawn in the same box, with their type and title; Quick Look
+  draws a `.callout-*` div as a quiet labelled box and any other div as its text.
 - **Image size:** while the pointer is over an image or it is selected, a handle on its left edge and
   one on its right edge, standing just outside it (inside it, where the image is as wide as the
   column), resize it, with its aspect kept; an aligned image has no handle on the edge it is
@@ -1459,10 +1463,9 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
-  are not drawn yet); Mermaid editing with a live preview;
+- captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's, Obsidian's and Quarto's are built); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
-- citations from the document's bibliography in `.qmd` and `.Rmd`;
+- a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (citations are drawn as chips);
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
   step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
@@ -1471,7 +1474,7 @@ a new email under the same name becomes an alias in the ledger
 
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
-changes); link cards; chips for Quarto shortcodes and cross-references; a form
+changes); link cards; chips for Quarto shortcodes; a form
 for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
 reading width, a dark page).
 

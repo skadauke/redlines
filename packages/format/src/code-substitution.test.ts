@@ -339,6 +339,16 @@ describe('a block that a pending change holds, and front matter', () => {
     expectEveryOrderAlike('code in Bo’s insertion', done.after ?? '');
   });
 
+  it('writes a key in code that another person’s pending code change holds, sound in every order (#285)', () => {
+    const theirs = typeIn(BODY, ['X'], afterOne, bo, { m2bd: 'bo' });
+    const at = theirs.indexOf('oneX') + 4;
+    const done = attempt(theirs, at, at, 'Y', ada);
+    expect(done.error).toBeUndefined();
+    expect(done.after).toContain('<!--sub');
+    expect(views(done.after ?? '').newest).toContain('line oneXY');
+    expectEveryOrderAlike('code in Bo’s substitution', done.after ?? '');
+  });
+
   it('writes it for another person in a block that your substitution holds (#808)', () => {
     const mine = typeIn(BODY, ['X'], afterOne);
     const at = mine.indexOf('oneX') + 4;
@@ -673,8 +683,12 @@ describe('the marks that refuse a key in indented code (fix round 3)', () => {
     // Bo's deletion of the break is at it.
     const at = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'bo' });
     const held = at.indexOf('one') + 1;
-    // The refusal stays: the deleted break is at the block's edge, decided with it (#107).
-    expect(type(at, held).code).toBe('no-legal-placement');
+    // It is written as a replacement of the code and the paragraph above, which hold the deleted
+    // break whole, and reads alike in every order of decisions (#265).
+    const done = type(at, held);
+    expect(done.error).toBeUndefined();
+    expect(done.after).toContain('<!--sub');
+    expectEveryOrderAlike('code under Bo’s deleted break', done.after ?? '');
     const own2 = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'ada' });
     expect(type(own2, own2.indexOf('one') + 1).error).toBeUndefined();
   });
