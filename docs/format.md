@@ -1557,12 +1557,17 @@ them and the line end, the edit is refused. The underline of a setext heading is
 break: replacing all of it is this too (`---` typed over by `===` leaves `Title⏎===⏎⏎` a heading),
 and a change of a part of it is refused (below, under a setext heading). Where the closer or
 another change next to the break has no place, the edit is refused, as any edit is. The break of
-the author's own pending split is left as it was (#419). A deletion there is not this: a change
-that takes a line break away takes all of the break (above), taking the quote markers or the white
-space out of a blank line is the rule for a quote's blank lines (below), and a deletion that
-takes no line break and that rule does not know (the `>` of a blank line indented in a list item,
-in the break of a pending split) is written as the join of the two blocks, which the last check
-sees only where letters differ (#447).
+the author's own pending split is cancelled with its break, and what stays of the break is typed
+again with what is typed, its line breaks as splits of their own (`> One⏎>⏎> Two` with `x` typed over
+the `>` of the blank line is `> One⏎x⏎> Two`, new splits for both breaks, not raw line breaks in an
+insertion; #419). A deletion inside a blank line of a break that takes no line break away, and that
+the rule for a quote's blank lines (below) does not know (the `>` of a blank line indented in a list
+item, a quote that starts at the blank line, a blank line of the break of a pending split of the
+author's own), is the same substitution with nothing typed: the break stays, whole, in the new
+text (#447). In the break of another person's split it is told as a pair that must be decided in
+order, as any change next to a split is. A change that takes a line break away takes all of the break
+(above), and taking the quote markers or the white space out of a blank line is the rule for a
+quote's blank lines (below).
 
 **The prefix of the first line, taken away.** A deletion of all of the prefix of the first line of
 the body, a list marker or a quote's `>` with the white space after it, where the text of its block

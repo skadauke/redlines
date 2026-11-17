@@ -34,8 +34,9 @@ export interface CliIo {
   randomHex(n: number): string;
   /** Writes a binary file. Absent where the command line can't make one (the app's program). */
   writeBytes?(path: string, bytes: Uint8Array): Promise<void>;
-  /** The bytes of a file. Absent where `importDocx` is. */
-  readBytes?(path: string): Promise<Uint8Array>;
+  /** The bytes of a file; a file longer than `max` bytes (when given) is not read, and the promise
+   * rejects. Absent where `importDocx` is. */
+  readBytes?(path: string, max?: number): Promise<Uint8Array>;
   /** A .docx as Markdown, with what could not be kept. Absent where `exportDocx` is. */
   importDocx?(
     bytes: Uint8Array,
@@ -51,7 +52,7 @@ export interface CliIo {
 const USAGE = `Usage: redlines <command> <file> [options]
 
 Commands:
-  redlines export-docx <file> [-o <out.docx>]
+  redlines export-docx <file> [-o <out.docx>]   (-o replaces a file there; without it, one is never)
   redlines import-docx <file.docx> [-o <out.md>]
 ${Object.entries(COMMANDS)
   .map(([name, command]) => `  redlines ${name} ${command.usage}`)
@@ -126,6 +127,9 @@ function parseArguments(command: Command, argv: readonly string[]): CommandLine 
   return { file, args, flags };
 }
 
+/** The most bytes of a picture the export reads (as the app's own reading of one is held to). */
+const MAX_PICTURE_BYTES = 50 * 1024 * 1024;
+
 /** The pictures of a document: the file that an address names, beside the document. An address with
  * a scheme (`https:`, `data:`) is not a file, a path that leaves the document's folder is not one
  * it may read, and a file that can't be read is no picture. */
@@ -146,12 +150,14 @@ function pictureReader(
     // Only a file in the document's own folder or below it: no absolute path, no `..`.
     if (name === '' || name.startsWith('/') || name.includes('\\')) return undefined;
     if (name.split('/').includes('..')) return undefined;
-    return io.readBytes?.(folder + name).catch(() => undefined);
+    // A file that can't be read, or is too large, rejects, and the export says so.
+    return io.readBytes?.(folder + name, MAX_PICTURE_BYTES);
   };
 }
 
 /** `redlines export-docx <file.md> [-o out.docx]`: the file as a Word file, with its tracked
- * changes and comments. It leaves the file alone, so it is no command of the table. */
+ * changes and comments, beside the file by default and never over a file that is there; `-o` names
+ * the file to write, and replaces it. It leaves the file alone, so it is no command of the table. */
 async function exportDocx(rest: string[], io: CliIo): Promise<number> {
   let file: string | undefined;
   let out: string | undefined;
@@ -175,6 +181,18 @@ async function exportDocx(rest: string[], io: CliIo): Promise<number> {
   const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.docx';
   if (target === file)
     throw new EditError(`${file} is the file to export; give another name with -o.`);
+  // Only a name given with -o replaces a file that is there; the default name never does.
+  if (
+    out === undefined &&
+    (await io.realpath(target).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    throw new EditError(
+      `${target} is there already; pass -o ${target} to replace it, or -o with another name.`,
+    );
+  }
   const { bytes, notes } = await io.exportDocx(text, pictureReader(file, io)).catch((error) => {
     const reason = error instanceof Error ? error.message : String(error);
     throw new EditError(`${file} could not be written as a Word file: ${reason}`);
@@ -244,10 +262,19 @@ async function importDocx(rest: string[], io: CliIo): Promise<number> {
       throw new EditError(`${folder + name} is there already; give another folder with -o.`);
     }
   }
-  for (const [name, picture] of pictures) {
-    await io.writeBytes?.(folder + name, picture).catch(cannot('write', folder + name));
+  // If any write fails, the pictures written so far are removed again.
+  const written: string[] = [];
+  try {
+    for (const [name, picture] of pictures) {
+      // Listed before the write: a file that stopped half way goes too (none was there before).
+      written.push(folder + name);
+      await io.writeBytes?.(folder + name, picture).catch(cannot('write', folder + name));
+    }
+    await io.writeFile(target, markdown).catch(cannot('write', target));
+  } catch (error) {
+    for (const path of written) await io.remove(path).catch(() => undefined);
+    throw error;
   }
-  await io.writeFile(target, markdown).catch(cannot('write', target));
   for (const note of notes) io.stderr(`${note}\n`);
   io.stdout(`${target}\n`);
   return 0;

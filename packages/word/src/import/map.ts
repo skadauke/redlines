@@ -236,6 +236,9 @@ function structural(table: Table): boolean {
   );
 }
 
+/** An image in a block: `![alt](src "title")`. */
+const IMAGE_LINK = /!\[((?:[^\]\\]|\\.)*)\]\(\s*(<[^>]*>|[^)\s]*)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
+
 class Mapper {
   readonly ctx: Ctx;
   readonly writer: InlineWriter;
@@ -615,17 +618,19 @@ class Mapper {
       const sameType = (block.type === 'heading') === (chunk.kind === 'heading');
       // A picture the export couldn't embed was written as its description (`[Image: alt]`), so a
       // block that holds one reads as that when it comes back, and is restored with its link.
+      // Only when every picture of the block is one the file shows as a description, and the words
+      // are otherwise the same: a block with no picture, or a description Word did not get from a
+      // picture here, is not restored by this.
+      const pictures = text.match(IMAGE_LINK)?.length ?? 0;
+      const described = chunk.body.match(/\[Image: /g)?.length ?? 0;
       const asExported = text.replace(
-        /!\[((?:[^\]\\]|\\.)*)\]\(\s*(<[^>]*>|[^)\s]*)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g,
+        IMAGE_LINK,
         (_, alt: string, src: string) => `[Image: ${alt || src || 'no description'}]`,
       );
-      if (
-        /<!--/.test(text) ||
-        !sameType ||
-        (norm(text) !== norm(chunk.body) && norm(asExported) !== norm(chunk.body))
-      ) {
-        continue;
-      }
+      const sameWords =
+        norm(text) === norm(chunk.body) ||
+        (pictures > 0 && pictures === described && norm(asExported) === norm(chunk.body));
+      if (/<!--/.test(text) || !sameType || !sameWords) continue;
       const stripped = text.replace(/^\s*(?:#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+|>[ \t]?)/, '');
       chunk.restored = true;
       // The list marker or quote mark the paragraph stood after, as it was written.
