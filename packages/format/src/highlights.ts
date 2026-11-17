@@ -16,7 +16,13 @@ import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
-import { decisionsHold, hasTableChange, nearRanges, refusalsOf } from './table-settle.ts';
+import {
+  decisionsHold,
+  hasTableChange,
+  marksOfTablesAt,
+  nearRanges,
+  refusalsOf,
+} from './table-settle.ts';
 import { readTables } from './table.ts';
 import { highlightAgainstRows, inPendingRow, rowWidenings } from './table-rules.ts';
 import type { TableRead } from './table.ts';
@@ -192,12 +198,14 @@ export function addHighlight(
     if (!across) {
       // In a table with a change pending, the ends stand where no decision of it becomes impossible (#396).
       if (settled || !hasTableChange(text)) return { changes, id };
-      const before = refusalsOf(text);
-      if (decisionsHold(text, changes, before)) return { changes, id };
+      const scope = marksOfTablesAt(text, wanted);
+      if (scope.size === 0) return { changes, id };
+      const before = refusalsOf(text, scope);
+      if (decisionsHold(text, changes, before, scope)) return { changes, id };
       for (const candidate of nearRanges(text, wanted, 60)) {
         try {
           const found = addHighlight(text, candidate, recorded.replay(), rowsWidened, true);
-          if (decisionsHold(text, found.changes, before)) return found;
+          if (decisionsHold(text, found.changes, before, scope)) return found;
         } catch (error) {
           if (!(error instanceof EditError)) throw error;
         }
