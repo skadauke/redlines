@@ -145,6 +145,14 @@ function outOfRejected(
   position: number,
   end: number,
 ): number | undefined {
+  // Most files have no deletion before the position: nothing to read then.
+  if (
+    !markers.some(
+      (m) => m.from < end && m.role === 'open' && m.mark?.kind === 'del' && m.segment?.payload,
+    )
+  ) {
+    return undefined;
+  }
   // The text as it reads with every deletion rejected: each character with where it stands in the
   // file; the characters of a deletion's payload stand at its marker, before or after as a whole.
   const chars: string[] = [];
@@ -180,9 +188,9 @@ function outOfRejected(
   // The characters in front of the position: a deletion's payload is before it when its marker is.
   let q = 0;
   while (q < starts.length && (ends[q] ?? 0) <= position) q++;
-  const { hits } = hitsIn(rest, '');
+  const { hits } = hitsIn(rest, text);
   for (const hit of hits) {
-    if (q < hit.lo || q > hit.hi) continue;
+    if (q < hit.lo || q > hit.hi || hit.refuse !== undefined) continue;
     // Only a construct that a deletion's text is part of: the others are the newest view's.
     let part = false;
     for (let i = hit.from; i < hit.to; i++)
