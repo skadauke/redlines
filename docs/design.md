@@ -90,15 +90,15 @@ with its changes intact.
 ## 4. How Redlines compares
 
 Redlines as built on `main`, and what it plans: ✅ is built, and Planned is designed but not built
-yet; a row is built when all of it works on `main`. The other products as of October 2026, from
+yet; a row is built when all of it works on `main`. The other products as of November 2026, from
 their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The
-website shows eleven of these rows, and `npm run compare:check` in `website/` fails when they differ
+website shows eleven of these rows, those only Redlines has first, and `npm run compare:check` in `website/` fails when they differ
 from this table.
 
 | Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
 | ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
 | Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
-| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
+| Edits R Markdown and Quarto files           |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 | Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
@@ -113,7 +113,11 @@ from this table.
 | Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 
-The Mac app is built; Windows and Linux are planned (§10).
+The Mac app is built; Windows and Linux are planned (§10). The editor is not yet published as a
+package others can embed: the packages are private, and the website's embed is a demo. R Markdown
+and Quarto files are edited with their divs, callouts, citations, cross-references and includes
+drawn; running their code cells is not what Redlines does. Several windows of one document on one
+Mac work, but live collaboration with people means people on different computers.
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
 Docs, the AI edits only when asked, and its edits count as yours: Copilot edits the document under
@@ -480,9 +484,8 @@ Redlines covers everything in the Markdown Guide's
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
   while the caret is in the title line. Two alerts one blank line apart are two boxes with the space
-  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are drawn in the same box (the type is the class on the
-  opening fence); the Quick Look preview draws a `.callout-*` div as a quiet labelled box and any
-  other div as its text.
+  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are drawn in the same box, with their type and title; Quick Look
+  draws a `.callout-*` div as a quiet labelled box and any other div as its text.
 - **Image size:** while the pointer is over an image or it is selected, a handle on its left edge and
   one on its right edge, standing just outside it (inside it, where the image is as wide as the
   column), resize it, with its aspect kept; an aligned image has no handle on the edge it is
@@ -585,7 +588,7 @@ README-style snippets) holds the editor to it.
   or an end of a selection is inside the block, while the current match of Find is in it, and while
   a pending change touches it (a change is seen and decided in its text, never drawn away). Edits
   in the source are ordinary edits, tracked or not, written by the same rules as any text; none is
-  refused. An image in a rendered block is a small box with its alt text: nothing is loaded.
+  refused. An image in a rendered block is drawn when it is a local one, through the host's resolver, at its numeric `width` and `height`; a `<picture>` draws the `<source>` that matches the window's appearance (`prefers-color-scheme`), else its `<img>`. Any other image is a small box with its alt text: nothing remote is loaded.
 - **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
   WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
   `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
@@ -1390,7 +1393,10 @@ ordinary copy writes the HTML that Word and Docs draw well); File › Print and 
   never copied: the link is its path from the document. It is one step to undo, and a tracked
   insertion with Track Changes on, and is refused where an image may not go (in code, say).
 - **Cropping an image** (#624). Image › Crop… puts a crop box with a handle at each corner and edge over a
-  local image; Return or Done applies it, Escape cancels. The app writes the part inside the box as
+  local image; Return or Done applies it, Escape cancels. With the keys alone: the arrow keys move the
+  box, Tab reaches each of the eight handles (named, "Top left corner, crop handle"), and the arrow keys
+  on a handle resize from that side or corner (Shift for larger steps); the box's size is spoken once
+  after a run of key presses. The app writes the part inside the box as
   a copy beside the others in the project's folder for images (`photo-crop.png`, numbered when the
   name is taken), and the Markdown points at the copy, keeping the text, the title, the width and
   the alignment. The original stays, so rejecting the change gets it back. With Track Changes on
@@ -1460,10 +1466,9 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
-  are not drawn yet); Mermaid editing with a live preview;
+- captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's, Obsidian's and Quarto's are built); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
-- citations from the document's bibliography in `.qmd` and `.Rmd`;
+- a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (citations are drawn as chips);
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
   step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
@@ -1472,7 +1477,7 @@ a new email under the same name becomes an alias in the ledger
 
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
-changes); link cards; chips for Quarto shortcodes and cross-references; a form
+changes); link cards; chips for Quarto shortcodes; a form
 for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
 reading width, a dark page).
 

@@ -15,6 +15,7 @@ import {
 } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { buffer } from 'node:stream/consumers';
+import type { ReportEntry } from '@redlines/word';
 import { notUtf8 } from './files.ts';
 import type { CliIo } from './run.ts';
 
@@ -81,12 +82,11 @@ export const nodeIo: CliIo = {
     const notes = result.report.entries.map((entry) => entry.message);
     return { markdown: result.markdown, notes, media: result.media };
   },
-  async exportDocx(text) {
+  async exportDocx(text, images) {
     // Loaded here and not in `run.ts`, so the program in the app, which has no Node, never holds it.
-    const { exportDocx, exportReport } = await import('@redlines/word');
-    return {
-      bytes: await exportDocx(text),
-      notes: exportReport(text).entries.map((entry) => entry.message),
-    };
+    const { exportDocx } = await import('@redlines/word');
+    const report: ReportEntry[] = [];
+    const bytes = await exportDocx(text, { report, ...(images ? { images } : {}) });
+    return { bytes, notes: report.map((entry) => entry.message) };
   },
 };
