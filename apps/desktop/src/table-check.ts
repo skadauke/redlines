@@ -2348,7 +2348,6 @@ const CHECKS: Check[] = [
         } else {
           const grip = await colGripOf(editor, 1);
           if (!grip) return { ...problems, grip: 'none shows' };
-          const box = grip.getBoundingClientRect();
           openGripMenu(grip);
           await frames();
           const item = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')].find(
@@ -2444,7 +2443,6 @@ const CHECKS: Check[] = [
       const open = async () => {
         const grip = await colGripOf(editor, 1);
         if (!grip) return null;
-        const box = grip.getBoundingClientRect();
         openGripMenu(grip);
         await frames();
         return [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
