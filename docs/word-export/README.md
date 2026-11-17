@@ -282,4 +282,8 @@ and `commentsIds.xml` for the durable ids written on export.
 - **`redlines export-docx <file.md> [-o out.docx]`** is the same, beside the file by default. It is
   in the Node command line (`pnpm redlines`); the program in the app, which runs the logic in QuickJS
   without Node, doesn't carry the writer, and says so.
-- Import will be File › Open .docx…, into a new unsaved document, with its report as a notification.
+- **File › Open .docx…** opens a Word or Google Docs file as a new, unsaved document (here while the
+  window is untouched, else in a new window). The import report is a notification, never a dialog.
+  Pictures are not carried yet, and the report says how many. In the development page it is a file picker.
+- **`redlines import-docx <file.docx> [-o out.md]`** writes the Markdown beside the file, and never over
+  a file that is there.

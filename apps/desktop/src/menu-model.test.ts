@@ -24,6 +24,7 @@ function commands() {
     revealInFinder: vi.fn(),
     print: vi.fn(),
     exportWord: vi.fn(),
+    openDocx: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
     switchLook: vi.fn(),
@@ -203,6 +204,7 @@ describe('the menu model', () => {
       '---',
       'Close',
       '---',
+      ['Open .docx…', undefined],
       ['Export to Word…', undefined],
       '---',
       ['Print…', 'CmdOrCtrl+P'],
@@ -291,6 +293,8 @@ describe('the menu model', () => {
     expect(c.revealInFinder).toHaveBeenCalledOnce();
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
+    click('File', 'Open .docx…');
+    expect(c.openDocx).toHaveBeenCalledOnce();
     click('File', 'Export to Word…');
     expect(c.exportWord).toHaveBeenCalledOnce();
     click('View', 'Plain');
