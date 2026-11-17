@@ -8,6 +8,7 @@ import { acceptMarks, parse, rejectMarks, trackedEdit, type TextChange } from '@
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { createEditor, type Editor } from '../index.ts';
+import { intentAnnotation } from '../tracked/intent.ts';
 import { refusedEditEffect, setTrackingEffect } from '../tracked/typing.ts';
 import { redoSayingWhy, undoSayingWhy } from './guard.ts';
 import { history, historyField, remoteStep, undoDepth } from './history.ts';
@@ -457,6 +458,37 @@ describe('undo, per person', () => {
     expect(bodyOf(editor)).toContain('X');
     expect(bodyOf(editor)).not.toContain('moon');
     expect(bodyOf(editor)).not.toContain('mo');
+  });
+
+  it('knows whose a step is that a group of steps made (a table paste)', () => {
+    const { editor } = made('Hello world\n', false);
+    const edit = { from: 5, to: 5, insert: ' there', main: true };
+    editor.view.dispatch({
+      changes: { from: 5, insert: ' there' },
+      userEvent: 'input.type',
+      annotations: intentAnnotation.of({
+        kind: 'steps',
+        id: 'grp1',
+        steps: [
+          {
+            kind: 'typing',
+            id: 'one1',
+            tracking: false,
+            edits: [edit],
+            backward: false,
+            grouped: false,
+            widening: false,
+            author: { handle: 'ada', name: 'Ada Lovelace' },
+            time: '',
+            drawn: [],
+          },
+        ],
+      }),
+    });
+    expect(savedSteps(editor.view.state)[0]!.meta!.person).toBe('ada');
+    remote(editor, 8, 8, 'X');
+    undoSayingWhy(editor.view);
+    expect(bodyOf(editor)).toBe('HelloX world\n');
   });
 
   it('keeps what it knows of a step through the history’s JSON, and uses it after fromJSON', () => {
