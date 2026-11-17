@@ -20,6 +20,7 @@ pub mod connections;
 pub mod gateway;
 mod latest;
 pub mod node;
+mod openclaw_nodes;
 mod openclaw_protocol;
 mod log;
 mod process;
@@ -43,6 +44,7 @@ pub use which::Programs;
 
 use acp::{AcpAgent, AcpAgents, Found};
 use connections::{Change, Connections, Kind, NewConnection, Secret, View};
+use openclaw_nodes::Nodes;
 use acp_runs::AcpRuns;
 use allowed::Agent;
 use log::RunInfo;
@@ -78,6 +80,23 @@ pub fn set_up(app: &AppHandle) {
         .map(|folder| folder.join("openclaw"))
         .unwrap_or_default();
     app.manage(Connections::new(root));
+    app.manage(Nodes::default());
+    // A connection that was set up connects again when the app opens, and keeps trying by itself.
+    let starting = app.clone();
+    std::thread::spawn(move || {
+        let computer = this_mac_name();
+        let connections = starting.state::<Connections>();
+        for view in connections.views() {
+            if view.node_token {
+                let _ = starting.state::<Nodes>().connect(
+                    &starting,
+                    &view.connection.handle,
+                    None,
+                    &computer,
+                );
+            }
+        }
+    });
     if let Ok(folder) = log_folder(app) {
         std::thread::spawn(move || log::delete_old_logs(&folder, SystemTime::now()));
     }
@@ -104,6 +123,7 @@ pub fn quitting(app: &AppHandle) {
     app.state::<Runs>().stop_all();
     app.state::<Setups>().stop_all();
     app.state::<Relays>().close_all();
+    app.state::<Nodes>().stop_all();
 }
 
 /// Whether this machine has an agent's program: its path, or null. Only what this returns can run.
@@ -190,7 +210,7 @@ pub fn openclaw_connections(app: AppHandle) -> Vec<View> {
     app.state::<Connections>().views()
 }
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs())
@@ -224,6 +244,7 @@ pub fn openclaw_connection_change(
 /// Removes a connection and every secret it kept.
 #[tauri::command(async)]
 pub fn openclaw_connection_remove(app: AppHandle, handle: String) -> Result<Vec<View>, String> {
+    app.state::<Nodes>().stop(&handle);
     let list = app.state::<Connections>().remove(&handle)?;
     let _ = app.emit(OPENCLAW_CHANGED, ());
     Ok(list)
@@ -244,6 +265,56 @@ pub fn openclaw_use_token(
     store.keep(&handle, Kind::OperatorToken, &secret)?;
     let _ = app.emit(OPENCLAW_CHANGED, ());
     Ok(store.views())
+}
+
+/// The name of this Mac as its owner knows it (System Settings › General › About), for what the
+/// Gateway's owner sees in a request: "Redlines on Ada’s MacBook".
+fn this_mac_name() -> String {
+    Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .and_then(|name| openclaw_nodes::computer_name(&name).ok())
+        .unwrap_or_else(|| "this Mac".to_owned())
+}
+
+/// This Mac's name, for the prompt the person sends their agent.
+#[tauri::command(async)]
+pub fn openclaw_this_mac() -> String {
+    this_mac_name()
+}
+
+/// Connects an OpenClaw connection to its Gateway, with the setup code the person pasted (which goes
+/// to the connection and is never kept) or else the token it kept. Only Preferences may ask.
+#[tauri::command(async)]
+pub fn openclaw_node_connect(
+    app: AppHandle,
+    handle: String,
+    setup_code: Option<String>,
+) -> Result<(), String> {
+    let code = setup_code
+        .as_deref()
+        .filter(|code| !code.trim().is_empty())
+        .map(Secret::new)
+        .transpose()
+        .map_err(|_| "That doesn’t look like a setup code: it is one line with no spaces.".to_owned())?;
+    app.state::<Nodes>()
+        .connect(&app, &handle, code, &this_mac_name())
+}
+
+/// Where a connection is: connecting, waiting for approval (with the code to compare), connected,
+/// trying again, failed and why, or stopped. Nothing when none is running.
+#[tauri::command(async)]
+pub fn openclaw_node_status(app: AppHandle, handle: String) -> Option<node::Status> {
+    app.state::<Nodes>().status(&handle)
+}
+
+/// Disconnects a connection, which stays in the list.
+#[tauri::command(async)]
+pub fn openclaw_node_stop(app: AppHandle, handle: String) {
+    app.state::<Nodes>().stop(&handle);
 }
 
 /// Removes an Agent Client Protocol agent, once the person has said so in a question of the

@@ -416,7 +416,6 @@ impl Connections {
         Ok(self.views())
     }
 
-    #[allow(dead_code)] // The node connection notes its use (OC 4).
     /// Notes that the connection was used, for "Last used".
     pub fn used(&self, handle: &str, now: u64) -> Result<(), String> {
         let _one_at_a_time = hold(&self.changing);
@@ -495,7 +494,6 @@ impl Connections {
         Secret::new(&text).ok()
     }
 
-    #[allow(dead_code)] // The node connection signs with it (OC 4).
     /// This connection's device key, made the first time it is asked for: 32 random bytes of the
     /// operating system's, as hex, kept like any secret.
     pub fn device_key(&self, handle: &str) -> Result<Secret, String> {

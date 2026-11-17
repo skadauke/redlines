@@ -16,9 +16,6 @@
 //! Secrets are given to the connection as [`Secret`]s and leave it only in the one frame that
 //! carries them; nothing here logs or reports one.
 
-// Nothing starts the node until the tool bridge is wired (OC 5): what is here is run by its tests.
-#![allow(dead_code)]
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
@@ -1248,5 +1245,35 @@ mod tests {
         ] {
             assert!(Identity::from_seed(bad).is_none(), "{bad:?}");
         }
+    }
+    #[test]
+    fn a_status_reaches_the_page_in_the_shape_the_sheet_reads() {
+        let said = |status: Status| serde_json::to_value(status).unwrap();
+        assert_eq!(said(Status::Connecting), json!({"state": "connecting"}));
+        assert_eq!(
+            said(Status::Pairing {
+                request_id: Some("r".into()),
+                code: "7QF-2K9".into()
+            }),
+            json!({"state": "pairing", "request_id": "r", "code": "7QF-2K9"})
+        );
+        assert_eq!(
+            said(Status::Connected { tools: 6 }),
+            json!({"state": "connected", "tools": 6})
+        );
+        assert_eq!(
+            said(Status::Failed(Failure::CodeUsed)),
+            json!({"state": "failed", "why": "code-used"})
+        );
+        assert_eq!(
+            said(Status::Failed(Failure::TooNew { protocol: Some(4) })),
+            json!({"state": "failed", "why": "too-new", "protocol": 4})
+        );
+        assert_eq!(
+            said(Status::Failed(Failure::ToolsRefused {
+                message: "off".into()
+            })),
+            json!({"state": "failed", "why": "tools-refused", "message": "off"})
+        );
     }
 }

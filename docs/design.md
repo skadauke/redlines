@@ -2211,6 +2211,26 @@ The Claude Code skill is also a plugin, and this repository a marketplace for it
 (`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
+**OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks
+a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a sheet
+([research note](research/openclaw-connection.md), screens 1 to 7, and a gray card for every
+failure): whether this Mac has Tailscale installed, is signed in and sees other computers
+(`tailscale status --json`, read only: Redlines never starts, stops or changes Tailscale); which
+computer, found by opening its WebSocket and reading its greeting (nothing is sent); a prompt to
+send the person's agent, which holds no secret and asks for the private road only (Tailscale
+Serve, auth on, one command, the tools for one agent); a secure field for the setup code the agent
+answers with, used once; the short code to compare when the agent approves this Mac; and a test.
+Redlines then connects out to the Gateway as a node and offers the six tools; nothing listens on
+this Mac. The connection is a record (the name it writes as, the computer, a level that starts at
+Suggest, the folders its tools may reach) with its tokens and device key in files only this user
+can read, never shown and never returned to a window; adding a connection or giving one more asks
+in a question of the system's, as adding an Agent Client Protocol agent does. The agent's card in
+Preferences shows the level, the folders, when it was last used and where the connection is, and
+Remove deletes every file. Not yet built: the tools acting on a document (the tool bridge), and
+mentions through this connection; the `openclaw acp` agent below stays for a Mac that has the
+`openclaw` command. The wire's shapes are unverified against a real Gateway (the research note's
+First live test).
+
 **OpenClaw.** An OpenClaw agent, such as one a person calls Moby, is reached through the Gateway
 that runs it, which may be on another machine, by `openclaw acp`. Preferences › Agents › OpenClaw
 takes its name (what is written after an @), the Gateway's address and the path of the file that
