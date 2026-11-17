@@ -378,6 +378,24 @@ export function highlightAgainstRows(
   return null;
 }
 
+/**
+ * Where a marker of a comment, to be written at `at` in `text`, goes so that it does not hide the
+ * mark of a pending inserted or moved row: a marker in front of the mark, at the start of the row's
+ * first cell, or between the mark and its space, would take the mark out of the table's reading and
+ * the row could be neither accepted nor rejected. It goes past the mark and its space, where the
+ * text of the row starts. `at` when it is anywhere else.
+ */
+export function pastRowMark(table: TableRead, text: string, at: number): number {
+  for (const row of table.rows) {
+    const open = row.insertion?.segments[0]?.open;
+    if (!open || at < row.from || at > open.to) continue;
+    if (at === open.to || /^[\s|]*$/.test(text.slice(row.from, at))) {
+      return text[open.to] === ' ' ? open.to + 1 : open.to;
+    }
+  }
+  return at;
+}
+
 /** The marks, other than comments and highlights, that have a marker inside `row`. */
 function changesIn(parsed: Parsed, row: TableRowRead): MarkRange[] {
   return parsed.marks.filter(
@@ -917,7 +935,17 @@ export interface TableNeighbours {
   indentedAbove: boolean;
   /** The line right above the table has text: the table starts on the line under it, with no blank line. */
   underText: boolean;
+  /** The nearest line with text below the table is indented as code. */
+  indentedBelow: boolean;
+  /** The line right below the table has text that opens an HTML comment or block, with no blank line. */
+  htmlBelow: boolean;
+  /** The line right above the table is a heading. */
+  headingAbove: boolean;
 }
+
+/** A line that opens an HTML comment or block (CommonMark's block tags), not an autolink or inline tag. */
+const HTML_OPENS =
+  /^ {0,3}<(?:!--|[?!]|\/?(?:address|article|aside|blockquote|body|center|details|dialog|div|dl|dt|dd|fieldset|figure|figcaption|footer|form|h[1-6]|header|hr|html|iframe|li|main|nav|ol|p|pre|script|section|style|summary|table|tbody|td|th|thead|tr|ul)(?:[ \t>]|\/>|$))/i;
 
 /** What stands next to `table`. */
 export function neighboursOf(text: string, parsed: Parsed, table: TableRead): TableNeighbours {
@@ -928,6 +956,9 @@ export function neighboursOf(text: string, parsed: Parsed, table: TableRead): Ta
   let after = nextLineStart(text, end);
   while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
   const next = after < stop ? text.slice(after, lineEnd(text, after)) : null;
+  const right = nextLineStart(text, end);
+  const directBelow =
+    right < stop && !blankAt(text, right) ? text.slice(right, lineEnd(text, right)) : null;
   // The nearest line with text above the table, and whether it is the line right above.
   const first = bodyStart(text);
   let above: { line: string; directly: boolean } | null = null;
@@ -942,6 +973,9 @@ export function neighboursOf(text: string, parsed: Parsed, table: TableRead): Ta
     fenceOrRuleAbove: above !== null && FENCE_CLOSE_OR_RULE.test(above.line),
     indentedAbove: above !== null && indentOf(above.line) >= 4,
     underText: above?.directly === true,
+    indentedBelow: next !== null && indentOf(next) >= 4,
+    htmlBelow: directBelow !== null && HTML_OPENS.test(directBelow),
+    headingAbove: above?.directly === true && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(above.line),
   };
 }
 
@@ -957,6 +991,15 @@ export const NEXT_TO_WORDS = {
   /** The table starts right under the line above it, with no break in front of it. */
   underText:
     "This table can't be deleted with Track Changes on while it starts right under the line above it, with no blank line between. Put a blank line between them first, or turn off Track Changes.",
+  /** An HTML comment or block follows the table on the next line. */
+  htmlBelow:
+    "This table can't be deleted with Track Changes on while an HTML comment or block follows it with no blank line between. Put a blank line between them first, or turn off Track Changes.",
+  /** Indented code stands above the table and below it. */
+  codeBetween:
+    "This table can't be deleted with Track Changes on while indented code stands both above and below it. Put a paragraph between the table and one of the code blocks first, or turn off Track Changes.",
+  /** The table starts right under a heading with closing #s or attributes. */
+  underHeading:
+    "This table can't be deleted with Track Changes on while it starts right under a heading that has closing #s or attributes. Put a blank line between them first, or turn off Track Changes.",
 } as const;
 
 /** A pipe written plain beside an edit (format §3.7, rule 7): where, what, and whether text at that

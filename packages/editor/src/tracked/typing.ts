@@ -48,6 +48,7 @@ import {
   idsIn,
   type MarkRange,
   newId,
+  closerRange,
   openerRange,
   parse,
   type Parsed,
@@ -354,7 +355,7 @@ function markersOf(parsed: Parsed): Range[] {
   for (const { segments } of parsed.marks) {
     for (const segment of segments) {
       ranges.push(openerRange(segment));
-      if (segment.close) ranges.push(segment.close);
+      if (segment.close) ranges.push(closerRange(parsed.text, segment.close));
     }
   }
   return ranges.sort((a, b) => a.from - b.from);

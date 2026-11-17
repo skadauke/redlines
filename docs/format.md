@@ -1186,7 +1186,8 @@ middle of a paragraph it splits the paragraph.
 - The new text of a substitution that is a whole tag alone on its line, at the start of the file or after a blank line (CommonMark's
   seventh kind of HTML block: an image given a size is written as `<img …>`), has its closer on the
   next line, because a closer after the tag on its line would make the line a paragraph, which the
-  newest view doesn't read (#628).
+  newest view doesn't read (#628). That line break is the closer's syntax: the views, accepting and rejecting take
+  it away with the closer, and no view has it as text: a document gains no line break from where this marker stands.
 
 A tracked insertion never stands between a list marker and the space after it. A marker with no
 space after it (`-` or `2.` alone on its line) is an empty item to Markdown, but `-<!--ins x--> a<!--/x-->`
@@ -3563,6 +3564,12 @@ front matter in R Markdown and Quarto.
   marker belongs to the first ledger after it. The editor always writes one.
 - The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
   (§2.1).
+- A `<!--` with no `-->` of its own, anywhere in the text, opens a comment that runs to the first
+  `-->` after it, and in a file with a ledger that is the ledger's own. A reader (and every other
+  renderer) then finds no ledger and no marks, though the ledger is in the file. Redlines refuses
+  every edit that writes a change or a ledger in such a file, a tracked edit or a table operation, with "Close or remove the `<!--` first.", so that the file keeps exactly
+  one ledger, and the `<!--` stays text until its owner closes or removes it. Once the comment is
+  closed, or removed, the ledger is read again and edits write as they always do.
 
 ### 5.2 Keys
 

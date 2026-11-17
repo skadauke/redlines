@@ -382,7 +382,10 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[], bare
   if (parent && !nested) {
     // Up one level: the item's syntax as its parent's next item has it.
     const target = `${parent.indent}${nextMarker(state, parent)}${parent.after}${item.task ? '[ ] ' : ''}`;
-    const change = retype(line, line.to, target);
+    // Up to where the markers behind the syntax start, which stay where they are.
+    const syntaxEnd =
+      line.to - (/(?:(?:<!--\/[a-z0-9]+-->)+[ \t]*)?$/.exec(line.text)?.[0].length ?? 0);
+    const change = retype(line, syntaxEnd, target);
     // The item a Return of the author's own made, with Track Changes on: its line is the syntax of
     // that Return's pending split, and the new syntax goes over it as it is, as Tab's does, with no
     // mark. Typed over, the format takes the break with the old marker and writes the new one at
@@ -394,7 +397,7 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[], bare
       changes: [change],
       selection: EditorSelection.single(line.from + target.length),
       userEvent: 'input.break',
-      ...(split === 'own' ? { final: true, caretAt: line.to } : {}),
+      ...(split === 'own' ? { final: true, caretAt: syntaxEnd } : {}),
     };
   }
   // Out of the list: an empty paragraph after it, in the containers around it. With Track Changes
@@ -549,7 +552,12 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
   const items = itemsAround(state, block);
   const item = items[0];
   if (!item) return null;
-  if (block.text.from >= block.text.to || !state.sliceDoc(block.text.from, block.text.to).trim()) {
+  // Markers behind an empty item's syntax (the closer of the insertion that holds a Return's break
+  // and the new line, `-  <!--/id-->`) are no text of it (#464).
+  const inText = state
+    .sliceDoc(block.text.from, block.text.to)
+    .replace(/(?:<!--\/[a-z0-9]+-->)+[ \t]*$/, '');
+  if (block.text.from >= block.text.to || !inText.trim()) {
     return returnInEmptyItem(state, block, items);
   }
   const start = textStart(state, block);

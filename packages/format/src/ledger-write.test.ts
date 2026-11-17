@@ -452,7 +452,7 @@ describe('setLedger', () => {
 
     it('refuses to add a ledger where it would not be read', () => {
       const message =
-        "The end of this file is inside a code block or a comment that is never closed, so Redlines can't add its ledger. Close it first.";
+        "The end of this file is inside a code block or a comment that is never closed, or a `<!--` with no `-->` of its own hides its ledger, so Redlines can't write the ledger. Close or remove the `<!--` first.";
       expect(() => setLedger('Text\n\n```js\nlet x;\n', ledger)).toThrow(message);
       expect(() => setLedger('Text <!-- never closed\n', ledger)).toThrow(EditError);
       // A file that does not end in either is fine.
