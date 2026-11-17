@@ -527,6 +527,12 @@ export class Authority {
       }
       this.presences.set(clientID, { state, at: time });
     }
+    return { ok: true, peers: this.peers(clientID) };
+  }
+
+  /** The presence states of everyone but `clientID`, without changing any: what `presence` answers. */
+  peers(clientID: string): Peer[] {
+    const time = this.now();
     const peers: Peer[] = [];
     for (const [id, held] of this.presences) {
       if (time - held.at > this.limits.presenceTtlMs) {
@@ -538,7 +544,7 @@ export class Authority {
       const { handle, name, color } = other.identity;
       peers.push({ clientID: id, handle, name, ...(color ? { color } : {}), state: held.state });
     }
-    return { ok: true, peers };
+    return peers;
   }
 
   // --- helpers ------------------------------------------------------------------------------

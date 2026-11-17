@@ -24,6 +24,7 @@ import {
   type TextChange,
 } from '@redlines/format';
 import type {
+  AgentEditOutcome,
   Author,
   DocumentKind,
   Editor,
@@ -42,6 +43,8 @@ import {
   disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
+import { agentIntent, agentIntentAnnotation } from './tracked/agent-intent.ts';
+import { rebaseAgentEdit } from './tracked/agent-rebase.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { dialectFacet } from './dialect.ts';
@@ -83,6 +86,7 @@ import {
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -177,6 +181,7 @@ export {
   calloutOf,
   type CalloutMenuRequest,
 } from './preview/callout.ts';
+export { QUARTO_CALLOUTS } from './preview/divs.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export {
@@ -269,6 +274,9 @@ export { deriveWidenedPaste, writeWidenedPaste } from './table/widened-paste.ts'
 export type { WidenedPasteIntent, WidenedPasteRequest } from './table/widened-paste.ts';
 export type { TableIntent, TableRequest, TableWriter, WrittenTable } from './table/intent.ts';
 export type { FormatIntent, FormatRequest, FormatWriter } from './tracked/format-intent.ts';
+export { agentIntentAnnotation, agentIntentOf } from './tracked/agent-intent.ts';
+export type { AgentIntent } from './tracked/agent-intent.ts';
+export { anchorChanges, rebaseAgentEdit } from './tracked/agent-rebase.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
 export type { Intent, IntentEdit, StepsIntent, TypingIntent, Unnamed } from './tracked/intent.ts';
@@ -408,6 +416,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
+    options.includes ? includeFacet.of(options.includes) : [],
+    quartoIncludes(),
     imageSelection(),
     undoHistory(),
     trackingBack,
@@ -667,8 +677,21 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         trackingChosen = null;
       }
     },
-    applyAgentEdit: (doc, step) => {
-      if (doc === fileText(view.state)) return;
+    applyAgentEdit: (written, step, base) => {
+      const was = fileText(view.state);
+      let doc = written;
+      let dropped: AgentEditOutcome['dropped'] = [];
+      // An edit that changes nothing of what the agent read leaves the document as it is, whatever
+      // was typed since.
+      if (base !== undefined && written === base) return { rebased: false, dropped: [] };
+      const rebased = base !== undefined && base !== was;
+      if (rebased) {
+        const placed = rebaseAgentEdit(was, base, written);
+        doc = placed.text;
+        dropped = placed.dropped.map(({ removed, insert }) => ({ removed, insert }));
+      }
+      const outcome = { rebased, dropped };
+      if (doc === was) return outcome;
       const next = loadFile(doc, plain());
       const { state } = view;
       const { changes, selection, effects } = newVersion(state, next.doc);
@@ -678,8 +701,19 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         // The file and its line breaks, which the history gives back with the step.
         effects: [...next.effects, ...effects],
         // A step of the agent's, which Track Changes leaves as the agent wrote it.
-        annotations: [agentStep.of(step), trackedEditAnnotation.of(true)],
+        annotations: [
+          agentStep.of(step),
+          trackedEditAnnotation.of(true),
+          ...(base === undefined
+            ? []
+            : [
+                agentIntentAnnotation.of(
+                  agentIntent({ group: step.group, agent: step.agent, base, next: written }),
+                ),
+              ]),
+        ],
       });
+      return outcome;
     },
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),

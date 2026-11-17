@@ -23,6 +23,14 @@ export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
  */
 export type DocumentKind = 'markdown' | 'plain-only';
 
+/** What the host gives the editor to read and open an included file by its path as written. */
+export interface IncludeHost {
+  /** The text of the included file, or null where it can't be read. */
+  read(path: string): Promise<string | null>;
+  /** Opens the included file, as a document of its own. */
+  open(path: string): void;
+}
+
 /** The dialect of a Markdown file (format §9.1): GitHub's, or pandoc's in `.qmd` and `.Rmd`. */
 export type MarkdownDialect = 'gfm' | 'pandoc';
 
@@ -331,6 +339,13 @@ export interface EditorOptions {
    */
   openImage?: (src: string) => void;
   /**
+   * How the editor reads and opens the files that a Quarto document includes (`{{< include
+   * _part.qmd >}}`, drawn as a block in a `.qmd`, decision 4 of docs/research/quarto.md): given the
+   * path as the document writes it. The host knows where the document is and which files may be
+   * read. Default: none, and the block names the file and does no more.
+   */
+  includes?: IncludeHost;
+  /**
    * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
    * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
    * to keep, as fractions of its width and height. Writes the copy beside the original, in the
@@ -407,6 +422,14 @@ export interface EditorOptions {
   onNothingToUndo?: (redo: boolean) => void;
 }
 
+/** What an agent's edit did on the text it met. */
+export interface AgentEditOutcome {
+  /** The edit was placed on newer text, not written as it was. */
+  rebased: boolean;
+  /** The agent's changes that could not be placed, since the text they changed is gone. */
+  dropped: readonly { removed: string; insert: string }[];
+}
+
 /** An agent's edit, for the history: what it is part of, and who made it (design: What a step is). */
 export interface AgentStep {
   /**
@@ -475,8 +498,15 @@ export interface Editor {
    * scroll stay where the text stayed; unlike one, it is a step to undo, joined to the newest step
    * when that is `step.group`'s, and Track Changes leaves it as it is. `getDoc()` is then `next`
    * byte for byte; Undo gives back the text before, byte for byte, and Redo `next`.
+   *
+   * With `base`, the text the agent's tool read to work out `next`, and a document that is no longer
+   * that text (someone typed meanwhile), what the agent changed is placed on the text as it is, and
+   * what others wrote since stays: the edit is a push, not a whole-text write. A change of the
+   * agent's whose text is gone is left out and told in the outcome; nothing throws for it. The
+   * ledger's entries are merged by key, so both writers' marks and comments are kept. With no `base`,
+   * or a document still at it, the edit is `next`, as before.
    */
-  applyAgentEdit(next: string, step: AgentStep): void;
+  applyAgentEdit(next: string, step: AgentStep, base?: string): AgentEditOutcome;
   /**
    * The parse of the document as CodeMirror holds it, with LF line breaks, so its offsets are
    * CodeMirror positions. Its `text` matches `getDoc()` only when all the file's line breaks
