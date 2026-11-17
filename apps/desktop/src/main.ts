@@ -441,7 +441,13 @@ const editor = createEditor(element('#editor'), {
     editor.setPeople(settings.people);
   },
   // A chunk's `{r}` in a .qmd or .Rmd file is read for its language.
-  codeLanguages: codeLanguagesFor(() => controller.state.path),
+  codeLanguages: codeLanguagesFor(() => {
+    try {
+      return controller.state.path;
+    } catch {
+      return null; // the controller is made after the editor
+    }
+  }),
   // ⌘-click on a link opens its address (http, https or mailto: the editor lets no other through)
   // in the default browser or mail app, which only the app can run; a browser tab opens it itself.
   openLink: (address) => {

@@ -114,7 +114,7 @@ export function codeLanguages(info: string): LanguageDescription | null {
  * read as `codeLanguages` does.
  */
 export function chunkLanguage(info: string): LanguageDescription | null {
-  const chunk = /^\s*\{\s*\.?([A-Za-z0-9_+#-]+)/.exec(info);
+  const chunk = /^\s*\{\s*\.?([A-Za-z][A-Za-z0-9_+-]*)/.exec(info);
   return chunk ? codeLanguages(chunk[1]!) : codeLanguages(info);
 }
 
