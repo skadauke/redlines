@@ -9,7 +9,8 @@ use std::process::Command;
 /// after its scheme and no white space or control character in it. Anything else is None: another
 /// scheme (`javascript:`, `file:`, `data:`), no scheme, a link to another document.
 fn address(url: &str) -> Option<&str> {
-    let url = url.trim();
+    // U+FEFF is white space to the page (JavaScript's `\s`), so it is here too.
+    let url = url.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     let rest = ["https://", "http://", "mailto:"]
         .into_iter()
         .find_map(|scheme| {
@@ -17,7 +18,7 @@ fn address(url: &str) -> Option<&str> {
                 .filter(|head| head.eq_ignore_ascii_case(scheme))
                 .map(|_| &url[scheme.len()..])
         })?;
-    let plain = |c: char| !c.is_whitespace() && !c.is_control();
+    let plain = |c: char| !c.is_whitespace() && !c.is_control() && c != '\u{feff}';
     (!rest.is_empty() && rest.chars().all(plain)).then_some(url)
 }
 

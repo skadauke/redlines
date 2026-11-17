@@ -37,6 +37,7 @@
     "https://example.org/\u0007",
     "https://example.org/\u0085x",
     "https://example.org/ x",
+    "https://exa﻿mple.org",
     "https:/example.org"
   ]
 }
