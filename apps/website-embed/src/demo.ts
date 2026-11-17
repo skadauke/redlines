@@ -14,6 +14,7 @@ import {
 import { createFormatting } from '@redlines/formatting';
 import {
   attachPicker,
+  createAsk,
   createLiveLines,
   createRuns,
   renderCommentText,
@@ -141,6 +142,29 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
       ...(options.demo === 'design' ? wireAgent() : {}),
     });
     undone.push(() => review.destroy());
+    // Ask (#351): the scripted Claude answers one canned question in the bubble, after the review
+    // interface as in the app, and writes nothing.
+    const ask =
+      options.demo === 'design'
+        ? createAsk(editor, {
+            agents: scriptedAgents({ pause }),
+            author: VISITOR,
+            document: {
+              path: () => null,
+              generation: () => generation,
+              read: () => editor.getDoc(),
+            },
+            projectRoot: () => Promise.resolve({ folder: '/demo', isRepo: false, tooBroad: false }),
+            settings: {
+              defaultScope: () => 'document',
+              consent: () => 'document',
+              setConsent: () => {},
+            },
+            notice: onNotice,
+            pinToRail: (el, anchor, lost) => review.pinToRail(el, anchor, lost),
+          })
+        : null;
+    if (ask) undone.push(() => ask.destroy());
     tell();
 
     /** The runs of the scripted Claude, their live lines, the @ picker and the notes' text. */
@@ -256,6 +280,16 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
         }
         return review.startComment(SAY.question);
       },
+      askAboutNote() {
+        if (!ask) return false;
+        const text = editor.view.state.doc.toString();
+        const from = text.indexOf('Uploads retry');
+        const end = from < 0 ? -1 : text.indexOf('then fail.', from);
+        if (from >= 0 && end >= 0) {
+          editor.view.dispatch({ selection: { anchor: from, head: end + 'then fail.'.length } });
+        }
+        return ask.start();
+      },
       openReviewBar() {
         // The bar opens on the first change, with the focus on Accept, so that Tab and Return reach
         // Accept and Reject at once: the bar alone leaves them disabled. With the bar already open,
@@ -275,6 +309,7 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
       reset() {
         // A run posted before this finds another document: its tools refuse, and it stops.
         generation++;
+        ask?.close();
         stopQuietly();
         runs?.documentReplaced();
         editor.setDoc(text);
