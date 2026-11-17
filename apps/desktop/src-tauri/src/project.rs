@@ -130,11 +130,19 @@ fn list_shown_with(
     list_with(root, folder, global_excludes)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many folders `list_with` has listed on this thread, for the tests.
+    static LISTINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The entries of `folder`, which must be inside the project folder `root`, links followed: hidden
 /// ones, and those that git ignores, left out, and, with `global_excludes`, those that the excludes
 /// the person's git config names for every repository leave out. Only this one folder is read, so a
 /// large folder further down costs nothing until it is opened.
 fn list_with(root: &Path, folder: &Path, global_excludes: bool) -> Result<Vec<FileEntry>, String> {
+    #[cfg(test)]
+    LISTINGS.with(|count| count.set(count.get() + 1));
     let cannot = |error: std::io::Error| format!("Can’t read {}: {error}", folder.display());
     let real_root = std::fs::canonicalize(root).map_err(cannot)?;
     let real_folder = std::fs::canonicalize(folder).map_err(cannot)?;
@@ -444,21 +452,83 @@ fn cannot_open(path: &Path) -> String {
 /// (`list_with`), so none is hidden, and none is ignored by git.
 fn shown_below(root: &Path, path: &Path, global_excludes: bool) -> Result<(), ()> {
     let below = path.strip_prefix(root).map_err(|_| ())?;
-    let mut folder = root.to_path_buf();
+    let mut names = Vec::new();
     for name in below.components() {
         let std::path::Component::Normal(name) = name else {
             return Err(());
         };
-        let listed = list_with(root, &folder, global_excludes)
-            .map_err(|_| ())?
-            .into_iter()
-            .any(|entry| entry.name == name.to_string_lossy());
-        if !listed {
-            return Err(());
-        }
-        folder.push(name);
+        names.push(name);
     }
-    Ok(())
+    // The last name is looked for in a listing of its folder, which is one listing however deep it
+    // is. The folders above it are not listed again: none may be hidden (a string test), and none
+    // may be ignored by git (`ignored_above`, which reads ignore files, not folders).
+    let Some((last, above)) = names.split_last() else {
+        return Ok(());
+    };
+    if above
+        .iter()
+        .any(|name| name.to_string_lossy().starts_with('.'))
+        || ignored_above(root, above, global_excludes)
+    {
+        return Err(());
+    }
+    let listed = list_with(
+        root,
+        &root.join(above.iter().collect::<PathBuf>()),
+        global_excludes,
+    )
+    .map_err(|_| ())?
+    .into_iter()
+    .any(|entry| entry.name == last.to_string_lossy());
+    if listed { Ok(()) } else { Err(()) }
+}
+
+/// Whether git ignores one of the folders `above` that lead down from `root`, as `list_with`'s
+/// walk would leave it out of its folder's listing: by the `.gitignore` files from the
+/// repository's top down, the repository's `.git/info/exclude` and, with `global_excludes`, the
+/// person's own. Without a repository, as for the walk, nothing is ignored.
+fn ignored_above(root: &Path, above: &[&std::ffi::OsStr], global_excludes: bool) -> bool {
+    use ignore::gitignore::{Gitignore, GitignoreBuilder};
+    let Some(top) = root.ancestors().find(|folder| folder.join(".git").exists()) else {
+        return false;
+    };
+    let with_ignore_file_of = |matchers: &mut Vec<Gitignore>, folder: &Path| {
+        let mut builder = GitignoreBuilder::new(folder);
+        if builder.add(folder.join(".gitignore")).is_none()
+            && let Ok(built) = builder.build()
+        {
+            matchers.push(built);
+        }
+    };
+    // Outermost first; the innermost match decides.
+    let mut matchers: Vec<Gitignore> = Vec::new();
+    if global_excludes {
+        matchers.push(Gitignore::global().0);
+    }
+    let mut exclude = GitignoreBuilder::new(top);
+    let _ = exclude.add(top.join(".git").join("info").join("exclude"));
+    matchers.extend(exclude.build());
+    // From the repository's top to the project folder, then down through the names.
+    let mut folder = top.to_path_buf();
+    with_ignore_file_of(&mut matchers, &folder);
+    for part in root.strip_prefix(top).unwrap_or(Path::new("")).components() {
+        folder.push(part);
+        with_ignore_file_of(&mut matchers, &folder);
+    }
+    for name in above {
+        folder.push(name);
+        let ignored = matchers
+            .iter()
+            .rev()
+            .map(|matcher| matcher.matched(&folder, true))
+            .find(|found| !found.is_none())
+            .is_some_and(|found| found.is_ignore());
+        if ignored {
+            return true;
+        }
+        with_ignore_file_of(&mut matchers, &folder);
+    }
+    false
 }
 
 /// The file at `path`, as it really is, if the sidebar showing the folder `root` lists it: below
@@ -1074,6 +1144,51 @@ mod tests {
                 })
                 .collect()
         })
+    }
+
+    /// How many folders `list_with` lists while `then` runs.
+    fn listings(then: impl FnOnce()) -> usize {
+        let before = LISTINGS.with(|count| count.get());
+        then();
+        LISTINGS.with(|count| count.get()) - before
+    }
+
+    #[test]
+    fn a_deep_folder_costs_one_listing_and_hides_what_the_ways_above_hide() {
+        let disk = folder("deep");
+        make(
+            &disk,
+            &[
+                "repo/.git/",
+                "repo/.gitignore",
+                "repo/a/b/c/d/e/f/note.md",
+                "repo/a/b/c/d/e/f/g/",
+                "repo/a/b/skip/inner/x.md",
+                "repo/a/b/.dot/inner/x.md",
+                "repo/a/b/c/.gitignore",
+                "repo/a/b/c/d/own/inner/x.md",
+            ],
+        );
+        fs::write(disk.join("repo/.gitignore"), "skip/\n").unwrap();
+        fs::write(disk.join("repo/a/b/c/.gitignore"), "own/\n").unwrap();
+        let repo = disk.join("repo");
+        let deep = repo.join("a/b/c/d/e/f");
+        let shown = [repo.clone()];
+        let mut result = Ok(Vec::new());
+        let count = listings(|| result = shown_names(&shown, &repo, &deep));
+        assert_eq!(result.unwrap(), ["g/", "note.md"]);
+        // One listing for the folder, one for the check of its own name: not one for each ancestor.
+        assert_eq!(count, 2, "the ancestors are listed again");
+        // A hidden or ignored folder on the way refuses everything below it.
+        for way in ["a/b/skip/inner", "a/b/.dot/inner", "a/b/c/d/own/inner"] {
+            assert!(
+                shown_names(&shown, &repo, &repo.join(way)).is_err(),
+                "{way}"
+            );
+        }
+        // And the last name must be one the folder before it lists.
+        assert!(shown_names(&shown, &repo, &repo.join("a/b/missing/x")).is_err());
+        fs::remove_dir_all(&disk).unwrap();
     }
 
     #[test]
