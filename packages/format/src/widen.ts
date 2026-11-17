@@ -468,7 +468,8 @@ function tryRung(
   // An HTML block goes on over the line after it, a closer included: the closer stands after a blank
   // line, where it is an HTML block of its own (#597).
   const html = HTML_LINE.test(lastLineOf(now, rung.prefix));
-  const bare = endsInBare(now);
+  // (a setext underline or a rule is a line of its own, which the closer cannot join)
+  const bare = endsInBare(now) && !/(?:^|\n)[ \t>]*(?:-{2,}|={2,})[ \t]*$/.test(now);
   if (html && rung.prefix !== '') return giveUp('html');
   const atomic =
     html ||
