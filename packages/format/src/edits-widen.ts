@@ -56,7 +56,7 @@ export function widenedAtOnce(
       from: view.map.fromSource(edit.from),
       to: view.map.fromSource(edit.to),
     }));
-    const done = widen(text, made, ctx);
+    const done = widen(text, made, ctx, !cells);
     // Another person's pending marks in the old text stay in it, as in a table's cells: every order
     // of decisions reads alike (format §3.12, #808). A mark of theirs that ends at the unit's edge
     // does not read alike in every order (#107), and keeps the refusal.

@@ -104,11 +104,23 @@ export interface Widened {
  *
  * @throws Untrackable when no unit holds the edit; EditError when the ledger can't be read.
  */
-export function widen(text: string, edits: readonly TextChange[], ctx: EditContext): Widened {
-  return withDialect(ctx.dialect, () => widenIn(text, edits, ctx));
+export function widen(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  /** Where another person's mark ends at the unit's edge, the unit with the block beside it, which
+   * holds the mark whole, is tried before the unit is given with the mark left out (#265). */
+  beside = false,
+): Widened {
+  return withDialect(ctx.dialect, () => widenIn(text, edits, ctx, beside));
 }
 
-function widenIn(text: string, edits: readonly TextChange[], ctx: EditContext): Widened {
+function widenIn(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  beside: boolean,
+): Widened {
   const parsed = parse(text);
   const view = newestView(text);
   const sorted = edits.toSorted((a, b) => a.from - b.from || a.to - b.to);
@@ -157,6 +169,10 @@ function widenIn(text: string, edits: readonly TextChange[], ctx: EditContext): 
       : undefined;
   // A unit that closure brought back to one already tried would go up and down for ever.
   const tried = new Set<string>();
+  // The first write that another person's mark touches at the edge, kept if no wider unit holds it.
+  let touching: Widened | undefined;
+  const besides: Rung[] = [];
+  let besideTried = false;
   for (let index = 0; rung; index++) {
     const closed = closure(parsed, units, rung, sourceFrom, sourceTo, region);
     const key = `${closed.lineFrom}:${closed.to}`;
@@ -189,12 +205,39 @@ function widenIn(text: string, edits: readonly TextChange[], ctx: EditContext): 
     );
     // The unit with the block after it is kept only where micromark reads its file as the newest
     // view (the check of the oracle's reader), else the ladder ends in an alert.
-    if (done && !(fromSpare && readsOtherMicromark(text, done.changes))) return done;
+    const kept = done && !(fromSpare && readsOtherMicromark(text, done.changes)) ? done : undefined;
+    if (kept && (!beside || kept.touchingOthers.length === 0)) return kept;
+    if (
+      beside &&
+      !besideTried &&
+      (kept
+        ? kept.touchingOthers.length > 0
+        : parsed.marks.some(
+            (mark) =>
+              mark.entry.by !== ctx.author.handle &&
+              touches(mark, { from: closed.lineFrom - 2, to: closed.to + 2 }),
+          ))
+    ) {
+      // A rung that another person's mark touches at its edge, or that its decisions with the mark
+      // do not read alike for (#107), is tried with the block beside it, which holds the mark.
+      besideTried = true;
+      for (const next of [withNext(units, rung), withPrev(units, rung)]) {
+        if (next) besides.push(next);
+      }
+    }
+    touching ??= kept;
+    const next = besides.shift();
+    if (next) {
+      rung = next;
+      fromSpare = false;
+      continue;
+    }
     const wider = widerThan(closed);
     fromSpare = !wider && spare !== undefined;
     rung = wider ?? spare;
     spare = undefined;
   }
+  if (touching) return touching;
   trace?.('ladder-end');
   throw new Untrackable(
     'no-unit',
@@ -281,6 +324,16 @@ function withNext(units: Unit[], rung: Rung): Rung | undefined {
   const at = siblings.indexOf(only);
   const next = siblings[at + 1];
   return at < 0 || !next ? undefined : rungOfUnits([only, next], rung.parent);
+}
+
+/** A unit with the one before it (see `withNext`). */
+function withPrev(units: Unit[], rung: Rung): Rung | undefined {
+  const [only] = rung.units;
+  if (rung.units.length !== 1 || !only) return undefined;
+  const siblings = rung.parent ? rung.parent.children : units;
+  const at = siblings.indexOf(only);
+  const previous = siblings[at - 1];
+  return at < 1 || !previous ? undefined : rungOfUnits([previous, only], rung.parent);
 }
 
 function widerThan(rung: Rung): Rung | undefined {
@@ -750,6 +803,53 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
       at = next;
     }
     return false;
+  });
+}
+
+/**
+ * Whether an edit is made at an emphasis delimiter in a paragraph that holds a marker: it replaces
+ * or deletes a `*`, `_` or `~`, types one, or sits right against one (a marker between them does not
+ * part them). A fine write there can leave the delimiter run cut by a marker, which micromark reads
+ * otherwise than the newest view (#299, #265). Only these are read by micromark, so that a
+ * keystroke elsewhere costs what it did.
+ */
+export function atDelimiter(text: string, edits: readonly TextChange[]): boolean {
+  const DELIMITER = /[*_~]/;
+  return edits.some((edit) => {
+    let from = text.lastIndexOf('\n\n', edit.from);
+    from = from < 0 ? 0 : from;
+    let to = text.indexOf('\n\n', edit.to);
+    to = to < 0 ? text.length : to;
+    const paragraph = text.slice(from, to);
+    // A marker in the paragraph, or just over its edge (a split's break, a deletion of one).
+    const near = text.slice(Math.max(0, edit.from - 100), edit.to + 100);
+    if (!paragraph.includes('<!--') && !/<!--(?:split|del)/.test(near)) return false;
+    if (DELIMITER.test(edit.insert) || DELIMITER.test(text.slice(edit.from, edit.to))) return true;
+    const before = text.slice(from, edit.from).replace(/<!--[^]*?-->/g, '');
+    const after = text.slice(edit.to, to).replace(/<!--[^]*?-->/g, '');
+    return DELIMITER.test(before.slice(-1)) || DELIMITER.test(after.slice(0, 1));
+  });
+}
+
+/**
+ * Whether an edit that types or touches a delimiter run stands right against a pending split or
+ * deletion (a block break, a word): deciding it reads the run in another place than the file shows
+ * it, which only the replacement of the blocks that hold it keeps alike (#265).
+ */
+export function delimiterBesideBreak(text: string, edits: readonly TextChange[]): boolean {
+  const DELIMITER = /[*_~]/;
+  return edits.some((edit) => {
+    const before = text.slice(Math.max(0, edit.from - 400), edit.from);
+    const after = text.slice(edit.to, edit.to + 40);
+    const beside =
+      /<!--(?:split|del) [^]*?-->\s*$/.test(before) || /^\s*<!--(?:split|del) /.test(after);
+    if (!beside) return false;
+    const around = `${before.replace(/<!--[^]*?-->/g, '').slice(-1)}${after.replace(/<!--[^]*?-->/g, '').slice(0, 1)}`;
+    return (
+      DELIMITER.test(edit.insert) ||
+      DELIMITER.test(text.slice(edit.from, edit.to)) ||
+      DELIMITER.test(around)
+    );
   });
 }
 
