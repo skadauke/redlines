@@ -5300,7 +5300,7 @@ function editsWidening(
           // can't be.
           let whole: ReturnType<typeof widenedAtOnce>;
           try {
-            whole = widenedAtOnce(text, edits, again());
+            whole = widenedAtOnce(text, edits, again(), false, true);
           } catch {
             // no unit holds it: the fine write stays
           }
