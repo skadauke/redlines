@@ -648,6 +648,7 @@ mod tests {
             &app,
             &tauri::utils::config::FsScope::AllowedPaths(Vec::new()),
         )
+        .inspect(file_scope::follow_links)
         .unwrap()
     }
 
@@ -790,7 +791,9 @@ mod tests {
             Ok(root(&disk.join("notes"), true, false))
         );
         assert_eq!(projects.folders(), [disk.join("notes")]);
-        // The file it is a link to is the person's too, and has its own project.
+        // The file it is a link to is the person's too (under the spelling the scope was told of:
+        // a temp folder is itself spelled through a link on macOS), and has its own project.
+        scope.allow_file(disk.join("work/real.md")).unwrap();
         assert_eq!(
             ask(disk.join("work/real.md")),
             Ok(root(&disk.join("work"), true, false))
