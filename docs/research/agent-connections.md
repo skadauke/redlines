@@ -26,9 +26,15 @@ written for each.
   stdio shim for agents that only start commands), off until someone adds a connection. The
   author is fixed by the token, never claimed by the agent. A remote agent reaches the port through
   a tunnel the person already runs (Tailscale, SSH). This covers OpenClaw (through its own
-  `mcp.servers`), Hermes, Grok Build and the rest with one generated snippet each. It is what
-  Stephan's relay does, with a grant and a revoke added, so the relay is needed only as an add-on
-  for an agent that cannot do HTTP, if there is one.
+  `mcp.servers`), Hermes, Grok Build and the rest with one generated snippet each.
+- **Two directions, two mechanisms.** The endpoint is _agent to Redlines_ (the agent uses the
+  tools). A mention is _Redlines to agent_ (a bounded job handed to a standing agent), and that is
+  the job of the agent's own inbound door: OpenClaw's Gateway through `openclaw acp --url`, Hermes's
+  API server, or, for an agent with no door, a small receiver. Stephan's relay is this second
+  direction: it starts an isolated run for each job. It complements the endpoint; it is not an
+  alternative to it.
+- **Isolation is a requirement.** A mention from a document starts an isolated run with only the
+  Redlines tools and that connection's folders, and never posts into the agent's main conversation.
 - **ACP stays what it is for:** Redlines starting an agent and asking it something. Its remote
   transport is still a draft; it does not solve the tools problem for OpenClaw.
 - **A2A is not a fit.** It is for agents handing work to agents, not for giving an agent tools.
@@ -42,7 +48,7 @@ secondary. Dates are the dates fetched, since most pages carry none.
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Claude Code, Codex                                | Yes, remote HTTP too                                                                                                                                                                                    | Through adapters                                                                                                                                                         | Own folders                                                                                         | Done natively; a provider each                                                                                                |
 | OpenClaw                                          | Yes: `openclaw mcp add/set` keep servers in its config; stdio, SSE and streamable HTTP; OAuth by `openclaw mcp login` ([docs](https://docs.openclaw.ai/cli/mcp))                                        | `openclaw acp` is a server over stdio to a Gateway, local or `--url`, with `--token-file` ([docs](https://docs.openclaw.ai/cli/acp)); it rejects per-session `mcpServers` | `~/.openclaw/skills`; reads `~/.agents/skills`                                                      | Also `openclaw mcp serve`, which lets an MCP client talk to its conversations; not the direction Redlines needs                |
-| Hermes Agent (Nous Research)                      | Yes, and `hermes mcp` manages servers ([docs](https://hermes-agent.nousresearch.com/docs))                                                                                                              | `hermes acp` is reported by third parties; the official page read doesn't mention it                                                                                     | agentskills.io format                                                                               | One gateway for 20+ chat platforms; runs on local, Docker, SSH and cloud backends, so often not on the Mac                    |
+| Hermes Agent (Nous Research)                      | Yes, and `hermes mcp` manages servers ([docs](https://hermes-agent.nousresearch.com/docs))                                                                                                              | `hermes acp` is reported by third parties; the official page read doesn't mention it                                                                                     | agentskills.io format                                                                               | One gateway for 20+ chat platforms; runs on local, Docker, SSH and cloud backends, so often not on the Mac. Inbound door: an OpenAI-compatible API server (`hermes gateway`, port 8642, loopback by default, a bearer key required when it listens wider) with streamed tool progress, and a jobs API ([docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server); mirrors and guides read for details) |
 | Grok Build (xAI)                                  | Yes ("bring your own MCP")                                                                                                                                                                              | Not confirmed                                                                                                                                                            | Reads Claude Code skills, plugins and `AGENTS.md`, per xAI's coverage (May 2026, secondary sources) | Beta, subscription-gated                                                                                                      |
 | Muse (Meta, launched September 8, 2026)          | Through Meta's connector platform, which takes an API endpoint or an MCP server (secondary sources)                                                                                                     | No                                                                                                                                                                       | No                                                                                                  | Closed and hosted: it can only reach a server on the public internet, and Redlines should not be that                         |
 | OpenMuse, NanoClaw and other self-hosted agents   | Generally yes                                                                                                                                                                                           | Varies                                                                                                                                                                   | Varies                                                                                              | Same shape as OpenClaw and Hermes                                                                                             |
@@ -89,12 +95,15 @@ agent card for the Redlines endpoint is a small addition.
 | 2b. MCP, Redlines as the server       | Any agent that can use MCP: all of the above. This Mac, or another through a tunnel                                          | A pasted snippet and a token file; for an agent elsewhere, a tunnel too  | Good if Redlines authenticates and scopes: author fixed by token, folders, level, revoke. A new listening surface, so loopback only                                                                                                                   | Low and shared: one server, and a snippet per agent kept in a list                                                                                                      |
 | 2c. A2A                               | Agents that delegate to other agents                                                                                         | High; few personal agents expose it                                      | Agent-card signing is new                                                                                                                                                                                                                             | Not a fit; skip                                                                                                                                                         |
 | 3. Command line and skill             | Any agent with a shell: on this Mac, or on another machine that has the files (synced)                                       | Install the skill; the `redlines` command on the PATH                    | Weakest: the agent writes the file itself, claims its own name, nothing is granted, so nothing can be revoked; the agent's own sandbox is the only limit. Edits arrive as outside edits, with no live merge with typing (design §7.3)                  | Lowest: one text, built into copies (exists)                                                                                                                            |
-| 4. A relay add-on (Stephan's, generalized) | Whatever the relay reaches; today one setup                                                                             | High and personal: a program on both sides                               | Depends on what is added; today a pipe with no grant                                                                                                                                                                                                  | Medium: a second thing to ship, with its own updates and bugs                                                                                                           |
+| 4. A relay add-on (Stephan's, generalized) | Any standing agent on another machine that can take a job: the relay hands it a bounded job, the reverse direction of 2b | Medium: enroll each calling machine once; a tunnel with two credentials | Good where it stands: an isolated run for each job (fresh transcript, no access to the main conversation, no way to message anyone), a cap on runs in flight, two credentials (one at the network edge, one the relay checks) in a 0600 file. Lacks, for Redlines, a folder scope, authorship fixed by the credential and a revoke from the editor | Medium: a second thing to ship; unneeded where the agent has its own inbound door |
 
 Option 2b, with the shell route (3) kept as the zero-setup start, gives the most reach for the
-least upkeep. Option 4, generalized, is 2b with the pieces in other places. What generalizing it
-would take is a listening endpoint, a token per agent, a folder scope and a way to revoke. If
-Redlines serves those itself, the add-on isn't needed.
+least upkeep. Option 4 is not an alternative to 2b but its other half. 2b is _agent to Redlines_:
+the agent uses the tools. The relay is _Redlines to agent_: Redlines hands a job to a standing
+agent. A mention needs both, the job in and the tools back. A general version of the relay is the
+agent's own gateway where it has one (OpenClaw's Gateway, Hermes's API server), or a small receiver
+with the same properties where it has not. What Redlines adds to either is what the relay lacks: a
+folder scope, authorship fixed by the credential and a revoke from the editor.
 
 ## The journey
 
@@ -122,12 +131,20 @@ Redlines serves those itself, the add-on isn't needed.
    is already on, Suggest, never Auto. A connection is the rule "an agent never has more rights than
    its person" (§8.1) with a name on it. Redlines enforces it at the endpoint: a path outside the
    folders gets the answer a missing file gets.
-5. **Mention or Ask.** A connected agent is in the @ picker by its handle. A mention can't _start_ a
-   standing agent. For an agent Redlines can start (ACP, a command) it starts it. For a standing
-   agent it posts the mention to the connection as a waiting request, which the agent takes with a
-   new tool, `next_request` (or learns of by its own channel: OpenClaw's `mcp serve` and Hermes's
-   gateway already carry messages). The thread shows "waiting for Moby" until it answers, and says so
-   when the agent never takes it.
+5. **Mention or Ask.** A connected agent is in the @ picker by its handle. Each mention is a bounded
+   job, and how it reaches the agent depends on the agent's door:
+   - _Redlines starts it_ (a command, ACP on this Mac): as today.
+   - _The agent has an inbound door_: Redlines sends the job there. For OpenClaw that is
+     `openclaw acp --url <gateway> --token-file <path>`, which exists (the Gateway is the agent's own
+     relay). For Hermes it is the API server's chat endpoint (or jobs API) at a URL, with the key in a
+     file; whether it can take a per-job isolated run, as OpenClaw's session key does, is to be
+     tested.
+   - _No door_: a waiting request, which the agent takes with a new tool, `next_request`. A fallback
+     only, since it needs the agent to poll.
+
+   Whichever, the job is an **isolated run** (see below): only the Redlines tools and this
+   connection's folders, a fresh transcript, never the agent's main conversation. The thread shows
+   "waiting for Moby" until it answers, and says so when it never does.
 6. **See edits as tracked changes in its name.** The author is the connection's handle and the person
    (`moby-ada`), set by the token. A mention always suggests (§8.2). Each run's marks are one group,
    as now. An edit through the endpoint is the app's own write, so it merges with typing as Claude's
@@ -152,11 +169,17 @@ Stephan's case: the agent runs on a machine of his and the documents are on the 
 3. **Authenticate.** The same token, as a file. The person puts it on the other machine themselves
    (`scp`, a secrets manager) and the snippet names the path there. Redlines doesn't copy it. A token
    for a remote connection is its own, with a shorter life, so that a lost machine costs one revoke.
-4. **Permissions, mention, edits, revoke.** As above. The endpoint is the only writer, so the
+4. **Mention: the other direction.** The tunnel carries two flows. Tools come _in_ (agent to the
+   endpoint above). Jobs go _out_: Redlines hands the mention to the agent's inbound door, over an
+   authenticated tunnel with the agent's own credential in a file whose path Redlines is given and
+   never reads. Stephan's relay is that door for his agent: it starts an isolated run for each job,
+   caps the runs in flight, and reports back once. A general door is the agent's own gateway, or a
+   small receiver with those properties.
+5. **Permissions, edits, revoke.** As above. The endpoint is the only writer, so the
    documents never leave the Mac, which the shell route can't give a remote agent (it would need the
    files synced, and a sync conflict would be its edits' conflict). What the agent reads goes to its
    own model host, and the first-use question says so, as it does for OpenClaw today.
-5. **OpenClaw in particular.** The Gateway makes the outbound call, so the snippet is for the
+6. **OpenClaw in particular.** The Gateway makes the outbound call, so the snippet is for the
    Gateway's host (`openclaw mcp add` there). The existing ACP row stays for Ask and mentions, which
    the Gateway answers in text.
 
@@ -179,6 +202,14 @@ Stephan's case: the agent runs on a machine of his and the documents are on the 
 - **Secrets.** Only paths in prompts, snippets, logs and the UI, as for OpenClaw today. Tokens are
   random, 256 bits, in a 0600 file in a 0700 folder (the relay socket's rules), compared in constant
   time. There is no "copy token" button; the person copies a path or the file.
+- **Isolation of a mention (required).** A personal agent can hold broad powers (a shell, other
+  accounts), and a document's text, others' comments included, is untrusted. So a mention starts an
+  isolated run for that job: a fresh transcript, only the Redlines tools and that connection's
+  folders, no access to the agent's main conversation and no way to message anyone, one report back,
+  and a cap on runs in flight. It never posts into the main conversation. Redlines asks for this
+  when it hands the job over (OpenClaw: a session key for each thread, as today), says in the
+  connection's card when an agent can't promise it, and does not offer mentions for such an agent
+  unless the person says so after being told.
 - **Prompt injection.** An agent reads others' words and may be told to act. The tool results already
   label deleted text and comments untrusted. A connection can only suggest and only inside its
   folders, which is what bounds it. The slash-directive escaping OpenClaw needs applies to anything
@@ -212,11 +243,20 @@ grant prompt on first use; revoke and last used; the author fixed by the token. 
 sheet with a snippet per agent (OpenClaw, Hermes, Grok Build, generic). Tested against the real
 programs, as the Claude and Codex providers were.
 
-**Phase 2: another machine.** Streamable HTTP on the listener, the Origin and Host checks, the two
-tunnel recipes, a shorter token life, the reachability check, and the waiting-request tool so a
-mention reaches a standing agent. Stephan's relay becomes a recipe to retire, not a program to port.
+**Phase 2: another machine, both directions.**
+- _Tools in:_ Streamable HTTP on the listener, the Origin and Host checks, the two tunnel recipes,
+  a shorter token life and the reachability check.
+- _Jobs out:_ a mention goes to the agent's own inbound door, each job isolated. OpenClaw first
+  (`openclaw acp --url … --token-file …`, which exists, with the endpoint registered at the Gateway
+  by `openclaw mcp add`), then Hermes's API server once a real install shows a job can be isolated.
+- _No door:_ the waiting-request tool, as a fallback only.
 
-**Phase 3: the long tail and teams.** Hand the endpoint's URL to ACP agents that declare they take an
+Stephan's relay is the working example of the jobs-out direction, not a program to port first.
+
+**Phase 3: the long tail and teams.** A small receiver for agents with no inbound door, with the
+relay's properties (isolated run per job, a cap, two credentials) and Redlines' additions (folder
+scope, authorship fixed by the credential, revoke from the editor); this is the one place a port of
+the relay may still be worth it. Hand the endpoint's URL to ACP agents that declare they take an
 HTTP MCP server; OAuth 2.1 for agents that can only sign in that way and for shared servers; folder
 policy files; ACP's remote transport if the draft ships and agents adopt it.
 
@@ -225,18 +265,23 @@ Redlines running anyone's tunnel.
 
 ## Open questions for Stephan
 
-1. **What does the Moby-os relay do exactly?** I didn't read it and never touched the machines. If it
-   does something the endpoint above doesn't (a push to the Mac, a queue for an agent that is off,
-   a chat channel), that part is worth keeping.
+1. **Resolved: what Stephan's relay does.** Its design shows the push direction (a caller hands a
+   bounded job to a standing agent on another machine) and isolation (a fresh run for each job, no
+   access to the main conversation, one report back, a cap on runs in flight, two credentials). A
+   general version is the agent's own gateway, or a small receiver with the same properties. Porting
+   it as an add-on is not needed for OpenClaw, whose Gateway is that door already, and probably not
+   for Hermes, which has an API server. It may be worth it for an agent with no inbound door; that is
+   phase 3, after real agents show how many there are. (I did not read the relay or any machine; this
+   is from the description the project gave.)
 2. **Is Tailscale or SSH an acceptable stated way to reach the Mac?** The alternative is to ship a
    tunnel, which I would rather not own.
 3. **A standing endpoint is a new surface on a text editor.** Off until the first connection,
    loopback only, a grant for each: is that the right level of comfort?
 4. **Which agents should get real installs to test with?** OpenClaw is the one the design knows;
    Hermes and Grok Build are read only from docs and coverage.
-5. **Mentions of a standing agent:** is "waiting for Moby" with a `next_request` tool enough, or
-   should the agent's own channel (OpenClaw's `mcp serve`, a Hermes gateway message) carry it, even
-   though that leaves the thread in two places?
+5. **Mentions of a standing agent:** the agent's own door first, and `next_request` only for an agent
+   with none. Is it acceptable that an agent that can't promise an isolated run gets no mentions
+   unless the person insists?
 6. **Muse and other hosted agents:** say no, as above, or offer a hosted, signed-in bridge later
    (a product with a backend, against the open-source, no-backend stance)?
 7. **A team policy file:** kept in the repository next to the documents, or only in Preferences?
@@ -247,7 +292,7 @@ Redlines running anyone's tunnel.
 All fetched November 16, 2026. Secondary sources are marked in the text.
 
 - OpenClaw: [`openclaw acp`](https://docs.openclaw.ai/cli/acp), [`openclaw mcp`](https://docs.openclaw.ai/cli/mcp)
-- Hermes Agent: [docs](https://hermes-agent.nousresearch.com/docs)
+- Hermes Agent: [docs](https://hermes-agent.nousresearch.com/docs), [API server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server) (details also from third-party guides; `hermes acp` and inbound webhooks not confirmed)
 - ACP: [transport RFD](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport), [registry](https://agentclientprotocol.com/registry/index)
 - MCP: [authorization, 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/index)
 - A2A: [summary, March 2026](https://dev.to/eclaw/a2a-protocol-tech-update-20260317-2fl3)
