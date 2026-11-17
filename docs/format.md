@@ -1040,6 +1040,11 @@ Report every ward the same way.
 - The callout stands between blank lines (or at the start of the body, or under a heading, a
   thematic break or a closing fence), so that the opener and the closer are blocks of their own.
   The attribute text is syntax, as an alert's type is: a change of it changes no words.
+- A callout that doesn't stand so (text on the line above it or right after it, or no line break
+  after its closing fence) is not refused: the change is written as a whole-block substitution,
+  the old callout struck above the new one, as for code (§3.12), and rejecting gives the old callout
+  back. Where even that can't be written (another person's pending change on the fence line), the
+  editor's menu disables the item and says why; no click is refused.
 - A title that comes from the first heading of the body is text, not an attribute: setting a title
   writes `title="…"`, which Quarto takes before the heading.
 

@@ -473,9 +473,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   };
 
   /** Why a format change can't be written at `range`, or undefined where it can: asked before a menu
-   * offers it, so that an item is disabled with the reason, and no click is refused. */
+   * offers it, so that an item is disabled with the reason, and no click is refused. It changes
+   * nothing and tells no one: no notice, and ids from a source of its own, so that the ids the editor
+   * draws are not spent. */
   const whyNot = (range: Range, op: FormatOp): string | undefined => {
-    if (!editable()) return undefined;
+    if (view.state.field(trackingField) && view.state.field(viewModeField) === 'raw') {
+      return RAW_READ_ONLY;
+    }
     try {
       writeFormat(view.state.doc.toString(), {
         tracking: view.state.field(trackingField),
@@ -484,7 +488,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         author: personOf(options.author),
         time: ledgerTime(new Date()),
         dialect: view.state.facet(dialectFacet),
-        ...sourceOf(),
+        random: (n) => crypto.getRandomValues(new Uint8Array(n)),
       });
       return undefined;
     } catch (error) {
@@ -1215,6 +1219,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
                   ? undefined
                   : whyNot(here, { kind: 'callout-title', title: null });
               return {
+                check: (typed: string | null) =>
+                  whyNot(here, { kind: 'callout-title', title: typed }),
                 ...(set ? { disabled: set } : {}),
                 ...(clear ? { clearDisabled: clear } : {}),
               };
