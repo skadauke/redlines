@@ -1092,7 +1092,10 @@ at the outer edge of a whole inline construct. A marker never goes:
    in every order, but never a character of the text of another person's insertion or
    substitution: that is not the author's to write again (a deletion holds no text, and the change
    may stand behind its marker). Where no way reads alike, the change is refused, in words that name
-   the other person's change and ask for it to be decided first;
+   the other person's change and ask for it to be decided first. A format change (`fmt`) counts as
+   a mark that stands against the change: an insertion right before another person's tracked italic
+   that starts with punctuation (`*<sup>`) would read otherwise when it is accepted (`é*<sup>`
+   can't open emphasis) than when it is rejected, so it is refused in those words (#484);
 6. between a hard break's trailing spaces or backslash and the line end. It goes before them. The
    spaces are those of the newest view, whoever types them: two spaces typed at the end of a line
    that another line follows (or one typed after a space, or next to the spaces of another
@@ -2019,9 +2022,11 @@ A new paragraph.<!--split v2pc-->
   against the text that was asked for (apart from white space around breaks and the numbers of a
   list); if it still reads otherwise the form is refused, and the edit when no form can be written
   (`no-legal-placement`). Edits that take no break in front of a marker are not checked this way.
-- **An agent's `str_replace` at a pending insertion**, anyone's, leaves that insertion rejectable.
-  Where the insertion could be rejected before the edit and rejecting it would be refused after,
-  whatever the cause, the edit is refused (`no-legal-placement`) and writes nothing.
+- **An agent's `str_replace` next to a pending change**, anyone's, leaves it decidable. A change in
+  the blocks the edit touches that could be accepted before the edit, or rejected, can be after it.
+  The edit is written at the grain of its words; where that would leave a decision impossible, it is
+  written as a replacement of the unit that holds the marks (§3.12); where that would too, the edit
+  is refused (`no-legal-placement`) and writes nothing.
 
 ### 3.5 Atomic content
 

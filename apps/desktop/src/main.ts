@@ -22,6 +22,7 @@ import {
 import { codeFileHighlight, codeLanguages } from '@redlines/code';
 import {
   createEditor,
+  editorDocumentHtml,
   PLAIN_ONLY_TRACKING,
   type Author,
   type CropRect,
@@ -67,7 +68,7 @@ import {
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
-import { holdWholeDocument, printPage } from './print.ts';
+import { fillPrintPage, plainPageHtml, printPage } from './print.ts';
 import { exportToWord } from './word-export.ts';
 import { openWord } from './word-import.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
@@ -118,6 +119,7 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './zoom.css';
 import './styles.css';
+import './print.css';
 import './ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
@@ -1365,12 +1367,28 @@ const commands: MenuCommands = {
   print: () =>
     void printPage({
       print: () => host.print(),
-      hold: () => holdWholeDocument(editor.view),
+      prepare: () => fillPrintPage(printableHtml()),
       back: [editor.view.dom, element('#titlebar')],
     }).catch((error: unknown) => {
       console.error('Could not print', error);
       notice.flash('Couldn’t print.');
     }),
+  exportPdf: () => {
+    const path = controller.state.path;
+    void (async () => {
+      const release = await fillPrintPage(printableHtml());
+      try {
+        const folder = path === null ? null : path.slice(0, Math.max(0, path.lastIndexOf('/')));
+        const written = await host.exportPdf(controller.state.name, folder);
+        if (written) notice.flash('Saved the PDF.');
+      } finally {
+        release();
+      }
+    })().catch((error: unknown) => {
+      console.error('Could not export the PDF', error);
+      notice.flash('Couldn’t export the PDF.');
+    });
+  },
   openDocx: () =>
     void openWord({
       host,
@@ -1380,6 +1398,11 @@ const commands: MenuCommands = {
         controller.untouched || !isTauri
           ? controller.createWith(markdown)
           : host.openWindow(undefined, undefined, markdown),
+      folderName: () => loadSettings().imageFolderName,
+      openFile: (path) =>
+        controller.untouched || !isTauri
+          ? openHere(path)
+          : openInNewWindow(path).then(() => undefined),
       show: (options) => void notifications.show(options),
     }).catch((error: unknown) => {
       console.error('Could not open the Word file', error);
@@ -1512,6 +1535,17 @@ const historyRoute: HistoryRoute = {
 const historyIsTheDocuments = () =>
   historyIsDocuments(editor.view.dom, document.activeElement, document.hasFocus());
 const undoOrRedo = (redo: boolean) => routeHistory(historyRoute, redo);
+
+/**
+ * What a printed page holds: the document as it reads now, clean, with no marks (`print.css`), or
+ * the Original while the window shows that. A text or code file is its text as it is.
+ */
+function printableHtml(): string {
+  const current = ui ?? editor.getUiState();
+  if (current.kind === 'plain-only') return plainPageHtml(editor.getDoc());
+  // `view` has no Original yet; a window that shows one prints it.
+  return editorDocumentHtml(editor.view, (current.view as string) === 'original');
+}
 
 function render(): void {
   if (!doc || !ui) return;

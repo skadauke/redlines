@@ -190,6 +190,88 @@ pub fn print_window(window: WebviewWindow) -> Result<(), String> {
     window.print().map_err(|error| error.to_string())
 }
 
+/// Asks where to save the window's printed page as a PDF, with the system's save panel as a sheet of
+/// the window, starting from `name` in `folder` when that is a folder that is there, and writes it
+/// there, paginated as the print dialog would (`src/pdf.rs`). The page makes itself ready first
+/// (`src/print.ts`). Resolves to the file's path, or to nothing when the person cancels. The app
+/// opens the panel, not the page, so a page can never name a file to write. A debug build started
+/// with `REDLINES_EXPORT_PDF` set to a path writes there with no panel, for unattended checks.
+#[tauri::command(async)]
+pub fn export_pdf(
+    app: AppHandle,
+    window: WebviewWindow,
+    name: String,
+    folder: Option<String>,
+) -> Result<Option<String>, String> {
+    let chosen = if cfg!(debug_assertions) && std::env::var_os("REDLINES_EXPORT_PDF").is_some() {
+        std::env::var("REDLINES_EXPORT_PDF").ok().map(PathBuf::from)
+    } else {
+        let mut panel = app
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_can_create_directories(true)
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(pdf_name(&name));
+        if let Some(folder) = panel_start(folder) {
+            panel = panel.set_directory(folder);
+        }
+        match panel.blocking_save_file() {
+            Some(path) => Some(path.into_path().map_err(|error| error.to_string())?),
+            None => None,
+        }
+    };
+    let Some(mut path) = chosen else {
+        return Ok(None);
+    };
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+    {
+        // The panel confirmed the name as typed, not another: add the extension, and never write
+        // over a file the person didn't see named.
+        let mut named = path.into_os_string();
+        named.push(".pdf");
+        path = PathBuf::from(named);
+        if path.exists() {
+            return Err(format!("{} already exists.", path.display()));
+        }
+    }
+    write_pdf(&window, path.to_string_lossy().into_owned())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Writes the window's printed page to the PDF file `target`, once WebKit has run the operation.
+#[cfg(target_os = "macos")]
+fn write_pdf(window: &WebviewWindow, target: String) -> Result<(), String> {
+    let (done, wait) = std::sync::mpsc::channel();
+    let failed = done.clone();
+    window
+        .with_webview(move |webview| {
+            if let Err(error) = crate::pdf::print_to_pdf(webview.inner(), &target, done) {
+                let _ = failed.send(Err(error));
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    wait.recv_timeout(std::time::Duration::from_secs(120))
+        .map_err(|_| "Timed out writing the PDF".to_string())?
+}
+
+#[cfg(not(target_os = "macos"))]
+fn write_pdf(_window: &WebviewWindow, _target: String) -> Result<(), String> {
+    Err("Export as PDF is for the Mac app.".into())
+}
+
+/// The panel's suggested name for the document `name`: its own, with `.pdf` for its extension.
+fn pdf_name(name: &str) -> String {
+    let stem = Path::new(name)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "Untitled".to_string());
+    format!("{stem}.pdf")
+}
+
 /// The file in the app's data folder that holds the folders the person chose in Preferences.
 const CHOSEN_FILE: &str = "folders.json";
 

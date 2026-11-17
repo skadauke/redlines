@@ -28,6 +28,7 @@
 // What cannot be put anywhere is refused with the code `no-legal-placement`; a change that would put
 // its markers inside code or an HTML comment, where nothing would read them, with `inside-code`.
 
+import { isAlignPayload } from './format-ops.ts';
 import {
   CONTAINER_PREFIX,
   HARD_BREAK,
@@ -2442,11 +2443,12 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   /** Whether a marker stands against the change, which the markers of both read as punctuation to
    * the delimiters between them: then it is written as typed first, and read in every order of
    * decisions (`emphasisReadsAlike`), and written again by a character if that reads otherwise. */
-  /** Whether a marker of a mark that is no format change or split touches the change. */
+  /** Whether a marker of a mark that is no split touches the change. A format change counts for
+   * text that the change writes (#484): a deletion leaves the runs beside it to the views. */
   const stands = (m: MarkerRange) =>
     m.mark !== undefined &&
-    m.mark.kind !== 'fmt' &&
     m.mark.kind !== 'split' &&
+    (m.mark.kind !== 'fmt' || (typing.inner !== '' && !isAlignPayload(m.segment?.payload ?? ''))) &&
     m.to >= from &&
     m.from <= to;
   // Whether the change was written again by a character for the sake of the marks against it.

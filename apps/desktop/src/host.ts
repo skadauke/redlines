@@ -93,6 +93,12 @@ export interface Host {
   /** Prints the window's page, as it is shown (the system's print dialog). */
   print(): Promise<void>;
   /**
+   * Asks where to save the window's printed page as a PDF and writes it there, paginated as the
+   * print dialog would: the path, or null when the person cancels. The page must be ready first
+   * (print.ts).
+   */
+  exportPdf(name: string, folder?: string | null): Promise<string | null>;
+  /**
    * Asks where to save, starting from a file name or a full path, and writes the file there. For a
    * name alone, `folder` is where the dialog starts, if it is still there; without it, or when it
    * is gone, the dialog starts where macOS has it. A full path starts in its own folder.
@@ -476,6 +482,8 @@ function createTauriHost(): Host {
     exists: (path) => exists(path),
     reveal: (path) => invoke('reveal_in_finder', { path }),
     print: () => invoke('print_window'),
+    exportPdf: (name, folder) =>
+      invoke<string | null>('export_pdf', { name, folder: folder ?? null }),
     async saveAs(text, suggestedName, folder) {
       const filters = panelFilters(suggestedName);
       const defaultPath = await savePanelStart(suggestedName, folder);
@@ -710,6 +718,11 @@ function createBrowserHost(): Host {
     print: () => {
       window.print();
       return Promise.resolve();
+    },
+    // A tab has no panel of its own to write a file with: the browser's print dialog saves a PDF.
+    exportPdf: () => {
+      window.print();
+      return Promise.resolve(null);
     },
     saveAs: (text, suggestedName) => {
       const path = basename(suggestedName);

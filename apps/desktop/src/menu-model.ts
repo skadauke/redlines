@@ -23,6 +23,7 @@ export interface MenuCommands {
   rename(): void;
   revealInFinder(): void;
   print(): void;
+  exportPdf(): void;
   /** Saves the document as a Word file, through a save panel (File › Export to Word…). */
   exportWord(): void;
   /** Opens a Word or Google Docs file as a new, unsaved document (File › Open .docx…). */
@@ -398,6 +399,7 @@ export function appMenuModel(
         { text: 'Export to Word…', action: () => commands.exportWord() },
         SEPARATOR,
         { text: 'Print…', accelerator: 'CmdOrCtrl+P', action: () => commands.print() },
+        { text: 'Export as PDF…', action: () => commands.exportPdf() },
       ]),
     },
     {
