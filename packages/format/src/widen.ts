@@ -726,6 +726,8 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
       !typed &&
       prefix !== '' &&
       SYNTAX_PREFIX.test(prefix) &&
+      // (a link definition only where a key is typed in it, #262)
+      (edit.from === edit.to || !/^\[[^\]\n]*\]:/.test(prefix)) &&
       ((edit.insert.includes('\n') && (edit.from < edit.to || !/[ \t]$/.test(prefix))) ||
         !/[ \t]$/.test(prefix))
     ) {

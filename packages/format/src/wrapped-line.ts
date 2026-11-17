@@ -58,6 +58,13 @@ const DEFINITION = /^(?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t]))*\[\^?[^\]\n]+\]:/
 /** The underline of a setext heading, after its container prefix. */
 const SETEXT_UNDERLINE = /^[ \t>]*(?:=+|-+)[ \t]*\r?$/;
 
+/** Whether the line above `underline` is words a heading can hold: not a definition, a comment or HTML. */
+function isHeadingText(text: string, markers: readonly MarkerRange[], underline: number): boolean {
+  const above = lineStart(text, underline - 1);
+  const line = visibleText(text, markers, above, lineEnd(text, above));
+  return line.trim() !== '' && !DEFINITION.test(line) && !/^[ \t>]*</.test(line);
+}
+
 /** The line of a GitHub alert that names its type, which takes nothing after it (`> [!NOTE]`). */
 const ALERT = /^[ \t>]*\[![A-Za-z]+\]/;
 
@@ -87,10 +94,12 @@ function wrappedParagraph(
   // first line is the one after (#469).
   if (
     paragraph.from > 0 &&
-    SETEXT_UNDERLINE.test(text.slice(paragraph.from, lineEnd(text, paragraph.from)))
+    SETEXT_UNDERLINE.test(text.slice(paragraph.from, lineEnd(text, paragraph.from))) &&
+    isHeadingText(text, markers, paragraph.from)
   ) {
     const next = nextLineStart(text, paragraph.from);
-    if (next <= paragraph.to) {
+    // (the line right under the underline is a paragraph's first line: it is covered as before)
+    if (next <= paragraph.to && lineStart(text, from) !== next) {
       paragraph = { from: next, to: paragraph.to };
       underlined = true;
     }
