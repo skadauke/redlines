@@ -73,8 +73,8 @@ export class People {
     this.taken.add(handle);
     this.byName.set(name, handle);
     const person: LedgerPerson = { handle, name };
-    const account = this.model.people.find((p) => p.name === name && p.providerId && p.userId);
-    if (account) person.accounts = [`${account.providerId}:${account.userId}`];
+    // Word's `presenceInfo` is a provider's account id for a person (a Microsoft 365 id). It is not
+    // written into the file, which people commit and share (import.md, "People").
     this.list.push(person);
     return handle;
   }
@@ -88,6 +88,12 @@ export class People {
     if (!earlier) return undefined;
     this.list.push(earlier);
     return earlier.handle;
+  }
+
+  /** How many of the people met have an account id in Word's file that is not kept. */
+  unkept(): number {
+    const met = new Set(this.list.map((person) => person.name));
+    return this.model.people.filter((p) => p.providerId && p.userId && met.has(p.name)).length;
   }
 
   /** The people met so far: those the file already knew in the order it had them, then the new ones
