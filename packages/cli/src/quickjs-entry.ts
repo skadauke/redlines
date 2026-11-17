@@ -24,10 +24,24 @@ interface Host {
   rename(from: string, to: string): void | Promise<void>;
   remove(path: string): void | Promise<void>;
   readStdin(): string | Promise<string>;
+  /** The bytes of a file, for a .docx or a picture. */
+  readBytes(path: string): Uint8Array;
+  /** Writes a file of bytes, and the folders above it that aren't there yet. */
+  writeBytes(path: string, bytes: Uint8Array): void;
+  /** Evaluates the Word half of the program (`quickjs-word.ts`), which sets `__redlinesWord`. It is
+   * not evaluated unless a Word command asks, since it is most of the program's weight. */
+  loadWord(): void;
   randomHex(n: number): string;
 }
 
 declare const __host: Host;
+declare const __redlinesWord: Required<Pick<CliIo, 'importDocx' | 'exportDocx'>>;
+
+/** The Word half, loaded by the first command that needs it. */
+function word() {
+  if (typeof __redlinesWord === 'undefined') __host.loadWord();
+  return __redlinesWord;
+}
 
 /** A text from the host, with a failure to decode it as the error that `nodeIo` gives. */
 async function decoded(source: string, read: () => string | Promise<string>): Promise<string> {
@@ -37,6 +51,12 @@ async function decoded(source: string, read: () => string | Promise<string>): Pr
     if (error instanceof Error && error.name === 'NotUtf8') throw notUtf8(source);
     throw error;
   }
+}
+
+/** The result of a synchronous call as a promise, which a failure rejects, as `await` of an async
+ * function would. */
+function attempt<T>(call: () => T): Promise<T> {
+  return new Promise((resolve) => resolve(call()));
 }
 
 function ioOf(host: Host): CliIo {
@@ -53,6 +73,10 @@ function ioOf(host: Host): CliIo {
     remove: async (path) => host.remove(path),
     readStdin: () => decoded('Standard input', () => host.readStdin()),
     randomHex: (n) => host.randomHex(n),
+    readBytes: (path) => attempt(() => host.readBytes(path)),
+    writeBytes: (path, bytes) => attempt(() => host.writeBytes(path, bytes)),
+    importDocx: (bytes) => word().importDocx(bytes),
+    exportDocx: (text, images) => word().exportDocx(text, images),
   };
 }
 

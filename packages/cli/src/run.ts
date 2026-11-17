@@ -34,14 +34,18 @@ export interface CliIo {
   randomHex(n: number): string;
   /** Writes a binary file. Absent where the command line can't make one (the app's program). */
   writeBytes?(path: string, bytes: Uint8Array): Promise<void>;
-  /** The text as a .docx and what the file can't hold. Absent where `writeBytes` is. */
   /** The bytes of a file. Absent where `importDocx` is. */
   readBytes?(path: string): Promise<Uint8Array>;
   /** A .docx as Markdown, with what could not be kept. Absent where `exportDocx` is. */
   importDocx?(
     bytes: Uint8Array,
   ): Promise<{ markdown: string; notes: string[]; media: Record<string, Uint8Array> }>;
-  exportDocx?(text: string): Promise<{ bytes: Uint8Array; notes: string[] }>;
+  /** The text as a .docx and what the file can't hold. `images` gives the bytes of a picture by the
+   * address in the Markdown, or nothing. Absent where `writeBytes` is. */
+  exportDocx?(
+    text: string,
+    images?: (src: string) => Promise<Uint8Array | undefined>,
+  ): Promise<{ bytes: Uint8Array; notes: string[] }>;
 }
 
 const USAGE = `Usage: redlines <command> <file> [options]
@@ -122,6 +126,27 @@ function parseArguments(command: Command, argv: readonly string[]): CommandLine 
   return { file, args, flags };
 }
 
+/** The pictures of a document: the file that an address names, beside the document. An address with
+ * a scheme (`https:`, `data:`) is not a file, and a file that can't be read is no picture. */
+function pictureReader(
+  document: string,
+  io: CliIo,
+): ((src: string) => Promise<Uint8Array | undefined>) | undefined {
+  if (!io.readBytes) return undefined;
+  const folder = document.includes('/') ? document.slice(0, document.lastIndexOf('/') + 1) : '';
+  return async (src) => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return undefined;
+    let name = src.split(/[?#]/)[0] ?? '';
+    try {
+      name = decodeURIComponent(name);
+    } catch {
+      return undefined;
+    }
+    if (name === '') return undefined;
+    return io.readBytes?.(name.startsWith('/') ? name : folder + name).catch(() => undefined);
+  };
+}
+
 /** `redlines export-docx <file.md> [-o out.docx]`: the file as a Word file, with its tracked
  * changes and comments. It leaves the file alone, so it is no command of the table. */
 async function exportDocx(rest: string[], io: CliIo): Promise<number> {
@@ -147,7 +172,7 @@ async function exportDocx(rest: string[], io: CliIo): Promise<number> {
   const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.docx';
   if (target === file)
     throw new EditError(`${file} is the file to export; give another name with -o.`);
-  const { bytes, notes } = await io.exportDocx(text);
+  const { bytes, notes } = await io.exportDocx(text, pictureReader(file, io));
   await io.writeBytes(target, bytes).catch(cannot('write', target));
   for (const note of notes) io.stderr(`${note}\n`);
   io.stdout(`${target}\n`);
