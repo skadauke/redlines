@@ -77,6 +77,15 @@ const shapes: [string, string, Step[], Partial<Script>?][] = [
   ['spaces then Backspace', 'abc‸⏎def', [{ type: '  ' }, 'Backspace']],
 ];
 
+const WANT_NEWEST: Record<string, string> = {
+  'an insertion': 'abc  ⏎de fg',
+  'a deletion': 'abc  ⏎ fg',
+};
+const WANT_ORIGINAL: Record<string, string> = {
+  'an insertion': 'abc⏎ fg',
+  'a deletion': 'abc⏎de fg',
+};
+
 describe('spaces typed at the end of a line (#603)', () => {
   for (const [name, doc, keys, extra] of shapes) {
     it(name, () => {
@@ -89,7 +98,7 @@ describe('spaces typed at the end of a line (#603)', () => {
     ['an insertion', 'abc‸⏎<ins>de</ins> fg'],
     ['a deletion', 'abc‸⏎<del de> fg'],
   ] as [string, string][]) {
-    it(`says why where the next line starts with another person's ${name}`, () => {
+    it(`writes the spaces beside another person's ${name} on the next line as a substitution (#936)`, () => {
       const result = runScript({
         name,
         doc,
@@ -97,12 +106,9 @@ describe('spaces typed at the end of a line (#603)', () => {
         tc: true,
         others: 'bo',
         ids: ['b2b2', 'c3c3', 'd4d4'],
-        // The document starts a line with a marker, which micromark reads as an HTML block.
-        skip: { render: 'the starting document' },
-        expect: {
-          refusal:
-            "Two spaces make a hard break, and another person's change starts the next line. Decide it first.",
-        },
+        // The other person's mark goes inside the old text of the substitution, where rejecting it
+        // gives the line back as it was; accepting leaves the new text with the spaces.
+        expect: { newest: WANT_NEWEST[name]!, original: WANT_ORIGINAL[name]! },
       });
       checkInvariants(result);
     });
