@@ -33,8 +33,10 @@ export function unreadDelimiters(s: string): string {
   return masked;
 }
 
-/** The most states of decisions that are read; a file with more is refused. */
-const MOST_STATES = 40;
+/** The most states of decisions that are read; a file with more is refused. A cluster of marks
+ * grows the states about 2.6 times a mark (a chain of four of one person's marks, with the key's own
+ * beside them, reads 55; seven marks 380), at about 0.4 ms a state. */
+const MOST_STATES = 400;
 /** How many lines on either side of a marker belong to its paragraph. */
 const MOST_LINES = 30;
 
