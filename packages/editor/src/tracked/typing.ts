@@ -527,7 +527,14 @@ function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: b
       (mark) =>
         mark.kind === 'sub' &&
         before.ledger.marks[mark.id] === undefined &&
-        mark.segments.some((segment) => openerRange(segment).from === hidden.from),
+        mark.segments.some((segment) => {
+          const from = openerRange(segment).from;
+          const line = after.text.slice(after.text.lastIndexOf('\n', from - 1) + 1, from);
+          return (
+            from === hidden.from &&
+            /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(?:\[[ xX]\][ \t]+)?$/.test(line)
+          );
+        }),
     );
   const pos = positionAt(
     next,
@@ -780,6 +787,8 @@ function trackedSpec(
       // No fine form: the unit that holds the edit is replaced, unless a key has another form to
       // try first.
       if (!(error instanceof EditError) || tr.annotation(probeAnnotation) === true) throw error;
+      // (Several edits are composed by position, which a replacement moves: they stay refused.)
+      if (edits.length > 1) throw error;
       tracked = track(true);
     }
   } catch (error) {

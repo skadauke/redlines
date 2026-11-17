@@ -71,6 +71,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'a refusal the inventory counted by its constant, or a message of the same kind: written as a replacement of its unit (format §3.12)',
   ],
   ['packages/editor/src/blocks/edits.ts', 'NEEDS_BLANK_AFTER_HARD_BREAK', 'widen', 'inventory #3'],
+  ['packages/editor/src/blocks/edits.ts', 'THEIR_SPLIT', 'widen', 'inventory #1'],
   ['packages/editor/src/blocks/edits.ts', 'NEEDS_BLANK_LINE', 'widen', 'inventory #2'],
   ['packages/editor/src/blocks/joins.ts', 'ABSORBED', 'widen', 'inventory #8'],
   ['packages/editor/src/blocks/joins.ts', 'BELOW_CHANGES', 'widen', 'inventory #7'],
@@ -117,6 +118,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   ['packages/editor/src/blocks/tab.ts', 'FIRST_ITEM', 'disable', 'inventory #14'],
   ['packages/editor/src/blocks/tab.ts', 'NOT_UNDER_TEXT', 'disable', 'inventory #15'],
+  ['packages/editor/src/blocks/tab.ts', 'THEIR_SPLIT', 'widen', 'inventory #1'],
   [
     'packages/editor/src/blocks/tab.ts',
     'error.message',

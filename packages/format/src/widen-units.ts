@@ -406,7 +406,8 @@ function readList(
   list.tight = !loose;
   for (const element of elements) {
     element.tight = list.tight;
-    for (const child of element.children) child.tight = list.tight;
+    // (A nested list keeps its own tightness: it is the list's, not its container's.)
+    for (const child of element.children) if (child.kind !== 'list') child.tight = list.tight;
     list.children.push(element);
   }
   return { list, next: k };
