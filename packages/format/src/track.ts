@@ -4558,7 +4558,10 @@ function selfCheck(
     return quiet(a) === quiet(b);
   };
   const kept = plan.plain ? blank(is) === blank(was) || quietly() : is === was;
-  if (letters(views.newest(after).text) !== letters(intended) || !kept) {
+  // Most edits come out as they were meant, to the letter; the comparison of the letters is for
+  // those that differ in white space.
+  const now = views.newest(after).text;
+  if ((now !== intended && letters(now) !== letters(intended)) || !kept) {
     throw new EditError(SELF_CHECK, 'no-legal-placement');
   }
 }

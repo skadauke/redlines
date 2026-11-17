@@ -51,12 +51,12 @@ const ESCAPED_AFTER_BACKSLASH = new Set([
  * in a CRLF file as `LF_IN_CRLF`.
  */
 export function payloadText(raw: string, style: '\r\n' | '\n'): string {
-  let out = '';
-  for (const part of raw.split(/(\r\n|\r|\n)/)) {
+  // One pass of replace, not a split and a string built by parts: a code block of thousands of
+  // lines is read on its first key.
+  return raw.replace(/\r\n|\r|\n/g, (found, at: number) =>
     // A CRLF right after a CR alone stays explicit: `\r` and an implicit `\n` would read as one CRLF.
-    out += part === style && !out.endsWith('\r') ? '\n' : part === '\n' ? LF_IN_CRLF : part;
-  }
-  return out;
+    found === style && raw.charAt(at - 1) !== '\r' ? '\n' : found === '\n' ? LF_IN_CRLF : found,
+  );
 }
 
 /**
@@ -72,16 +72,23 @@ export function encodePayload(text: string, style?: '\r\n' | '\n'): string {
 
 /** Encodes text that is already as a payload holds it: `\n` the file's own line break (above). */
 export function encodePayloadText(s: string): string {
+  // Only the characters below are written otherwise: the text between them is copied as it is, which
+  // is most of a long payload, such as a whole block of code.
   let out = '';
-  for (let i = 0; i < s.length; i++) {
+  let copied = 0;
+  const special = /[\r\uffff\n`|\-{%\\]/g;
+  for (let found = special.exec(s); found !== null; found = special.exec(s)) {
+    const i = found.index;
     const c = s.charAt(i);
     const previous = s.charAt(i - 1);
+    out += s.slice(copied, i);
+    copied = i + 1;
     switch (c) {
       case '\r':
         // A CRLF, or a CR alone.
         if (s.charAt(i + 1) === '\n') {
           out += '\\x0d\\n';
-          i++;
+          copied = special.lastIndex = i + 2;
         } else out += '\\x0d';
         break;
       case LF_IN_CRLF:
@@ -105,14 +112,11 @@ export function encodePayloadText(s: string): string {
       case '%':
         out += previous === '{' ? `\\${c}` : c;
         break;
-      case '\\':
-        out += ESCAPED_AFTER_BACKSLASH.has(s.charAt(i + 1)) ? '\\\\' : '\\';
-        break;
       default:
-        out += c;
+        out += ESCAPED_AFTER_BACKSLASH.has(s.charAt(i + 1)) ? '\\\\' : '\\';
     }
   }
-  return out;
+  return out + s.slice(copied);
 }
 
 /** The escapes of `encodePayload`, and what each stands for. */
