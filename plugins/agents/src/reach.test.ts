@@ -1,8 +1,8 @@
-import type { AgentScope } from '@redlines/plugin-api';
+import type { AgentScope, ProjectRoot } from '@redlines/plugin-api';
 import { describe, expect, it, vi } from 'vitest';
 import { decideReach, narrower, TOO_BROAD, type ReachInput } from './reach.ts';
 
-const root = { folder: '/p', tooBroad: false } as const;
+const root: ProjectRoot = { folder: '/p', isRepo: true, tooBroad: false };
 
 function input(over: Partial<ReachInput> = {}): ReachInput & {
   stored: Map<string, AgentScope | 'no'>;
@@ -36,7 +36,9 @@ describe('decideReach', () => {
   });
 
   it('is this document, with a note, for a folder that is too broad', async () => {
-    const reach = await decideReach(input({ root: { folder: '/Users/a', tooBroad: true } }));
+    const reach = await decideReach(
+      input({ root: { folder: '/Users/a', isRepo: false, tooBroad: true } }),
+    );
     expect(reach).toEqual({ scope: 'document', note: TOO_BROAD });
   });
 
