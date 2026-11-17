@@ -201,8 +201,11 @@ export function rederiveIntent(state: EditorState, anchored: AnchoredIntent): Re
     if (!kept.some((edit) => edit.main)) kept[kept.length - 1] = { ...kept.at(-1)!, main: true };
   }
   if (!kept.length) return { ok: true, changes: ChangeSet.empty(text.length), notices, moved };
+  // The newer text holds no composition to take back: the edits are placed on it as they are.
+  const whole: TypingIntent = { ...intent };
+  delete whole.revert;
   const derive = (widening: boolean | 'first') => ({
-    ...intent,
+    ...whole,
     edits: kept,
     widening: intent.widening || widening,
   });

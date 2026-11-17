@@ -259,6 +259,8 @@ export {
 export { editSourceFacet } from './tracked/typing.ts';
 export { intentAnnotation, intentOf, newIntentId, recordedAs } from './tracked/intent.ts';
 export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
+export { deriveTable, writeTable } from './table/intent.ts';
+export type { TableIntent, TableRequest, TableWriter, WrittenTable } from './table/intent.ts';
 export type { FormatIntent, FormatRequest, FormatWriter } from './tracked/format-intent.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';

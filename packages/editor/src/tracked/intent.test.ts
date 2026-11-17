@@ -118,6 +118,48 @@ describe('a recorded edit', () => {
   });
 });
 
+describe('text composed by an input method', () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+  const composing = (editor: Editor, on: boolean) => {
+    (editor.view as unknown as { inputState: { composing: number } }).inputState.composing = on
+      ? 1
+      : -1;
+  };
+
+  it.each([true, false])(
+    'is recorded when it ends, Track Changes %s, and derives',
+    async (tracking) => {
+      const doc = 'Gruss aus Kln.\n';
+      const at = doc.indexOf('ln.');
+      const { editor, seen } = made(doc, tracking);
+      composing(editor, true);
+      editor.view.dispatch({
+        changes: { from: at, to: at, insert: '¨' },
+        selection: { anchor: at + 1 },
+        userEvent: 'input.type.compose.start',
+      });
+      editor.view.dispatch({
+        changes: { from: at, to: at + 1, insert: 'ö' },
+        selection: { anchor: at + 1 },
+        userEvent: 'input.type.compose',
+      });
+      await tick();
+      composing(editor, false);
+      editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
+      await tick();
+      const one = seen.find((s) => typing(s.intent).revert);
+      // With Track Changes off the text goes in as composed, and no step is written to record.
+      if (!tracking) {
+        expect(one).toBeUndefined();
+        expect(editor.view.state.doc.toString()).toBe('Gruss aus Köln.\n');
+        return;
+      }
+      expect(one).toBeDefined();
+      expect(json(deriveIntent(one!.start, typing(one!.intent)))).toBe(json(one!.changes));
+    },
+  );
+});
+
 describe('deriving an intent', () => {
   const steps: [string, number, number, string][] = [
     ['typing', 5, 5, ' there'],
