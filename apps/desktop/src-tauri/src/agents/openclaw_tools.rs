@@ -6,7 +6,8 @@
 //! with `sessionKey` (`openclaw-plugin-tools-*.mjs`, the plugin tool's `execute`), and the Gateway
 //! forwards it in the `node.invoke.request` event (`node-invoke-request-*.mjs`, `sessionKey`). The
 //! session of a run is the key Redlines chose for the thread (`sessionOf` in `plugins/agent-acp`),
-//! so a call names its run by a key only that run's thread was given.
+//! so a call names its run by a key only that run's thread was given. The key is matched whole
+//! (`canonical`), the agent included.
 //!
 //! The run's tools are the same as a local agent's: the window opens a relay for the run, which
 //! answers each line with the run's tools (the gate, the author, the thread, the edit path), and
@@ -49,15 +50,26 @@ pub const NOT_LIVE: &str = "This call is not part of a live Redlines run, so it 
     any document. Redlines' tools work only inside a run that a person started in Redlines, until \
     they stop it.";
 
-/// What names a run's thread in a session key. The Gateway files a session under an agent
-/// (`agent:main:redlines-0123456789abcdef`) and reports calls with that key, even when the run was
-/// started with the bare `redlines-0123456789abcdef`, which it files under its default agent
-/// (seen live). The part after the agent is what Redlines chose for the thread (a hash of the
-/// document and the thread), so that is what a call is matched on.
-fn thread_of(key: &str) -> &str {
-    key.strip_prefix("agent:")
-        .and_then(|rest| rest.split_once(':'))
-        .map_or(key, |(_, thread)| thread)
+/// The agent a session key without one is filed under at the Gateway: its default agent, `main`
+/// unless the person configured another (seen live: a run started with the bare
+/// `redlines-0123456789abcdef` is reported as `agent:main:redlines-0123456789abcdef`).
+const DEFAULT_AGENT: &str = "main";
+
+/// The key a session is matched on, whole: `agent:<id>:<name>`. A bare key is the default agent's;
+/// one that names an agent keeps it, so a call from one agent's session never acts for another's
+/// that shares the name after the agent. (If the person's default agent isn't `main`, a run
+/// started with a bare key isn't matched by the Gateway's reports, and its calls are refused:
+/// that fails closed.)
+fn canonical(key: &str) -> String {
+    let named = key.strip_prefix("agent:").is_some_and(|rest| {
+        rest.split_once(':')
+            .is_some_and(|(id, name)| !id.is_empty() && !name.is_empty())
+    });
+    if named {
+        key.to_owned()
+    } else {
+        format!("agent:{DEFAULT_AGENT}:{key}")
+    }
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -311,7 +323,8 @@ impl RunTools {
         stopped: &dyn Fn() -> bool,
     ) -> Result<Registration, String> {
         {
-            let key = thread_of(session);
+            let key = canonical(session);
+            let key = key.as_str();
             let deadline = Instant::now() + wait;
             let mut draining = locked(&self.draining);
             while let Some(drain) = draining.get(key) {
@@ -367,7 +380,7 @@ impl RunTools {
             turn: Condvar::new(),
             control,
         });
-        let key = thread_of(session).to_owned();
+        let key = canonical(session);
         let mut live = locked(&self.live);
         if live.contains_key(&key) {
             return Err("This thread already has a run with tools.".to_owned());
@@ -384,7 +397,7 @@ impl RunTools {
     /// Whether a run is live in this session.
     #[cfg(test)]
     pub fn is_live(&self, session: &str) -> bool {
-        locked(&self.live).contains_key(thread_of(session))
+        locked(&self.live).contains_key(&canonical(session))
     }
 
     /// Answers a `tools/call` made from `session`: the window's answer, or a refusal as the tool's
@@ -397,17 +410,17 @@ impl RunTools {
                 "isError": true,
             }})
         };
-        let Some(session) = session.map(thread_of) else {
+        let Some(session) = session.map(canonical) else {
             return refused(NOT_LIVE);
         };
-        let line = locked(&self.live).get(session).cloned();
+        let line = locked(&self.live).get(&session).cloned();
         let Some(line) = line else {
             return refused(NOT_LIVE);
         };
         let answered = line.ask_in_turn(request["params"].clone(), CALL_TIMEOUT);
         // A run that ended while the call waited is a run that is not live.
         let still_live = locked(&self.live)
-            .get(session)
+            .get(&session)
             .is_some_and(|now| Arc::ptr_eq(now, &line));
         match answered {
             // An answer that came is the answer, even if the run was stopped as it came: the
@@ -514,23 +527,56 @@ mod tests {
     }
 
     #[test]
-    fn a_run_is_found_by_its_thread_whatever_agent_the_gateway_files_it_under() {
-        assert_eq!(thread_of("redlines-0a"), "redlines-0a");
-        assert_eq!(thread_of("agent:main:redlines-0a"), "redlines-0a");
-        assert_eq!(thread_of("agent:moby:redlines-0a"), "redlines-0a");
-        assert_eq!(thread_of("agent:moby"), "agent:moby");
+    fn a_run_is_found_by_its_whole_key_and_never_by_the_name_after_the_agent() {
+        assert_eq!(canonical("redlines-0a"), "agent:main:redlines-0a");
+        assert_eq!(
+            canonical("agent:main:redlines-0a"),
+            "agent:main:redlines-0a"
+        );
+        assert_eq!(
+            canonical("agent:moby:redlines-0a"),
+            "agent:moby:redlines-0a"
+        );
         let temp = folder("bare");
         let (socket, _window) = window(&temp);
         let tools = Arc::new(RunTools::default());
         let _held = tools.register("redlines-0a", &socket, &|| false).unwrap();
+        // The Gateway reports a bare key under its default agent.
         assert_ne!(
             text(&call(&tools, Some("agent:main:redlines-0a"), "view")),
             NOT_LIVE
         );
+        assert_ne!(text(&call(&tools, Some("redlines-0a"), "view")), NOT_LIVE);
+        for other in ["agent:main:redlines-0b", "agent:moby:redlines-0a"] {
+            assert_eq!(
+                text(&call(&tools, Some(other), "view")),
+                NOT_LIVE,
+                "{other}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_agents_sessions_that_share_the_name_after_the_agent_are_two_runs() {
+        let (one, two) = (folder("agents-1"), folder("agents-2"));
+        let (socket_1, _w1) = window(&one);
+        let (socket_2, _w2) = window(&two);
+        let tools = Arc::new(RunTools::default());
+        let _a = tools
+            .register("agent:moby:redlines-0a", &socket_1, &|| false)
+            .unwrap();
+        // Another agent's session, same tail: no run yet, so a call for it reaches nobody.
         assert_eq!(
-            text(&call(&tools, Some("agent:main:redlines-0b"), "view")),
+            text(&call(&tools, Some("agent:main:redlines-0a"), "view")),
             NOT_LIVE
         );
+        assert!(!tools.is_live("agent:main:redlines-0a"));
+        // It can have its own run beside the first.
+        let _b = tools
+            .register("agent:main:redlines-0a", &socket_2, &|| false)
+            .unwrap();
+        assert!(tools.is_live("agent:moby:redlines-0a"));
+        assert!(tools.is_live("agent:main:redlines-0a"));
     }
 
     #[test]
@@ -612,9 +658,9 @@ mod tests {
         b.end();
         // A's final event comes late.
         a.finish();
-        assert!(locked(&tools.draining).contains_key("redlines-0a"));
+        assert!(locked(&tools.draining).contains_key("agent:main:redlines-0a"));
         b.finish();
-        assert!(!locked(&tools.draining).contains_key("redlines-0a"));
+        assert!(!locked(&tools.draining).contains_key("agent:main:redlines-0a"));
     }
 
     #[test]

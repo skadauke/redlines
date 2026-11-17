@@ -585,7 +585,8 @@ command, `{server, tool, arguments}` **and the run's `sessionKey`** (same file, 
 `buildNodeInvokeRequest`: `sessionKey`; `dist/node-registry-private-*.mjs`). So node tools *are*
 session-scoped: no run token in the prompt is needed. Two things seen live: the Gateway reports the
 canonical key (`agent:main:redlines-<hex>`) even when the run was started with the bare
-`redlines-<hex>`, so a call is matched on the part after the agent; and by default OpenClaw defers
+`redlines-<hex>`, so a bare key is read as the default agent's (`main`) and a call is matched on the
+whole key, never on the part after the agent; and by default OpenClaw defers
 tool schemas behind `tool_search`/`dispatch_action` (`tools.toolSearch`), which the live check turned
 off to let a stand-in model call the tool directly.
 
@@ -640,6 +641,14 @@ leaves its thread waiting for the full `SETTLE_TIMEOUT`; one that was reported o
   was stopped, and gives up at once. An edit already in flight when Stop is pressed may still land:
   the window had begun it, and Stop ends the run's tools, not the page's work in progress; the
   agent is told the call was refused only if it hadn't been answered yet.
+- **Keys are matched whole** (`canonical` in `openclaw_tools.rs`). A key that names an agent
+  (`agent:<id>:redlines-<hash>`) is matched exactly, so a call from one agent's session never acts
+  for another agent's session that shares the part after the agent
+  (`two_agents_sessions_that_share_the_name_after_the_agent_are_two_runs`). A bare key is the
+  default agent's, `main` as seen live (`agent:main:redlines-<hash>` is what the Gateway reports for
+  it). If the person's default agent is another, a run started with a bare key isn't matched by the
+  Gateway's reports and its calls are refused (fails closed; the app names the agent when the person
+  gave one).
 - **A follow-up prompt in the same run keeps the tools.** OpenClaw offers the node's tools to every
   run, resolved afresh from the connected nodes with that run's session key (`resolvePluginTools`
   and the loop over `listConnectedNodePluginTools()` in `openclaw-plugin-tools-*.mjs`), so a second
