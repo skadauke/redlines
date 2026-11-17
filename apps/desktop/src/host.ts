@@ -12,7 +12,7 @@ import {
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { exists, readFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { exists, readFile, writeFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
 import { appIdentity, BROWSER_IDENTITY } from './identity.ts';
@@ -98,6 +98,16 @@ export interface Host {
    * is gone, the dialog starts where macOS has it. A full path starts in its own folder.
    */
   saveAs(text: string, suggestedName: string, folder?: string | null): Promise<string | null>;
+  /**
+   * Asks where to save a Word file, starting from `suggestedName` in `folder` (as `saveAs` does),
+   * and writes the bytes there. Resolves to the name it was saved as, or null when the dialog is
+   * cancelled. In the development page the browser downloads it.
+   */
+  exportWord(
+    bytes: Uint8Array,
+    suggestedName: string,
+    folder?: string | null,
+  ): Promise<string | null>;
   /**
    * Calls `onChange` after the file changes on disk; resolves to a function that stops watching. In
    * the app, only the window's document, a file it may use, which the app watches for it.
@@ -327,6 +337,9 @@ export function createHost(): Host {
   return '__TAURI_INTERNALS__' in window ? createTauriHost() : createBrowserHost();
 }
 
+/** The media type of a Word file. */
+const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
 /** What the open and save panels offer: the documents (`DOCUMENT_EXTENSIONS`). */
 const PANEL_EXTENSIONS = DOCUMENT_EXTENSIONS;
 
@@ -458,6 +471,18 @@ function createTauriHost(): Host {
       if (!isDocument(path)) throw new NotADocumentError(SAVES_DOCUMENTS_ONLY);
       await write(path, text);
       return path;
+    },
+    async exportWord(bytes, suggestedName, folder) {
+      const defaultPath = await savePanelStart(suggestedName, folder);
+      const path = await saveDialog({
+        defaultPath,
+        filters: [{ name: 'Word document', extensions: ['docx'] }],
+      });
+      if (!path) return null;
+      // The panel may take a name without the extension, off the Mac; a Word file needs it.
+      const named = path.toLowerCase().endsWith('.docx') ? path : `${path}.docx`;
+      await writeFile(named, bytes);
+      return named;
     },
     watch: watchDocument,
     // src-tauri/src/project.rs.
@@ -665,6 +690,18 @@ function createBrowserHost(): Host {
       const path = basename(suggestedName);
       files.set(path, text);
       return Promise.resolve(path);
+    },
+    exportWord: (bytes, suggestedName) => {
+      // A tab has no save panel: the browser downloads the file.
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: DOCX_TYPE }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = suggestedName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return Promise.resolve(suggestedName);
     },
     watch: () => Promise.resolve(() => {}),
     // One folder, with no name and no repository.

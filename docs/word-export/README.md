@@ -272,3 +272,14 @@ mammoth.js and docx-preview ignore or only display revisions, so the importer
 reads the OOXML itself (JSZip plus an XML parser): `w:ins`, `w:del`,
 paragraph-mark revisions, `comments.xml`, `commentsExtended.xml` for threads
 and `commentsIds.xml` for the durable ids written on export.
+
+## In the app and on the command line
+
+- **File › Export to Word…** writes the open document, marks and all, to a `.docx` through a save panel
+  that starts at the document's name with `.docx`. The host writes the bytes (the window may use the
+  file plugin's `write-file`, on the file the save panel gave it). What Word can't hold comes as a
+  notification that stays until it is read; a plain success passes by. Never a dialog.
+- **`redlines export-docx <file.md> [-o out.docx]`** is the same, beside the file by default. It is
+  in the Node command line (`pnpm redlines`); the program in the app, which runs the logic in QuickJS
+  without Node, doesn't carry the writer, and says so.
+- Import will be File › Open .docx…, into a new unsaved document, with its report as a notification.

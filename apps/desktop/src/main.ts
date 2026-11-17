@@ -66,6 +66,7 @@ import {
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
+import { exportToWord } from './word-export.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import { createShortcutBook, shortcutEntries } from './shortcut-book.ts';
 import { publishShortcutEntries } from './shortcuts-published.ts';
@@ -1325,6 +1326,18 @@ const commands: MenuCommands = {
     }).catch((error: unknown) => {
       console.error('Could not print', error);
       notice.flash('Couldn’t print.');
+    }),
+  exportWord: () =>
+    void exportToWord({
+      host,
+      text: editor.getDoc(),
+      name: doc?.name ?? 'Untitled',
+      path: doc?.path ?? null,
+      show: (options) => void notifications.show(options),
+      canReveal: isTauri,
+    }).catch((error: unknown) => {
+      console.error('Could not export to Word', error);
+      notice.flash('Couldn’t export to Word.');
     }),
   quit: () => void windows?.quit(),
   setView: (view) => editor.showView(view),

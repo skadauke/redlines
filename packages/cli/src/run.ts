@@ -6,7 +6,7 @@
 import { EditError } from '@redlines/format';
 import { COMMANDS, UsageError } from './commands.ts';
 import type { Command } from './commands.ts';
-import { readText, readTextOptions, saveText } from './files.ts';
+import { cannot, readText, readTextOptions, saveText } from './files.ts';
 import { isPlainOnly } from './plain-only.ts';
 
 /** What the command line reads and writes, so tests can run it in memory. */
@@ -32,11 +32,16 @@ export interface CliIo {
   readStdin(): Promise<string>;
   /** `n` random bytes as `2 * n` lowercase hexadecimal digits, from the operating system. */
   randomHex(n: number): string;
+  /** Writes a binary file. Absent where the command line can't make one (the app's program). */
+  writeBytes?(path: string, bytes: Uint8Array): Promise<void>;
+  /** The text as a .docx and what the file can't hold. Absent where `writeBytes` is. */
+  exportDocx?(text: string): Promise<{ bytes: Uint8Array; notes: string[] }>;
 }
 
 const USAGE = `Usage: redlines <command> <file> [options]
 
 Commands:
+  redlines export-docx <file> [-o <out.docx>]
 ${Object.entries(COMMANDS)
   .map(([name, command]) => `  redlines ${name} ${command.usage}`)
   .join('\n')}
@@ -110,6 +115,36 @@ function parseArguments(command: Command, argv: readonly string[]): CommandLine 
   return { file, args, flags };
 }
 
+/** `redlines export-docx <file.md> [-o out.docx]`: the file as a Word file, with its tracked
+ * changes and comments. It leaves the file alone, so it is no command of the table. */
+async function exportDocx(rest: string[], io: CliIo): Promise<number> {
+  let file: string | undefined;
+  let out: string | undefined;
+  for (let arg = rest.shift(); arg !== undefined; arg = rest.shift()) {
+    if (arg === '-o' || arg === '--output') {
+      out = rest.shift();
+      if (out === undefined) throw new UsageError(`${arg} needs a value`);
+    } else if (arg.startsWith('-')) {
+      throw new UsageError(`Unknown option: ${arg}`);
+    } else if (file === undefined) {
+      file = arg;
+    } else {
+      throw new UsageError(`Unexpected argument: ${arg}`);
+    }
+  }
+  if (file === undefined) throw new UsageError('Missing <file>');
+  if (!io.exportDocx || !io.writeBytes) {
+    throw new EditError('export-docx is not in this copy of redlines. Use the one in a checkout.');
+  }
+  const text = await readText(io, file);
+  const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.docx';
+  const { bytes, notes } = await io.exportDocx(text);
+  await io.writeBytes(target, bytes).catch(cannot('write', target));
+  for (const note of notes) io.stderr(`${note}\n`);
+  io.stdout(`${target}\n`);
+  return 0;
+}
+
 /** Runs a command and returns its exit code: 0 when it worked, 1 when the edit or the file was
  * refused (the message is on stderr), and 2 when the command line was wrong. */
 export async function run(argv: string[], io: CliIo): Promise<number> {
@@ -120,6 +155,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
   }
   try {
     if (name === undefined) throw new UsageError('Missing <command>');
+    if (name === 'export-docx') return await exportDocx(rest, io);
     const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined;
     if (command === undefined) throw new UsageError(`Unknown command: ${name}`);
     const { file, args, flags } = parseArguments(command, rest);
