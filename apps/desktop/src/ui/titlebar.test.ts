@@ -19,6 +19,7 @@ const BASE: TitleBarState = {
   name: 'launch-plan.md',
   dirty: false,
   fileDraggable: true,
+  plainOnly: false,
   view: 'redlines',
   tracking: false,
   hasRedlines: true,
@@ -30,7 +31,7 @@ const BASE: TitleBarState = {
 /** The bars the test made, which are taken down after it: an open menu listens on the document. */
 const made: { destroy(): void }[] = [];
 
-function setup(state: Partial<TitleBarState> = {}) {
+function setup(state: Partial<TitleBarState> = {}, keyOf?: (id: string) => string | null) {
   const root = document.createElement('div');
   document.body.append(root);
   const actions = {
@@ -46,6 +47,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     dragFile: vi.fn(),
     scrollPage: vi.fn(),
     documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
+    ...(keyOf ? { keyOf } : {}),
   };
   const bar = createTitleBar(root, actions);
   made.push(bar);
@@ -593,6 +595,23 @@ describe('title bar', () => {
     expect(redlines().disabled).toBe(true);
   });
 
+  it('disables Clean, Redlines and Track Changes in a text or code file, with the reason as their hint', () => {
+    const { actions, button, menu } = setup({ plainOnly: true, view: 'raw', hasRedlines: false });
+    hover(button('View'));
+    for (const name of ['Clean', 'Redlines']) {
+      const row = item(menu('View'), name);
+      expect(row.disabled, name).toBe(true);
+      expect(row.title).toBe('Only Markdown files have Clean and Redlines views.');
+    }
+    expect(item(menu('View'), 'Plain').disabled).toBe(false);
+    expect(item(menu('View'), 'Plain').getAttribute('aria-checked')).toBe('true');
+    const tracking = item(menu('Review'), 'Track Changes');
+    expect(tracking.disabled).toBe(true);
+    expect(tracking.title).toBe('Only Markdown files have Track Changes and review.');
+    tracking.click();
+    expect(actions.toggleTracking).not.toHaveBeenCalled();
+  });
+
   it('lists Clean, Redlines and Plain in order, with their keys and one check mark', () => {
     const { actions, menu, button } = setup({ view: 'clean' });
     hover(button('View'));
@@ -1069,6 +1088,26 @@ describe('what a click on the icons will do, said before it is made', () => {
     bar.update({ ...BASE, view: 'clean' });
     bar.update({ ...BASE, view: 'raw' });
     expect(view?.textContent).toBe('Show Clean⌥⌘1');
+  });
+
+  it('shows the keys the person gave, and none when they took the key away (#551)', () => {
+    const keys: Record<string, string | null> = {
+      'View/Clean': 'Alt-Mod-9',
+      'Review/Track Changes': null,
+      'View/Show Files': 'Mod-k',
+    };
+    const { root, bar, button } = setup({ view: 'redlines' }, (id) => keys[id] ?? null);
+    const { view, review } = tips(root);
+    expect(view?.textContent).toBe('Show Clean⌥⌘9');
+    expect(button('View').getAttribute('aria-keyshortcuts')).toBe('Alt+Meta+9');
+    expect(review?.textContent).toBe('Turn on Track Changes');
+    expect(root.querySelector('#rl-files-tip')?.textContent).toBe('Show files⌘K');
+    // A change made in Preferences reaches a bar that is already drawn.
+    keys['View/Clean'] = 'Ctrl-Mod-9';
+    keys['Review/Track Changes'] = 'Shift-Mod-t';
+    bar.keysChanged();
+    expect(view?.textContent).toBe('Show Clean⌃⌘9');
+    expect(review?.textContent).toBe('Turn on Track Changes⇧⌘T');
   });
 
   it('says on the pen whether a click turns Track Changes on or off, with the key', () => {

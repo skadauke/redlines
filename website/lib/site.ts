@@ -56,8 +56,11 @@ export const aiDocs = {
   title: 'Markdown is the document format of AI.',
   body: `Plans, specs and reports from agents arrive as \`.md\` files, and most apps show them as code. ${name} shows a formatted document you can edit.`,
   points: [
-    'Open any `.md` file and read it formatted, with tables, images, task lists and syntax-colored code.',
-    'Edit it like a document: bold from the keyboard, find and replace, a file sidebar.',
+    'Open any `.md` file and read it formatted, with tables, images, task lists and syntax-colored code. HTML that GitHub draws, such as inline tags and collapsible sections, is drawn the same way.',
+    'Edit it like a document: a toolbar you summon with the wrench, for formatting, tables, lists and images, with every command in a searchable palette, find and replace, a file sidebar. Move a block with ⌥↑ and ⌥↓, or drag it to a drop line.',
+    'Drop images from Finder, align them, and let an agent write their alt text. Their sizes are known before they load, so the page doesn’t jump.',
+    'Long documents stay quick to scroll and type in. If a crash is caught, your document is recovered.',
+    'Switch between Clean, Redlines and Plain from the page icon. Text and code files open in Plain, with syntax colors.',
     'It stays a `.md` file in your repo: agents and git read it, and other Markdown tools show the newest text.',
   ],
 };
@@ -70,7 +73,8 @@ export const changes = {
     'It replies in a few words, and cites the file and line when the answer comes from the code. A click opens that file.',
     'It can comment on other text. Its edits are always tracked changes in its own name, for you to accept or reject.',
     'Each run starts fresh and reads the document and its thread from the file, so a follow-up needs no session and no server.',
-    `${name} runs your own Claude Code or Codex, signed in as you. It never sees your Claude or ChatGPT sign-in.`,
+    `${name} runs your own Claude Code or Codex, signed in as you. It never sees your Claude or ChatGPT sign-in. Choose a default agent and a model for each one in Preferences.`,
+    'Table edits that a document can’t take as plain text, such as a row or column added or removed, are written as tracked changes you can accept or reject, not refused.',
   ],
 };
 
@@ -143,7 +147,7 @@ export const developers = {
     },
     {
       title: 'Agents, with limits',
-      body: 'Claude Code and Codex get a small set of tools. They read only after you say yes and write only this document, as tracked changes. A mention that arrives through git never starts a run.',
+      body: 'Claude Code and Codex get a small set of tools. They read only after you say yes, and reach the web only if you turn on one switch. They write only this document, as tracked changes. A mention that arrives through git never starts a run.',
     },
     {
       title: 'Built to embed',

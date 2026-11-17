@@ -49,6 +49,14 @@ describe('inside a line (format §3.1)', () => {
     expect(place('see [the\ngu‸ide](https://example.org/a) now')).toEqual(OK);
   });
 
+  it('puts a position in a pandoc attribute block after an image on the whole image (§3.5)', () => {
+    const image = '![A cat](cat.png){width=50% .wide}';
+    expect(construct('a ![A cat](cat.png){widt‸h=50% .wide} b')).toBe(image);
+    expect(construct('a ![A ‸cat](cat.png){width=50% .wide} b')).toBe(image);
+    // With a space between, or a brace inside, it is text.
+    expect(construct('a ![A cat](cat.png) {wid‸th=5}')).toBeUndefined();
+  });
+
   it('puts a position in an image, in its alt text or its source, on the whole image', () => {
     const image = '![A cat](cat.png "Cat")';
     expect(construct('a ![A ‸cat](cat.png "Cat") b')).toBe(image);

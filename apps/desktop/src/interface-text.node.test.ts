@@ -16,6 +16,9 @@ const repo = new URL('../../../', import.meta.url);
 const TOKENS = new Set([
   'var(--rl-size-ui)',
   'var(--rl-size-ui-small)',
+  // The controls: 13 px type, and a field's 14 (plugins/themes/src/tokens.css).
+  'var(--rl-size-ctl)',
+  'var(--rl-size-field)',
   'var(--rl-size-ui-scaled)',
   'var(--rl-size-ui-small-scaled)',
   // The frame's, worked out from the window zoom (zoom.css).

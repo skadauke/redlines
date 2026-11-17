@@ -842,6 +842,7 @@ function mountRun(
     author: me,
     document: {
       path: () => '/repo/plan.md',
+      plainOnly: () => false,
       generation: () => generation,
       read: () => editor.getDoc(),
       parsed: () => editor.getParsed(),

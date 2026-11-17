@@ -13,6 +13,23 @@ import {
 import type { Author, MarkupView, MenuView, MetPerson, ViewMode } from '../api.ts';
 
 /**
+ * Whether the document is a Plain-only file (`DocumentKind`): text and code, which is never read
+ * for marks or a ledger, and shows in Plain alone.
+ */
+export const plainOnlyFacet = Facet.define<boolean, boolean>({
+  combine: (values) => values.some(Boolean),
+});
+
+/** Why a Plain-only file has no Clean or Redlines view, no Track Changes and no review. */
+export const PLAIN_ONLY_VIEWS = 'Only Markdown files have Clean and Redlines views.';
+
+/** Why a Plain-only file has no Track Changes and no review. */
+export const PLAIN_ONLY_TRACKING = 'Only Markdown files have Track Changes and review.';
+
+/** The parse of a Plain-only file: its text, and no mark, ledger or warning. */
+const plainParsed = (text: string): Parsed => ({ ...parse(''), text });
+
+/**
  * Marks a transaction the tracked layer has dealt with: an edit of the author's, tracked or plain,
  * or a decision on a change. Track Changes leaves it as it is, and the caret moves out of hidden
  * text after it.
@@ -79,9 +96,14 @@ export function chooseViewEffects(mode: ViewMode): StateEffect<unknown>[] {
  * text didn't change isn't read again on every keystroke.
  */
 export const parsedField = StateField.define<Parsed>({
-  create: (state) => parse(state.doc.toString()),
-  update(parsed, tr) {
-    if (!tr.docChanged) return parsed;
+  create: (state) =>
+    state.facet(plainOnlyFacet) ? plainParsed(state.doc.toString()) : parse(state.doc.toString()),
+  update: (parsed, tr) => {
+    // A file that becomes Markdown, or Plain-only, by its name (a rename, Save As) is read again.
+    const kindChanged = tr.startState.facet(plainOnlyFacet) !== tr.state.facet(plainOnlyFacet);
+    if (!tr.docChanged && !kindChanged) return parsed;
+    if (tr.state.facet(plainOnlyFacet)) return plainParsed(tr.newDoc.toString());
+    if (kindChanged) return parse(tr.newDoc.toString());
     // Where the text changed, as one stretch: the parse reads the marks again only there (#700).
     let change: ParseChange | undefined;
     tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
@@ -191,6 +213,7 @@ export const holdViewAnnotation = Annotation.define<boolean>();
  */
 export const viewModeField = StateField.define<ViewMode>({
   create: (state) => {
+    if (state.facet(plainOnlyFacet)) return 'raw';
     const parsed = state.field(parsedField);
     // Nothing to show, nothing to be left in: a ledger that only says how the file was left
     // doesn't open it in Redlines.
@@ -198,6 +221,8 @@ export const viewModeField = StateField.define<ViewMode>({
     return parsed.ledger.view ?? state.facet(markupViewFacet);
   },
   update(mode, tr) {
+    // A Plain-only file has no other view, however one is asked for.
+    if (tr.state.facet(plainOnlyFacet)) return 'raw';
     const chosen = tr.effects.findLast((effect) => effect.is(setViewModeEffect));
     if (chosen) return chosen.value;
     if (!tr.docChanged || mode !== 'clean' || tr.annotation(holdViewAnnotation)) return mode;

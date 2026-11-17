@@ -152,6 +152,7 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
         // A document with no file: the run's tools act on the editor, and nothing is saved.
         document: {
           path: () => null,
+          plainOnly: () => false,
           generation: () => generation,
           read: () => editor.getDoc(),
           parsed: () => editor.getParsed(),

@@ -106,6 +106,11 @@ export interface Settings {
   showLineBreakMarks: boolean;
   /** Whether the word count shows in the window's lower right corner (design §5.1). */
   showWordCount: boolean;
+  /**
+   * Whether the sidebar lists text and code files (Plain-only documents) beside the Markdown ones;
+   * off, it lists only the one that is open.
+   */
+  showPlainOnlyFiles: boolean;
   /** Whether the toolbar is shown at the bottom of the window, not only when it is summoned (#504). */
   toolbarAtBottom: boolean;
   /** What agents may read when nothing says otherwise. */
@@ -149,6 +154,11 @@ export interface Settings {
    * pasted into one of its documents is saved.
    */
   imageFolderName: string;
+  /**
+   * The person's own shortcuts (Preferences › Shortcuts, shortcuts.ts): a command's id to its key
+   * in CodeMirror's notation, or to "" for none. A command that isn't here has its own key.
+   */
+  shortcuts: Readonly<Record<string, string>>;
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -174,6 +184,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   emojiSuggestions: true,
   showLineBreakMarks: false,
   showWordCount: true,
+  showPlainOnlyFiles: true,
   toolbarAtBottom: false,
   agentScope: 'folder',
   consent: {},
@@ -184,6 +195,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   people: [],
   newDocumentFolder: null,
   imageFolderName: 'images',
+  shortcuts: {},
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -205,6 +217,7 @@ export function loadSettings(): Settings {
       | 'checkForUpdates'
       | 'showLineBreakMarks'
       | 'showWordCount'
+      | 'showPlainOnlyFiles'
       | 'toolbarAtBottom',
   ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'emojiSuggestions') =>
@@ -235,6 +248,7 @@ export function loadSettings(): Settings {
     emojiSuggestions: typing('emojiSuggestions'),
     showLineBreakMarks: flag('showLineBreakMarks'),
     showWordCount: flag('showWordCount'),
+    showPlainOnlyFiles: flag('showPlainOnlyFiles'),
     toolbarAtBottom: flag('toolbarAtBottom'),
     agentScope: isAgentScope(value['agentScope'])
       ? value['agentScope']
@@ -256,7 +270,18 @@ export function loadSettings(): Settings {
       (typeof value['imageFolderName'] === 'string' &&
         imageFolderNameOf(value['imageFolderName'])) ||
       DEFAULT_SETTINGS.imageFolderName,
+    shortcuts: shortcutsOf(value['shortcuts']),
   };
+}
+
+/** The shortcuts as stored: ids to a key or "" for none; anything else is dropped. */
+function shortcutsOf(value: unknown): Settings['shortcuts'] {
+  const shortcuts: Record<string, string> = {};
+  if (typeof value !== 'object' || value === null) return shortcuts;
+  for (const [id, key] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof key === 'string' && key.length < 40) shortcuts[id] = key;
+  }
+  return shortcuts;
 }
 
 /**

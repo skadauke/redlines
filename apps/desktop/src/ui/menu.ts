@@ -19,6 +19,8 @@ export interface MenuItem {
   /** A class on the icon, such as the red of the tracking pen. */
   iconClass?: string;
   disabled?: boolean;
+  /** Why the item is disabled, as its hint (`title`) while it is. */
+  disabledHint?: string;
   select(): void;
 }
 
@@ -299,6 +301,8 @@ function buildItem(initial: MenuItem): ItemRow {
     current = item;
     if (item.role !== 'menuitem') element.setAttribute('aria-checked', String(!!item.checked));
     element.disabled = !!item.disabled;
+    if (item.disabled && item.disabledHint) element.title = item.disabledHint;
+    else element.removeAttribute('title');
     iconBox.className = item.iconClass ? `rl-menu-icon ${item.iconClass}` : 'rl-menu-icon';
   };
   update(initial);

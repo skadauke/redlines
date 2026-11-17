@@ -7,6 +7,7 @@ import { EditError } from '@redlines/format';
 import { COMMANDS, UsageError } from './commands.ts';
 import type { Command } from './commands.ts';
 import { readText, readTextOptions, saveText } from './files.ts';
+import { isPlainOnly } from './plain-only.ts';
 
 /** What the command line reads and writes, so tests can run it in memory. */
 export interface CliIo {
@@ -123,6 +124,16 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
     if (command === undefined) throw new UsageError(`Unknown command: ${name}`);
     const { file, args, flags } = parseArguments(command, rest);
     const text = await readText(io, file);
+    if (isPlainOnly(file)) {
+      // Text and code hold no marks: `view` is the file as it is, and no command makes one.
+      if (name !== 'view') {
+        throw new EditError(
+          `${file} is not a Markdown document: text and code files hold no tracked changes or comments. Edit the file as text.`,
+        );
+      }
+      io.stdout(text);
+      return 0;
+    }
     await readTextOptions(io, command, flags);
     const outcome = command.run(text, { args, flags, now: io.now() });
     for (const note of outcome.notes ?? []) io.stderr(`${note}\n`);

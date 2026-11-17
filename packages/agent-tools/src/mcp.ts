@@ -4,7 +4,7 @@
 // doesn't know gets -32601, which is how Claude's `server/discover` probe learns to use the old way.
 // `_meta`, which both clients send, is ignored.
 
-import { TOOL_DEFINITIONS, callTool } from './tools.ts';
+import { TOOL_DEFINITIONS, VIEW_IMAGE, callTool } from './tools.ts';
 import type { ToolContext } from './tools.ts';
 
 /** The version of the protocol to offer a client that names none. One that does is answered with
@@ -45,9 +45,13 @@ export function answerMcp(
   ctx: ToolContext,
   options: McpOptions = {},
 ): (line: string) => Promise<string | null> {
-  const offered = options.only
-    ? TOOL_DEFINITIONS.filter(({ name }) => options.only?.includes(name))
-    : TOOL_DEFINITIONS;
+  const offered = [
+    ...(options.only
+      ? TOOL_DEFINITIONS.filter(({ name }) => options.only?.includes(name))
+      : TOOL_DEFINITIONS),
+    // The picture is offered only to a run that has one, and only when the list names it.
+    ...(ctx.image && options.only?.includes(VIEW_IMAGE.name) ? [VIEW_IMAGE] : []),
+  ];
   return async (line) => {
     try {
       return await answer(line);
@@ -103,7 +107,15 @@ export function answerMcp(
           });
         }
         const done = await callTool(ctx, name, params['arguments']);
-        return result(id, { content: [{ type: 'text', text: done.text }], isError: done.isError });
+        return result(id, {
+          content: [
+            { type: 'text', text: done.text },
+            ...(done.image
+              ? [{ type: 'image', data: done.image.data, mimeType: done.image.mimeType }]
+              : []),
+          ],
+          isError: done.isError,
+        });
       }
       default:
         return failure(id, NO_METHOD, `Method not found: ${method}`);

@@ -82,6 +82,7 @@ describe('settings', () => {
       emojiSuggestions: true,
       showLineBreakMarks: false,
       showWordCount: true,
+      showPlainOnlyFiles: true,
       toolbarAtBottom: false,
       agentScope: 'folder',
       consent: {},
@@ -92,6 +93,7 @@ describe('settings', () => {
       people: [],
       newDocumentFolder: null,
       imageFolderName: 'images',
+      shortcuts: {},
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -116,6 +118,7 @@ describe('settings', () => {
       emojiSuggestions: false,
       showLineBreakMarks: true,
       showWordCount: false,
+      showPlainOnlyFiles: false,
       toolbarAtBottom: true,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
@@ -129,6 +132,7 @@ describe('settings', () => {
       ],
       newDocumentFolder: '/Users/ada/Notes',
       imageFolderName: 'pictures',
+      shortcuts: { 'File/Save': 'Alt-Mod-s', 'command:format.bold': '' },
     } as const;
     saveSettings(changed);
     // With the theme for each appearance, as earlier builds read it.

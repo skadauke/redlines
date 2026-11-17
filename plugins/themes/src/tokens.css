@@ -62,6 +62,16 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #ffffff;
   --rl-ink: #1d1d1f;
@@ -75,6 +85,10 @@
   --rl-pressed: #ececef;
   --rl-red: #d42a1e;
   --rl-mixed: #aeaeb2;
+  --rl-on: #8e8e93;
+  --rl-on-fg: #ffffff;
+  --rl-off: #d1d1d6;
+  --rl-seg-on: #ffffff;
 
   --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
@@ -132,6 +146,16 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #1e1e1f;
   --rl-ink: #f2f2f5;
@@ -145,6 +169,10 @@
   --rl-pressed: #333336;
   --rl-red: #ff6a5c;
   --rl-mixed: #636366;
+  --rl-on: #a1a1a8;
+  --rl-on-fg: #1e1e1f;
+  --rl-off: #48484c;
+  --rl-seg-on: #4a4a4f;
 
   --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;
@@ -202,6 +230,16 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #fffefb;
   --rl-ink: #25231f;
@@ -215,6 +253,10 @@
   --rl-pressed: #eeebe4;
   --rl-red: #c8281d;
   --rl-mixed: #b5afa4;
+  --rl-on: #8e8e93;
+  --rl-on-fg: #ffffff;
+  --rl-off: #d1d1d6;
+  --rl-seg-on: #ffffff;
 
   --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
@@ -272,6 +314,16 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #1c1b19;
   --rl-ink: #ece7de;
@@ -285,6 +337,10 @@
   --rl-pressed: #33302b;
   --rl-red: #ff6e60;
   --rl-mixed: #6b655c;
+  --rl-on: #a1a1a8;
+  --rl-on-fg: #1e1e1f;
+  --rl-off: #48484c;
+  --rl-seg-on: #4a4a4f;
 
   --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;
@@ -342,6 +398,16 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #ffffff;
   --rl-ink: #15171c;
@@ -355,6 +421,10 @@
   --rl-pressed: #eaedf1;
   --rl-red: #d42a1e;
   --rl-mixed: #aab0ba;
+  --rl-on: #8e8e93;
+  --rl-on-fg: #ffffff;
+  --rl-off: #d1d1d6;
+  --rl-seg-on: #ffffff;
 
   --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
@@ -412,6 +482,16 @@
   --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
+  /* Controls: one size for buttons, pick lists, fields, chips and the bar's rows. */
+  --rl-ctl-h: 26px;
+  --rl-ctl-radius: 7px;
+  --rl-size-ctl: var(--rl-size-ui-small);
+  --rl-size-field: var(--rl-size-ui);
+  --rl-seg-h: 22px;
+  --rl-chip-h: 24px;
+  --rl-row-h: 30px;
+  --rl-radius-menu: 10px;
+  --rl-radius-card: 12px;
 
   --rl-page: #15171b;
   --rl-ink: #e7e9ed;
@@ -425,6 +505,10 @@
   --rl-pressed: #2a2e36;
   --rl-red: #ff6a5c;
   --rl-mixed: #5a606b;
+  --rl-on: #a1a1a8;
+  --rl-on-fg: #1e1e1f;
+  --rl-off: #48484c;
+  --rl-seg-on: #4a4a4f;
 
   --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;
