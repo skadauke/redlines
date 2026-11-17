@@ -2610,6 +2610,31 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
         }
       }
     }
+    // A deletion that leaves a space on the inner side of a delimiter (`**a b ⟦c⟧**`) is read
+    // by the markers as a delimiter next to punctuation, which pairs, where the newest view's
+    // delimiter next to a space does not (format §3.1, rule 5, #814): it takes the character on
+    // one side, or both, that leaves the emphasis as the newest view reads it.
+    if (
+      content === '' &&
+      from < to &&
+      typing.trail === '' &&
+      [text[from - 1], text[to]].some((c) => c !== undefined && DELIMITERS.test(c)) &&
+      !markers.some((m) => m.role !== 'ledger' && m.to >= from - 1 && m.from <= to + 1) &&
+      !emphasisKept(plan, from, to, '', '')
+    ) {
+      const l = stepLeft(text, markers, from);
+      const r = stepRight(text, markers, to);
+      const room = (a: number, b: number) => !/[\r\n]/.test(text.slice(a, b)) && a !== b;
+      const ways: [number, number][] = [];
+      const blank = (a: number, b: number) => /^\s+$/.test(text.slice(a, b));
+      if (room(l, from) && blank(l, from)) ways.push([l, to]);
+      if (room(to, r) && blank(to, r)) ways.push([from, r]);
+      const way = ways.find(([a, b]) => emphasisKept(plan, a, b, '', ''));
+      if (way) {
+        [from, to] = way;
+        continue;
+      }
+    }
     // Nor may it follow an unescaped backslash, which would escape it (format §3.1): the change
     // takes the character after the backslash as well, which it escapes or stands in front of, or
     // the line break and the next word.
