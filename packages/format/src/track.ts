@@ -5432,10 +5432,7 @@ function editsWidening(
       }
       try {
         const written = editsOnce(text, edits, mode === 0 ? first : again(), mode);
-        if (
-          widening &&
-          (readsOtherAtBoundary(text, edits, written.changes) || delimiterBesideBreak(text, edits))
-        ) {
+        if (widening && readsOtherAtBoundary(text, edits, written.changes)) {
           // A write the format accepts that a reader of the file reads otherwise than the newest
           // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
           // can't be.
@@ -5461,8 +5458,10 @@ function editsWidening(
 
 /**
  * Whether `changes`, a fine write of `edits`, are at a block's boundary (`atBlockBoundary`) and
- * make a file that micromark reads otherwise than its newest view (#597, #601, #588). The editor
- * answers it with the replacement of the unit.
+ * make a file that micromark reads otherwise than its newest view (#597, #601, #588), or whether
+ * an edit has a delimiter beside a break (`delimiterBesideBreak`, which the fine form can't hold
+ * whatever it reads as). The editor answers it with the replacement of the unit, as `trackedEdits`
+ * does (the fifth property of docs/hardening.md).
  */
 export function readsOtherAtBoundary(
   text: string,
@@ -5470,7 +5469,9 @@ export function readsOtherAtBoundary(
   changes: readonly TextChange[],
 ): boolean {
   return (
-    (atBlockBoundary(text, edits) || atDelimiter(text, edits)) && readsOtherMicromark(text, changes)
+    ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
+      readsOtherMicromark(text, changes)) ||
+    delimiterBesideBreak(text, edits)
   );
 }
 
