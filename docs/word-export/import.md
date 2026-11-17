@@ -93,7 +93,25 @@ Both behaviors are standard Word practice. Word for Mac keeps both through a
 tracked edit and a save, and after Accept All only the bookmark of a deleted
 paragraph is gone
 ([Word lab](../research/word.md#export-and-round-trip-checks)). Word for the
-web is still untested.
+web and Google Docs are still untested.
+
+What the exporter writes (`packages/word/src/carriers/`):
+
+- `customXml/redlines-source.xml`, root `rl:source` in the namespace `urn:redlines:source:1`, with
+  `rl:markdown` (the file as it was, every character, with a base64 form for the few characters XML
+  cannot hold), `rl:ledger` (the ledger as JSON) and `rl:blocks`: one `rl:block` for each block the
+  exporter wrote (`id`, `type`, and `from` and `to`, the block's offsets in the Markdown). Its
+  `itemProps` part and relationship are written too, as Word's own custom parts have them. Word may
+  rename the part (`item1.xml`), so a reader finds it by its root element, which `readSource` does.
+- A bookmark `_rl_b1`, `_rl_b2`, … around each block, in the order of `rl:blocks`. A table's
+  bookmark starts in its first cell and ends in its last. `survivingBlocks` lists the ones a file
+  still has.
+- `commentsExtended.xml` (threads and `done`, for every file with comments: `docx` leaves out a
+  lone resolved thread), `commentsIds.xml` and `commentsExtensible.xml`, which carry the same
+  durable id (derived from the Redlines id) and, in the last, `w16cex:dateUtc`.
+- `w16du:dateUtc` next to every `w:date` in the document, with `w16du` in `mc:Ignorable`.
+
+`exportDocx(text, { carriers: false })` writes none of these.
 
 On import, every block whose bookmark survives and that has no revisions is
 copied from the original Markdown byte for byte. Only blocks with revisions or
