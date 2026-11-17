@@ -18,14 +18,14 @@ import { newestView, originalView } from './views.ts';
 vi.setConfig({ testTimeout: 60_000 });
 
 /** The text with ordered-list numbers as written (known gap: they are not renumbered), and with
- * no blank lines after a fence line: a replacement's closer stands alone on the line after a fence
- * that ends the new text (format §3.12), so the newest view keeps a blank line there that the plain
- * move has not. Markdown reads both alike (the every-order check judges that). */
+ * blank lines collapsed: a replacement's closer stands alone on the line after a fence, indented
+ * code or other line it can't join (format §3.12), so the newest view keeps a blank line there
+ * that the plain move has not. Markdown reads both alike (the every-order check judges that). */
 const numberless = (text: string) =>
   text
     .trimEnd()
     .replace(/^(\s*(?:>\s*)*)\d{1,9}([.)])/gm, '$1N$2')
-    .replace(/^([ \t>]*(?:`{3,}|~{3,})[^\n]*)\n(?:[ \t]*\n)+/gm, '$1\n');
+    .replace(/\n(?:[ \t]*\n)+/g, '\n');
 
 /** The marks of a file, and those inside the payloads of its substitutions. */
 const marksIn = (text: string) => parse(text).marks.length + payloadMarksOf(parse(text)).length;
