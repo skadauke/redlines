@@ -16,12 +16,22 @@ const renderedLines = (editor: Editor) => editor.view.dom.querySelectorAll('.cm-
 const PARAGRAPHS = 800;
 
 export async function runPrintCheck(editor: Editor): Promise<void> {
+  try {
+    await check(editor);
+  } catch (error) {
+    console.warn(`PRINT-CHECK crashed ${JSON.stringify(String(error))}`);
+    console.warn('PRINT-CHECK done 0 passed, 1 failed');
+  }
+}
+
+async function check(editor: Editor): Promise<void> {
   const long = Array.from(
     { length: PARAGRAPHS },
     (_, i) => `Paragraph ${i + 1} of the long document, which the print check draws and counts.`,
   ).join('\n\n');
   editor.reloadDoc(long);
   editor.view.scrollDOM.scrollTop = 0;
+  editor.view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
   await new Promise((resolve) => setTimeout(resolve, 1000));
   const documentLines = editor.getDoc().split('\n').length;
   const before = renderedLines(editor);
@@ -43,6 +53,6 @@ export async function runPrintCheck(editor: Editor): Promise<void> {
   // The window's own end of the dialog, which lets the hold go.
   window.dispatchEvent(new Event('afterprint'));
   // The editor drew only what is near the window before, and every paragraph with the print held.
-  const ok = before < PARAGRAPHS && after >= PARAGRAPHS;
+  const ok = before > 0 && before < PARAGRAPHS / 2 && after >= PARAGRAPHS;
   console.warn(`PRINT-CHECK done ${ok ? 1 : 0} passed, ${ok ? 0 : 1} failed`);
 }
