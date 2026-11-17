@@ -71,6 +71,7 @@ export function moveRunTo(view: EditorView, run: BlockRun, gap: BlockGap): boole
   let changes: ChangeSet;
   let moved: Range;
   let untracked = !tracking;
+  let asking = TOO_MANY_BLOCKS;
   try {
     if (tracking) {
       try {
@@ -83,6 +84,7 @@ export function moveRunTo(view: EditorView, run: BlockRun, gap: BlockGap): boole
         // Not even the widened write holds it: the person is asked, and the move is made untracked
         // (design: widen, alert or disable, §3.1), never refused.
         untracked = true;
+        if (error.reason !== 'too-large') asking = NOT_MARKABLE;
         const plain = plainMove(state, text, run, gap, true);
         if (!plain) return false;
         ({ changes, moved } = plain);
@@ -110,7 +112,7 @@ export function moveRunTo(view: EditorView, run: BlockRun, gap: BlockGap): boole
       view.dispatch({
         effects: heldEditEffect.of({
           reason: 'accept-pending',
-          words: { title: TOO_MANY_BLOCKS },
+          words: { title: asking },
           doc: state.doc,
           changes,
           selection,
@@ -139,6 +141,10 @@ export function moveRunTo(view: EditorView, run: BlockRun, gap: BlockGap): boole
 /** The sheet's question for a move that no tracked write holds. */
 const TOO_MANY_BLOCKS =
   'This move reaches too many blocks to be tracked. Make it without tracking?';
+
+/** The sheet's question for a move whose pending marks would read otherwise than the move (two lists
+ * that it brings side by side are one list in the text, two in the file with a marker between). */
+const NOT_MARKABLE = 'Marks would read this move otherwise than it is. Make it without tracking?';
 
 /** The move as plain edits, in offsets of the text (none when the run is no longer there). */
 function plainMove(
