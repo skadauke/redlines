@@ -134,6 +134,8 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
   const others = (range: Range) => othersIn(parsed, range, ctx);
   const id = newId(idsIn(text), ctx.random);
   let rung = rungOf(units, sourceFrom, sourceTo);
+  // Where no unit of its own holds the edit, the unit and the block after it are replaced together.
+  let spare = rung ? withNext(units, rung) : undefined;
   // A unit that closure brought back to one already tried would go up and down for ever.
   const tried = new Set<string>();
   for (let index = 0; rung; index++) {
@@ -167,7 +169,8 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
       region,
     );
     if (done) return done;
-    rung = widerThan(closed);
+    rung = widerThan(closed) ?? spare;
+    spare = undefined;
   }
   trace?.('ladder-end');
   throw new Untrackable(
@@ -246,6 +249,17 @@ function rungOf(units: readonly Unit[], from: number, to: number): Rung | undefi
 }
 
 /** The next larger unit around a rung: the unit that holds it. Undefined at the top. */
+/** A unit with the one after it: the rung that holds both, for an edit that falls in the gap between
+ * them (a line break typed after a bare marker, #588) or code that a list line follows (#601). */
+function withNext(units: Unit[], rung: Rung): Rung | undefined {
+  const [only] = rung.units;
+  if (rung.units.length !== 1 || !only) return undefined;
+  const siblings = rung.parent ? rung.parent.children : units;
+  const at = siblings.indexOf(only);
+  const next = siblings[at + 1];
+  return at < 0 || !next ? undefined : rungOfUnits([only, next], rung.parent);
+}
+
 function widerThan(rung: Rung): Rung | undefined {
   const parent = rung.parent;
   return parent ? rungOfUnits([parent], parent.parent) : undefined;
@@ -435,7 +449,13 @@ function tryRung(
   ) {
     return giveUp('delimiter');
   }
+  // An HTML block goes on over the line after it, a closer included: the closer stands after a blank
+  // line, where it is an HTML block of its own (#597).
+  const html = HTML_LINE.test(lastLineOf(now, rung.prefix));
+  if (html && rung.prefix !== '') return giveUp('html');
+  const bare = endsInBare(now);
   const atomic =
+    html ||
     rung.atomic ||
     rung.kind === 'table' ||
     endsInFence(old) ||
@@ -456,7 +476,6 @@ function tryRung(
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
   const closer = `<!--/${id}-->`;
-  if (HTML_LINE.test(lastLineOf(now, rung.prefix))) return giveUp('html');
   // The lines before and after the unit stand in its container, whose tightness is the item's: a
   // list's own tightness (it holds a blank line) says nothing of the blank line before it.
   const tight = rung.kind === 'list' && rung.parent ? rung.parent.tight : rung.tight;
@@ -466,7 +485,7 @@ function tryRung(
   let end = to;
   if (atomic) {
     const line = `${continuationPrefix(rung.prefix)}${closer}`;
-    written = `${opener}${lead}${body}${eol}${line}`;
+    written = `${opener}${lead}${body}${html || (bare && rung.prefix === '') ? eol : ''}${eol}${line}`;
     if (blankAfter) end = to + eol.length;
   } else {
     written = `${opener}${lead}${body}${closer}`;
@@ -641,7 +660,9 @@ function failure(
   ].find(grew);
   if (bad) return `warning ${bad}`;
   if (paragraphBreaks(newestView(after).text) !== paragraphBreaks(intended)) return 'newest';
-  if (shapeOf(unitsOf(after, read)) !== shapeOf(unitsOf(intended, parse(intended)))) return 'shape';
+  if (shapeOf(unitsOf(after, read)) !== shapeOf(unitsOf(intended, parse(intended)))) {
+    return 'shape';
+  }
   if (paragraphBreaks(originalView(after).text) !== paragraphBreaks(originalView(text).text)) {
     return 'original';
   }

@@ -64,6 +64,7 @@ import {
   unitsOf,
   untrackedEdit,
   untrackedFormat,
+  readsOtherAtBoundary,
   widenedFirstEdits,
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
@@ -612,7 +613,18 @@ function trackEdits(
             widenedFirstEdits(at, [change], made).changes
         : widening
           ? trackedEdit
-          : fineEdit;
+          : (at: string, change: TextChange, made: typeof ctx) => {
+              const fine = fineEdit(at, change, made);
+              // A fine write that micromark reads otherwise than the newest view is taken back,
+              // for the replacement of the unit (#597, #601, #588).
+              if (readsOtherAtBoundary(at, [change], fine)) {
+                throw new EditError(
+                  'This change reads differently in the file than in the document.',
+                  'no-legal-placement',
+                );
+              }
+              return fine;
+            };
     if (edit.from !== edit.to) return write(doc, edit, ctx);
     const at = rangeEdge(read, edit.from, edit.insert);
     return write(doc, { from: at, to: at, insert: edit.insert }, ctx);

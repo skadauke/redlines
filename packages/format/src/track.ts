@@ -107,6 +107,7 @@ import {
   textLike,
   underliningBullet,
 } from './inline.ts';
+import { micromark } from 'micromark';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
@@ -5205,7 +5206,14 @@ function editsWidening(
         );
       }
       try {
-        return editsOnce(text, edits, mode === 0 ? first : again(), mode);
+        const written = editsOnce(text, edits, mode === 0 ? first : again(), mode);
+        if (widening && readsOtherAtBoundary(text, edits, written.changes)) {
+          // A write the format accepts that a reader of the file reads otherwise than the newest
+          // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
+          // can't be.
+          return widenedAtOnce(text, edits, again()) ?? written;
+        }
+        return written;
       } catch (error) {
         if (!(error instanceof ReadsOtherwise)) throw error;
       }
@@ -5215,6 +5223,68 @@ function editsWidening(
     if (!widening) throw error;
     return widenedEdits(text, edits, again(), error);
   }
+}
+
+/** The syntax of a block's first line, up to where an edit starts. */
+const SYNTAX_PREFIX =
+  /^(?:#{1,6}[ \t]*|[-*+][ \t]*|\d{1,9}[.)][ \t]*|<[^\s>]*|`{3,}[^`]*|~{3,}.*)$/;
+const LIST_LINE = /^[ \t>]*(?:\d{1,9}[.)]|[-*+])(?:[ \t]|$)/;
+
+/**
+ * Whether an edit is where a fine write can read otherwise in the file than in the newest view: it
+ * starts inside a block's syntax (the `>` of a tag, the space of `## `, right behind a bare
+ * marker), or it is in indented code with a list item close below it. Only these are read by
+ * micromark (`readsOtherwise`), so that a keystroke elsewhere costs what it did.
+ */
+function atBlockBoundary(text: string, edits: readonly TextChange[]): boolean {
+  return edits.some((edit) => {
+    const start = lineStart(text, edit.from);
+    const prefix = text
+      .slice(start, edit.from)
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/^[ \t]*(?:>[ \t]*)*/, '');
+    if (
+      prefix !== '' &&
+      SYNTAX_PREFIX.test(prefix) &&
+      (edit.insert.includes('\n') || !/[ \t]$/.test(prefix))
+    ) {
+      return true;
+    }
+    if (!/^(?: {4}|\t)/.test(text.slice(start))) return false;
+    let at = lineEnd(text, edit.to);
+    for (let i = 0; i < 4 && at < text.length; i++) {
+      const next = lineEnd(text, at + 1);
+      if (LIST_LINE.test(text.slice(at + 1, next))) return true;
+      at = next;
+    }
+    return false;
+  });
+}
+
+/**
+ * Whether `changes`, a fine write of `edits`, are at a block's boundary (`atBlockBoundary`) and
+ * make a file that micromark reads otherwise than its newest view (#597, #601, #588). The editor
+ * answers it with the replacement of the unit.
+ */
+export function readsOtherAtBoundary(
+  text: string,
+  edits: readonly TextChange[],
+  changes: readonly TextChange[],
+): boolean {
+  return atBlockBoundary(text, edits) && readsOtherwise(text, changes);
+}
+
+/** Whether micromark reads the file the changes make otherwise than its newest view. */
+function readsOtherwise(text: string, changes: readonly TextChange[]): boolean {
+  const file = applyChanges(text, changes);
+  const ledger = parse(file).ledgerRange;
+  const read = (source: string) =>
+    micromark(source, { allowDangerousHtml: true })
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/ ?(<[^>]*>) ?/g, '$1')
+      .trim();
+  return read(ledger ? file.slice(0, ledger.from) : file) !== read(newestView(file).text);
 }
 
 /**

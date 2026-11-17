@@ -43,7 +43,9 @@ export function widenedAtOnce(
   ctx: EditContext,
 ): TrackedEdits | undefined {
   if (edits.length === 0) return undefined;
-  if (edits.some((edit) => !widensEditHere(text, edit.from, edit.to))) return undefined;
+  if (edits.some((edit) => !widensEditHere(text, edit.from, edit.to))) {
+    return undefined;
+  }
   try {
     const view = newestView(text);
     const made = edits.map((edit) => ({
