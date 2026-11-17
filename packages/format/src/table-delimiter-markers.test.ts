@@ -54,4 +54,22 @@ describe('a marker next to a delimiter run in a cell (#490)', () => {
     expect(bodyOf(after)).not.toContain('**ca<!--del k3x9 fé*-->*');
     expectEveryOrderRead('closer', after);
   });
+
+  // `marksAfter` counts in UTF-16 units and `changesFlanking` looks in code points. They meet only
+  // after the run, whose characters are delimiters (one unit each), so an emoji beside a mark and a
+  // run cannot shift the lookup: typing a run before an emoji or beside a mark reads alike in every
+  // order.
+  it.each([
+    ['a run typed before an emoji, a mark after it', '🎉<!--ins m5nn x-->', '**'],
+    ['a run typed before a mark, an emoji after it', '<!--ins m5nn x-->🎉', '**'],
+    ['a run of `_` typed between an emoji and a mark', '🎉<!--ins m5nn x-->a', '_'],
+  ])('reads alike in every order: %s', (_why, cell, run) => {
+    const text = table(`${cell} w`, { m5nn: 'claude-ada' });
+    const at = text.indexOf(cell);
+    const after = applyChanges(
+      text,
+      trackedEdit(text, { from: at, to: at, insert: run }, context(bo, ['t5vw'])),
+    );
+    expectEveryOrderRead('emoji', after);
+  });
 });
