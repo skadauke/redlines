@@ -364,6 +364,40 @@ pub fn image_for_agent(app: AppHandle, path: String) -> Result<AgentImage, Strin
     }
 }
 
+/// The picture at `path` for the page to crop (Crop, #624), or what is said to the person when it
+/// can't be read: the file as the preview reads it, of any type it shows, as large as one may be. The
+/// page draws the part that is kept to a canvas, which it can't do with the picture it loads from
+/// the app's own address (the canvas would be tainted), and saves that as a copy.
+fn crop_image(images: &Images, path: &str) -> Result<AgentImage, String> {
+    use base64::Engine;
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return Err("Couldn’t read the image.".into());
+    }
+    let (kind, bytes) = read_image(images, path, MAX_IMAGE_BYTES).map_err(|status| {
+        if status == StatusCode::NOT_FOUND {
+            "The image file isn’t there.".to_string()
+        } else {
+            "Redlines can’t read that image: it is outside the folders it shows, or isn’t a picture.".to_string()
+        }
+    })?;
+    Ok(AgentImage {
+        mime_type: kind,
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+/// The one picture the page crops: the file at `path`, an absolute path, only where the page may
+/// load it (`Images::may_load`), read whole. It gives the page no other file and no path to read;
+/// the cropped copy goes back through `add_pasted_image` like any image added.
+#[tauri::command(async)]
+pub fn image_for_crop(app: AppHandle, path: String) -> Result<AgentImage, String> {
+    match app.try_state::<Images>() {
+        Some(images) => crop_image(&images, &path),
+        None => Err("Couldn’t read the image.".into()),
+    }
+}
+
 /// The answer to the page's request for `asset://localhost/<path>`: the image at `path`, if the
 /// page may load it (`image`), and otherwise nothing, with the status Tauri's own asset protocol
 /// gives: 403 for a file the page may not load, 404 for one that isn't there.
