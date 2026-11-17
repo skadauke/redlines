@@ -367,6 +367,27 @@ function joinsLists(siblings: readonly Unit[], first: number, last: number, g: n
   });
 }
 
+/** Whether a change writes a marker inside a fenced code block, past its opening fence: a move takes
+ * whole blocks, and a marker there is read as the code's own text. */
+function insideCode(text: string, changes: readonly TextChange[]): boolean {
+  const code: Range[] = [];
+  const walk = (units: readonly Unit[]) => {
+    for (const unit of units) {
+      if (unit.kind === 'code') {
+        const open = text.indexOf('\n', unit.lineFrom);
+        if (open !== -1 && open < unit.to) code.push({ from: open, to: unit.to });
+      }
+      walk(unit.children);
+    }
+  };
+  walk(unitsOf(text, parse(text)));
+  return changes.some(
+    (change) =>
+      change.insert.includes('<!--') &&
+      code.some((range) => range.from < change.from && change.from < range.to),
+  );
+}
+
 /**
  * The tracked move of `run` to `gap`: the edits of `moveBlockEdits` (with where the run lands) written as the author's tracked
  * changes, a deletion at the old place and an insertion at the new, all in one group so that they
@@ -402,10 +423,12 @@ export function trackedBlockMove(
     }
     for (const next of plans.filter((other) => !other.joins)) {
       try {
-        return {
-          changes: trackedEdits(text, next.source, { ...ctx, group }).changes,
-          moved: next.moved,
-        };
+        const { changes } = trackedEdits(text, next.source, { ...ctx, group });
+        // A fine write whose newest view has other fences than the file's (a replacement that starts
+        // at the closing fence of an earlier code block and writes a stray one, #586 seed 102) is
+        // wrong: the next way, then the widened one, which asks if it can't be made.
+        if (insideCode(text, changes)) continue;
+        return { changes, moved: next.moved };
       } catch (error) {
         if (!(error instanceof EditError)) throw error;
       }
