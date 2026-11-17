@@ -384,6 +384,24 @@ export function markdownBlocks(text: string): Block[] {
             task: true,
           });
           break;
+        case 'autolinkProtocol':
+        case 'autolinkEmail':
+        case 'literalAutolink': {
+          // An address that is its own text: written as a link whose text is the address.
+          const shown = slice();
+          const mail = /^[^/:\s]+@/.test(shown);
+          const link = mail ? `mailto:${shown}` : /^www\./i.test(shown) ? `http://${shown}` : shown;
+          sink?.push({
+            kind: 'text',
+            text: shown,
+            from: token.start.offset,
+            to: token.end.offset,
+            exact: true,
+            fmt: fmt(),
+            link,
+          });
+          break;
+        }
         case 'htmlText': {
           const tag = /^<(\/?)(sub|sup)>$/.exec(slice());
           if (tag) {

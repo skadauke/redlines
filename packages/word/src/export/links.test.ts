@@ -24,6 +24,23 @@ describe('links', () => {
     expect(blocks.match(/https:\/\/example\.org\/guide/g)).toHaveLength(1);
   });
 
+  it('writes an autolink and a bare address as hyperlinks whose text is the address', async () => {
+    const parts = readParts(
+      await exportDocx(
+        'A <https://example.org/a> b <me@example.org> c https://example.org/b d www.example.org\n',
+      ),
+    );
+    const document = partText(parts, 'word/document.xml') ?? '';
+    const rels = partText(parts, 'word/_rels/document.xml.rels') ?? '';
+    expect(document.match(/<w:hyperlink /g)).toHaveLength(4);
+    for (const shown of ['https://example.org/a', 'me@example.org', 'https://example.org/b']) {
+      expect(document.match(new RegExp(`>${shown}<`, 'g'))).toHaveLength(1);
+    }
+    expect(document).toContain('>www.example.org<');
+    expect(rels).toContain('Target="mailto:me@example.org"');
+    expect(rels).toContain('Target="http://www.example.org"');
+  });
+
   it('writes the sample when WORD_LINKS_OUT names a file', async () => {
     const out = process.env.WORD_LINKS_OUT;
     if (!out) return;
