@@ -335,8 +335,10 @@ const ledgerReads = new WeakMap<Parsed, Map<string, LedgerRead>>();
 export function parse(text: string, previous?: Parsed, change?: Change): Parsed {
   // A long text read again as it stands (no earlier parse given) is the same parse: a move or a
   // decision reads one file's text some fifty times, the file written and the views of it, which was
-  // 18 of the 45 ms of a block move in 220 KB (#1062). Parses are read-only (above), so they are shared.
-  if (previous || change || text.length < RECENT_MIN) return parseText(text, previous, change);
+  // 18 of the 45 ms of a block move in 220 KB (#1062). A parse is read-only, with or without an earlier one (above), so it is shared.
+  if (previous || change || text.length < RECENT_MIN || text.length > RECENT_MAX) {
+    return parseText(text, previous, change);
+  }
   const known = recent.get(text);
   if (known) {
     recent.delete(text);
@@ -350,14 +352,16 @@ export function parse(text: string, previous?: Parsed, change?: Change): Parsed 
   return parsed;
 }
 
-/** How many long texts were read in full (not found among the latest), for the cost tests. */
+/** @internal How many long texts were read in full (not found among the latest), for the cost tests. */
 export const parseStats = { long: 0 };
 
 /** The parses of long texts read lately, by text, the latest last. */
 const recent = new Map<string, Parsed>();
-const RECENT_MOST = 6;
+const RECENT_MOST = 4;
 /** Shorter texts parse in less time than it takes to look them up. */
 const RECENT_MIN = 20_000;
+/** Longer ones are not kept: each parse holds the text, and a lookup hashes all of it. */
+const RECENT_MAX = 2_000_000;
 
 function parseText(text: string, previous?: Parsed, change?: Change): Parsed {
   const scanned = (previous && change && scanChanged(previous.text, text, change)) || scan(text);

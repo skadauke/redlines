@@ -209,9 +209,10 @@ export function viewsOnce(): Views {
 /** The views of long texts, by text: a block move or a decision asks for the views of one file's
  * text some ten times (#1062). Shorter texts are read faster than they are looked up. */
 const LONG = 20_000;
+const LONGEST = 2_000_000;
 function remembered(make: (text: string) => DocView, recent: Map<string, DocView>) {
   return (text: string): DocView => {
-    if (text.length < LONG) return make(text);
+    if (text.length < LONG || text.length > LONGEST) return make(text);
     let view = recent.get(text);
     if (view) recent.delete(text);
     else view = make(text);

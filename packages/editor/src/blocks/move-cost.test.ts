@@ -87,7 +87,10 @@ describe('a block move in 2,000 blocks with 200 pending changes', () => {
         view.dispatch({ changes: { from: at, insert: 'x' }, selection: { anchor: ++at } });
       };
       let down = true;
+      // A letter at the top before each move, so that each is made on a text no memo has seen (the
+      // first move after an edit is the one that happens); the caret keeps its block.
       const move = () => {
+        view.dispatch({ changes: { from: 0, insert: 'y' } });
         moveBlocks(view, down);
         down = !down;
       };
