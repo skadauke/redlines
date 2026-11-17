@@ -4,7 +4,11 @@
 import { applyChanges, eolOf } from './changes.ts';
 import type { Eol } from './changes.ts';
 import { EditError } from './errors.ts';
-import { findLedger, ledgerHidden, readSpan } from './ledger-read.ts';
+import { idPositions, splitLedger } from './ledger-join.ts';
+import { findLedger, findLedgers, ledgerHidden, readSpan } from './ledger-read.ts';
+import type { LedgerSpan } from './ledger-read.ts';
+import { scan } from './scan.ts';
+import type { Scan } from './scan.ts';
 import { encodePayload } from './payload.ts';
 import type {
   ExtraFields,
@@ -274,13 +278,18 @@ export function setLedger(
   ledger: Ledger,
   options: SetLedgerOptions = {},
 ): TextChange[] {
-  const existing = findLedger(text);
-  if (existing && !options.replaceUnreadable && !readSpan(existing).valid) {
+  const scanned = scan(text);
+  const spans = findLedgers(text, scanned);
+  const existing = spans.at(-1);
+  if (spans.some((span) => !options.replaceUnreadable && !readSpan(span).valid)) {
     throw new EditError(
       "The ledger at the end of this file can't be read, so Redlines won't change it. Fix or remove it first.",
       'unreadable-ledger',
     );
   }
+  // A joined document has a ledger for each part: an entry goes to the one its marker reads
+  // (format §5.1).
+  if (spans.length > 1) return setLedgers(text, ledger, spans, scanned);
   if (!keepsLedger(ledger)) {
     return existing ? [{ from: existing.range.from, to: existing.range.to, insert: '' }] : [];
   }
@@ -306,6 +315,49 @@ export function setLedger(
   // comment text, and the next save would add another one.
   if (!findLedger(applyChanges(text, added))) throw unclosedEnd();
   return added;
+}
+
+/** The changes that make `ledger` the ledgers of a file that has several (format §5.1): each
+ * ledger gets the entries of the marks that read it, and one that is the same is left as it is. */
+function setLedgers(
+  text: string,
+  ledger: Ledger,
+  spans: LedgerSpan[],
+  scanned: Scan,
+): TextChange[] {
+  const reads = spans.map(readSpan);
+  const starts = spans.map((span) => span.start);
+  const parts = splitLedger(
+    ledger,
+    reads.map((read) => read.ledger),
+    starts,
+    idPositions(scanned),
+  );
+  const changes: TextChange[] = [];
+  spans.forEach((span, index) => {
+    const part = parts[index]!;
+    const read = reads[index]!;
+    const written = serializeLedger(part);
+    if (read.valid && !span.crLines && written === serializeLedger(read.ledger)) return;
+    if (!keepsLedger(part)) {
+      changes.push({ from: span.range.from, to: span.range.to, insert: '' });
+      return;
+    }
+    const eol = eolOf(text, span.range);
+    const lines = written.replaceAll('\n', eol);
+    if (!span.crLines) {
+      if (text.slice(span.start, span.range.to) === lines) return;
+      changes.push({ from: span.start, to: span.range.to, insert: lines });
+    } else {
+      const at = span.range.from;
+      changes.push({
+        from: at,
+        to: span.range.to,
+        insert: `${blankLine(text, at, eol)}${lines}`,
+      });
+    }
+  });
+  return changes;
 }
 
 /**

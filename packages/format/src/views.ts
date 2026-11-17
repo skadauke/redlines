@@ -64,10 +64,10 @@ function wholeSegment(segment: Segment, insert: string): TextChange {
   return { from: segment.open.from, to: (segment.close ?? openerRange(segment)).to, insert };
 }
 
-/** The ledger and its blank line, as a change. */
+/** The ledger and its blank line, as a change; and those of the other parts of a joined file. */
 function ledgerChanges(parsed: Parsed): TextChange[] {
-  const range = parsed.ledgerRange;
-  return range ? [{ from: range.from, to: range.to, insert: '' }] : [];
+  const ranges = [...parsed.earlierLedgers, ...(parsed.ledgerRange ? [parsed.ledgerRange] : [])];
+  return ranges.map((range) => ({ from: range.from, to: range.to, insert: '' }));
 }
 
 /** Changes that hide every marker of a segment and keep what lies between them. */
