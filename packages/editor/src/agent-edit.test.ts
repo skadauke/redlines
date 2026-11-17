@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runScopeHandlers } from '@codemirror/view';
-import { applyChanges, parse, reply, suggestReplace } from '@redlines/format';
+import { acceptAll, applyChanges, parse, reply, suggestReplace } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentStep, EditorOptions } from './api.ts';
 import { createEditor, type Editor } from './index.ts';
@@ -275,5 +275,15 @@ describe('an agent’s edit', () => {
     // The agent's undo gives back the text it was made on: the first part composed, plain.
     expect(seen).toContain(composed);
     expect(seen.at(-1)).toBe(fixture);
+  });
+
+  it('leaves no `****` when the agent deletes all the text of a bold', () => {
+    const plain = '# Plan\n\nShip **now** please.\n';
+    const editor = load(plain);
+    const next = suggested(plain, 'now', '');
+    editor.applyAgentEdit(next, STEP);
+    expect(editor.getDoc()).toBe(next);
+    const accepted = applyChanges(next, acceptAll(next));
+    expect(accepted).not.toContain('*');
   });
 });

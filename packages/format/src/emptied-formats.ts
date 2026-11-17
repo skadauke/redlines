@@ -1,8 +1,13 @@
 // A deletion of all the text of an inline format (`**a**`, `~~a~~`, a code span) takes the format's
 // delimiters too, from the outermost format it empties: what a fine write leaves, `****`, is no
-// format and no text, and read again it is something else (#584). The editor does this for a key
-// (`emptiedFormats`, in the editor's tracking filter); `trackedEdits` does it for any caller, so
-// that both write the same text.
+// format and no text, and read again it is something else (#584). Who applies it: the editor's
+// tracking filter, for a key (its own `emptiedFormats`), and the harness's library writer
+// (`packages/collab-sim`), which gives `trackedEdits` what the editor's filter would. `trackedEdits`
+// itself does not: it writes the edit it is given, and `formatting.test.ts` holds that a format
+// change keeps its syntax when its word is deleted, so that accepting both reads as the newest view.
+// An agent's `str_replace` needs no step: it compares the newest view, where the delimiters are
+// text, and so deletes them with the word (tests in the agent tools, the command line and the
+// editor's `applyAgentEdit` hold it).
 
 import { micromark } from 'micromark';
 import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
