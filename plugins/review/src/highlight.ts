@@ -12,6 +12,7 @@ import {
   refusedEditEffect,
   setViewModeEffect,
   viewModeField,
+  dialectFacet,
 } from '@redlines/editor';
 import {
   addHighlight,
@@ -168,7 +169,11 @@ export function toggleHighlight(ctx: ReviewContext): boolean {
     } else {
       const target = highlightTarget(state);
       if (!target) return refuse(NO_TEXT);
-      const { changes } = addHighlight(state.doc.toString(), target, editContext(ctx.author));
+      const { changes } = addHighlight(
+        state.doc.toString(),
+        target,
+        editContext(ctx.author, state.facet(dialectFacet)),
+      );
       applyEdit(view, changes, 'review.highlight');
     }
   } catch (error) {

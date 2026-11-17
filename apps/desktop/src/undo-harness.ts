@@ -224,7 +224,7 @@ export async function openWindow(doc: string): Promise<Window> {
       read: () => editor.getDoc(),
       parsed: () => editor.getParsed(),
       save: () => controller.save(),
-      applyAgentEdit: (next, step) => controller.applyAgentEdit(next, step),
+      applyAgentEdit: (next, step, base) => controller.applyAgentEdit(next, step, base),
     },
     projectRoot: (path) => host.projectRoot(path),
     settings: { defaultScope: () => 'folder', consent: () => 'folder', setConsent: () => {} },

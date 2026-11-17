@@ -192,11 +192,15 @@ class FakeHost implements Host {
  */
 function fakeEditor() {
   let doc = '';
+  const dialects: (string | undefined)[] = [];
   let onChange: (text: string) => void = () => {};
   return {
     getDoc: vi.fn(() => doc),
     getParsed: () => parse(doc),
-    setDoc: (text: string) => {
+    /** The dialect each document was given, which the name of its file says. */
+    dialects,
+    setDoc: (text: string, _kind?: string, dialect?: string) => {
+      dialects.push(dialect);
       doc = text;
       onChange(text);
     },
@@ -209,6 +213,7 @@ function fakeEditor() {
       expect(step.group).toBeTruthy();
       doc = text;
       onChange(text);
+      return { rebased: false, dropped: [] };
     }),
     /** Records the view in the file's ledger, which a save asks for: nothing, unless a test says. */
     recordView: vi.fn(() => {}),
@@ -945,6 +950,18 @@ describe('DocumentController', () => {
     consoleError.mockRestore();
   });
 
+  it('opens a .qmd, a .Rmd and a .md in their dialects (format §9.1)', async () => {
+    const { editor, controller } = setup({
+      '/a/talk.qmd': '# Talk\n',
+      '/a/report.Rmd': '# Report\n',
+      '/a/notes.md': '# Notes\n',
+    });
+    await controller.open('/a/talk.qmd');
+    await controller.open('/a/report.Rmd');
+    await controller.open('/a/notes.md');
+    expect(editor.dialects).toEqual(['pandoc', 'pandoc', 'gfm']);
+  });
+
   it('opens no file that isn’t a document, and asks nothing of the one open', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { host, editor, controller, state } = setup({
@@ -1106,6 +1123,16 @@ describe('the view a save records (format §5.6)', () => {
     await controller.applyAgentEdit('One agent\n', { group: 'run-1', agent: 'Claude' });
     expect(editor.recordView).not.toHaveBeenCalled();
     expect(host.writes).toEqual([{ path: '/docs/plan.md', text: 'One agent\n' }]);
+  });
+
+  it('places an agent’s edit on a document that moved since its tool read it, and leaves the file', async () => {
+    const { host, editor, controller } = recording({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    const step = { group: 'run-1', agent: 'Claude' };
+    // Someone typed after the tool read 'Zero\n': the edit is placed, not written as it is.
+    await controller.applyAgentEdit('Zero agent\n', step, 'Zero\n');
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith('Zero agent\n', step, 'Zero\n');
+    expect(host.writes).toEqual([]);
   });
 });
 

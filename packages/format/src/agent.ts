@@ -3,6 +3,7 @@
 // name. `old_str` must match the newest view exactly once. The replacement is compared with it
 // word by word, and only the words that changed become marks.
 
+import { withDialect } from './dialect.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -84,7 +85,9 @@ export function suggestReplace(
   newStr: string,
   ctx: EditContext,
 ): TrackedEdits {
-  return suggestReplaceWith(text, oldStr, newStr, ctx, joinedHunks);
+  return withDialect(ctx.dialect, () => {
+    return suggestReplaceWith(text, oldStr, newStr, ctx, joinedHunks);
+  });
 }
 
 /** `suggestReplace` with the joining rule given: a test gives one that writes what the format
@@ -97,19 +100,21 @@ export function suggestReplaceWith(
   join: (before: string, after: string, guards: JoinGuards) => Hunk[],
   guarded = true,
 ): TrackedEdits {
-  const ids = replayable(ctx.random);
-  const edits = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.first }, join);
-  if (!guarded || keepsDecidable(text, edits)) return edits;
-  // The marks next to the edit, written at the grain of the words, leave a decision that could be
-  // made before it impossible (#251). Written as a replacement of the unit that holds them, they
-  // may not; where that is no better, the edit is refused (#246).
-  try {
-    const wide = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.again }, join, widenedEdits);
-    if (keepsDecidable(text, wide)) return wide;
-  } catch (error) {
-    if (!(error instanceof EditError)) throw error;
-  }
-  throw new EditError(INSERTION_STUCK, 'no-legal-placement');
+  return withDialect(ctx.dialect, () => {
+    const ids = replayable(ctx.random);
+    const edits = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.first }, join);
+    if (!guarded || keepsDecidable(text, edits)) return edits;
+    // The marks next to the edit, written at the grain of the words, leave a decision that could be
+    // made before it impossible (#251). Written as a replacement of the unit that holds them, they
+    // may not; where that is no better, the edit is refused (#246).
+    try {
+      const wide = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.again }, join, widenedEdits);
+      if (keepsDecidable(text, wide)) return wide;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    throw new EditError(INSERTION_STUCK, 'no-legal-placement');
+  });
 }
 
 function suggestForms(
@@ -398,17 +403,19 @@ export function suggestReplaceAsOne(
   added: string,
   ctx: EditContext,
 ): TrackedEdits {
-  const edits = suggestReplace(text, old, added, ctx);
-  if (edits.markIds.length < 2) return edits;
-  // An id that nothing in the file or in the new marks has.
-  const taken = idsIn(applyChanges(text, edits.changes));
-  for (;;) {
-    const group = newId(taken);
-    // The same edit with a group: the first has been checked.
-    const grouped = suggestReplaceWith(text, old, added, { ...ctx, group }, joinedHunks, false);
-    if (!grouped.markIds.includes(group)) return grouped;
-    taken.add(group);
-  }
+  return withDialect(ctx.dialect, () => {
+    const edits = suggestReplace(text, old, added, ctx);
+    if (edits.markIds.length < 2) return edits;
+    // An id that nothing in the file or in the new marks has.
+    const taken = idsIn(applyChanges(text, edits.changes));
+    for (;;) {
+      const group = newId(taken);
+      // The same edit with a group: the first has been checked.
+      const grouped = suggestReplaceWith(text, old, added, { ...ctx, group }, joinedHunks, false);
+      if (!grouped.markIds.includes(group)) return grouped;
+      taken.add(group);
+    }
+  });
 }
 
 /**
@@ -451,12 +458,14 @@ export function commentOnQuote(
   body: string,
   ctx: EditContext,
 ): { changes: TextChange[]; id: string } {
-  const newest = newestView(text);
-  const wanted = inEol(quote, eolOf(text));
-  const start = uniqueMatch(newest.text, wanted);
-  const range = {
-    from: newest.map.toSource(start, 1),
-    to: newest.map.toSource(start + wanted.length, -1),
-  };
-  return addComment(text, range, body, ctx);
+  return withDialect(ctx.dialect, () => {
+    const newest = newestView(text);
+    const wanted = inEol(quote, eolOf(text));
+    const start = uniqueMatch(newest.text, wanted);
+    const range = {
+      from: newest.map.toSource(start, 1),
+      to: newest.map.toSource(start + wanted.length, -1),
+    };
+    return addComment(text, range, body, ctx);
+  });
 }
