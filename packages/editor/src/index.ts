@@ -140,7 +140,7 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
-import { intentOf, recordedAs } from './tracked/intent.ts';
+import { intentOf, plainIntent, recordedAs } from './tracked/intent.ts';
 import { guardDecision, seenOf, writeReview } from './tracked/review-intent.ts';
 import { DecidedLog, skippedMessage } from './tracked/decided.ts';
 import type { DecisionOutcome } from './tracked/decided.ts';
@@ -268,7 +268,13 @@ export {
   trackingField,
 } from './tracked/typing.ts';
 export { editSourceFacet } from './tracked/typing.ts';
-export { intentAnnotation, intentOf, newIntentId, recordedAs } from './tracked/intent.ts';
+export {
+  intentAnnotation,
+  intentOf,
+  newIntentId,
+  plainIntent,
+  recordedAs,
+} from './tracked/intent.ts';
 export {
   deriveReview,
   guardDecision,
@@ -701,6 +707,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       annotations: [
         trackedEditAnnotation.of(true),
         Transaction.remote.of(true),
+        recordedAs(plainIntent(state, state.changes(changes))),
         ...(joins
           ? [joinsNewestStep.of(true), isolateHistory.of('after')]
           : [Transaction.addToHistory.of(false)]),
@@ -748,7 +755,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         // history starts over.
         effects: changed ? [...next.effects, ...effects, ...startOver(state)] : next.effects,
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
-        annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
+        annotations: [
+          Transaction.addToHistory.of(false),
+          Transaction.remote.of(true),
+          ...(changes.empty ? [] : [recordedAs(plainIntent(state, changes))]),
+        ],
         userEvent: 'reload',
       });
       // A file that newly asks everyone to track changes is read as one that is opened: Track
@@ -792,6 +803,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         annotations: [
           agentStep.of(step),
           trackedEditAnnotation.of(true),
+          recordedAs(plainIntent(state, changes)),
           ...(base === undefined
             ? []
             : [

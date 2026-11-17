@@ -266,6 +266,10 @@ function rederive(
       if (placed.ok) {
         changes = placed.changes;
         notices.push(...placed.notices);
+      } else if (intent.exact && edit.changes.length === state.doc.length) {
+        // The text's own changes (Undo, an agent's edit) that can't be placed by their source: as
+        // the session mapped them over what others changed, which never takes them back.
+        changes = edit.changes;
       } else {
         notices.push(`An edit of yours was taken back: ${placed.reason}`);
       }

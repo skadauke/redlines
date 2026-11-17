@@ -232,6 +232,24 @@ as possible, and never dropped:
 The earlier design turned away 0.4–4% of commands while deriving them again. This rule turns away
 none, as Redlines' refusal policy asks: write the edit exactly, else write a wider one, else alert.
 
+**Every write has one (IG3).** `apps/desktop/src/intent-gap.test.ts` runs every command of the
+editor and its plugins, every editing key, typing, every paste, Undo and Redo, an agent's edit, a
+reload, the file's own settings and Accept All and Stop Tracking on a sample document, with Track
+Changes on and off, and fails when one dispatches a document change with no intent. What is, in the
+end, plain text changes takes a typing intent with `exact` set (`plainIntent`): the changes as made,
+who made them, written as they are on the text they were made on, and placed among the words on
+newer text where the same source, with its neighbours, still stands, and never among the visible words, which would leave markers behind. Undo and Redo, an agent's whole-text edit, `recordTracking` and
+`recordView`, a reload from disk and Accept All and Stop Tracking use it. Where a session can't place
+one by its source, it keeps it as the session mapped it over what others changed, and never takes it
+back.
+
+Still open, and not refusals by the new paths: an Undo that takes away a mark's ledger entry while
+another window writes the ledger is turned away by the authority as not fitting its text (found with
+the sync test; it happens with no intent too, and is §4.3's ledger entries); and a window places a typing intent among the words of
+newer text, and the other kinds (format, table, steps, move, widened paste) as they are when the text
+under them is the same, or else not at all. Placing those on newer text, anchored the way typing is,
+is what is left before the session has no path that takes an edit back.
+
 ### 4.3 The ledger travels as entries
 
 Today every edit that touches the ledger replaces the whole ledger in one change
