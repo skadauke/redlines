@@ -2443,7 +2443,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   /** Whether a marker stands against the change, which the markers of both read as punctuation to
    * the delimiters between them: then it is written as typed first, and read in every order of
    * decisions (`emphasisReadsAlike`), and written again by a character if that reads otherwise. */
-  /** Whether a marker of a mark that is no format change or split touches the change. */
+  /** Whether a marker of a mark that is no split touches the change (a format change counts, #484). */
   const stands = (m: MarkerRange) =>
     m.mark !== undefined && m.mark.kind !== 'split' && m.to >= from && m.from <= to;
   // Whether the change was written again by a character for the sake of the marks against it.
