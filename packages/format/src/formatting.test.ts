@@ -1127,6 +1127,13 @@ describe('next to pending changes', () => {
     );
   });
 
+  it('refuses a line that a deletion in the paragraph above makes a definition (#335)', () => {
+    const text = file('Text.\n\n<!--del k3x9 [r]-->\n\n: https://r.example', { k3x9: 'ada' });
+    expect(() => format(text, rangeOf(text, 'https'), bold(true))).toThrow(
+      'This line defines a link.',
+    );
+  });
+
   it('formats what CommonMark reads as text, though it looks like a definition', () => {
     for (const [written, word] of [
       // A destination with a space in it is no destination, and no title follows.

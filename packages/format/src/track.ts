@@ -5523,6 +5523,29 @@ function withPipes(
     to: shifted(edit.to),
   }));
   const done = trackedEdits(applyChanges(text, written), moved, ctx);
+  // A change that widened over the pipe's space reaches into the pipe just written, and would come
+  // back with its start after its end: the pipe goes without its space then, so that nothing of it
+  // lies inside a change (#429).
+  const reach = (at: number) => {
+    let offset = 0;
+    for (const w of sorted) {
+      const place = w.at + offset;
+      if (at > place && at < place + w.insert.length) return true;
+      offset += w.insert.length;
+    }
+    return false;
+  };
+  if (
+    writes.some((w) => w.leading && w.insert === '| ') &&
+    done.changes.some((c) => c.from < c.to && reach(c.from))
+  ) {
+    return withPipes(
+      text,
+      edits,
+      ctx,
+      writes.map((w) => (w.leading ? { ...w, insert: '|' } : w)),
+    );
+  }
   // A position of the text with the pipes in it, back in the text without them: those just after a
   // pipe are where the pipe is written.
   const back = (at: number) => {
