@@ -71,7 +71,9 @@ export function draggableRead(view: EditorView): { run: BlockRun; read: FileRead
   const read = asFile(view.state);
   if (!read) return undefined;
   const run = runOfSelection(read.file);
-  return run && main.from <= run.textFrom && main.to >= run.to ? { run, read } : undefined;
+  // The run is in the file's text, so the selection is compared as the file has it.
+  const sel = read.file.selection.main;
+  return run && sel.from <= run.textFrom && sel.to >= run.to ? { run, read } : undefined;
 }
 
 /** A drag of blocks in progress: the line, and the gap it is at. */
