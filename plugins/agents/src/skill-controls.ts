@@ -112,9 +112,7 @@ export function skillControls(options: {
       skillLine.textContent = 'Couldn’t look at the Redlines skill.';
       return;
     }
-    skillLine.textContent = installing
-      ? 'Installing the Redlines skill…'
-      : skillText(skill, skillDone);
+    skillLine.textContent = skillText(skill, skillDone);
     const next =
       skill.state === 'missing' ? 'Install' : skill.state === 'older' ? 'Update' : undefined;
     if (next !== undefined) {
