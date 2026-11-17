@@ -23,6 +23,14 @@ export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
  */
 export type DocumentKind = 'markdown' | 'plain-only';
 
+/** What the host gives the editor to read and open an included file by its path as written. */
+export interface IncludeHost {
+  /** The text of the included file, or null where it can't be read. */
+  read(path: string): Promise<string | null>;
+  /** Opens the included file, as a document of its own. */
+  open(path: string): void;
+}
+
 /** The dialect of a Markdown file (format §9.1): GitHub's, or pandoc's in `.qmd` and `.Rmd`. */
 export type MarkdownDialect = 'gfm' | 'pandoc';
 
@@ -330,6 +338,13 @@ export interface EditorOptions {
    * the command isn't registered.
    */
   openImage?: (src: string) => void;
+  /**
+   * How the editor reads and opens the files that a Quarto document includes (`{{< include
+   * _part.qmd >}}`, drawn as a block in a `.qmd`, decision 4 of docs/research/quarto.md): given the
+   * path as the document writes it. The host knows where the document is and which files may be
+   * read. Default: none, and the block names the file and does no more.
+   */
+  includes?: IncludeHost;
   /**
    * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
    * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
