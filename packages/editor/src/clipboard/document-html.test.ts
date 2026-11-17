@@ -1,0 +1,134 @@
+// @vitest-environment happy-dom
+import { describe, expect, it } from 'vitest';
+import { documentHtml, documentText } from './document-html.ts';
+
+const LEDGER = [
+  '<!-- redlines',
+  'version: 1',
+  'people:',
+  '  ada: {name: Ada Lovelace, email: ada@example.org}',
+  '  bo: {name: Bo Chen, email: bo@example.org}',
+  'marks:',
+  '  k3x9: {by: ada, at: 2026-10-13T22:30Z}',
+  '  p7qd: {by: ada, at: 2026-10-13T22:31Z}',
+  '  w2rf: {by: bo, at: 2026-10-13T22:35Z}',
+  'comments:',
+  '  c8d2:',
+  '    by: bo',
+  '    at: 2026-10-13T22:40Z',
+  '    text: |-',
+  '      Who signs off on the security review?',
+  '-->',
+].join('\n');
+
+const marked = [
+  '# Launch plan',
+  '',
+  'We will ship the <!--ins k3x9-->new <!--/k3x9-->importer in <!--sub p7qd March-->April<!--/p7qd-->, after the <!--cmt c8d2-->security review<!--/c8d2-->.<!--del w2rf  The old exporter stays as it is.-->',
+  '',
+  LEDGER,
+  '',
+].join('\n');
+
+describe('documentHtml', () => {
+  it('draws the text as it reads now: insertions plain, deletions gone, no marks or comments', () => {
+    const html = documentHtml(marked);
+    expect(html).toContain('<h1');
+    expect(html).toContain('We will ship the new importer in April, after the security review.');
+    expect(html).not.toContain('exporter');
+    expect(html).not.toMatch(/<!--|version: 1|c8d2|k3x9|Who signs off|Bo Chen|ada@example/);
+  });
+
+  it('draws the Original as it was: insertions gone, deletions and replaced text back', () => {
+    const html = documentHtml(marked, 'original');
+    expect(html).toContain('We will ship the importer in March, after the security review.');
+    expect(html).toContain('The old exporter stays as it is.');
+    expect(html).not.toMatch(/<!--|version: 1|c8d2|Who signs off/);
+  });
+
+  it('leaves out YAML front matter', () => {
+    const html = documentHtml('---\ntitle: Secret\ntags: [a]\n---\n\n# Hello\n');
+    expect(html).toContain('Hello');
+    expect(html).not.toMatch(/Secret|title:/);
+    expect(documentText('---\na: 1\n---\nText\n')).toBe('\nText\n');
+  });
+
+  it('leaves out an ordinary comment block', () => {
+    const html = documentHtml('One\n\n<!-- a note to self -->\n\nTwo\n');
+    expect(html).not.toContain('note to self');
+    expect(html).toContain('Two');
+  });
+
+  it('draws tables, code, task items, footnotes and alerts', () => {
+    const html = documentHtml(
+      [
+        '| a | b |',
+        '| - | - |',
+        '| 1 | 2 |',
+        '',
+        '```js',
+        'const x = 1;',
+        '```',
+        '',
+        '- [x] done',
+        '- [ ] todo',
+        '',
+        'A claim[^1].',
+        '',
+        '[^1]: The source of it.',
+        '',
+        '> [!NOTE] Mind this',
+        '',
+      ].join('\n'),
+    );
+    expect(html).toContain('<table>');
+    expect(html).toContain('<pre');
+    expect(html).toContain('<li class="rl-task">☑ done</li>');
+    expect(html).toContain('A claim<sup>1</sup>.');
+    expect(html).toContain('<p class="rl-footnote"><sup>1</sup> The source of it.</p>');
+    expect(html).toContain('rl-callout-note');
+    expect(html).toContain('Mind this');
+    expect(html).not.toContain('[!NOTE]');
+  });
+
+  it('draws emoji and the images the host resolves, and the alt text of the rest', () => {
+    const html = documentHtml(
+      '![Chart](pics/a%20b.png) ![Gone](missing.png) ![Web](https://example.org/x.png) :tent:',
+      'clean',
+      {
+        emoji: (name) => (name === 'tent' ? '⛺' : undefined),
+        resolveImage: (path) => (path === 'pics/a b.png' ? 'asset://a.png' : null),
+      },
+    );
+    expect(html).toContain('<img src="asset://a.png" alt="Chart">');
+    expect(html).toContain('https://example.org/x.png');
+    expect(html).toContain('Gone');
+    expect(html).not.toContain('missing.png');
+    expect(html).toContain('⛺');
+  });
+
+  it('draws an HTML block sanitized, never live', () => {
+    const html = documentHtml('<p align="center">Hi <script>alert(1)</script><b>there</b></p>\n');
+    expect(html).toContain('class="rl-html"');
+    expect(html).toContain('<b>there</b>');
+    expect(html).not.toContain('<script');
+    expect(html).not.toContain('onclick');
+  });
+
+  it('keeps an image inside an HTML block, as the host resolves it', () => {
+    const html = documentHtml(
+      '<p align="center"><img src="a.png" alt="Pic" width="120"></p>\n',
+      'clean',
+      {
+        resolveImage: (path) => `asset://${path}`,
+      },
+    );
+    expect(html).toContain('<img src="asset://a.png" alt="Pic" width="120">');
+  });
+
+  it('keeps a link as a link and its words as its text', () => {
+    expect(documentHtml('See [the docs](https://example.org/d).')).toContain(
+      '<a href="https://example.org/d">the docs</a>',
+    );
+  });
+});

@@ -39,6 +39,7 @@
     "allow-crash-simulate",
     "allow-crash-slow",
     "allow-document-windows",
+    "allow-export-pdf",
     "allow-folder-exists",
     "allow-forget-documents",
     "allow-identity",

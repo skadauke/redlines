@@ -226,9 +226,17 @@ The window, on the desktop:
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
   in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close,
   Export to Word… (a save panel, then a notification, never a dialog, that says what Word can't hold; in the
-  development page the file downloads) and Print. `redlines export-docx <file> [-o out.docx]` does the same
-  from the command line. Printing holds the whole document in light ink and prints the view as it shows, without
-  the rail: Redlines in its simple look prints the newest text with its change bars. Saving a
+  development page the file downloads), Print and Export as PDF. `redlines export-docx <file> [-o out.docx]` does the same
+  from the command line. A printed page is the document as it reads now, set as a document: every
+  pending insertion as plain text and every pending deletion left out (the Original, when the
+  window shows that), with no change bar, comment, note or highlight, none of the window around
+  it, and nothing of the YAML front matter. It is black on white in every theme, in the theme's own
+  faces at 11 pt; links print as their words, underlined, with no address (the PDF keeps them live);
+  images fit the page, tables and code wrap, headings stay with what follows, and rows and images
+  are not split. It is drawn again as clean HTML (`documentHtml` of `@redlines/editor`, which Copy
+  for Word and the Word export share) into a container that only paper shows, not printed from the
+  editor, which draws only the lines in view. Export as PDF writes the same pages to a file chosen
+  in a save panel, with no print dialog. Saving a
   document that has no file yet opens the Save dialog in the default folder for new documents
   (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
   As of a saved document starts in that document's own folder.
@@ -757,9 +765,8 @@ mode has no counterpart in the desktop app.
   the screen line where the text was; a row of a table, and a block deleted whole, have a bar of
   their own. In Redlines a click on a bar switches between its two looks, the full markup and the
   simple look, as the View menu's Simple Look switch does: the bar is a target 24 px wide, only
-  beside the lines it marks, and it widens under the pointer. Printing draws the bars as a left border, which
-  prints, down the whole paragraph of a changed line: the bars were measured for the screen, and
-  the printed page wraps the text differently.
+  beside the lines it marks, and it widens under the pointer. Printing shows no bars: a printed page
+  has no markup.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
   - a substitution is the struck old text followed by the underlined new text, with one card
     ("Replaced 'March' with 'April'");

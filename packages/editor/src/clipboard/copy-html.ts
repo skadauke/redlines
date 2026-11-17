@@ -93,11 +93,26 @@ function bare(address: string): string {
   return address;
 }
 
+/**
+ * What a document (not a selection) is drawn with, for a page or a file: the parts of the language
+ * that a clip leaves as text. Everything here is off for a copy.
+ */
+export interface DocumentParts {
+  /** The address an image is loaded from, for the written one; null draws its alt text only. */
+  imageUrl?: (written: string) => string | null;
+  /** A block of HTML as the sanitized HTML that is drawn of it; null leaves it as text. */
+  html?: (source: string) => string | null;
+}
+
+/** A footnote's mark in prose: `[^1]`, not followed by the colon of its definition. */
+const FOOTNOTE_MARK = /\[\^([^\]\s&]+)\](?!:)/g;
+
 function render(
   src: string,
   fonts: FontStacks,
   keepAsText: (href: string) => boolean,
   emoji: EmojiLookup = () => undefined,
+  doc?: DocumentParts,
 ): string {
   const tree = markdown.parse(src);
   // Reference links take the address of their definition, when the copy has it.
@@ -129,8 +144,10 @@ function render(
     const href = value('src') ?? '';
     if (!href) return null;
     if (!safe(href) || keepAsText(href)) return escape(value('alt') ?? '');
+    const shown = doc?.imageUrl ? doc.imageUrl(href) : href;
+    if (shown === null) return escape(value('alt') ?? '');
     const width = /^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$/i.exec(value('width') ?? '')?.[1];
-    return `<img src="${escape(href)}" alt="${escape(value('alt') ?? '')}"${
+    return `<img src="${escape(shown)}" alt="${escape(value('alt') ?? '')}"${
       width && Number(width) > 0 ? ` width="${Math.round(Number(width))}"` : ''
     }>`;
   }
@@ -142,17 +159,21 @@ function render(
   /** Text between nodes, as the Markdown it was written. */
   const text = (from: number, to: number) => escape(slice(from, to));
 
+  /** Text of a document's prose, in which a footnote's mark is a superscript. */
+  const prose = (from: number, to: number) =>
+    doc ? text(from, to).replace(FOOTNOTE_MARK, '<sup>$1</sup>') : text(from, to);
+
   /** The children of `node` between `from` and `to`, with the text between them. */
   function inlines(node: SyntaxNode, from = node.from, to = node.to): string {
     let pos = from;
     let out = '';
     for (let child = node.firstChild; child; child = child.nextSibling) {
       if (child.to <= from || child.from >= to) continue;
-      out += text(pos, child.from);
+      out += prose(pos, child.from);
       out += inline(child);
       pos = child.to;
     }
-    return out + text(pos, to);
+    return out + prose(pos, to);
   }
 
   /** The children of `node` that are not marks, with the text between them. */
@@ -160,11 +181,11 @@ function render(
     let pos = node.from;
     let out = '';
     for (let child = node.firstChild; child; child = child.nextSibling) {
-      out += text(pos, child.from);
+      out += prose(pos, child.from);
       if (!marks.has(child.name)) out += inline(child);
       pos = child.to;
     }
-    return out + text(pos, node.to);
+    return out + prose(pos, node.to);
   }
 
   const wrap = (tag: string, node: SyntaxNode, marks: string) =>
@@ -173,7 +194,7 @@ function render(
   function link(node: SyntaxNode): string {
     const marks = node.getChildren('LinkMark');
     const url = node.getChild('URL');
-    if (!marks[0] || !marks[1]) return text(node.from, node.to);
+    if (!marks[0] || !marks[1]) return prose(node.from, node.to);
     const label = inlines(node, marks[0].to, marks[1].from);
     let href: string | undefined;
     if (url) href = destination(slice(url.from, url.to));
@@ -185,7 +206,7 @@ function render(
       );
       href = definitions.get(key(inside.trim() ? inside : slice(marks[0].to, marks[1].from)));
     }
-    if (href === undefined) return text(node.from, node.to);
+    if (href === undefined) return prose(node.from, node.to);
     return safe(href) ? `<a href="${escape(href)}">${label}</a>` : label;
   }
 
@@ -216,8 +237,9 @@ function render(
         const alt = slice(marks[0]!.to, marks[1].from);
         const href = destination(slice(url.from, url.to));
         // An image the preview doesn't fetch is not one a target should: its alt text only.
-        return safe(href) && !keepAsText(href)
-          ? `<img src="${escape(href)}" alt="${escape(alt)}">`
+        const shown = doc?.imageUrl ? doc.imageUrl(href) : href;
+        return safe(href) && !keepAsText(href) && shown !== null
+          ? `<img src="${escape(shown)}" alt="${escape(alt)}">`
           : escape(alt);
       }
       case 'Autolink':
@@ -329,7 +351,8 @@ function render(
         parts.push(block(child));
       }
     }
-    return `<li>${parts.join('')}</li>`;
+    const task = doc && parts.some((part) => /^[\u2610\u2611]/.test(part));
+    return `<li${task ? ' class="rl-task"' : ''}>${parts.join('')}</li>`;
   }
 
   function list(node: SyntaxNode): string {
@@ -367,10 +390,22 @@ function render(
     const level = /^(?:ATX|Setext)Heading([1-6])$/.exec(node.name)?.[1];
     if (level) return heading(node, Number(level));
     switch (node.name) {
-      case 'Paragraph':
+      case 'Paragraph': {
+        const note = doc ? /^\[\^([^\]\s]+)\]:[ \t]*/.exec(slice(node.from, node.to)) : null;
+        if (note) {
+          const body = inlines(node, node.from + note[0].length);
+          return `<p class="rl-footnote"><sup>${escape(note[1]!)}</sup> ${body}</p>`;
+        }
         return `<p>${inlines(node)}</p>`;
-      case 'Blockquote':
-        return `<blockquote>${blocks(node)}</blockquote>`;
+      }
+      case 'Blockquote': {
+        const body = blocks(node);
+        const alert = doc ? /^<p>\[!([A-Za-z][A-Za-z0-9-]*)\][ \t]*/.exec(body) : null;
+        if (!alert) return `<blockquote>${body}</blockquote>`;
+        const type = alert[1]!.toLowerCase();
+        const title = type.charAt(0).toUpperCase() + type.slice(1);
+        return `<blockquote class="rl-callout rl-callout-${escape(type)}"><p class="rl-callout-title">${escape(title)}</p><p>${body.slice(alert[0].length)}</blockquote>`;
+      }
       case 'BulletList':
       case 'OrderedList':
         return list(node);
@@ -381,11 +416,25 @@ function render(
         return '<hr>';
       case 'Table':
         return table(node);
-      case 'LinkReference':
+      case 'LinkReference': {
+        const note = doc
+          ? /^\[\^([^\]\s]+)\]:[ \t]*([\s\S]*)$/.exec(slice(node.from, node.to))
+          : null;
+        if (note) {
+          return `<p class="rl-footnote"><sup>${escape(note[1]!)}</sup> ${escape(note[2]!.trim())}</p>`;
+        }
         return `<p>${text(node.from, node.to)}</p>`;
+      }
       case 'HTMLBlock': {
         const picture = tagPicture(slice(node.from, node.to));
         if (picture !== null) return `<p>${picture}</p>`;
+        if (doc) {
+          // A comment is not shown; other HTML is drawn as the sanitizer allows.
+          const source = slice(node.from, node.to);
+          if (/^\s*<!--(?:(?!-->)[\s\S])*-->\s*$/.test(source)) return '';
+          const drawn = doc.html?.(source);
+          if (drawn !== null && drawn !== undefined) return `<div class="rl-html">${drawn}</div>`;
+        }
         return `<p>${text(node.from, node.to).replace(/\n/g, '<br>')}</p>`;
       }
       default:
@@ -400,6 +449,20 @@ function render(
   }
 
   return `<div data-redlines${style(fonts.body)}>${blocks(tree.topNode)}</div>`;
+}
+
+/**
+ * The HTML of a whole document's Markdown, for a page or a file: `markdownToHtml` and the parts of
+ * the language that a copy leaves as text (footnotes, alerts, task items, HTML blocks, the images
+ * the host resolves). `documentHtml` (document-html.ts) reads the document first.
+ */
+export function markdownToDocumentHtml(
+  source: string,
+  fonts: FontStacks,
+  emoji: EmojiLookup | undefined,
+  parts: DocumentParts,
+): string {
+  return render(source, fonts, () => false, emoji, parts);
 }
 
 /**
