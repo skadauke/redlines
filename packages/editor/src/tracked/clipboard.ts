@@ -28,6 +28,7 @@ import { htmlToMarkdown, htmlToRange } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
 import { pasteListItems } from '../blocks/keys.ts';
 import { LOOKS_LIKE_ITEMS } from '../blocks/paste.ts';
+import { emojiLookup } from '../preview/emoji.ts';
 import { heldRemoteImages } from '../preview/image.ts';
 import { headCell, rectOf } from '../table/cells.ts';
 import {
@@ -264,13 +265,14 @@ export function clipboard(): Extension {
         const holding = held;
         const altOnly = (href: string) =>
           holding === null || [...holding].some((url) => destination(url) === href);
+        const lookup = view.state.facet(emojiLookup);
         const own = cells && cells.text === text ? cells : null;
         cells = null;
         data.setData(
           'text/html',
           own
-            ? partsToHtml(own.parts, fontsOf(view), altOnly)
-            : markdownToHtml(text, fontsOf(view), altOnly),
+            ? partsToHtml(own.parts, fontsOf(view), altOnly, lookup)
+            : markdownToHtml(text, fontsOf(view), altOnly, lookup),
         );
       };
       view.dom.addEventListener('copy', copied);

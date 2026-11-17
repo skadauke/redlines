@@ -18,6 +18,7 @@ import { type Rect, rectOf } from './cells.ts';
 import { type Cell, type Table } from './model.ts';
 import { cellText } from './escape.ts';
 import { reachOf } from './reach.ts';
+import type { EmojiLookup } from '../preview/emoji.ts';
 
 /** One stretch of what is copied: Markdown text, or cells with the table's alignments. */
 export type CopyPart = { md: string } | { rows: string[][]; header: boolean; aligns: string[] };
@@ -87,12 +88,13 @@ export function partsToHtml(
   parts: readonly CopyPart[],
   fonts: FontStacks = DEFAULT_FONTS,
   altOnly: (href: string) => boolean = () => false,
+  emoji?: EmojiLookup,
 ): string {
   return parts
     .map((part) =>
       'md' in part
-        ? markdownToHtml(part.md, fonts, altOnly)
-        : cellsToHtml(part.rows, part.header, part.aligns, fonts, altOnly),
+        ? markdownToHtml(part.md, fonts, altOnly, emoji)
+        : cellsToHtml(part.rows, part.header, part.aligns, fonts, altOnly, emoji),
     )
     .join('');
 }
@@ -103,11 +105,13 @@ export function rectToHtml(
   rect: Rect,
   fonts: FontStacks = DEFAULT_FONTS,
   altOnly: (href: string) => boolean = () => false,
+  emoji?: EmojiLookup,
 ): string {
   return partsToHtml(
     [partOf(rect.table, rect.rows, rect.cols, newestOf(state)).part],
     fonts,
     altOnly,
+    emoji,
   );
 }
 

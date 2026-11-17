@@ -10,6 +10,7 @@
 
 import { GFM, parser } from '@lezer/markdown';
 import { readTag } from '../image-size.ts';
+import { emojiCodes, type EmojiLookup } from '../preview/emoji.ts';
 import { scriptTags } from '../preview/script.ts';
 
 /** The font stacks of a copy. */
@@ -42,7 +43,7 @@ export const DEFAULT_FONTS: FontStacks = {
 };
 
 // The tags of subscript and superscript are read as pairs, so that they are copied as live tags.
-const markdown = parser.configure([GFM, scriptTags]);
+const markdown = parser.configure([GFM, scriptTags, emojiCodes]);
 
 /** A reference label as definitions and uses agree on it. */
 const key = (label: string) => label.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -92,7 +93,12 @@ function bare(address: string): string {
   return address;
 }
 
-function render(src: string, fonts: FontStacks, keepAsText: (href: string) => boolean): string {
+function render(
+  src: string,
+  fonts: FontStacks,
+  keepAsText: (href: string) => boolean,
+  emoji: EmojiLookup = () => undefined,
+): string {
   const tree = markdown.parse(src);
   // Reference links take the address of their definition, when the copy has it.
   const definitions = new Map<string, string>();
@@ -221,6 +227,11 @@ function render(src: string, fonts: FontStacks, keepAsText: (href: string) => bo
         return safe(href)
           ? `<a href="${escape(href)}">${escape(slice(node.from, node.to))}</a>`
           : text(node.from, node.to);
+      }
+      case 'Emoji': {
+        // A shortcode the host knows is its character, as the editor draws it.
+        const char = emoji(slice(node.from + 1, node.to - 1));
+        return char === undefined ? text(node.from, node.to) : escape(char);
       }
       case 'Escape':
         return escape(slice(node.from + 1, node.to));
@@ -399,8 +410,9 @@ export function markdownToHtml(
   source: string,
   fonts: FontStacks = DEFAULT_FONTS,
   altOnly: (href: string) => boolean = () => false,
+  emoji?: EmojiLookup,
 ): string {
-  return render(source, fonts, altOnly);
+  return render(source, fonts, altOnly, emoji);
 }
 
 /**
@@ -414,6 +426,7 @@ export function cellsToHtml(
   aligns: readonly string[] = [],
   fonts: FontStacks = DEFAULT_FONTS,
   altOnly: (href: string) => boolean = () => false,
+  emoji?: EmojiLookup,
 ): string {
   const width = Math.max(1, ...rows.map((row) => row.length));
   const line = (row: readonly string[]) =>
@@ -427,6 +440,7 @@ export function cellsToHtml(
     [line(first), delimiter, ...rows.slice(1).map(line)].join('\n'),
     fonts,
     altOnly,
+    emoji,
   );
   const table = /<table>.*<\/table>/s.exec(html)?.[0] ?? '<table></table>';
   const open = /^<div[^>]*>/.exec(html)?.[0] ?? '<div data-redlines>';
