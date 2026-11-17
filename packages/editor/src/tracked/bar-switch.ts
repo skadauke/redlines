@@ -210,6 +210,55 @@ export function switchLookAt(
   // move lines (an image that loads, a height it learns).
   keep(top());
   view.requestMeasure({ read: top, write: keep });
+  holdLine(view, top, start, keep);
+}
+
+/** How long after a switch the line is kept where it was, in ms (#415). */
+const HOLD_MS = 700;
+/** What stops the hold: the person scrolling or typing is not to be fought. */
+const HOLD_STOPS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+const holds = new WeakMap<EditorView, () => void>();
+
+/**
+ * Keeps the line where it was for a moment after a switch, not only at the switch and in the next
+ * measure. CodeMirror may estimate again the heights of the lines it doesn't draw once the view has
+ * changed, and lines above the one kept then move it, hundreds of px, after those two passes; the
+ * page scrolls in an element around the editor, so CodeMirror's own anchoring doesn't reach it.
+ * Each frame the line's top is read, and put back where it was if it has moved. It ends after
+ * `HOLD_MS`, at the next switch, or at the first wheel, touch, press or key of the person's.
+ */
+function holdLine(
+  view: EditorView,
+  top: () => number,
+  start: number,
+  keep: (after: number) => void,
+): void {
+  holds.get(view)?.();
+  const win = view.dom.ownerDocument.defaultView;
+  if (!win) return;
+  const until = win.performance.now() + HOLD_MS;
+  let frame = 0;
+  let over = false;
+  const stop = () => {
+    over = true;
+    win.cancelAnimationFrame(frame);
+    for (const type of HOLD_STOPS) view.scrollDOM.removeEventListener(type, stop, true);
+    if (holds.get(view) === stop) holds.delete(view);
+  };
+  const step = () => {
+    if (!view.dom.isConnected || win.performance.now() > until) return stop();
+    view.requestMeasure({
+      read: top,
+      write: (after) => {
+        // A measure asked for before the stop may still come after it.
+        if (!over && Math.abs(after - start) >= 0.5) keep(after);
+      },
+    });
+    frame = win.requestAnimationFrame(step);
+  };
+  for (const type of HOLD_STOPS) view.scrollDOM.addEventListener(type, stop, true);
+  holds.set(view, stop);
+  frame = win.requestAnimationFrame(step);
 }
 
 /**
