@@ -299,7 +299,12 @@ fn hold(
     if !spelled(scope, path) {
         return false;
     }
-    remembered.note(&real(path).to_string_lossy());
+    let real = real(path);
+    // The spelling too, when it is another, so that the next launch is told of it again (`set_up`).
+    if path != real {
+        remembered.note(&path.to_string_lossy());
+    }
+    remembered.note(&real.to_string_lossy());
     projects.show(path);
     true
 }
@@ -876,7 +881,13 @@ mod tests {
         scope.allow_file(folder.join("plan-link.md")).unwrap();
         assert!(hold(&folder.join("plan-link.md")));
         let real = std::fs::canonicalize(notes.join("plan.md")).unwrap();
-        assert_eq!(*remembered.lock(), [real.to_string_lossy()]);
+        assert_eq!(
+            *remembered.lock(),
+            [
+                real.to_string_lossy(),
+                folder.join("plan-link.md").to_string_lossy()
+            ]
+        );
         // The sidebar shows the folder of the path the window holds.
         assert_eq!(projects.folders(), [folder.as_path()]);
         assert!(crate::project::shown_in(&projects.folders(), &key, false).is_err());
