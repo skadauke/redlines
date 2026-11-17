@@ -19,6 +19,7 @@ import {
 import type { Ledger, MarkEntry, MarkRange, Parsed, Range, Thread } from '@redlines/format';
 import type { PushContext, PushRefusal } from './authority.ts';
 import type { Decision } from './protocol.ts';
+import { sha256 } from './sha256.ts';
 
 /** A decision that was logged: who, and how. The first decision on a mark wins. */
 export interface DecidedRecord {
@@ -44,19 +45,7 @@ const LONGEST_DECISION = 1000;
 
 // --- digests -----------------------------------------------------------------------------------
 
-/** A short stable hash (cyrb53). It tells two readings of a mark apart; it is no secret. */
-function hash(text: string): string {
-  let h1 = 0xdeadbeef;
-  let h2 = 0x41c6ce57;
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 2654435761);
-    h2 = Math.imul(h2 ^ c, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
-}
+const hash = sha256;
 
 const isRowOrColumn = (mark: MarkRange) =>
   (mark.kind === 'ins' && (mark.payload === 'row' || mark.payload === 'col')) ||
@@ -140,6 +129,21 @@ function bodyOf(text: string, parsed: Parsed): string {
  */
 function withoutOwn(text: string, handle: string): string | null {
   let parsed = parse(text);
+  // Other people's marks inside the commenter's own marks go with them when those are taken away,
+  // so they are kept apart and compared as they are.
+  const own = parsed.marks.filter((m) => m.entry.by === handle).map((m) => markSpan(text, m));
+  const nested = parsed.marks
+    .filter((m) => m.entry.by !== handle)
+    .filter((m) =>
+      own.some(
+        (o) =>
+          (m.segments[0]?.open.from ?? -1) >= o.from && (m.segments[0]?.open.from ?? -1) < o.to,
+      ),
+    )
+    .map((m) => {
+      const span = markSpan(text, m);
+      return [m.id, text.slice(span.from, span.to)];
+    });
   const suggestions = parsed.marks.filter(
     (mark) => mark.entry.by === handle && mark.kind !== 'cmt' && mark.kind !== 'hl',
   );
@@ -176,22 +180,35 @@ function withoutOwn(text: string, handle: string): string | null {
     at = cut.to;
   }
   out += current.slice(at);
-  return bodyOf(out, parse(out));
+  return `${bodyOf(out, parse(out))}\u0001${JSON.stringify(nested)}`;
 }
 
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** A thread as other people's: without the replies and likes of `handle`, and without a resolve. */
+/**
+ * A thread as other people's: without the replies, likes and resolve of `handle`. What is left must
+ * not change.
+ */
 function othersView(thread: Thread, handle: string) {
-  const { replies, likes, ...rest } = thread;
-  delete rest.resolved;
+  const { replies, likes, resolved, ...rest } = thread;
   return {
     ...rest,
+    ...(resolved && resolved.by !== handle ? { resolved } : {}),
     replies: replies.filter((r) => r.by !== handle),
     likes: likes.filter((l) => l.by !== handle),
   };
+}
+
+/** Whether a thread of the commenter's own says anything in someone else's name. */
+function forgedThread(thread: Thread, handle: string): boolean {
+  return (
+    thread.by !== handle ||
+    thread.replies.some((r) => r.by !== handle) ||
+    thread.likes.some((l) => l.by !== handle) ||
+    (thread.resolved !== undefined && thread.resolved.by !== handle)
+  );
 }
 
 /** Why the ledger after is not the ledger before plus what `handle` may add, or null. */
@@ -210,6 +227,16 @@ function ledgerRefusal(before: Ledger, after: Ledger, handle: string): string | 
   const entries = (marks: Record<string, MarkEntry>) =>
     Object.entries(marks).filter(([, entry]) => entry.by !== handle);
   if (!same(entries(bm), entries(am))) return 'A commenter cannot change other people’s marks.';
+  if (ac.some((t) => t.by === handle && forgedThread(t, handle))) {
+    return 'A commenter can only write in their own name.';
+  }
+  const mine = ap.find((p) => p.handle === handle);
+  if (mine && (mine.aliases || mine.accounts || mine.members || mine.deleted || mine.extra)) {
+    return 'A commenter cannot set who they are.';
+  }
+  if (Object.values(am).some((e) => e.by === handle && e.move !== undefined)) {
+    return 'A commenter cannot move marks.';
+  }
   const others = (threads: Thread[]) =>
     threads.filter((t) => t.by !== handle).map((t) => othersView(t, handle));
   if (!same(others(bc), others(ac))) return 'A commenter cannot change other people’s comments.';

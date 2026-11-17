@@ -7,6 +7,7 @@ import {
   parse,
   rejectMarks,
   reply,
+  resolve,
   suggestReplace,
 } from '@redlines/format';
 import type { EditContext, TextChange } from '@redlines/format';
@@ -199,6 +200,25 @@ describe('a commenter', () => {
       seen: seenDigests(text, suggestionIds),
     };
     expect(code(pushText(authority, 'cy', accepted, { decision }))).toBe('forbidden');
+  });
+});
+
+describe('a commenter, in someone else’s name', () => {
+  it('may not put words in another person’s mouth in their own thread', () => {
+    const { authority, text } = start();
+    const at = text.indexOf('theta');
+    const own = addComment(text, { from: at, to: at + 5 }, 'Hm', ctx('cy', 'Cy'));
+    const withOwn = applyChanges(text, own.changes);
+    const forged = applyChanges(withOwn, reply(withOwn, own.id, 'I approve.', ctx('bo', 'Bo')));
+    expect(code(pushText(authority, 'cy', forged))).toBe('forbidden');
+  });
+
+  it('may resolve in their own name only', () => {
+    const { authority, text, threadId } = start();
+    const asBo = applyChanges(text, resolve(text, threadId, ctx('bo', 'Bo')));
+    expect(code(pushText(authority, 'cy', asBo))).toBe('forbidden');
+    const asCy = applyChanges(text, resolve(text, threadId, ctx('cy', 'Cy')));
+    expect(code(pushText(authority, 'cy', asCy))).toBe('ok');
   });
 });
 
