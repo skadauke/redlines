@@ -23,7 +23,9 @@ import {
   type Thread,
   type WarningCode,
 } from '@redlines/format';
-import { type FontStacks, destination, fontStack, markdownToHtml } from '../clipboard/copy-html.ts';
+import { type FontStacks, destination, fontStack } from '../clipboard/copy-html.ts';
+import { documentHtml } from '../clipboard/document-html.ts';
+import { imageResolver } from '../preview/image.ts';
 import { htmlToMarkdown, htmlToRange } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
 import { pasteListItems } from '../blocks/keys.ts';
@@ -172,6 +174,33 @@ function fontsOf(view: EditorView): FontStacks {
   };
 }
 
+/**
+ * An image the editor has drawn, as a `data:` address, which Word and Google Docs load where they
+ * fail a remote or local one. Null when it isn't loaded here or the page may not read its pixels.
+ */
+function embedded(view: EditorView, shown: string): string | null {
+  if (shown.startsWith('data:') || typeof document === 'undefined') return shown;
+  for (const img of Array.from(view.dom.querySelectorAll('img'))) {
+    if (img.src !== shown && img.getAttribute('src') !== shown) continue;
+    if (!img.complete || !img.naturalWidth) return null;
+    // A picture too large to copy in a keystroke stays an address.
+    if (img.naturalWidth * img.naturalHeight > 12_000_000) return null;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      context.drawImage(img, 0, 0);
+      const url = canvas.toDataURL('image/png');
+      return url.startsWith('data:image') && url.length < 8_000_000 ? url : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /** Whether `pos` is in code, where a paste is text as it is. */
 function inCode(state: EditorState, pos: number): boolean {
   for (
@@ -295,7 +324,15 @@ export function clipboard(): Extension {
           'text/html',
           own
             ? partsToHtml(own.parts, fontsOf(view), altOnly, lookup)
-            : markdownToHtml(text, fontsOf(view), altOnly, lookup),
+            : documentHtml(text, 'clean', {
+                office: true,
+                clip: true,
+                fonts: fontsOf(view),
+                emoji: lookup,
+                altOnly,
+                resolveImage: view.state.facet(imageResolver) ?? ((path) => path),
+                embedImage: (shown) => embedded(view, shown),
+              }),
         );
       };
       view.dom.addEventListener('copy', copied);
