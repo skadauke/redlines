@@ -10,7 +10,9 @@ export {
   codeFileHighlight,
   codeFileLanguage,
   codeHighlight,
+  chunkLanguage,
   codeLanguages,
+  codeLanguagesFor,
   codeSpans,
   codeStyle,
 } from './highlight.ts';

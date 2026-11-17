@@ -334,6 +334,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       close: () => close(true),
       stop: () => session.stop(),
       chooseModel: (model) => session.setModel(model),
+      typing: (text) => session.draft(text),
       consent: (answer) => session.answerConsent(answer),
       dismiss: () => session.dismiss(),
       ...(options.showLog ? { showLog: options.showLog } : {}),
