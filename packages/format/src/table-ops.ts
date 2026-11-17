@@ -1658,6 +1658,13 @@ function relocatedPatch(text: string, table: TableRead, index: number): TextChan
  */
 export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
   try {
+    // A table in the new text of a pending replacement takes no mark of its own there (a decision of
+    // the replacement would hide it): the operation is written into the replacement's new text.
+    if (inReplacementText(text, op)) return widenedTableEdit(text, op, ctx);
+  } catch (first) {
+    if (!(first instanceof EditError) && !(first instanceof Untrackable)) throw first;
+  }
+  try {
     return fineTableEdit(text, op, ctx);
   } catch (error) {
     if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
@@ -1672,6 +1679,22 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
       throw second;
     }
   }
+}
+
+/** Whether the table that `op` is on stands in the new text of a pending replacement. */
+function inReplacementText(text: string, op: TableOp): boolean {
+  const at = 'table' in op ? op.table : undefined;
+  if (typeof at !== 'number') return false;
+  return parse(text).marks.some(
+    (mark) =>
+      mark.kind === 'sub' &&
+      mark.segments.some(
+        (segment) =>
+          segment.close !== undefined &&
+          (segment.carrier?.to ?? segment.content.from) <= at &&
+          at < segment.content.to,
+      ),
+  );
 }
 
 /**

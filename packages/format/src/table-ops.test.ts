@@ -505,7 +505,6 @@ describe('deciding and viewing an inserted row (format §3.7, §8)', () => {
 describe('deleting a whole table (format §3.7, rule 6)', () => {
   const around = (table: string) => `Intro.\n\n${table}\n\nAfter.`;
   const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
-  const pending = (name: string) => `${name}'s pending change is in this table. Decide it first.`;
   const CODE_AFTER =
     "This table can't be deleted with Track Changes on while a code block follows it with no text between. Put a paragraph between them first, or turn off Track Changes.";
   const CODE_BEFORE =

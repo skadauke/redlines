@@ -207,7 +207,7 @@ function collapseBlankRuns(view: string): string {
 }
 
 /** The text without the blank lines at its end. */
-const tidy = (view: string) => collapseBlankRuns(view.replace(/\r\n/g, '\n')).replace(/\s+$/, '');
+const tidy = (view: string) => collapseBlankRuns(view).replace(/\s+$/, '');
 
 /**
  * Deletes the table of `text` whole (format §3.7, rule 6), by `who`, or plain with none, alone in the
