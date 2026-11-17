@@ -282,7 +282,7 @@ export function blankTrailingMarkers(text: string): string {
 export function trailingMarkersEnd(text: string, at: number): number {
   const eol = text.indexOf('\n', at);
   const line = text.slice(at, eol === -1 ? text.length : eol).replace(/\r$/, '');
-  const found = /^(?:<!--(?:split [a-z0-9]{4}|\/[a-z0-9]{4})-->)+(?=[ \t]*$)/.exec(line);
+  const found = /^[ \t]*(?:<!--(?:split [a-z0-9]{4}|\/[a-z0-9]{4})-->)+(?=[ \t]*$)/.exec(line);
   return found ? at + found[0].length : at;
 }
 
