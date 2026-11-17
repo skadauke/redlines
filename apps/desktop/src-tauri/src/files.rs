@@ -248,11 +248,18 @@ pub fn export_pdf(
     let Some(mut path) = chosen else {
         return Ok(None);
     };
-    if path
+    if !path
         .extension()
-        .is_none_or(|extension| !extension.eq_ignore_ascii_case("pdf"))
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
     {
-        path.set_extension("pdf");
+        // The panel confirmed the name as typed, not another: add the extension, and never write
+        // over a file the person didn't see named.
+        let mut named = path.into_os_string();
+        named.push(".pdf");
+        path = PathBuf::from(named);
+        if path.exists() {
+            return Err(format!("{} already exists.", path.display()));
+        }
     }
     let target = path.to_string_lossy().into_owned();
     #[cfg(target_os = "macos")]

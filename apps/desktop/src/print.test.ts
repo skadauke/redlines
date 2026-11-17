@@ -30,6 +30,15 @@ describe('the print container', () => {
     expect(printContainer().innerHTML).toBe('');
   });
 
+  it('lets an older page’s release leave a newer page alone', async () => {
+    const first = await fillPrintPage('<p>One</p>');
+    const second = await fillPrintPage('<p>Two</p>');
+    first();
+    expect(printContainer().innerHTML).toBe('<p>Two</p>');
+    second();
+    expect(printContainer().innerHTML).toBe('');
+  });
+
   it('waits for images, and gives up on a slow one', async () => {
     vi.useFakeTimers();
     try {

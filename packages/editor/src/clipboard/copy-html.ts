@@ -431,7 +431,7 @@ function render(
         if (doc) {
           // A comment is not shown; other HTML is drawn as the sanitizer allows.
           const source = slice(node.from, node.to);
-          if (/^\s*<!--[\s\S]*-->\s*$/.test(source)) return '';
+          if (/^\s*<!--(?:(?!-->)[\s\S])*-->\s*$/.test(source)) return '';
           const drawn = doc.html?.(source);
           if (drawn !== null && drawn !== undefined) return `<div class="rl-html">${drawn}</div>`;
         }

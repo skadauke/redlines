@@ -22,6 +22,9 @@ export function printContainer(doc: Document = document): HTMLElement {
   return container;
 }
 
+/** The number of the last page put in the container. */
+let fills = 0;
+
 /** Resolves when every image under `root` has loaded or failed, or after `timeout` ms. */
 export function imagesLoaded(root: ParentNode, timeout = IMAGE_WAIT_MS): Promise<void> {
   const pending = Array.from(root.querySelectorAll('img')).filter(
@@ -52,8 +55,14 @@ export function imagesLoaded(root: ParentNode, timeout = IMAGE_WAIT_MS): Promise
 export async function fillPrintPage(html: string, doc: Document = document): Promise<() => void> {
   const container = printContainer(doc);
   container.innerHTML = html;
+  // A release only empties the page it filled: an older print's hold may let go later, under a
+  // newer page that is being written to a PDF.
+  const mine = String(++fills);
+  container.dataset['fill'] = mine;
   await imagesLoaded(container);
-  return () => container.replaceChildren();
+  return () => {
+    if (container.dataset['fill'] === mine) container.replaceChildren();
+  };
 }
 
 /** A text or code file's page: its text as it is, in the page's code face, long lines wrapped. */
