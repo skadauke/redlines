@@ -10,7 +10,7 @@ import { applyChanges } from './changes.ts';
 import { Untrackable } from './widen.ts';
 import { expectEveryOrderRead, expectSound } from './oracle.ts';
 import { parse } from './parse.ts';
-import { ada, bo, bodyOf, context, file, problemsOf } from './test-helpers.ts';
+import { ada, bo, bodyOf, context, file, problemsOf, thread } from './test-helpers.ts';
 import { newestView, originalView } from './views.ts';
 
 /** A deterministic random source of its own, for ids. */
@@ -157,5 +157,42 @@ describe('moving blocks that bring two lists side by side (#871)', () => {
     const swapped = moved(file('- a\n\n1. b'), '- a', false);
     expect(viewOf(swapped)).toBe('1. b\n\n- a\n');
     expect(problemsOf(parse(swapped))).toEqual([]);
+  });
+});
+
+describe('moving blocks that hold comments or pending changes (#1052)', () => {
+  const ASKED = file(
+    '- alpha <!--cmt k6hg-->x<!--/k6hg-->\n- beta <!--cmt k6hj-->y<!--/k6hj-->',
+    {},
+    [...thread('k6hg', 'bo', 'One.'), ...thread('k6hj', 'bo', 'Two.')],
+  );
+
+  it('moves the text without tracking with the markers of its comments (verbatim edits)', () => {
+    const view = viewOf(ASKED);
+    const at = view.indexOf('alpha');
+    const run = blockRunAt(ASKED, { from: at, to: at })!;
+    const plan = moveBlockEdits(ASKED, run, neighbourGap(run, false)!)!;
+    expect(plan.verbatim).toBe(true);
+    const after = applyChanges(ASKED, plan.edits);
+    expect(bodyOf(after)).toContain(
+      '- beta <!--cmt k6hj-->y<!--/k6hj-->\n- alpha <!--cmt k6hg-->x<!--/k6hg-->',
+    );
+    expect(problemsOf(parse(after))).toEqual([]);
+  });
+
+  it('writes a plain move that holds no comment as it did', () => {
+    const plain = file('- alpha\n- beta');
+    const run = blockRunAt(plain, { from: 3, to: 3 })!;
+    expect(moveBlockEdits(plain, run, neighbourGap(run, false)!)!.verbatim).toBeUndefined();
+  });
+
+  it('is one replacement where the blocks hold pending changes, which read alike in every order', () => {
+    const text = file(
+      'One.\n\ndelta <!--ins m94w-->new\ncafé <!--del bv23 gone--><!--/m94w-->\n\nLast.',
+      { m94w: 'bo', bv23: 'ada' },
+    );
+    const out = moved(text, 'delta', true);
+    expect(bodyOf(out)).toContain('<!--sub ');
+    expectEveryOrderRead('pending', out);
   });
 });

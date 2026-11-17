@@ -318,12 +318,7 @@ function verbatimChunk(
  * above the sibling at the gap or after the one above it, then the same text again with the
  * siblings that it passes moving the other way, which reads as the same file.
  */
-function plansOf(
-  text: string,
-  run: BlockRun,
-  gap: BlockGap,
-  verbatim = false,
-): Plan[] {
+function plansOf(text: string, run: BlockRun, gap: BlockGap, verbatim = false): Plan[] {
   const read = readRun(text, run.viewFrom, run.viewTo);
   const firstUnit = read?.siblings[read.first];
   const lastUnit = read?.siblings[read.last];

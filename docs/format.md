@@ -3527,7 +3527,17 @@ blocks of the document's own flow, §3.7.)
   So is a move that leaves two lists side by side (a paragraph between them moved away, or a list
   moved up to one): the newest view reads them as one list and the marker between them in the file
   reads two, so no fine write is tried, and where no unit passes either, the person is asked (#883).
-- **Track Changes off.** The same two edits are made plain.
+- **Pending changes in the blocks.** Where the blocks a move takes out hold a pending change (an
+  insertion, deletion, replacement, split or format change, whoever made it), the move is written as
+  the widened replacement at once: the fine write would put the deletions among the markers of
+  another person's insertion, a mark on each line, and those read otherwise when some are decided
+  and others not (#1052). Where no unit holds the replacement, the fine write is tried after it.
+- **Track Changes off.** The same two edits are made plain, and the moved text is the file's own,
+  markers included, where the blocks hold a comment or a highlight: its markers go with it, so a
+  comment stays on the words it was on, and no marker is left alone on a line where it would split
+  a list (#1052). The text goes as it is written, taken out of the old place and put in at the new,
+  not typed (typed text may hold no markup). Where a mark reaches out of the blocks, the move is
+  written as typed text, and the marks that reach out keep a point where the text was.
 
 ### 3.15 HTML with a Markdown twin
 
