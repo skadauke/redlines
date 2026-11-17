@@ -944,7 +944,7 @@ describe('keeping an answer', () => {
     // Claude's answer is Claude's, the person's question is theirs, and Codex's answer is Codex's.
     expect(thread?.replies.map(({ by, text }) => [by, text])).toEqual([
       ['claude-ada', 'A lien is a claim.'],
-      ['ada', 'do you agree?'],
+      ['ada', '@Codex do you agree?'],
       ['codex-ada', 'Codex agrees.'],
     ]);
     // Both agents are among the people, each acting for the person who asked.
