@@ -166,6 +166,21 @@ let imageUrl: ((written: string) => string | null) | null = null;
 /** Whether a `<picture>` picks the source made for a dark appearance (#818). */
 let darkPicture = false;
 
+const localOnly = new WeakMap<object, (written: string) => string | null>();
+/** The host's resolver as one that finds local images only; one function per resolver, so that a
+ * rebuilt block's widget equals the last (`eq`). */
+function localImages(resolve: (path: string) => string | null): (written: string) => string | null {
+  let found = localOnly.get(resolve);
+  if (!found) {
+    found = (written) => {
+      const source = sourceOf(written);
+      return source.kind === 'local' ? resolve(source.path) : null;
+    };
+    localOnly.set(resolve, found);
+  }
+  return found;
+}
+
 /** Whether the window shows a dark appearance: the app's (`data-rl-appearance`), else the system's. */
 function isDark(): boolean {
   if (typeof document === 'undefined') return false;
@@ -224,7 +239,7 @@ function copyElement(
   if (depth > MAX_DEPTH) return;
   if (name === 'picture') {
     // The image that matches the appearance; its sources are never loaded themselves.
-    const img = element.querySelector('img');
+    const img = Array.from(element.children).find((c) => c.localName.toLowerCase() === 'img');
     if (img) {
       copyImage(img, pictureSource(element, img), to, doc);
       return;
@@ -495,12 +510,7 @@ export function htmlBlock(b: BlockSink, node: SyntaxNode): boolean {
   const selected = state.selection.ranges.some((range) => isWhole(range, block));
   const resolve = state.facet(imageResolver);
   // Only a local image is drawn, through the host's resolver; a remote or data address stays a box.
-  const image = resolve
-    ? (written: string): string | null => {
-        const found = sourceOf(written);
-        return found.kind === 'local' ? resolve(found.path) : null;
-      }
-    : null;
+  const image = resolve ? localImages(resolve) : null;
   const widget = new HtmlBlockWidget(
     state.sliceDoc(block.from, block.to),
     selected,
