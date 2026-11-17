@@ -431,6 +431,12 @@ const CHECKS: Check[] = [
     file: '- two⏎- one',
   },
   {
+    name: 'shift-option-down-selects-to-paragraph-end',
+    doc: 'On‸e.⏎⏎Two three.',
+    steps: ['Shift-Alt-ArrowDown'],
+    selected: 'e.',
+  },
+  {
     name: 'shift-option-up-selects-to-paragraph-start',
     doc: 'One.⏎⏎Tw‸o three.',
     steps: ['Shift-Alt-ArrowUp'],

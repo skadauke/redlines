@@ -821,7 +821,7 @@ const pointer: Check[] = [
     },
   },
   {
-    name: 'option-down-home-end-and-typing-next-to-a-struck-block-act-on-the-text-beside-it',
+    name: 'shift-option-down-home-end-and-typing-next-to-a-struck-block-act-on-the-text-beside-it',
     async run(editor) {
       await open(editor, 'redlines', 'After the deleted paragraph.');
       const problems: Problem = {};
@@ -852,7 +852,7 @@ const pointer: Check[] = [
           seen.push(head(editor));
         }
         const wanted = [aboveEnd, belowEnd, belowStart, aboveStart];
-        if (seen.join() !== wanted.join()) problems['option'] = { seen, wanted };
+        if (seen.join() !== wanted.join()) problems['shiftOption'] = { seen, wanted };
       }
       // End and Home stay on their own line, in the text, never in the block.
       await place(editor, belowStart + 4);
