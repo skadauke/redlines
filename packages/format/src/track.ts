@@ -1263,10 +1263,11 @@ function coverBreaks(
   from: number,
   to: number,
   typed = '',
-): Range & { kept: string; lead: string; tail: string } {
+): Range & { kept: string; lead: string; tail: string; retype: boolean } {
   let kept = '';
   let lead = '';
   let tail = '';
+  let retype = false;
   // The first line of the file has no break in front of it.
   const first = from < to ? prefixEnd(plan, from) : undefined;
   if (first !== undefined && to > first) from = first;
@@ -1329,15 +1330,18 @@ function coverBreaks(
       // next block, with no line break in the range: the break stays, all of it, with what is typed
       // in it. (A deletion there is another rule: `blankLineCut`, or it takes the break.)
       if (
-        typed !== '' &&
+        (typed !== '' || deletedInBlank(plan, from, to)) &&
         !partly &&
         from > found.start &&
         lineStart(plan.text, from) < prefix &&
-        to <= lineEnd(plan.text, from) &&
-        !own()
+        to <= lineEnd(plan.text, from)
       ) {
         lead = visibleText(plan.text, plan.markers, found.start, from);
         tail = visibleText(plan.text, plan.markers, to, found.end);
+        // The break of the author's own split is her own insertion: the split is cancelled with
+        // its break, and what stays of it is typed again with what is typed, its line breaks as
+        // new splits, not as raw line breaks in an insertion (#419).
+        retype = own();
         // Two spaces or more at the end of the line above are a hard break once the line under it
         // goes on the paragraph (what is typed is not blank): in front of the opener, and not in the
         // text that is typed again, they would no longer end their line for a reader that does not
@@ -1365,7 +1369,22 @@ function coverBreaks(
       to = Math.max(to, found.end);
     }
   }
-  return { from, to, kept, lead, tail };
+  return { from, to, kept, lead, tail, retype };
+}
+
+/**
+ * Whether `from` to `to` is white space and quote markers inside one blank line of a quote, in the
+ * break between two blocks, where `blankLineCut` has no rule: the indentation in front of the
+ * markers, or a line of the break of a split. Such a deletion takes no line break away, and is
+ * written as a substitution that keeps the break, as the replaced text of #358 is (#447).
+ */
+function deletedInBlank(plan: Plan, from: number, to: number): boolean {
+  const { text } = plan;
+  if (from >= to || !/^[ \t>]+$/.test(text.slice(from, to))) return false;
+  const line = text.slice(lineStart(text, from), lineEnd(text, from));
+  if (to > lineEnd(text, from) || !/^[ \t>]*$/.test(line) || !line.includes('>')) return false;
+  const read = blockQuoteAt(text, lineStart(text, from));
+  return read !== undefined;
 }
 
 /**
@@ -2925,10 +2944,18 @@ function splitBehind(plan: Plan, at: number, typed: string): Behind | undefined 
     if (!commutes(place)) return undefined;
     const tokens = tokenize(typed, linePrefixAt(text, place));
     if (tokens.length === 0) return undefined;
+    // A bare line break typed in a list goes in behind the indentation of the line it stands on,
+    // which would leave the text after it out of the item: the last break takes the indentation
+    // with it, as Enter's own does (#120).
+    const indent = text.slice(lineStart(text, place), place);
     let insert = '';
-    for (const token of tokens) {
+    for (const [i, token] of tokens.entries()) {
       if (!('brk' in token)) return undefined;
-      insert += SPLIT + String.fromCharCode(LENGTH + token.brk.length) + token.brk;
+      const brk =
+        i === tokens.length - 1 && /^[ \t]+$/.test(indent) && !token.brk.endsWith(indent)
+          ? token.brk + indent
+          : token.brk;
+      insert += SPLIT + String.fromCharCode(LENGTH + brk.length) + brk;
     }
     return { change: { from: place, to: place, insert } };
   }
@@ -4263,6 +4290,11 @@ function planEdit(plan: Plan, edit: TextChange): void {
     typed += covered.kept;
     lead = covered.lead;
     tail = covered.tail;
+    if (covered.retype) {
+      typed = lead + typed + tail;
+      lead = '';
+      tail = '';
+    }
   }
   const covers = { from, to };
   // Whether the range starts at the text of a line that goes on a paragraph, and no marker may stand
@@ -4572,6 +4604,29 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
       );
     }
   }
+  // A segment of another person's mark that the edit made, whose text starts with a line break on
+  // the line of a block's prefix (`2. ⏎> beta` cut after the prefix), has the same carrier, and the
+  // break is in no view (#430). It is written as a replacement of the unit instead.
+  const afterPrefix = (text: string, open: { from: number }) => {
+    const line = text.slice(text.lastIndexOf('\n', open.from - 1) + 1, open.from);
+    return /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(line.replace(/<!--[^]*?-->/g, ''));
+  };
+  const carriers = (marks: Parsed['marks'], text: string) =>
+    new Map(
+      marks.map((mark) => [
+        mark.id,
+        mark.segments.filter((s) => s.carrier && s.open && afterPrefix(text, s.open)).length,
+      ]),
+    );
+  const carried = carriers(plan.parsed.marks, plan.text);
+  for (const [id, count] of carriers(parsed.marks, after)) {
+    if (count > (carried.get(id) ?? Infinity)) {
+      throw new EditError(
+        'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
+        'no-legal-placement',
+      );
+    }
+  }
   // Each break is read as long as it was written. It is not when the line it follows has another
   // prefix in the new text than in the old, because another change was made on the way.
   const limit = parsed.ledgerRange?.from;
@@ -4637,10 +4692,14 @@ function selfCheck(
   // there are: text that lands on another line than the one it was typed on reads otherwise, with
   // the same letters (#111).
   const lines = edited.every((edit) => !/[\r\n]/.test(view.text.slice(edit.from, edit.to)));
+  // Digits count too where no edit takes a line break away, so that a lost line break between lines
+  // that hold only numbers is seen (#418); not the number of a list item, which a deletion of a
+  // block's text takes with its prefix.
   const letters = (s: string) =>
     s
       .replace(/\r\n?/g, '\n')
-      .replace(lines ? /[^\p{L}\n]+/gu : /[^\p{L}]+/gu, '')
+      .replace(lines ? /^[ \t>]*\d{1,9}[.)](?=[ \t]|$)/gm : /^$/g, '')
+      .replace(lines ? /[^\p{L}\p{N}\n]+/gu : /[^\p{L}]+/gu, '')
       .replace(/\n+/g, '\n')
       .replace(/^\n|\n$/g, '');
   // The original text of a deletion has the line breaks of its payload, which are LF.
@@ -5294,6 +5353,25 @@ export function fineEdit(text: string, edit: TextChange, ctx: EditContext): Text
   return fineEdits(text, [edit], ctx).changes;
 }
 
+/**
+ * Where text typed at `at` goes in a file that is a deletion of its blocks alone (a table deleted
+ * with nothing else in the file, format §3.4): after the deletion's marker, not before it. The
+ * newest view has nothing there, so the two places read alike, and after the marker the text is a
+ * paragraph of its own, below the deleted blocks, where the editor draws them (#470); before it the
+ * text shares the marker's line and the deleted table is drawn as source. Otherwise `at`.
+ */
+function pastLoneDeletion(text: string, at: number): number {
+  const parsed = parse(text);
+  const [only] = parsed.marks;
+  const segment = only?.segments[0];
+  if (parsed.marks.length !== 1 || only?.kind !== 'del' || only.segments.length !== 1) return at;
+  if (!segment || segment.carrier || segment.open.from !== at) return at;
+  const end = parsed.ledgerRange?.from ?? text.length;
+  if (!/^\s*$/.test(text.slice(0, at)) || !/^\s*$/.test(text.slice(segment.open.to, end)))
+    return at;
+  return segment.open.to;
+}
+
 function editsWidening(
   text: string,
   edits: readonly TextChange[],
@@ -5301,6 +5379,10 @@ function editsWidening(
   widening: boolean,
 ): TrackedEdits {
   for (const edit of edits) assertWholeCharacters(text, edit);
+  if (edits.length === 1 && edits[0]!.from === edits[0]!.to && edits[0]!.insert !== '') {
+    const at = pastLoneDeletion(text, edits[0]!.from);
+    if (at !== edits[0]!.from) edits = [{ ...edits[0]!, from: at, to: at }];
+  }
   // A block's start typed into an empty item is a block of its own in the newest view, and the file
   // reads it as text of the item (#583): the whole item is written as a replacement.
   if (edits.some((edit) => startsBlockInEmptyItem(text, edit))) {

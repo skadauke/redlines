@@ -542,6 +542,10 @@ function itemDepth(state: EditorState, line: Line): number {
   return block ? itemsAround(state, block).length : 0;
 }
 
+/** A line that ends in a hard break: two spaces, or a backslash that no other backslash escapes
+ * (`\\` is a backslash, no break, #291). */
+const HARD_BREAK_END = /(?:(?<!\\)(?:\\\\)*\\| {2,})$/;
+
 /** Why Return at the start of a nested list's first item, under the text of its item, is refused. */
 const NEEDS_BLANK_LINE =
   "An empty item can't start a list right under a line of text in Markdown, and a blank line there would make the item above it loose. Put a blank line above the list first.";
@@ -569,6 +573,38 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
   const sibling = newItem(state, item);
   const refuse = (refusal: string): KeyEdit => ({ ...nothing(state), refusal });
   const first = state.doc.lineAt(block.lines.from).number === item.line.number;
+  // Return over a selection that starts the text of a nested first item, under the text of its
+  // item, with Track Changes on: the deletion has gone in first, and the item's own line holds
+  // only its syntax and the struck text, with the rest of its text on the line below, where the
+  // caret stands. The item is then empty in the newest view, which a break right under the text of
+  // the item above would read as an underline: the empty item goes in above it with the blank
+  // line, as for a Return at the start of the first item (#395).
+  if (
+    head <= start &&
+    !first &&
+    state.field(trackingField, false) &&
+    items.length > 1 &&
+    state.doc.lineAt(block.lines.from).number === item.line.number + 1 &&
+    /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(item.line.text.replace(/<!--[^]*?-->/g, '')) &&
+    /<!--del /.test(item.line.text)
+  ) {
+    const above = item.node.prevSibling ? null : lineAbove(state, item.line);
+    if (
+      above &&
+      !BLANK.test(above.text) &&
+      itemDepth(state, above) < items.length &&
+      !HARD_BREAK_END.test(above.text)
+    ) {
+      const joined = `\n${blankOf(item.indent)}\n${item.indent}${item.marker}${item.after}`;
+      return {
+        changes: [{ from: above.to, insert: joined }],
+        selection: EditorSelection.single(head + joined.length),
+        userEvent: 'input.break',
+        caretAt: head,
+        fallback: refuse(NEEDS_BLANK_LINE),
+      };
+    }
+  }
   if (head <= start && first) {
     // An empty item above, the caret staying with the text. A task item keeps its own box: the
     // new item's goes in front of it.
@@ -590,7 +626,7 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
     // would stand on the blank line, with Track Changes on the key says so.
     const above = item.node.prevSibling ? null : lineAbove(state, item.line);
     const under = above && !BLANK.test(above.text) && itemDepth(state, above) < items.length;
-    if (under && tracking && items.length > 1 && /(?:\\| {2,})$/.test(above.text)) {
+    if (under && tracking && items.length > 1 && HARD_BREAK_END.test(above.text)) {
       // A hard break above: the break typed after its backslash would put a marker right behind it.
       return refuse(NEEDS_BLANK_AFTER_HARD_BREAK);
     }
@@ -606,7 +642,9 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       // belongs to the list). A blank line there, after the one that goes over the item, was
       // written as two splits, the second a marker line in column 0, which ended the item above
       // (walk seed 23 of the lists side by side).
-      const joined = `\n${blankOf(item.indent)}\n${item.indent}${item.marker}${item.after}`;
+      // A task item's box goes with it, as the other forms of the key keep it.
+      const copy = box ? state.sliceDoc(box.from, block.text.from) : '';
+      const joined = `\n${blankOf(item.indent)}\n${item.indent}${item.marker}${item.after}${copy}`;
       return {
         changes: [{ from: above.to, insert: joined }],
         selection: EditorSelection.single(start + joined.length),

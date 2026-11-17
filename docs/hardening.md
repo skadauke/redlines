@@ -255,12 +255,11 @@ its case; each is a bug. The list is what has been found, not a count of what is
   a line as the text it is since #600 (format §3.2). Left: at the first line of the file with Track
   Changes on the key still refuses, since the format has no place for the blank line next to the
   marker's deletion (#291).
-- A deletion inside a blank line of a break that takes no line break, in a shape that the rule for a
-  quote's blank lines does not know (the `>` of a blank line indented in a list item, in the break of
-  a pending split, a quote that starts at the blank line), is written as the join of the two blocks;
-  the last check sees it only where letters differ (#447, #418). So is a replacement inside the
-  blank line of the break of the author's own pending split, and a line break typed there with
-  letters as well (#419).
+- The last check (`selfCheck`) compares letters and digits, and where the edit takes no line break
+  away, where the line breaks fall among them: a line break that an edit lost between lines of
+  digits or markers is seen (#418). A deletion inside a blank line of a break, and a replacement
+  inside the blank line of the break of the author's own pending split, are written as a
+  substitution that keeps the break, so that every order of decisions reads as typed (#447, #419).
 - A highlight that runs from the text above a table into its header row can make another person's
   pending column change impossible to decide (#396).
 - The backslash and emphasis fixes leave five cases in one shape wrong, as on main, and refuse
