@@ -116,7 +116,11 @@ export function widenedCellFormat(
         return !seen.has(key) && seen.add(key);
       })
       .toSorted((a, b) => a.from - b.from || a.to - b.to);
-    if (edits.some((edit, i) => i > 0 && edit.from < (edits[i - 1] as TextChange).to)) throw first;
+    let reach = 0;
+    for (const edit of edits) {
+      if (edit.from < reach) throw first;
+      reach = Math.max(reach, edit.to);
+    }
     if (edits.length === 0) throw first;
     const done = widen(text, edits, ctx);
     // Outside a table's cells, another person's mark at the unit's edge keeps the refusal (#107).
