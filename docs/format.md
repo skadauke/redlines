@@ -264,6 +264,10 @@ early, must stay on one line, and must not let other tools act on what it contai
   the body out of it still leaves the file CRLF, so the `\n`s of its payloads still mean CRLF. Only
   a tool that gives the body a CRLF where it had none, or takes the ledger away, changes what the
   `\n`s of changes already written mean; a break that is written with its own kind never changes.
+- **A U+FFFF in the text is written as it is.** A tool keeps `\x0a` (an LF in a CRLF file) apart from
+  a U+FFFF of the text by its own means; in the file the two never meet, because `\x0a` is an
+  escape and U+FFFF is the character. A file written before this rule has no raw U+FFFF in a
+  payload (its writer turned one into `\x0a`), so every such file reads as it did.
 - All 271,452 non-empty strings of up to five characters over a 12-character alphabet of the
   characters above round-trip.
 - The ledger uses the same escapes, except that a value may span lines (§5.5).
