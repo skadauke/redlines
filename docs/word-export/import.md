@@ -155,3 +155,19 @@ gives it:
    text, rows and columns, moves, formatting, replies, resolve, like). These
    become the regression suite, checked against pandoc where pandoc can read
    them.
+
+## Google Docs' own .docx
+
+Docs' export reads as a Word file with these differences (`packages/word/src/google/`; fixture
+`packages/word/fixtures/docs-suggestions-and-comment.docx`, from the study):
+
+- Suggestions are `w:ins` and `w:del` by the person's name. Docs' `w:date` is real UTC; Word's is
+  local time with a false `Z`. Docs has no `w16du:dateUtc`.
+- Every inserted run carries an `rPrChange` with empty old properties. It is noise inside a `w:ins`
+  and is dropped. Outside one it is a suggested formatting change, and stays.
+- Every `rsid*` is zeros; runs carry `w:rtl w:val="0"`, fonts and sizes, a heading's runs repeat its
+  bold, and paragraphs end in an empty run. `normalizeGoogleDocx` takes all of it out.
+- Comment ids are a space of their own (an insertion and a comment may both be 0).
+- Resolved comments and every reply are missing from the file. A file Docs wrote says so in its
+  report, and `docsRoundTripNotes(text)` tells a person exporting to Docs how many replies and
+  resolved threads will not come back.
