@@ -1023,7 +1023,11 @@ at the outer edge of a whole inline construct. A marker never goes:
    would leave half a character in the file, which no tool reads back (the editor never makes one;
    a program that counts in code units can). A shortcode is `:name:` of gemoji's kind: lowercase
    letters, digits, `_` and `-` with a letter among them, `+1`, `-1`, `100` and `1234`, and the
-   six names of one letter (`:x:`), whichever of them GitHub knows;
+   six names of one letter (`:x:`), whichever of them GitHub knows. The construct is read as it is when pending deletions are rejected, too: a comment's or a
+   highlight's marker never stands between the pieces of an entity, a tag or a link's syntax that
+   rejecting deletions would put together (`&a` deleted, `m`, `p`, `;` deleted is `&amp;`). It goes to
+   the construct's nearest edge, the left one when both are as near, and the mark covers the
+   whole construct or none of it (#467);
 2. inside a link destination, title or reference label, between `]` and `(`, or inside the text of
    a collapsed or shortcut reference link (`[text]`, `[text][]`). The text of an inline link is
    fine;
