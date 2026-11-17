@@ -727,7 +727,7 @@ mode has no counterpart in the desktop app.
   Make Edit accepts them (never rejects) and makes the edit, as one step to undo, and it is asked
   every time. A host with no sheet refuses as before, and an agent's edit is never made untracked.
   A refusal is kept only where every write would leave the file wrong, and, for now, where the
-  unit a widened edit would replace holds another person's pending change ([hardening](hardening.md)).
+  unit a widened edit would replace has another person's pending mark at its edge ([hardening](hardening.md)).
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the

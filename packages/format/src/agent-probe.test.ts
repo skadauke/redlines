@@ -96,6 +96,7 @@ describe('edits that the fine writer refuses, over other people’s marks', () =
       }
     }
     if (process.env['PROBE_SEEDS']) console.log(`edit probe: ${JSON.stringify(seen)}`);
+    expect(seen.written, 'edits written as replacements').toBeGreaterThan(0);
     expect(unsound).toEqual([]);
   }, 600_000);
 });
