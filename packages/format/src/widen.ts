@@ -7,7 +7,8 @@
 // Nothing calls this yet: the writers that refuse today will call it in their turn. It is the one
 // writer all of them share: they differ in why the fine form failed, not in what to write.
 
-import { scaffold, continuationPrefix, bodyStart } from './blocks.ts';
+import { scaffold, continuationPrefix, bodyStart, lineEnd, lineStart } from './blocks.ts';
+import { micromark } from 'micromark';
 import { applyChanges, eolOf } from './changes.ts';
 import { accept, isDecidable, reject, rejectMarks } from './decide.ts';
 import { addPerson, changesBetween, paragraphBreaks, workingLedger } from './edit-support.ts';
@@ -135,7 +136,11 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
   const id = newId(idsIn(text), ctx.random);
   let rung = rungOf(units, sourceFrom, sourceTo);
   // Where no unit of its own holds the edit, the unit and the block after it are replaced together.
-  let spare = rung ? withNext(units, rung) : undefined;
+  let fromSpare = false;
+  let spare =
+    rung && atBlockBoundary(text, edits) && !(rung.parent && rung.kind === 'code')
+      ? withNext(units, rung)
+      : undefined;
   // A unit that closure brought back to one already tried would go up and down for ever.
   const tried = new Set<string>();
   for (let index = 0; rung; index++) {
@@ -168,8 +173,12 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
       blocks,
       region,
     );
-    if (done) return done;
-    rung = widerThan(closed) ?? spare;
+    // The unit with the block after it is kept only where micromark reads its file as the newest
+    // view (the check of the oracle's reader), else the ladder ends in an alert.
+    if (done && !(fromSpare && readsOtherwise(text, done.changes))) return done;
+    const wider = widerThan(closed);
+    fromSpare = !wider && spare !== undefined;
+    rung = wider ?? spare;
     spare = undefined;
   }
   trace?.('ladder-end');
@@ -452,8 +461,8 @@ function tryRung(
   // An HTML block goes on over the line after it, a closer included: the closer stands after a blank
   // line, where it is an HTML block of its own (#597).
   const html = HTML_LINE.test(lastLineOf(now, rung.prefix));
-  if (html && rung.prefix !== '') return giveUp('html');
   const bare = endsInBare(now);
+  if (html && rung.prefix !== '') return giveUp('html');
   const atomic =
     html ||
     rung.atomic ||
@@ -676,4 +685,53 @@ function failure(
     throw error;
   }
   return undefined;
+}
+
+/** The syntax of a block's first line, up to where an edit starts. */
+const SYNTAX_PREFIX =
+  /^(?:#{1,6}[ \t]*|[-*+][ \t]*|\d{1,9}[.)][ \t]*|<[^\s>]*|`{3,}[^`]*|~{3,}.*)$/;
+const LIST_LINE = /^[ \t>]*(?:\d{1,9}[.)]|[-*+])(?:[ \t]|$)/;
+
+/**
+ * Whether an edit is where a fine write can read otherwise in the file than in the newest view: it
+ * starts inside a block's syntax (the `>` of a tag, the space of `## `, right behind a bare
+ * marker), or it is in indented code with a list item close below it. Only these are read by
+ * micromark (`readsOtherwise`), so that a keystroke elsewhere costs what it did.
+ */
+export function atBlockBoundary(text: string, edits: readonly TextChange[]): boolean {
+  return edits.some((edit) => {
+    const start = lineStart(text, edit.from);
+    const prefix = text
+      .slice(start, edit.from)
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/^[ \t]*(?:>[ \t]*)*/, '');
+    if (
+      prefix !== '' &&
+      SYNTAX_PREFIX.test(prefix) &&
+      (edit.insert.includes('\n') || !/[ \t]$/.test(prefix))
+    ) {
+      return true;
+    }
+    if (!/^(?: {4}|\t)/.test(text.slice(start))) return false;
+    let at = lineEnd(text, edit.to);
+    for (let i = 0; i < 4 && at < text.length; i++) {
+      const next = lineEnd(text, at + 1);
+      if (LIST_LINE.test(text.slice(at + 1, next))) return true;
+      at = next;
+    }
+    return false;
+  });
+}
+
+/** Whether micromark reads the file the changes make otherwise than its newest view. */
+export function readsOtherwise(text: string, changes: readonly TextChange[]): boolean {
+  const file = applyChanges(text, changes);
+  const ledger = parse(file).ledgerRange;
+  const read = (source: string) =>
+    micromark(source, { allowDangerousHtml: true })
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/ ?(<[^>]*>) ?/g, '$1')
+      .trim();
+  return read(ledger ? file.slice(0, ledger.from) : file) !== read(newestView(file).text);
 }
