@@ -15,6 +15,9 @@ export type FailureId =
   | 'not-approved'
   | 'tools-unavailable'
   | 'agent-silent'
+  | 'token-refused'
+  | 'gateway-newer'
+  | 'connection-failed'
   | 'not-connected';
 
 /** What the button does, which the sheet carries out. */
@@ -64,7 +67,7 @@ export function failure(id: FailureId, subject: Subject = {}): Failure {
       return {
         id,
         title: 'Tailscale is not on this Mac',
-        body: 'Redlines reaches your other computer over Tailscale, a private network between your own computers.',
+        body: 'Redlines reaches your other computer over Tailscale, a private network between your own computers. Download the app, open it and sign in with the same account as your other computer. Redlines notices by itself.',
         step: 'Step 1',
         action: 'download-tailscale',
         label: 'Download Tailscale',
@@ -132,6 +135,33 @@ export function failure(id: FailureId, subject: Subject = {}): Failure {
         action: 'try-again',
         label: 'Try again',
       };
+    case 'token-refused':
+      return {
+        id,
+        title: 'The Gateway doesn’t accept that token',
+        body: 'It may have been changed or turned off. Ask your agent for a new setup code.',
+        step: 'Step 3',
+        action: 'copy-code-request',
+        label: 'Copy the request for a new code',
+      };
+    case 'gateway-newer':
+      return {
+        id,
+        title: 'This OpenClaw is newer than Redlines knows',
+        body: 'Redlines won’t guess how to talk to it. Update Redlines, then try again.',
+        step: 'Step 4',
+        action: 'try-again',
+        label: 'Try again',
+      };
+    case 'connection-failed':
+      return {
+        id,
+        title: `${computer} refused the connection`,
+        body: 'Nothing was changed on either computer. Details has what it said.',
+        step: 'Step 4',
+        action: 'try-again',
+        label: 'Try again',
+      };
     case 'not-connected':
       return {
         id,
@@ -154,5 +184,8 @@ export const FAILURE_IDS: readonly FailureId[] = [
   'not-approved',
   'tools-unavailable',
   'agent-silent',
+  'token-refused',
+  'gateway-newer',
+  'connection-failed',
   'not-connected',
 ];

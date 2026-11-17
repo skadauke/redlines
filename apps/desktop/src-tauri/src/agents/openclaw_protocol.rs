@@ -20,9 +20,6 @@
 //! A Gateway that speaks a newer protocol than [`PROTOCOL`] is told apart (`is_newer`), so that the
 //! sheet says "this Gateway is newer than Redlines knows" rather than failing in a strange way.
 
-// Nothing starts the node until the tool bridge is wired (OC 5): what is here is run by its tests.
-#![allow(dead_code)]
-
 use serde_json::{Value, json};
 
 /// The protocol version this was written against, and the only one it offers.

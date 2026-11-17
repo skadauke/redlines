@@ -17,6 +17,7 @@ import {
   type SkillState,
   type GatewayProbe,
   type NewOpenClawConnection,
+  type NodeStatus,
   type OpenClawChange,
   type OpenClawConnection,
   type TailscaleStatus,
@@ -140,6 +141,20 @@ export const openClawConnections = {
     invoke<OpenClawConnection[]>('openclaw_connection_remove', { handle }),
   useToken: (handle: string, token: string) =>
     invoke<OpenClawConnection[]>('openclaw_use_token', { handle, token }),
+};
+
+/**
+ * The connection of an OpenClaw agent to its Gateway (agents/openclaw_nodes.rs, node.rs): started
+ * with the setup code the person pasted, which goes to the app and is never kept or shown, or with
+ * the token the app kept; its status is polled; stopping it leaves the agent in the list.
+ */
+export const openClawNode = {
+  connect: (handle: string, setupCode: string | null) =>
+    invoke<void>('openclaw_node_connect', { handle, setupCode }),
+  status: (handle: string) => invoke<NodeStatus | null>('openclaw_node_status', { handle }),
+  stop: (handle: string) => invoke<void>('openclaw_node_stop', { handle }),
+  /** This Mac's name as its owner knows it. */
+  thisMac: () => invoke<string>('openclaw_this_mac'),
 };
 
 /**

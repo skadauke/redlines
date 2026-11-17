@@ -36,7 +36,7 @@ describe('failure cards', () => {
       expect(card.step).toMatch(/^(Step [1-5]|Later)$/);
       expect(card.label.length).toBeGreaterThan(2);
     }
-    expect(new Set(FAILURE_IDS).size).toBe(10);
+    expect(new Set(FAILURE_IDS).size).toBe(13);
   });
 
   it('names the computer and the agent where the person has seen them', () => {
