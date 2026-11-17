@@ -5038,6 +5038,28 @@ export function trackedEdits(
   return editsWidening(text, edits, ctx, true);
 }
 
+/**
+ * `trackedEdits` for an edit that a key knows no fine form reads right for, though the format's
+ * own check accepts one (a reader of the file reads it otherwise than the newest view): it is
+ * written as a replacement of its unit at once, and where no unit holds it, as `trackedEdits` does.
+ */
+export function widenedFirstEdits(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+): TrackedEdits {
+  try {
+    return widenedEdits(
+      text,
+      edits,
+      ctx,
+      new EditError('Written as a replacement of its unit.', 'no-legal-placement'),
+    );
+  } catch {
+    return editsWidening(text, edits, ctx, true);
+  }
+}
+
 /** `trackedEdits` as marks at the grain of the edit only: what reads alike in every order, or the
  * refusal. For the tests of the fine forms, and for writers that compose edits by position, which a
  * replacement moves. */

@@ -427,6 +427,11 @@ function tryRung(
     rung.prefix === '' &&
     /^\r?\n\r?\n[ \t]*\S/.test(next) &&
     !/^\r?\n\r?\n<!-- redlines/.test(next);
+  // An indented line after the blank line goes on the indented code that the unit ends in: the closer
+  // standing in the blank line would cut that block in two.
+  if (blankAfter && /(?:^|\n)( {4}|\t)[^\n]*$/.test(now) && /^\r?\n\r?\n( {4}|\t)/.test(next)) {
+    return giveUp('code goes on');
+  }
   const payload = blankAfter ? `${old}\n` : old;
   const opener = `<!--sub ${id} ${encodePayload(payload)}-->`;
   const closer = `<!--/${id}-->`;

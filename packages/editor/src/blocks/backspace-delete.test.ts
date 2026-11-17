@@ -98,14 +98,14 @@ describe('Backspace at the start of a block', () => {
         doc: 'Head⏎===⏎⏎‸Two.',
         keys: BS,
         off: { caret: 'Head‸Two.⏎===' },
-        on: { caret: 'Head⏎===⏎⏎‸Two.', refusal: SETEXT_JOIN },
+        on: { caret: '<sub Head⏎===⏎⏎Two.>⏎⏎Head‸Two.⏎===⏎</sub>' },
       },
       {
         name: 'Delete at the end of a setext heading, a paragraph after it',
         doc: 'Head‸⏎---⏎⏎Two.',
         keys: DEL,
         off: { caret: 'Head‸Two.⏎---' },
-        on: { caret: 'Head‸⏎---⏎⏎Two.', refusal: SETEXT_JOIN },
+        on: { caret: '<sub Head⏎---⏎⏎Two.>⏎⏎HeadTwo.⏎---‸⏎</sub>' },
       },
       {
         name: 'a paragraph after a setext heading in a quote',
@@ -771,7 +771,7 @@ describe('At the start of the document, Track Changes on', () => {
         doc: '> > ‸One.⏎> >⏎> > Two.',
         keys: BS,
         off: { caret: '> ‸One.⏎> ⏎> > Two.' },
-        on: { caret: '> > ‸One.⏎> >⏎> > Two.', refusal: DEEP_AT_START },
+        on: { caret: '> <sub > One.⏎> >⏎> > Two.>⏎>⏎> One.⏎> >⏎> > Two.‸</sub>' },
       },
       {
         name: 'the first item of a list in a quote',
@@ -990,7 +990,7 @@ describe('Numbered items that would become text (walk seeds 332, 511, 887)', () 
         doc: '- plan‸⏎  1) alpha⏎  2) ship',
         keys: DEL,
         off: { caret: '- plan‸alpha⏎⏎  2) ship' },
-        on: { caret: '- plan‸⏎  1) alpha⏎  2) ship', refusal: NUMBERED_IN_CONTAINER },
+        on: { caret: '- <sub plan⏎  1) alpha⏎  2) ship>⏎  planalpha⏎⏎  2) ship‸</sub>' },
       },
     ]),
     ...both([

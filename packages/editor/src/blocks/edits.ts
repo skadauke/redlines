@@ -101,6 +101,9 @@ export interface KeyEdit {
   openPlain?: { insert: string; down: number; at?: number };
   /** What the key does instead when the format refuses its changes. */
   fallback?: KeyEdit;
+  /** The changes are written as a replacement of their unit at once: the format accepts a fine
+   * form of them that a reader of the file reads otherwise than the newest view. */
+  widenFirst?: boolean;
 }
 
 /** A key that is taken and does nothing, the caret left where it is. */

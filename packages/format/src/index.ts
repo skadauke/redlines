@@ -57,7 +57,7 @@ export { fineFormat, trackedFormat, trackedFormatRanges, untrackedFormat } from 
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
 export { recordTracking, setView } from './settings.ts';
-export { fineEdit, fineEdits, trackedEdit, trackedEdits } from './track.ts';
+export { fineEdit, fineEdits, trackedEdit, trackedEdits, widenedFirstEdits } from './track.ts';
 export type { TrackedEdits } from './track.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';
 export type { UntrackedContext } from './untracked.ts';

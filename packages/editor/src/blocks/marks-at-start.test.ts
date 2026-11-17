@@ -77,14 +77,16 @@ describe('a join with a block that starts with another person’s insertion', ()
         doc: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two',
         keys: ['Delete'],
         off: { caret: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two', refusal: REWRITE },
-        on: { caret: 'Para.‸⏎⏎3. <ins>one</ins>⏎4. two', refusal: REWRITE },
+        on: {
+          caret: 'Para.‸<del ⏎⏎><sub 3. <!--ins zbb9-->one<!--/zbb9-->⏎4. two>3. one⏎⏎4. two</sub>',
+        },
       },
       {
         name: 'Delete before an item whose only text is the other person’s deletion: refused, naming them',
         doc: '- one‸⏎- <del x>⏎- two',
         keys: ['Delete'],
         off: { caret: '- one‸⏎- <del x>⏎- two', refusal: ONLY_DELETED },
-        on: { caret: '- one‸⏎- <del x>⏎- two', refusal: ONLY_DELETED },
+        on: { caret: '- one‸⏎- <del x>⏎- two' },
         skip: { render: 'The starting document reads that way: its item is empty to micromark.' },
       },
       {
@@ -92,7 +94,7 @@ describe('a join with a block that starts with another person’s insertion', ()
         doc: '- one⏎- <del x>⏎- ‸two',
         keys: ['Backspace'],
         off: { caret: '- one⏎- <del x>⏎- ‸two', refusal: ONLY_DELETED },
-        on: { caret: '- one⏎- <del x>⏎- ‸two', refusal: ONLY_DELETED },
+        on: { caret: '- one⏎- <del x>⏎‸- two' },
         skip: { render: 'The starting document reads that way: its item is empty to micromark.' },
       },
       {

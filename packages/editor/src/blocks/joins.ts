@@ -454,15 +454,11 @@ const movedLines = (
 ): ChangeSpec[] =>
   state.field(trackingField, false) ? (under.replace ? [under.replace] : []) : under.changes;
 
-/** Why a join in a list or quote can't keep the next numbered item apart, tracked. */
-const NUMBERED_IN_CONTAINER =
-  "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
-
 /** Why the first item of a numbered list at the start of a file can't leave it, tracked. */
 const FIRST_NUMBERED =
   "This item can't leave its list while Track Changes is on: a line below it (a number other than 1, an empty item or an underline) would read as part of its text. Take the marker out with Track Changes off, or move the lines below it first.";
 
-/** Words for a join onto a setext heading with Track Changes on. */
+/** Words for a join onto a setext heading in a list or a quote with Track Changes on. */
 const SETEXT_JOIN =
   "A heading underlined with === or --- can't take the block below it while Track Changes is on: its underline would have to be written again after the new text, behind a marker, where it would no longer be an underline. Join them with Track Changes off.";
 
@@ -487,10 +483,13 @@ function join(
   }
   const changes: ChangeSpec[] = [];
   let from = above.lines.to;
-  if (above.kind === 'heading' && above.setext && state.field(trackingField, false)) {
-    // The underline would be written again after the text joined to it, as an insertion, whose
-    // closer ends the underline's line: micromark reads that line as text, and the newest view as
-    // a heading. No other order of the marks puts a clean `===` line there (format §3.4).
+  // The underline written again after the text joined to it would end in a closer: a reader of the
+  // file reads that line as text, and the newest view as a heading. A replacement of the block
+  // holds it (format §3.12).
+  let widenFirst =
+    above.kind === 'heading' && !!above.setext && !!state.field(trackingField, false);
+  if (widenFirst && above.containers.length) {
+    // The block's replacement is not known to read right inside a container yet.
     return { ...nothing(state), refusal: SETEXT_JOIN };
   }
   if (above.kind === 'heading' && above.setext) {
@@ -507,11 +506,10 @@ function join(
     changes.push({ from: below.text.to, to: below.lines.to });
   }
   const blank = numberedKept(state, above, below);
+  // The blank line that keeps the next numbered item from becoming text can't be written beside a
+  // closer inside a list or a quote: a replacement of the unit holds both.
   if (blank !== null && state.field(trackingField, false) && above.containers.length) {
-    // The blank line that keeps the next numbered item from becoming text would be written with
-    // the closer of the change on its own line, inside a list or a quote, where it is no blank
-    // line to a reader that doesn't know the markers (format §3.4; #248, walk seed 887).
-    return { ...nothing(state), refusal: NUMBERED_IN_CONTAINER };
+    widenFirst = true;
   }
   const first = changes[0] as { from: number; to: number };
   if (
@@ -520,8 +518,14 @@ function join(
     !(below.kind === 'heading' && below.setext)
   ) {
     const words = holdsOthersChange(state, first.from, doc.lineAt(below.lines.to).to);
-    if (words) return { ...nothing(state), refusal: words };
-    changes[0] = withBlankAfter(state, first, doc.lineAt(below.lines.to).to, blank);
+    if (words && !state.field(trackingField, false)) return { ...nothing(state), refusal: words };
+    if (words) {
+      // Text that holds another person's marks can't be written again behind a marker: the blank
+      // line is a change of its own, and the format widens the two where they can't stand together.
+      changes.push({ from: doc.lineAt(below.lines.to).to + 1, insert: `${blank}\n` });
+    } else {
+      changes[0] = withBlankAfter(state, first, doc.lineAt(below.lines.to).to, blank);
+    }
   } else if (blank !== null) {
     changes.push({ from: doc.lineAt(below.lines.to).to + 1, insert: `${blank}\n` });
   }
@@ -539,7 +543,7 @@ function join(
     if (stuck) return stuck;
     changes.push(...movedLines(state, under));
   }
-  return edit(state, changes, from, userEvent);
+  return { ...edit(state, changes, from, userEvent), ...(widenFirst ? { widenFirst } : {}) };
 }
 
 /**
@@ -1038,8 +1042,12 @@ function outOfList(
         };
       }
       const words = holdsOthersChange(state, first.from, last.to);
-      if (words) return { ...nothing(state), refusal: words };
-      changes[0] = withBlankAfter(state, first, last.to, blankOf(number[1]!));
+      if (words && !state.field(trackingField, false)) return { ...nothing(state), refusal: words };
+      if (words) {
+        changes.push({ from: last.to + 1, insert: `${blankOf(number[1]!)}\n` });
+      } else {
+        changes[0] = withBlankAfter(state, first, last.to, blankOf(number[1]!));
+      }
     }
   }
   const stuck = codeRefusal(state, under, userEvent);
@@ -1377,7 +1385,7 @@ export function planBackspace(state: EditorState): KeyEdit | null {
   }
   const nodes = containerNodes(state, block);
   const { prev } = neighbours(state, block);
-  const deleted = prev && onlyDeletedText(state, prev);
+  const deleted = prev && !state.field(trackingField, false) && onlyDeletedText(state, prev);
   if (deleted) return { ...nothing(state), refusal: deleted };
   const item = itemStartedBy(state, block, nodes);
   let edit: KeyEdit;
@@ -1438,7 +1446,7 @@ export function planDelete(state: EditorState): KeyEdit | null {
     );
   }
   const { next } = neighbours(state, block);
-  const deleted = next && onlyDeletedText(state, next);
+  const deleted = next && !state.field(trackingField, false) && onlyDeletedText(state, next);
   if (deleted) return { ...nothing(state), refusal: deleted };
   if (!next || NO_TEXT.has(next.kind) || onlyHidden(state, next.lines.from, next.lines.to)) {
     return nothing(state);

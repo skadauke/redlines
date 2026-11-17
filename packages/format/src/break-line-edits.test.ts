@@ -23,7 +23,7 @@ import {
   squash,
   thread,
 } from './test-helpers.ts';
-import { SELF_CHECK, trackedEdits } from './track.ts';
+import { SELF_CHECK, fineEdits as trackedEdits } from './track.ts';
 import type { Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
 

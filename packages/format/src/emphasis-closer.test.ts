@@ -8,7 +8,7 @@ import { EditError } from './errors.ts';
 import { expectSound, readsAsNewest } from './oracle.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { ada, bodyOf, context, file } from './test-helpers.ts';
-import { trackedEdit } from './track.ts';
+import { fineEdit as trackedEdit } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** `pasted` typed at the caret `‸` of `body`: the file it leaves. */

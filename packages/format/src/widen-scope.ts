@@ -10,11 +10,11 @@ import type { Unit } from './widen-units.ts';
 export type WidenScope = 'cell' | 'code' | 'list' | 'block';
 
 /** The places whose format changes are widened when no fine form writes them. */
-export const WIDEN_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['cell', 'list']);
+export const WIDEN_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['cell', 'list', 'block']);
 
 /** The places whose typed, pasted and key edits are widened. The table's own edits go through its
  * operations (`table-widen.ts`), and a cell's typing keeps the rules of the table. */
-export const WIDEN_EDIT_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['list']);
+export const WIDEN_EDIT_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['list', 'block']);
 
 /** Where the source range `[from, to]` is: by the innermost unit that holds it. */
 export function scopeOfUnits(units: readonly Unit[], from: number, to: number): WidenScope {
@@ -39,7 +39,10 @@ export function scopeOfUnits(units: readonly Unit[], from: number, to: number): 
 
 /** The scope of a range of the source of `text`. */
 export function scopeOf(text: string, from: number, to: number): WidenScope {
-  return scopeOfUnits(unitsOf(text, parse(text)), from, to);
+  const scope = scopeOfUnits(unitsOf(text, parse(text)), from, to);
+  // Display math is the code lane's (R5), as raw HTML and fences are.
+  if (scope === 'block' && inDisplayMath(text, from, to)) return 'code';
+  return scope;
 }
 
 /** Whether a format change in the source range is widened. */
@@ -50,4 +53,15 @@ export function widensHere(text: string, from: number, to: number): boolean {
 /** Whether a typed, pasted or key edit in the source range is widened. */
 export function widensEditHere(text: string, from: number, to: number): boolean {
   return WIDEN_EDIT_SCOPES.has(scopeOf(text, from, to));
+}
+
+/** Whether the range is in a `$$` pair. */
+function inDisplayMath(text: string, from: number, to: number): boolean {
+  const fences = [...text.matchAll(/^[ \t>]*\$\$/gm)].map((m) => m.index!);
+  for (let i = 0; i + 1 < fences.length; i += 2) {
+    const open = fences[i]!;
+    const end = text.indexOf('\n', fences[i + 1]!);
+    if (from <= (end < 0 ? text.length : end) && open <= to) return true;
+  }
+  return fences.length % 2 === 1 && (fences.at(-1) ?? 0) <= to;
 }

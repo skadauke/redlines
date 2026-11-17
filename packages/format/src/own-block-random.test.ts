@@ -10,11 +10,11 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
 import type { BlockType, FormatOp } from './format-ops.ts';
-import { trackedFormat } from './formatting.ts';
+import { fineFormat as trackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { decidable, expectSameWords, expectSampledDecisions } from './own-block-oracle.ts';
-import { LINE_PREFIX, trackedEdits } from './track.ts';
+import { LINE_PREFIX, fineEdits as trackedEdits } from './track.ts';
 import {
   REFUSALS,
   TIME,

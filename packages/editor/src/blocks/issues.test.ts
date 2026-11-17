@@ -123,11 +123,14 @@ describe('the linked issues', () => {
         doc: 'alpha <split>⏎⏎‸beta',
         others: 'bo',
         keys: [{ type: '## x' }],
-        // Still refused, #107 open: the block insertion would read differently by the order.
+        // Untracked, still refused: the block insertion would read differently by the order. Tracked,
+        // written as a replacement of the block (format §3.12; #107).
         off: { refusal: SELF_CHECK },
-        on: {
-          refusal:
-            "This edit would leave bo's line break right next to your insertion, and deciding one would change the other. Decide bo's line break first.",
+        // Written as a replacement of the block, which reads alike with bo's break decided in
+        // neither order: #107 stays open for the order of decisions between the two.
+        skipOn: {
+          decisions:
+            "The replacement holds the block and not bo's break in front of it (#107, open).",
         },
       },
       {
@@ -135,11 +138,8 @@ describe('the linked issues', () => {
         doc: 'new‸<split>⏎words',
         others: 'bo',
         keys: ['Delete', 'Delete'],
-        // The second Delete is refused (#109 open); the first is a join of bo's break.
-        on: {
-          refusal:
-            "This edit would leave bo's line break right next to your deletion, and deciding one would change the other. Decide bo's line break first.",
-        },
+        // The second Delete is written as a replacement of the block (#109); the first is a join of
+        // bo's break.
       },
       {
         name: "#119: Backspace at the start of the line of another person's split in an item",

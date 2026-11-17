@@ -20,7 +20,7 @@ import {
   file,
   thread,
 } from './test-helpers.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 import type { Person } from './types.ts';
 
