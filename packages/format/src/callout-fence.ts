@@ -64,7 +64,8 @@ function typeIn(text: string): string | undefined {
 export function titleOf(text: string): string | null {
   for (const { match } of tokensOf(text)) {
     if (match[3] !== 'title') continue;
-    return (match[4] ?? match[5] ?? match[6] ?? '').replace(/\\(.)/g, '$1');
+    if (match[4] !== undefined) return match[4].replace(/\\(.)/g, '$1');
+    return match[5] ?? match[6] ?? '';
   }
   return null;
 }

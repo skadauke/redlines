@@ -1401,7 +1401,8 @@ function planFence(
   if (tracked) {
     const stands = standsAfterBlank(text, fence.top) || endsBlockAbove(text, fence.top);
     // The closer takes the blank line after the div, which must be there.
-    if (!stands || !isBlank(text, fence.after)) throw refused(ALERT_ON_ITS_OWN);
+    if (!stands || fence.after <= fence.end || !isBlank(text, fence.after))
+      throw refused(ALERT_ON_ITS_OWN);
     const block: Block = {
       type: 'p',
       line: fence.line,

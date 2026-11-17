@@ -175,6 +175,24 @@ describe('a change of a callout’s title in a .qmd', () => {
     expect(mark && formatChange(parse(text), mark)).toEqual([callout('tip'), title('Why')]);
   });
 
+  it('sets a title on a bare class, and one with a brace in it', () => {
+    const bare = SOURCE.replace('{.callout-note}', 'callout-note');
+    const one = tracked(bare, title('T'));
+    expect(body(one)).toContain('::: {.callout-note title="T"}');
+    expect(rejected(one, 'm2bd')).toBe(bare);
+    const brace = tracked(SOURCE, title('a} b'));
+    expect(rejected(brace, 'm2bd')).toBe(SOURCE);
+  });
+
+  it('reads a single-quoted title whole', () => {
+    expect(titleOf("{.callout-tip title='C:\\dir'}")).toBe('C:\\dir');
+  });
+
+  it('writes nothing where no line break follows the closing fence', () => {
+    const bare = '## A\n\n::: {.callout-note}\nText.\n:::';
+    expect(() => tracked(bare, callout('tip'))).toThrow();
+  });
+
   it('leaves a .md file alone: no callout there to change', () => {
     expect(() =>
       trackedFormat(SOURCE, onFence(SOURCE), title('x'), context(ada, ['m2bd'])),

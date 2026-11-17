@@ -204,8 +204,13 @@ const REFERENCES =
   /(?<![\w@])@(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
 /** The attributes of a Quarto callout's opening fence, `::: {.callout-note title="…"}`: syntax, as an
  * alert's type is (docs/research/quarto.md, Q7). */
-const CALLOUT_FENCE_LINE =
-  /^(:{3,}[ \t]*)(\{[^}\n]*\.callout-(?:note|tip|important|warning|caution)\b[^}\n]*\}|callout-(?:note|tip|important|warning|caution))/gm;
+const CALLOUT_FENCE_LINE = new RegExp(
+  '^(:{3,}[ \\t]*)(' +
+    // A braced block reads a quoted value whole, so a `}` in a title doesn't end it.
+    '\\{(?=[^\\n]*\\.callout-(?:note|tip|important|warning|caution)\\b)(?:[^}"\'\\n]|"(?:[^"\\\\\\n]|\\\\.)*"|\'[^\'\\n]*\')*\\}' +
+    '|callout-(?:note|tip|important|warning|caution))(?=[ \\t]*:*[ \\t]*$)',
+  'gm',
+);
 /** The type of an alert at the start of a quote's line; the word is `ALERT_LINE`'s (callout.ts). */
 const ALERT = /^[ \t>]*\[![A-Za-z][A-Za-z0-9-]*\]/gm;
 
