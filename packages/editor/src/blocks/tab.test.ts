@@ -325,11 +325,11 @@ describe('Tab in a list under review', () => {
       )
       .concat([
         {
-          name: 'with six at an item’s first character: refused, with the count, Track Changes on',
+          name: 'with six at an item’s first character: written as a replacement, Track Changes on',
           doc: `- one⏎- ‸two⏎${first(6)}`,
           keys: ['Tab'],
           tc: true,
-          expect: { refusal: many(6) },
+          expect: {},
         },
         {
           // Without Track Changes there is no new mark to try with them: one more works.

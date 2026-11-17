@@ -3281,10 +3281,10 @@ a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format 
 and so have the lists (`edits-widen.ts`, `widen-scope.ts`: a typed, pasted or key edit and a format
 or block change in a list item, which `trackedEdits` and `trackedFormat` write as a replacement of
 the item or the list when no fine form reads alike in every order, and keep their refusal when
-the unit's old text would hold another person's pending change: some order of decisions would not
-read as the original, #808), and so have the blocks (the same two, in a paragraph, a heading or a
-quote) and code (a typed, pasted or key edit in a fenced or indented block, display math or raw
-text, and a key that moves the lines under an item that leaves its list, with the same guard).
+another person's mark ends at the unit's edge, #107), and so have the blocks (the same two, in a
+paragraph, a heading or a quote) and code (a typed, pasted or key edit in a fenced or indented
+block, display math or raw text, and a key that moves the lines under an item that leaves its
+list, with the same guard).
 Until a writer calls it, it still refuses, in the words of its own section.
 
 Every place that refuses has one of four tiers (`refusals.ts`, which a test holds to it): the edit
@@ -3314,12 +3314,14 @@ new text of someone else's substitution, the unit is a unit of that new text, wr
 the old text of the second is the new text of the first, and the first's marks stand around it.
 Accepting the first leaves the second pending; rejecting the first takes the second with it.
 
-**The old text holds other people's marks.** In a table's cells the old text may hold another
-person's pending marks. Elsewhere, with Track Changes on, a replacement whose old text would hold another
-person's pending change, or next to whose edge another person's mark ends (a split's break right in
-front of the unit, an insertion right after it), is **not written** and the refusal stands: some
-order of decisions would not read as the original (#808, #107; `heldByOthers` of `widen`). The
-rest of this paragraph is what is written. Marks in a payload are written in the payload's
+**The old text holds other people's marks.** The old text of a replacement may hold another
+person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every
+order of accepting and rejecting the replacement and the marks in it reads alike (#808). The one
+refusal that stays is for a mark of theirs that ends at the unit's edge without being in it, as a
+split's break right in front of the unit or an insertion right after it (`touchingOthers` of
+`widen`): it is decided with the block next to it, the replacement would not read as the original
+in some order (#107), and the edit is not written. A change that holds the unit in its new text is
+no neighbour: the unit is written inside it. The rest of this paragraph is what is written. Marks in a payload are written in the payload's
 encoding (§2.5): `<!--ins k3x9-->` is `<!-\-ins k3x9-\->`. A decoded payload's marker is a mark
 when its id has a ledger entry (a thread, for a comment) and stands nowhere else in the file, its
 opener and closer are in the same payload, and payloads nest at most three deep
