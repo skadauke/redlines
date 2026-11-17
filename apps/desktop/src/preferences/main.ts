@@ -277,7 +277,7 @@ const deps: PaneDeps = {
                 ...(provider.id === 'claude'
                   ? {
                       alsoAPlugin:
-                        'If you also installed the Redlines plugin in Claude Code, it lists the skill twice (redlines and redlines:redlines): keep one, either this copy or the plugin.',
+                        'If you also installed the Redlines plugin in Claude Code, Claude Code lists the skill twice (redlines and redlines:redlines): keep one, either this copy or the plugin.',
                     }
                   : {}),
               },
