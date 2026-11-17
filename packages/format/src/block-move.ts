@@ -10,7 +10,7 @@
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
-import { trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import type { EditContext, Range, TextChange } from './types.ts';
 import { widen } from './widen.ts';
 import { unitsOf } from './widen-units.ts';

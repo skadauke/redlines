@@ -179,7 +179,16 @@ function inReplaced(tr: Transaction, at: number): number | null {
   const edits: TextChange[] = [];
   tr.changes.iterChanges((from, to, _a, _b, insert) => {
     edits.push({ from, to, insert: insert.toString() });
-    if (from < at && at < to && insert.toString().includes('<!--sub ')) held = true;
+    // A replacement of a unit starts the unit's text: after the prefix of its line, nothing else.
+    const before = tr.startState.doc.sliceString(tr.startState.doc.lineAt(from).from, from);
+    if (
+      from < at &&
+      at < to &&
+      insert.toString().startsWith('<!--sub ') &&
+      /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(?:\[[ xX]\][ \t]+)?$/.test(before)
+    ) {
+      held = true;
+    }
   });
   return held ? caretKeptFromEnd(tr.startState, edits, at) : null;
 }

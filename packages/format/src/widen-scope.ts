@@ -25,6 +25,8 @@ export function scopeOfUnits(units: readonly Unit[], from: number, to: number): 
     const [only] = hit;
     if (hit.length !== 1 || !only) {
       // Several blocks that are the items of a list, or the blocks of one item, are the list's.
+      if (hit.some((unit) => unit.kind === 'code')) return 'code';
+      if (hit.some((unit) => unit.kind === 'table')) return 'cell';
       return hit.length > 1 && (hit[0]?.parent?.kind === 'item' || hit[0]?.parent?.kind === 'list')
         ? 'list'
         : scope;

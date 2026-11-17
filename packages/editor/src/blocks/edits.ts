@@ -364,6 +364,10 @@ function bareItemAt(
 }
 
 /** Return in an empty item: up a level, or out of the list at the top. One container per Return. */
+/** Why Return is refused in the empty item of another person's pending split. */
+const THEIR_SPLIT =
+  "Another person's pending change made this item. Accept or reject it before moving it out of its list.";
+
 function returnInEmptyItem(state: EditorState, block: Block, items: Item[], bare = false): KeyEdit {
   const { doc } = state;
   const item = items[0]!;
@@ -382,8 +386,7 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[], bare
     // the end of the text above (`1. a⏎   - b‸`, Return twice: `b<ins>2. </ins>`, #440). Another
     // person's split is theirs to decide first, as for Tab.
     const split = state.field(trackingField, false) ? splitAbove(state, line) : null;
-    // Another person's split is theirs to decide: the edit goes through the tracked layer, which
-    // writes it as a replacement of the item or the list (format §3.12).
+    if (split === 'theirs') return { ...nothing(state), refusal: THEIR_SPLIT };
     return {
       changes: [change],
       selection: EditorSelection.single(line.from + target.length),
