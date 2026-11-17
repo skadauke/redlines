@@ -42,9 +42,7 @@ const MOST_LINES = 30;
 function clusterOf(parsed: Parsed, seeds: ReadonlySet<string>): Set<string> {
   // Where each mark has its markers, and its text: another mark joins by a marker that stands
   // against one of these, or inside the text of one.
-  const markers = markerRanges(parsed).filter(
-    (m) => m.mark && m.mark.kind !== 'split',
-  );
+  const markers = markerRanges(parsed).filter((m) => m.mark && m.mark.kind !== 'split');
   const texts = new Map<string, Range[]>();
   for (const mark of parsed.marks) {
     if (mark.kind !== 'ins' && mark.kind !== 'sub') continue;

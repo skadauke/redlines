@@ -2445,10 +2445,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
    * decisions (`emphasisReadsAlike`), and written again by a character if that reads otherwise. */
   /** Whether a marker of a mark that is no format change or split touches the change. */
   const stands = (m: MarkerRange) =>
-    m.mark !== undefined &&
-    m.mark.kind !== 'split' &&
-    m.to >= from &&
-    m.from <= to;
+    m.mark !== undefined && m.mark.kind !== 'split' && m.to >= from && m.from <= to;
   // Whether the change was written again by a character for the sake of the marks against it.
   let byCharacter = false;
   const touch = () => {
