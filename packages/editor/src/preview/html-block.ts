@@ -40,6 +40,7 @@ import type { SyntaxNode } from '@lezer/common';
 import { holdOpenAt } from '../blocks/containers.ts';
 import { parsedField, setViewModeEffect, viewModeField } from '../tracked/field.ts';
 import { imageOfNode } from '../image-size.ts';
+import { imageResolver, sourceOf } from './image.ts';
 import { readTag } from './html-inline.ts';
 
 /** A source longer than this many lines opens in Plain, at the spot, rather than in the page. */
@@ -142,23 +143,54 @@ export function renderHtml(
   source: string,
   doc: Document = document,
   image?: (written: string) => string | null,
+  dark = false,
 ): DocumentFragment {
   const template = doc.createElement('template');
   template.innerHTML = source;
   const out = doc.createDocumentFragment();
   const budget = { nodes: 0 };
   imageUrl = image ?? null;
+  darkPicture = dark;
   try {
     copyChildren(template.content, out, doc, 0, budget);
   } finally {
     imageUrl = null;
+    darkPicture = false;
   }
   return out;
 }
 
-/** Where a page that draws images (a printed page) finds the one an HTML block names; the editor
- * itself loads nothing, and draws a box. */
+/** Where a page that draws images finds the one an HTML block names: a printed page, and the editor
+ * for a local image through the host's resolver. With none, an image is a box with its alt text. */
 let imageUrl: ((written: string) => string | null) | null = null;
+/** Whether a `<picture>` picks the source made for a dark appearance (#818). */
+let darkPicture = false;
+
+/** Whether the window shows a dark appearance: the app's (`data-rl-appearance`), else the system's. */
+function isDark(): boolean {
+  if (typeof document === 'undefined') return false;
+  const told = document.documentElement.dataset['rlAppearance'];
+  if (told === 'dark' || told === 'light') return told === 'dark';
+  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+/** The first address of a `srcset` (its candidates are `url 2x, url 480w`), or ''. */
+function firstCandidate(srcset: string): string {
+  return srcset.split(',')[0]?.trim().split(/\s+/)[0] ?? '';
+}
+
+/** The address a `<picture>` draws: its `<source>` for the appearance, else its `<img>`'s. */
+function pictureSource(picture: Element, img: Element): string {
+  const want = darkPicture ? 'dark' : 'light';
+  for (const source of Array.from(picture.children)) {
+    if (source.localName.toLowerCase() !== 'source') continue;
+    const media = (source.getAttribute('media') ?? '').toLowerCase();
+    if (!new RegExp(`\\(\\s*prefers-color-scheme\\s*:\\s*${want}\\s*\\)`).test(media)) continue;
+    const found = firstCandidate(source.getAttribute('srcset') ?? '');
+    if (found) return found;
+  }
+  return img.getAttribute('src') ?? '';
+}
 
 function copyChildren(
   from: Node,
@@ -190,6 +222,14 @@ function copyElement(
     return;
   }
   if (depth > MAX_DEPTH) return;
+  if (name === 'picture') {
+    // The image that matches the appearance; its sources are never loaded themselves.
+    const img = element.querySelector('img');
+    if (img) {
+      copyImage(img, pictureSource(element, img), to, doc);
+      return;
+    }
+  }
   if (!isAllowedElement(name)) {
     if (htmlHandling(name) === 'chip') {
       const chip = doc.createElement('span');
@@ -200,21 +240,7 @@ function copyElement(
     return;
   }
   if (name === 'img') {
-    const shown = imageUrl?.(element.getAttribute('src') ?? '') ?? null;
-    if (shown !== null) {
-      const picture = doc.createElement('img');
-      picture.setAttribute('src', shown);
-      picture.setAttribute('alt', (element.getAttribute('alt') ?? '').slice(0, MAX_TEXT));
-      const width = element.getAttribute('width') ?? '';
-      if (VALUES['width']?.test(width)) picture.setAttribute('width', width);
-      to.appendChild(picture);
-      return;
-    }
-    // Nothing is loaded: an image is a box with its alt text.
-    const box = doc.createElement('span');
-    box.className = 'rl-html-img';
-    box.textContent = (element.getAttribute('alt') ?? '').slice(0, MAX_TEXT) || 'image';
-    to.appendChild(box);
+    copyImage(element, element.getAttribute('src') ?? '', to, doc);
     return;
   }
   // `<source>` only picks an image; nothing is drawn of it.
@@ -240,6 +266,32 @@ function copyElement(
   if (name === 'a') copy.classList.add('rl-link');
   to.appendChild(copy);
   if (!VOID.has(name)) copyChildren(element, copy, doc, depth + 1, budget);
+}
+
+/**
+ * An `<img>` of an HTML block: the image itself when the page can find it (a local one through the
+ * host's resolver, at its numeric width and height), else a box with its alt text. Nothing remote
+ * is loaded.
+ */
+function copyImage(element: Element, written: string, to: Node, doc: Document): void {
+  const shown = imageUrl?.(written) ?? null;
+  const alt = (element.getAttribute('alt') ?? '').slice(0, MAX_TEXT);
+  if (shown !== null) {
+    const picture = doc.createElement('img');
+    picture.setAttribute('src', shown);
+    picture.setAttribute('alt', alt);
+    for (const key of ['width', 'height']) {
+      const value = element.getAttribute(key) ?? '';
+      if (VALUES[key]?.test(value)) picture.setAttribute(key, value);
+    }
+    to.appendChild(picture);
+    return;
+  }
+  // Nothing is loaded: an image is a box with its alt text.
+  const box = doc.createElement('span');
+  box.className = 'rl-html-img';
+  box.textContent = alt || 'image';
+  to.appendChild(box);
 }
 
 // ------------------------------------------------------------------- opening
@@ -353,13 +405,27 @@ export interface BlockSink {
 class HtmlBlockWidget extends WidgetType {
   readonly source: string;
   readonly selected: boolean;
-  constructor(source: string, selected: boolean) {
+  readonly image: ((written: string) => string | null) | null;
+  readonly dark: boolean;
+  constructor(
+    source: string,
+    selected: boolean,
+    image: ((written: string) => string | null) | null,
+    dark: boolean,
+  ) {
     super();
     this.source = source;
     this.selected = selected;
+    this.image = image;
+    this.dark = dark;
   }
   override eq(other: HtmlBlockWidget): boolean {
-    return other.source === this.source && other.selected === this.selected;
+    return (
+      other.source === this.source &&
+      other.selected === this.selected &&
+      other.image === this.image &&
+      other.dark === this.dark
+    );
   }
   override toDOM(): HTMLElement {
     const wrap = document.createElement('div');
@@ -373,7 +439,7 @@ class HtmlBlockWidget extends WidgetType {
     label.setAttribute('data-rl-title', 'Show the HTML source');
     const body = document.createElement('div');
     body.className = 'rl-html-body';
-    body.append(renderHtml(this.source));
+    body.append(renderHtml(this.source, document, this.image ?? undefined, this.dark));
     wrap.append(label, body);
     return wrap;
   }
@@ -427,7 +493,20 @@ export function htmlBlock(b: BlockSink, node: SyntaxNode): boolean {
     return true;
   }
   const selected = state.selection.ranges.some((range) => isWhole(range, block));
-  const widget = new HtmlBlockWidget(state.sliceDoc(block.from, block.to), selected);
+  const resolve = state.facet(imageResolver);
+  // Only a local image is drawn, through the host's resolver; a remote or data address stays a box.
+  const image = resolve
+    ? (written: string): string | null => {
+        const found = sourceOf(written);
+        return found.kind === 'local' ? resolve(found.path) : null;
+      }
+    : null;
+  const widget = new HtmlBlockWidget(
+    state.sliceDoc(block.from, block.to),
+    selected,
+    image,
+    isDark(),
+  );
   // `imageAtom`: the caret steps over the block as one object.
   b.push(Decoration.replace({ widget, block: true, imageAtom: true }).range(block.from, block.to));
   return true;
