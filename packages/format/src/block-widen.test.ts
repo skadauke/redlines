@@ -18,6 +18,16 @@ import { newestView } from './views.ts';
 
 const IDS = ['m2bd', 'n8fx', 'p5qm', 'q6rs'];
 
+/** The document of the seed: two draws in three have no other person's pending change (theirs are
+ * made the author's own), so that block widening itself is held to every order; the third keeps them, where the
+ * guard of #808 keeps the refusal. */
+function drawn(seed: number, random: () => number): string {
+  const text = randomDocument(random);
+  if (seed % 3 === 0) return text;
+  // Every pending change is the author's own.
+  return text.replace(/\bby: (?!ada\b)\w+/g, 'by: ada');
+}
+
 function attempt<T>(run: () => T): T | undefined {
   try {
     return run();
@@ -32,9 +42,10 @@ describe('a refused edit in a block, written as a replacement of the block', () 
 
   it('types, breaks and deletes: written, reads alike in every order, rejects back', () => {
     let widened = 0;
+    let refused = 0;
     for (let seed = 1; seed <= runs; seed++) {
       const random = seeded(seed * 11 + 5);
-      const text = randomDocument(random);
+      const text = drawn(seed, random);
       const read = parse(text);
       // Every order of decisions is walked: a document with many marks is left to the walks.
       if (read.warnings.length > 0 || read.marks.length > 5 || text.startsWith('---')) continue;
@@ -64,7 +75,10 @@ describe('a refused edit in a block, written as a replacement of the block', () 
         if (scopeOf(text, source.from, source.to) !== 'block') continue;
         if (attempt(() => fineEdits(text, [source], context(ada, IDS)))) continue;
         const done = attempt(() => trackedEdits(text, [source], context(ada, IDS)));
-        if (!done) continue;
+        if (!done) {
+          if (seed % 3 === 0) refused++;
+          continue;
+        }
         widened++;
         expectWidened(
           `seed ${seed} step ${step}: ${JSON.stringify(source)}`,
@@ -75,10 +89,10 @@ describe('a refused edit in a block, written as a replacement of the block', () 
       }
     }
     expect(widened, 'edits written as replacements').toBeGreaterThan(0);
+    expect(refused, 'edits kept refused by the guard').toBeGreaterThan(0);
   }, 600_000);
 
   it('changes the type of a block: written and every order alike', () => {
-    let widened = 0;
     let refused = 0;
     const ops: FormatOp[] = [
       { kind: 'block', to: 'h1' },
@@ -90,7 +104,7 @@ describe('a refused edit in a block, written as a replacement of the block', () 
     ];
     for (let seed = 1; seed <= runs; seed++) {
       const random = seeded(seed * 13 + 1);
-      const text = randomDocument(random);
+      const text = drawn(seed, random);
       const read = parse(text);
       // Every order of decisions is walked: a document with many marks is left to the walks.
       if (read.warnings.length > 0 || read.marks.length > 5 || text.startsWith('---')) continue;
@@ -110,16 +124,16 @@ describe('a refused edit in a block, written as a replacement of the block', () 
           if (attempt(() => fineFormat(text, range, op, context(ada, IDS)))) continue;
           const done = attempt(() => trackedFormat(text, range, op, context(ada, IDS)));
           if (!done) {
-            refused++;
+            if (seed % 3 === 0) refused++;
             continue;
           }
-          widened++;
           expectWidened(`seed ${seed} ${JSON.stringify(op)} at ${at}`, text, done.changes, 'ada');
         }
     }
-    // A block change whose old text would hold another person's pending change keeps its refusal
-    // (#808), and the documents drawn here that no fine form writes all have such changes: what is
-    // written is held to every order, and the refusals are counted so that the draw can't go empty.
-    expect(widened + refused, 'block changes the fine form refuses').toBeGreaterThan(0);
+    // The fine form writes every block change in a document with only the author's own changes
+    // (what is refused there is a mark overlap, which a replacement can't set right), so what is
+    // written as a replacement needs another person's change in the old text, which the guard of
+    // #808 keeps refused: the refusals are what is held here, until that is open.
+    expect(refused, 'block changes kept refused by the guard').toBeGreaterThan(0);
   }, 600_000);
 });
