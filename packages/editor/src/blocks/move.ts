@@ -156,6 +156,7 @@ export function moveRunTo(
           changes: whole,
           selection,
           annotations: [Transaction.userEvent.of('move.block'), ...annotations],
+          effects: back ? [setOpenEffect.of(null)] : [],
           scrollIntoView: true,
         }),
       });
