@@ -832,6 +832,7 @@ class HistoryState {
             person: lastEvent.meta.person ?? event.meta.person,
             marks: [...lastEvent.meta.marks, ...event.meta.marks],
             touchedBy: lastEvent.meta.touchedBy,
+            ...(lastEvent.meta.shared ? { shared: true } : {}),
           },
         ),
       );
@@ -1041,7 +1042,7 @@ class HistoryState {
             side,
             rest,
             selection,
-            owner: null,
+            owner: event.owner,
             label: event.label,
             meta: { ...event.meta, touchedBy: null },
           }),

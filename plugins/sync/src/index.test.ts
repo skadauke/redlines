@@ -247,6 +247,11 @@ describe('a person who works alone', () => {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Waits, a few milliseconds at a time, until `test` holds: presence follows a move a moment later. */
+async function until(test: () => boolean, ms = 3000): Promise<void> {
+  for (let waited = 0; waited < ms && !test(); waited += 10) await wait(10);
+}
+
 /** The undo the keyboard and the Edit menu reach: an input event of the page. */
 function undoKey(editor: Editor): void {
   editor.view.contentDOM.dispatchEvent(
@@ -260,7 +265,7 @@ describe('the other window’s caret', () => {
     const doc = ada.editor.view.state.doc.toString();
     const at = doc.indexOf('Second') + 3;
     ada.editor.view.dispatch({ selection: { anchor: at, head: at + 6 } });
-    await wait(150);
+    await until(() => peersShown(bo.editor.view).length === 1);
     await settle(ada.binding, bo.binding);
     const peers = peersShown(bo.editor.view);
     expect(peers).toHaveLength(1);
@@ -269,7 +274,7 @@ describe('the other window’s caret', () => {
     expect(text.slice(peers[0]!.anchor, peers[0]!.head)).toBe(doc.slice(at, at + 6));
     // Ada sees Bo in Bo’s color.
     bo.editor.view.dispatch({ selection: { anchor: 3 } });
-    await wait(150);
+    await until(() => peersShown(ada.editor.view).length === 1);
     expect(peersShown(ada.editor.view)[0]).toMatchObject({ name: 'Bo (window 2)', color: 'p2' });
   });
 
@@ -277,10 +282,9 @@ describe('the other window’s caret', () => {
     const { ada, bo } = await session();
     const at = ada.editor.view.state.doc.toString().indexOf('Third');
     ada.editor.view.dispatch({ selection: { anchor: at } });
-    await wait(150);
+    await until(() => peersShown(bo.editor.view).length === 1);
     type(bo.editor, 'First', ' BO');
     await settle(ada.binding, bo.binding);
-    await wait(150);
     const place = peersShown(bo.editor.view)[0]!.head;
     expect(bo.editor.view.state.doc.toString().slice(place).startsWith('Third')).toBe(true);
     // And in the window that typed, before the message that says so.
@@ -293,10 +297,10 @@ describe('the other window’s caret', () => {
   it('goes when the window leaves', async () => {
     const { ada, bo } = await session();
     ada.editor.view.dispatch({ selection: { anchor: 4 } });
-    await wait(150);
+    await until(() => peersShown(bo.editor.view).length === 1);
     expect(peersShown(bo.editor.view)).toHaveLength(1);
     await ada.binding.stop();
-    await wait(30);
+    await until(() => peersShown(bo.editor.view).length === 0);
     expect(peersShown(bo.editor.view)).toHaveLength(0);
   });
 });
@@ -332,6 +336,25 @@ describe('undo in two windows', () => {
     expect(ada.notices).toEqual([]);
   });
 
+  it('takes back a step by its marks when the other window’s edit came between its keystrokes', async () => {
+    const { hub, ada, bo } = await session();
+    type(ada.editor, 'First', ' ONE');
+    type(bo.editor, 'Third', ' TWO');
+    await settle(ada.binding, bo.binding);
+    // Ada goes on typing where she stopped: the same step, after the other window's edit and its
+    // ledger entry came in.
+    type(ada.editor, ' ONE', ' MORE');
+    await settle(ada.binding, bo.binding);
+    ada.editor.undo();
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(text).not.toContain('ONE');
+    expect(text).not.toContain('MORE');
+    expect(text).toContain(' TWO');
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
   it('leaves an edit alone that the other window typed inside, and says whose window', async () => {
     const { hub, ada, bo } = await session();
     ada.editor.setTracking(false, { inFile: false });
@@ -339,7 +362,9 @@ describe('undo in two windows', () => {
     // The windows have said who they are.
     ada.editor.view.dispatch({ selection: { anchor: 1 } });
     bo.editor.view.dispatch({ selection: { anchor: 2 } });
-    await wait(150);
+    await until(
+      () => peersShown(bo.editor.view).length === 1 && peersShown(ada.editor.view).length === 1,
+    );
     type(ada.editor, 'First', ' ONE');
     await settle(ada.binding, bo.binding);
     // Bo types inside the words Ada just wrote.

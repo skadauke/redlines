@@ -12,7 +12,7 @@ import type { Credential, Peer } from '@redlines/collab';
 import { anchorIntent, intentOf, rederiveIntent, remoteStep } from '@redlines/editor';
 import type { Editor, Intent } from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
-import { ensureStyle, presenceExtension, showPeers } from './presence.ts';
+import { ensureStyle, peersShown, presenceExtension, showPeers } from './presence.ts';
 import type { PeerView } from './presence.ts';
 import type { Remote } from '@redlines/collab';
 
@@ -91,7 +91,6 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
   let peers: Peer[] = [];
   /** What each peer last said, to place again when the text or this window's version moves. */
   let lastPeers: readonly Peer[] = [];
-  const seen = new Map<string, { key: string; stamp: number }>();
   ensureStyle();
 
   const apply = (
@@ -113,11 +112,12 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
 
   /** What a window is called: its name from the authority, or the author's handle. */
   const nameOf = (clientID: string, by: string): string =>
-    peers.find((peer) => peer.clientID === clientID)?.name ?? by;
+    peers.find((peer) => peer.clientID === clientID)?.name ?? `${by} (another window)`;
 
   /** The other windows' carets and selections, placed in what this window shows. */
   const placePeers = () => {
     const views: PeerView[] = [];
+    const shownNow = peersShown(view);
     for (const peer of lastPeers) {
       const state = peer.state as { v?: unknown; h?: unknown; a?: unknown };
       if (
@@ -131,16 +131,19 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
       const anchor = replica.mapFrom(state.a, state.v);
       // A window that is ahead of this one: placed once this one has caught up.
       if (head === null || anchor === null) continue;
-      const key = `${state.v}:${state.h}:${state.a}`;
-      const before = seen.get(peer.clientID);
-      const stamp = before?.key === key ? before.stamp : Date.now();
-      seen.set(peer.clientID, { key, stamp });
+      const placed = { head: replica.toShown(head), anchor: replica.toShown(anchor) };
+      // The flag shows when a window moves, not when the text under it did, nor when it says
+      // where it is again at another version.
+      const before = shownNow.find((mine) => mine.clientID === peer.clientID);
+      const stamp =
+        before && before.head === placed.head && before.anchor === placed.anchor
+          ? before.stamp
+          : Date.now();
       views.push({
         clientID: peer.clientID,
         name: peer.name,
         color: peer.color ?? 'p1',
-        head: replica.toShown(head),
-        anchor: replica.toShown(anchor),
+        ...placed,
         stamp,
       });
     }
@@ -150,9 +153,6 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
   const heard = (next: readonly Peer[]) => {
     lastPeers = next;
     peers = [...next];
-    for (const id of [...seen.keys()]) {
-      if (!next.some((peer) => peer.clientID === id)) seen.delete(id);
-    }
     placePeers();
     options.onPeers?.(peers);
   };
@@ -176,7 +176,7 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
   const removeListener = editor.addExtension([
     presenceExtension(),
     EditorView.updateListener.of((update) => {
-      if (update.selectionSet || update.docChanged) sayWhere();
+      if (update.selectionSet) sayWhere();
       if (!update.docChanged) return;
       let local = false;
       for (const tr of update.transactions) {
@@ -184,7 +184,10 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
         replica.local(tr.changes, tr.startState.doc, { intent: intentOf(tr) });
         local = true;
       }
-      if (local) client.edited();
+      if (local) {
+        client.edited();
+        sayWhere();
+      }
     }),
   ]);
 
@@ -207,7 +210,6 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
         { person: `${remote.by}:${remote.clientID}`, name: nameOf(remote.clientID, remote.by) },
       );
       placePeers();
-      sayWhere();
     },
     showAll: (doc) => {
       const change = between(view.state.doc, doc);

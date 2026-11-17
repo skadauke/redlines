@@ -325,6 +325,7 @@ export async function joinSession(
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   const waitingSaves = new Map<number, (text: string | null) => void>();
   let saveIds = 0;
+  let stopped = false;
 
   /** Starts the authority in this window, from `log` when there is one to begin from. */
   const host = async (
@@ -407,8 +408,12 @@ export async function joinSession(
       const refuse = () =>
         answer({ ok: false, error: 'forbidden', message: 'Not a window of this session.' });
       void (async () => {
-        // The others ask as soon as the app says who leads: the answer waits for the hub.
-        if (taking) await taking.catch(() => {});
+        // The others ask as soon as the app says who leads, which this window may not have heard
+        // yet: the answer waits for the hub, for a moment.
+        for (let tries = 0; tries < 30 && !stopped && !(leading && hub); tries++) {
+          if (taking) await taking.catch(() => {});
+          else await new Promise((resolve) => setTimeout(resolve, 100));
+        }
         if (!hub || !leading) return;
         if (call.call === 'hello') {
           // Only a window the app counts in the session may join it.
@@ -513,10 +518,13 @@ export async function joinSession(
     if (taking) return;
     // Set before anything waits: the others ask the moment the app says who leads, and a call
     // that comes meanwhile waits for the hub (`serve`).
+    const forEpoch = epoch;
     taking = (async () => {
       try {
         const log = await ports.walRead(path);
         if (!log) throw new Error('The session has no log to take over from.');
+        // Another window may have been made the leader since: this one is not, then.
+        if (epoch !== forEpoch || leader !== ports.label) return;
         windowOf.clear();
         windowOf.set(clientID, ports.label);
         hub = await host(log.base, log);
@@ -579,6 +587,7 @@ export async function joinSession(
       });
     },
     stop: async () => {
+      stopped = true;
       if (saveTimer) clearTimeout(saveTimer);
       await binding.stop();
       for (const stop of off) stop();
