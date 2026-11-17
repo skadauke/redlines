@@ -109,6 +109,20 @@ describe('copy and cut', () => {
     expect(await copy(editor, from!, to!)).toBe('anywhere and merges.\n\nEach');
   });
 
+  it('copy the struck text, as plain text, when the selection holds only a deletion (#35)', async () => {
+    const editor = load(doc);
+    const marker = '<!--del w2rf  Nothing to install.-->';
+    const from = doc.indexOf(marker);
+    const data = await copyData(editor, from, from + marker.length);
+    const text = data.getData('text/plain');
+    expect(text.trim()).toBe('Nothing to install.');
+    expect(text).not.toContain('<!--');
+    expect(text).not.toContain('w2rf');
+    // A selection that holds more than the deletion still copies the newest text alone.
+    const [start, end] = between(doc, 'merges.', marker);
+    expect(await copy(editor, start!, end!)).toBe('merges.');
+  });
+
   it('copy the source as written in Plain', async () => {
     const editor = load(doc, { view: 'raw' });
     const [from, to] = between(doc, 'The changes', 'comments<!--/k3x9-->');

@@ -1246,6 +1246,9 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text. Copying cells puts tab-separated
   text and an HTML table; pasting a range into cells is §5.8.
+- **Copying only deleted text.** A selection that holds only pending deleted text, in Simple or
+  Redlines, copies what is seen: the struck text, as plain text, with no marks. Clean shows no
+  deletion and copies nothing. Any other selection copies its newest text.
 - **List items pasted into a list item.** A paste that is only list items (bullets, numbers or
   tasks, nested or not, from Markdown or from a page's list) made at a caret, or over a selection,
   inside a list item adds items to that list, as Return does, and never text inside the item. At
