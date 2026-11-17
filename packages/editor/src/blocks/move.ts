@@ -15,10 +15,9 @@ import {
   moveBlockEdits,
   neighbourGap,
   newestView,
-  trackedBlockMove,
   Untrackable,
 } from '@redlines/format';
-import type { Range } from '@redlines/format';
+import type { Range, TextChange } from '@redlines/format';
 import {
   markupViewFacet,
   parsedField,
@@ -29,12 +28,16 @@ import {
 import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
 import { openBlock, setOpenEffect, takeBackChanges } from './open.ts';
 import {
-  authoredChanges,
+  authoredWrite,
   contextFor,
   refusedEditEffect,
   trackingField,
-  untrackedChanges,
+  untrackedWrite,
 } from '../tracked/typing.ts';
+import { recordedAs, type Unnamed } from '../tracked/intent.ts';
+import type { MoveIntent } from './move-intent.ts';
+import { writeMove } from './move-intent.ts';
+import type { TypingIntent } from '../tracked/intent.ts';
 
 /** The run the selection names, with Raw and several selections excluded. */
 export function runOfSelection(state: EditorState): BlockRun | undefined {
@@ -109,15 +112,26 @@ export function moveRunTo(
   const tracking = state.field(trackingField);
   let changes: ChangeSet;
   let moved: Range;
+  let intent: Unnamed<MoveIntent | TypingIntent>;
   let untracked = !tracking;
   let asking = TOO_MANY_BLOCKS;
   try {
     if (tracking) {
       try {
-        const done = trackedBlockMove(text, run, gap, contextFor(state));
+        const ctx = contextFor(state);
+        const done = writeMove(text, {
+          run,
+          gap,
+          ...(back ? { revert: changesOf(back) } : {}),
+          author: ctx.author,
+          time: ctx.time,
+          ...(ctx.dialect === undefined ? {} : { dialect: ctx.dialect }),
+          ...(ctx.random ? { random: ctx.random } : {}),
+        });
         if (!done) return false;
         changes = ChangeSet.of(done.changes, state.doc.length);
         moved = done.moved;
+        intent = done.intent;
       } catch (error) {
         if (!(error instanceof Untrackable)) throw error;
         // Not even the widened write holds it: the person is asked, and the move is made untracked
@@ -126,12 +140,12 @@ export function moveRunTo(
         if (error.reason !== 'too-large') asking = NOT_MARKABLE;
         const plain = plainMove(state, text, run, gap, true);
         if (!plain) return false;
-        ({ changes, moved } = plain);
+        ({ changes, moved, intent } = plain);
       }
     } else {
       const plain = plainMove(state, text, run, gap);
       if (!plain) return false;
-      ({ changes, moved } = plain);
+      ({ changes, moved, intent } = plain);
     }
   } catch (error) {
     if (error instanceof EditError) {
@@ -143,7 +157,11 @@ export function moveRunTo(
   }
   const after = changes.apply(state.doc).toString();
   const selection = selectionAfter(state, after, run, moved);
-  const annotations = [trackedEditAnnotation.of(true), isolateHistory.of('full')];
+  // The move as it was asked and written; the open paragraph taken back is part of the step.
+  const recorded = recordedAs(
+    intent.kind === 'typing' && back ? { ...intent, revert: changesOf(back) } : intent,
+  );
+  const annotations = [trackedEditAnnotation.of(true), isolateHistory.of('full'), recorded];
   // From the document as it was (the open paragraph in it): taken back, then moved, in one step.
   const whole = back ? back.compose(changes) : changes;
   if (tracking && untracked) {
@@ -197,18 +215,23 @@ function plainMove(
   run: BlockRun,
   gap: BlockGap,
   forced = false,
-): { changes: ChangeSet; moved: Range } | undefined {
+): { changes: ChangeSet; moved: Range; intent: Unnamed<TypingIntent> } | undefined {
   const plan = moveBlockEdits(text, run, gap);
   if (!plan) return undefined;
-  return {
-    changes: (forced ? untrackedChanges : authoredChanges)(
-      state,
-      text,
-      state.field(parsedField),
-      plan.edits,
-    ),
-    moved: plan.moved,
-  };
+  const written = (forced ? untrackedWrite : authoredWrite)(
+    state,
+    text,
+    state.field(parsedField),
+    plan.edits,
+  );
+  return { changes: written.changes, moved: plan.moved, intent: written.intent };
+}
+
+/** The changes of a set, as the edits an intent records. */
+function changesOf(set: ChangeSet): TextChange[] {
+  const out: TextChange[] = [];
+  set.iterChanges((from, to, _a, _b, inserted) => out.push({ from, to, insert: inserted.toString() }));
+  return out;
 }
 
 /** The selection once the move is made: the moved blocks, selected as the person had them (a caret

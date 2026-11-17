@@ -261,6 +261,10 @@ export { intentAnnotation, intentOf, newIntentId, recordedAs } from './tracked/i
 export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
 export { deriveTable, writeTable } from './table/intent.ts';
 export { deriveSteps } from './table/paste-intent.ts';
+export { deriveMove, writeMove } from './blocks/move-intent.ts';
+export type { MoveIntent, MoveRequest } from './blocks/move-intent.ts';
+export { deriveWidenedPaste, writeWidenedPaste } from './table/widened-paste.ts';
+export type { WidenedPasteIntent, WidenedPasteRequest } from './table/widened-paste.ts';
 export type { TableIntent, TableRequest, TableWriter, WrittenTable } from './table/intent.ts';
 export type { FormatIntent, FormatRequest, FormatWriter } from './tracked/format-intent.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
