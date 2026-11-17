@@ -13,7 +13,7 @@ import {
   readsAlike,
 } from './indented-code.ts';
 import { normalizeLedger } from './ledger-order.ts';
-import { keepsLedger, setLedger } from './ledger-write.ts';
+import { assertLedgerVisible, keepsLedger, setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { bodyStart, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
@@ -656,6 +656,9 @@ export function commitEdit(
   options: CommitOptions = {},
 ): TextChange[] {
   let sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
+  // A `<!--` that nothing closes covers the ledger and the marks after it: nothing is read, and
+  // a write would add a second ledger or none.
+  if (sorted.length > 0) assertLedgerVisible(text);
   const before = sorted.length > 0 ? (options.parsed ?? parse(text)) : undefined;
   const removing = options.removes === true;
   // A decision that gives back a code block that is never closed would leave the ledger inside it.

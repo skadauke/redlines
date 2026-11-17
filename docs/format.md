@@ -3539,6 +3539,12 @@ front matter in R Markdown and Quarto.
   marker belongs to the first ledger after it. The editor always writes one.
 - The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
   (§2.1).
+- A `<!--` with no `-->` of its own, anywhere in the text, opens a comment that runs to the first
+  `-->` after it, and in a file with a ledger that is the ledger's own. A reader (and every other
+  renderer) then finds no ledger and no marks, though the ledger is in the file. Redlines refuses
+  every edit that writes a change or a ledger in such a file, a tracked edit or a table operation, with "Close or remove the `<!--` first.", so that the file keeps exactly
+  one ledger, and the `<!--` stays text until its owner closes or removes it. Once the comment is
+  closed, or removed, the ledger is read again and edits write as they always do.
 
 ### 5.2 Keys
 

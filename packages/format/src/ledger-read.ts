@@ -63,6 +63,25 @@ export function findLedger(text: string, scanned: Scan = scan(text)): LedgerSpan
   return span;
 }
 
+/** A `<!-- redlines` line, alone on it (format §5.1), inside an HTML comment. */
+const HIDDEN_HEAD = /(?:^|[\r\n])<!-- redlines[ \t]*(?=[\r\n]|$)/;
+
+/**
+ * Whether a ledger sits inside an HTML comment that something opened before it: a `<!--` with no
+ * `-->` of its own runs to the first `-->` after it, which is the ledger's, so `findLedger` doesn't
+ * find that ledger (format §5.1). A ledger that is found is never covered by a comment. Pass the
+ * file's `scan` if you have it.
+ */
+export function ledgerHidden(text: string, scanned: Scan = scan(text)): boolean {
+  if (!text.includes('<!-- redlines')) return false;
+  const found = scanned.ledgers.at(-1)?.start ?? -1;
+  for (const part of scanned.verbatim) {
+    if (part.kind !== 'comment' || part.to <= found) continue;
+    if (HIDDEN_HEAD.test(text.slice(part.from + 4, part.to))) return true;
+  }
+  return false;
+}
+
 /** What reading the ledger of `span` gives: its YAML, read, or nothing for a ledger that was written
  * with CRs alone for line breaks. */
 export function readSpan(span: LedgerSpan): LedgerRead {
