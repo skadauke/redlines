@@ -445,7 +445,7 @@ function struckBlocks(
     const owners: { to: number; color: number }[] = [];
     let total = 0;
     for (const { segment, mark: owner } of segments) {
-      total += segment.payload?.length ?? 0;
+      total += plainPayload(segment.payload ?? '').length;
       owners.push({ to: total, color: colorOf(owner) });
     }
     const drawn = new Set<number>();

@@ -472,6 +472,31 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     }
   };
 
+  /** Why a format change can't be written at `range`, or undefined where it can: asked before a menu
+   * offers it, so that an item is disabled with the reason, and no click is refused. It changes
+   * nothing and tells no one: no notice, and ids from a source of its own, so that the ids the editor
+   * draws are not spent. */
+  const whyNot = (range: Range, op: FormatOp): string | undefined => {
+    if (view.state.field(trackingField) && view.state.field(viewModeField) === 'raw') {
+      return RAW_READ_ONLY;
+    }
+    try {
+      writeFormat(view.state.doc.toString(), {
+        tracking: view.state.field(trackingField),
+        ranges: [range],
+        op,
+        author: personOf(options.author),
+        time: ledgerTime(new Date()),
+        dialect: view.state.facet(dialectFacet),
+        random: (n) => crypto.getRandomValues(new Uint8Array(n)),
+      });
+      return undefined;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      return error.message;
+    }
+  };
+
   /** Inserts text as typing: an insertion with Track Changes on, plain text with it off. */
   const insert = (changes: readonly TextChange[]): boolean =>
     editable() && put(changes, 'input.format', false);
@@ -1174,11 +1199,32 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         const here = { from: pos, to: pos };
         openCalloutMenu(view, {
           anchor,
-          types: QUARTO_CALLOUTS.map((each) => ({ type: each, name: calloutName(each) })),
+          types: QUARTO_CALLOUTS.map((each) => {
+            const reason =
+              each === type ? undefined : whyNot(here, { kind: 'callout', type: each });
+            return { type: each, name: calloutName(each), ...(reason ? { disabled: reason } : {}) };
+          }),
           current: type,
           choose: (to) => void format(here, { kind: 'callout', type: to }, 'format.callout'),
           title: {
             current: quarto.title,
+            ...(() => {
+              // Asked with a title other than the one it has, which would be no change at all.
+              const set = whyNot(here, {
+                kind: 'callout-title',
+                title: quarto.title === null ? 'x' : `${quarto.title}\u200b`,
+              });
+              const clear =
+                quarto.title === null
+                  ? undefined
+                  : whyNot(here, { kind: 'callout-title', title: null });
+              return {
+                check: (typed: string | null) =>
+                  whyNot(here, { kind: 'callout-title', title: typed }),
+                ...(set ? { disabled: set } : {}),
+                ...(clear ? { clearDisabled: clear } : {}),
+              };
+            })(),
             set: (title) =>
               void format(here, { kind: 'callout-title', title }, 'format.callout-title'),
           },
