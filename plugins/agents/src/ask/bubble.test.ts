@@ -221,3 +221,65 @@ describe('the bubble’s exchange', () => {
     expect(exchangeOf(bubble).textContent).toContain('<img src=x onerror=alert(1)>');
   });
 });
+
+describe('the bubble’s model list (#507)', () => {
+  const choice = (model?: string) => ({
+    agent: CLAUDE,
+    models: [
+      { id: 'opus', name: 'Opus' },
+      { id: 'sonnet', name: 'Sonnet' },
+    ],
+    model,
+  });
+
+  it('shows the agent and its model at the lower left, and says what is picked', () => {
+    const bubble = make();
+    bubble.render(view({ choice: choice('sonnet') }));
+    const row = bubble.el.querySelector('.rl-note-box-row');
+    expect(row?.firstElementChild?.className).toBe('rl-qa-who');
+    expect(row?.firstElementChild?.textContent).toContain('Claude');
+    const select = bubble.el.querySelector<HTMLSelectElement>('.rl-qa-model');
+    expect([...(select?.options ?? [])].map((option) => option.textContent)).toEqual([
+      'Default',
+      'Opus',
+      'Sonnet',
+    ]);
+    expect(select?.value).toBe('sonnet');
+  });
+
+  it('tells the host the model picked, and Default as undefined', () => {
+    const picked: (string | undefined)[] = [];
+    const bubble = createBubble({
+      submit: noop,
+      close: noop,
+      stop: noop,
+      chooseModel: (model) => picked.push(model),
+      consent: noop,
+      dismiss: noop,
+      makeComment: noop,
+      openWindow: noop,
+      copy: noop,
+      has: () => true,
+      show: noop,
+      resized: noop,
+      focusDocument: noop,
+    });
+    document.body.append(bubble.el);
+    bubble.render(view({ choice: choice() }));
+    const select = bubble.el.querySelector<HTMLSelectElement>('.rl-qa-model')!;
+    select.value = 'opus';
+    select.dispatchEvent(new Event('change'));
+    select.value = '';
+    select.dispatchEvent(new Event('change'));
+    expect(picked).toEqual(['opus', undefined]);
+  });
+
+  it('shows no list for an agent that lists no models, and nothing before the agent is known', () => {
+    const bubble = make();
+    bubble.render(view());
+    expect(bubble.el.querySelector<HTMLElement>('.rl-qa-who')?.hidden).toBe(true);
+    bubble.render(view({ choice: { agent: CLAUDE, models: [], model: undefined } }));
+    expect(bubble.el.querySelector<HTMLElement>('.rl-qa-who')?.hidden).toBe(false);
+    expect(bubble.el.querySelector<HTMLElement>('.rl-qa-model')?.hidden).toBe(true);
+  });
+});

@@ -13,7 +13,7 @@ import { fitStatus, renderLiveLine, type LiveLineActions } from '../live-line.ts
 import type { LiveLine } from '../runs.ts';
 import { askIcon, type AskIconName } from './icons.ts';
 import { renderAnswer } from './render.ts';
-import { EXPLAIN, type AskTurn } from './session.ts';
+import { EXPLAIN, type AskChoice, type AskTurn } from './session.ts';
 import { addStyle } from './styles.ts';
 
 /** What the bubble shows. */
@@ -25,6 +25,8 @@ export interface BubbleView {
   line: LiveLine | null;
   /** What the field starts with when it comes back after a stop or a failure. */
   draft: string;
+  /** Who answers next and with which model: shown at the lower left, with a picker. */
+  choice?: AskChoice | null;
   /** Whether Open in New Window is offered: the host can open a window with text. */
   canOpenWindow: boolean;
 }
@@ -35,6 +37,8 @@ export interface BubbleHandlers {
   /** Cancel, or Esc in the field. */
   close(): void;
   stop(): void;
+  /** A model was picked in the list; undefined is the agent's default. */
+  chooseModel?: (model: string | undefined) => void;
   consent(answer: AgentScope | 'no'): void;
   dismiss(): void;
   showLog?: (path: string) => void;
@@ -107,7 +111,19 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
   };
   const askButton = button('Ask', () => submit());
   askButton.title = 'Ask (Return)';
+  // Who answers, and the model that runs, at the lower left (#507).
+  const who = el('div', 'rl-qa-who');
+  who.hidden = true;
+  const whoName = el('span', 'rl-qa-who-name');
+  const whoSelect = el('select', 'rl-qa-model');
+  whoSelect.addEventListener('change', () =>
+    handlers.chooseModel?.(whoSelect.value === '' ? undefined : whoSelect.value),
+  );
+  // The list takes the keyboard when it is used, and gives it back to the field when it closes.
+  whoSelect.addEventListener('keydown', (event) => event.stopPropagation());
+  who.append(whoName, whoSelect);
   row.append(
+    who,
     button('Cancel', () => handlers.close()),
     askButton,
   );
@@ -277,6 +293,31 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
         live.replaceChildren(...(next ? [renderLiveLine(next, liveActions)] : []));
       }
       liveLine = next;
+
+      // The agent and its model: a list when the agent offers some, else its name alone.
+      const choice = view.choice ?? null;
+      who.hidden = choice === null;
+      if (choice) {
+        whoName.textContent = choice.agent.name;
+        whoSelect.setAttribute('aria-label', `Model for ${choice.agent.name}`);
+        const key = choice.models.map((model) => model.id).join('\n');
+        if (whoSelect.dataset['models'] !== `${choice.agent.id}\n${key}`) {
+          whoSelect.dataset['models'] = `${choice.agent.id}\n${key}`;
+          whoSelect.replaceChildren(
+            ...[
+              ['', 'Default'],
+              ...choice.models.map((model) => [model.id, model.name] as const),
+            ].map(([value, text]) => {
+              const option = el('option');
+              option.value = value;
+              option.textContent = text;
+              return option;
+            }),
+          );
+        }
+        whoSelect.value = choice.model ?? '';
+        whoSelect.hidden = choice.models.length === 0;
+      }
 
       // The actions, once there is an answer to keep and nothing is going on.
       actions.replaceChildren();

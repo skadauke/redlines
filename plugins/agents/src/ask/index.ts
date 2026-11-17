@@ -167,6 +167,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       turns: state.turns,
       pending: state.pending,
       line: state.line,
+      choice: state.choice,
       draft: state.turns.length > open.lastQuestion.answers ? '' : open.lastQuestion.text,
       canOpenWindow: options.openInNewWindow !== undefined,
     });
@@ -332,6 +333,7 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       },
       close: () => close(true),
       stop: () => session.stop(),
+      chooseModel: (model) => session.setModel(model),
       consent: (answer) => session.answerConsent(answer),
       dismiss: () => session.dismiss(),
       ...(options.showLog ? { showLog: options.showLog } : {}),

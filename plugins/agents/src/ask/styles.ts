@@ -103,6 +103,11 @@ export const ASK_STYLE = `
 .rl-qa-actions .rl-note-icon { flex: none; }
 .rl-qa-live { margin-top: ${px(2)}; }
 .rl-qa-composer[hidden] { display: none; }
+.rl-qa-who { display: flex; align-items: center; gap: ${px(4)}; margin-right: auto; min-width: 0; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small-scaled); }
+.rl-qa-who[hidden], .rl-qa-model[hidden] { display: none; }
+.rl-qa-who-name { white-space: nowrap; }
+.rl-qa-model { min-width: 0; max-width: ${px(96)}; border: 1px solid transparent; border-radius: ${px(4)}; background: transparent; color: inherit; font: inherit; }
+.rl-qa-model:hover, .rl-qa-model:focus { border-color: var(--rl-rule); }
 .rl-qa-composer textarea { min-height: ${px(24)}; }
 .rl-qa-composer-follow { margin-top: ${px(6)}; }
 @media print { .rl-qa { display: none !important; } }
