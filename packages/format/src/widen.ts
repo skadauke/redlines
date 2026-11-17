@@ -109,6 +109,13 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
     spanFrom === spanTo &&
     parsed.ledgerRange &&
     sourceFrom > parsed.ledgerRange.from &&
+    // Only an item that has no text: the line up to the point is markers alone (a table's cell or
+    // a paragraph at the end of the file keeps what it did).
+    /^[ \t>]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]*)+$/.test(
+      text
+        .slice(text.lastIndexOf('\n', sourceFrom - 1) + 1, sourceFrom)
+        .replace(/<!--[^]*?-->/g, ''),
+    ) &&
     // An opening fence that nothing closes is the code lane's, which keeps its refusal.
     !sorted.some((edit) => /^[ \t]*(?:`{3,}|~{3,})/.test(edit.insert))
   ) {

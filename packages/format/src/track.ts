@@ -5311,7 +5311,15 @@ function splitsAlone(text: string, changes: readonly TextChange[]): boolean {
       const above = (lines[i - 1] ?? '').replace(/<!--[^]*?-->/g, '');
       // Nor is indented code above it, four columns in from this line.
       const indent = (l: string) => /^[ \t>]*/.exec(l)?.[0].replace(/>/g, '').length ?? 0;
+      // Only in a list: the paragraph above starts with an item's marker (a quote or a paragraph
+      // outside a list keeps the split alone after its closer, as a backslash's break does).
+      let top = i - 1;
+      while (top > 0 && /[^\s>]/.test((lines[top - 1] ?? '').replace(/<!--[^]*?-->/g, ''))) top--;
+      const inList = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/.test(
+        (lines[top] ?? '').replace(/<!--[^]*?-->/g, ''),
+      );
       if (
+        inList &&
         /[^\s>]/.test(above) &&
         !/^[ \t>]*(?:`{3,}|~{3,})/.test(above) &&
         indent(above) - indent(line) < 4
@@ -5494,7 +5502,7 @@ export const BARE_MARKER =
  * starts with, in the text typed into an empty list item: the file reads these lines as text of
  * the item, with the insertion's mark between the marker and them, and the view as a block. */
 const BLOCK_START =
-  /^(?:([-*_])(?:[ \t]*\1){2,}[ \t]*(?:\n|$)|\[[^\]\n]+\]:)|\n[ \t]*(?:=+|-+)[ \t]*(?:\n|$)/;
+  /^(?:([-*_])(?:[ \t]*\1){2,}[ \t]*(?:\n|$)|\[[^\]\n]+\]:)|^[^\n]*\S[^\n]*\n[ \t]*(?:=+|-+)[ \t]*(?:\n|$)/;
 
 /** A line of an item that is three or more of one of `-`, `*` and `_`, with spaces between. */
 const THEMATIC_ITEM =
