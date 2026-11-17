@@ -18,12 +18,12 @@ script that tests it on any machine that has Quarto.
 
 - **Most of a Quarto file is ordinary Markdown to Redlines, and that part works.** Text inside a
   callout, a column or a tabset, headings, spans, citations, tables and footnotes take insertions,
-  deletions, comments and decisions, and read the same in every order of decisions (probe, below).
+  deletions, comments and decisions, and read right in four readings: the newest view, the original view, accept-all and reject-all (probe, below).
 - **Three kinds of Quarto syntax are handled as the spec says:** fenced chunks and their `#|`
   options (a change replaces the whole chunk, with its backticks and `#|` escaped in the payload),
   shortcodes `{{< … >}}` (a change replaces the shortcode, with `{\{<` in the payload) and attribute
   blocks `{#id .class}` (a change replaces the block).
-- **Three are not, though format §3.1 rule 9 says they are:** a mark on a `:::` fence line, a mark
+- **Three are not handled, though format §3.1 rule 9 says they should be (the citation key is the same hazard, not yet listed):** a mark on a `:::` fence line, a mark
   inside `@fig-plot` or `[@smith2020]`, and a mark between the colons of a closing fence. The library
   reads a `.qmd` as GitHub Markdown plus whatever it already knew, and has no scanner for divs or
   cross-references. Each of these can change what Quarto renders (from the earlier pandoc tests and
@@ -40,7 +40,7 @@ script that tests it on any machine that has Quarto.
   Quarto). For Word there are two routes, Quarto's docx from the source and Redlines' own export.
   Plan: keep Redlines' export for review, since it keeps comments and threads, and offer the pandoc
   filter (format §11) for people who want Quarto's docx with tracked changes.
-- **The plan is 17 PRs in six phases, about nine hours of lane time.** The first four PRs make the
+- **The plan is 17 PRs in six phases, about nine hours of lane time.** The first three PRs, and a fixture, make the
   library obey its own spec; the next four draw the constructs; the rest are includes, Word and
   Quarto's own render. Six questions for Stephan are at the end.
 
@@ -91,7 +91,7 @@ was edited at about 20 places with `trackedEdits` and again with `fineEdits` (th
 deleted afterwards). Each result was judged by whether the newest view, the original view, accept-all
 and reject-all give back what the edit and the file say:
 
-| Place of the edit | What Redlines wrote | Reads right | Quarto reads it right |
+| Place of the edit | What Redlines wrote | Reads right in Redlines (four readings) | Expected in Quarto (pandoc's grammar and earlier pandoc tests; Quarto not run) |
 | --- | --- | --- | --- |
 | a word in a callout or column | `Car<!--ins-->X<!--/-->eful` | yes | yes |
 | delete a word in a callout | `<!--sub … -->` of the words | yes | yes |
@@ -111,10 +111,10 @@ and reject-all give back what the edit and the file say:
 
 "Reads right" is Redlines' own reading, which held everywhere. The last column is the point: the
 four bold rows read right in Redlines and would change what Quarto renders. [syntax](syntax.md)
-found the fence-line hazard with pandoc, and §3.1 rule 9 forbids all three, so these are the library
+found the fence-line hazard with pandoc, and §3.1 rule 9 names the fence lines, the new fences and `@fig-x` (the citation key is the same hazard, and rule 9 doesn't list it yet), so these are the library
 falling short of its spec, found because nothing tested `.qmd` constructs until now. The probe did
-not test text typed *after* `}` of an attribute block, or a mark between a callout's title heading
-and its body.
+not test text typed *after* `}` of an attribute block (rule 9 forbids it; untested), or a mark between a
+callout's title heading and its body. The probe file is not in this PR; Q4 rebuilds it as a fixture.
 
 ## The constructs, and what to do with each
 
@@ -156,7 +156,7 @@ What follows for Redlines:
   changes and ledger live in it. This is the normal case, needs no work, and is what the decision
   on #144 assumed ("the editor always writes one ledger").
 - **A joined text has several ledgers, and each marker reads the first ledger after it.** Where one
-  appears: `quarto render --keep-md` and `keep-qmd` leave the expanded file next to the output;
+  appears: the `keep-md` option leaves the expanded file (as documented; not run) next to the output;
   knitr child documents and `{{< embed >}}` expand likewise; a person may paste a file into another.
   A review of that joined file, read-only, is the case #915 serves (the Quick Look and the CLI read
   it); writing it back to the parts is #915's `setLedger`, which keeps each entry in its ledger.
@@ -185,7 +185,7 @@ What follows for Redlines:
 - **The editor** should draw, in this order of value: callouts (the editor's alert box, with the
   kind in the title menu; the same tint and the author's color for a pending type change); the
   options of a chunk as a header line; `:::` fence lines folded away when the caret isn't there (as
-  the alert's syntax is, §5.2: "the source shows while the caret is in the title line"); shortcodes,
+  the alert's syntax is, design.md, alerts: "the source shows while the caret is in the title line"); shortcodes,
   cross-references and citations as chips (design "Could", and the numbers need a table of labels,
   which the editor can build from `{#fig-…}` and `#| label:` itself, without running anything);
   columns as a quiet bracket, not as columns (a margin of notes beside three columns would not fit).
@@ -210,13 +210,12 @@ What follows for Redlines:
 
 ## Word round trips
 
-Three ways to get a `.qmd` into Word and back:
+Two ways to get a `.qmd` into Word and back:
 
 | Route | Tracked changes | Comments | Code and figures | Back to the source |
 | --- | --- | --- | --- | --- |
 | **Redlines' export** (`packages/word`) from the source | real, with authors | with threads | chunks as code paragraphs; no output (nothing runs); cross-references as the text typed, since the number is Quarto's to make | Redlines' importer (`importDocx`): changes become marks, a changed paragraph is matched by text |
-| **Quarto docx** from the source (`format: docx`) | none by default; with the pandoc filter (§11), `.insertion` and `.deletion` spans become real ones | dropped; with the filter, comments that have a range, without threads | figures, tables and numbers as rendered; the real review document | none: the rendered text no longer is the source, and a Word edit of "Figure 1" can't be mapped to `@fig-x` |
-| **Quarto docx with the filter**, as a view of the markup | yes | partly | as rendered | none |
+| **Quarto docx** from the source (`format: docx`) | none by default; with the pandoc filter (§11; planned as Q15, the prototype reads an older key), `.insertion` and `.deletion` spans would become real ones | dropped; with the filter, only comments that have a range, without threads | figures, tables and numbers as rendered; the real review document | none: the rendered text no longer is the source, and a Word edit of "Figure 1" can't be mapped to `@fig-x` |
 
 Quarto's docx page documents `reference-doc` and no option for tracked changes or comments (the
 docx *input* side has pandoc's `--track-changes`; Quarto's output has no equivalent that this study
@@ -283,8 +282,8 @@ one above them only where stated.
 | Q16 | Docs and the website: a page for Quarto users (`editor: source`, the extension, what Word gets) | 15 |
 | Q17 | `redlines` CLI and the agent skill: how an agent edits a `.qmd` (the newest view; never inside a chunk's fence line; no reference token), with the skill's text rebuilt | 20 |
 
-Lanes: Q1 first and alone; Q2, Q3 and Q5 in parallel after it; Phase 2 in parallel with Phase 3
-once Q2 is in; Phase 4 and 5 last. About 9 hours of lane time, 3 to 4 elapsed.
+Dependencies: Q1 first; Q5 can start at once; Q2, Q3 and Q4 after Q1; Q7 after Q2; Q11 after #915
+merges; Q15 after Q4 and Q5. Phases 2 and 3 run in parallel once Q2 is in; Phases 4 and 5 last. About 9 hours of lane time, 3 to 4 elapsed.
 
 ## Open questions for Stephan
 
