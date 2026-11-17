@@ -211,8 +211,10 @@ pub fn classify(error: &WireError, offered_setup_code: bool) -> Refusal {
 /// JSON with no token.
 pub fn bootstrap_token(pasted: &str) -> Option<String> {
     use base64::Engine as _;
+    // A code that a chat or a terminal wrapped has line breaks inside it.
     let text = pasted
-        .trim()
+        .split_whitespace()
+        .collect::<String>()
         .trim_end_matches('=')
         .replace('+', "-")
         .replace('/', "_");
@@ -226,7 +228,7 @@ pub fn bootstrap_token(pasted: &str) -> Option<String> {
             .and_then(Value::as_str)
             .filter(|token| !token.is_empty())
             .map(str::to_owned),
-        _ => Some(pasted.trim().to_owned()),
+        _ => Some(pasted.split_whitespace().collect()),
     }
 }
 
@@ -353,14 +355,14 @@ mod tests {
         let greeting =
             r#"{"type":"event","event":"connect.challenge","payload":{"nonce":"n1","ts":5}}"#;
         assert_eq!(parse(greeting), Incoming::Challenge { nonce: "n1".into() });
-        let call = r#"{"type":"event","event":"node.invoke.request","payload":{"id":"c1","nodeId":"d1","command":"mcp.tools.call.v1","paramsJSON":"{\"tool\":\"view\"}","timeoutMs":9000}}"#;
+        let call = r#"{"type":"event","event":"node.invoke.request","payload":{"id":"c1","nodeId":"d1","command":"mcp.tools.call.v1","paramsJSON":"{\"server\":\"redlines\",\"tool\":\"view\"}","timeoutMs":9000}}"#;
         assert_eq!(
             parse(call),
             Incoming::Invoke {
                 id: "c1".into(),
                 node_id: "d1".into(),
                 command: "mcp.tools.call.v1".into(),
-                params_json: r#"{"tool":"view"}"#.into()
+                params_json: r#"{"server":"redlines","tool":"view"}"#.into()
             }
         );
     }
@@ -392,6 +394,8 @@ mod tests {
             bootstrap_token("CcN4abcDEF123").as_deref(),
             Some("CcN4abcDEF123")
         );
+        let wrapped = format!("{}\n  {}", &code[..10], &code[10..]);
+        assert_eq!(bootstrap_token(&wrapped).as_deref(), Some("Bt-1_x"));
         let none = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"url":"x"}"#);
         assert_eq!(bootstrap_token(&none), None);
     }

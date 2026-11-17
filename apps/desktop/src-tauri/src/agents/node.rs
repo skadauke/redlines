@@ -1126,6 +1126,24 @@ mod tests {
     }
 
     #[test]
+    fn a_call_for_another_server_or_no_tool_is_refused() {
+        let published = vec!["view".to_owned()];
+        for params in [
+            r#"{"server":"other","tool":"view"}"#,
+            r#"{"tool":"view"}"#,
+            r#"{"server":"redlines"}"#,
+            r#"{"server":"redlines","tool":""}"#,
+        ] {
+            assert!(
+                answer_call(&Tools, &published, COMMAND, params).is_err(),
+                "{params}"
+            );
+        }
+        let good = r#"{"server":"redlines","tool":"view"}"#;
+        assert!(answer_call(&Tools, &published, COMMAND, good).is_ok());
+    }
+
+    #[test]
     fn a_gateway_with_a_newer_protocol_is_said_to_be_newer() {
         let gateway = fake(vec![Box::new(|socket, frames| {
             greet(socket, "n");
