@@ -1180,7 +1180,7 @@ middle of a paragraph it splits the paragraph.
 - A closer alone on a line, with no text after it, starts no line of a paragraph: the line is an
   HTML block that ends on that line. It stands after a closing fence (§3.3) and after the line
   break that a change brings at the end of the document (§3.1, 4), which the ledger follows.
-- The new text of a substitution that is a whole tag alone on its line, after a blank line (CommonMark's
+- The new text of a substitution that is a whole tag alone on its line, at the start of the file or after a blank line (CommonMark's
   seventh kind of HTML block: an image given a size is written as `<img …>`), has its closer on the
   next line, because a closer after the tag on its line would make the line a paragraph, which the
   newest view doesn't read (#628).
