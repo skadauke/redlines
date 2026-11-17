@@ -3602,10 +3602,18 @@ front matter in R Markdown and Quarto.
   is: the ledger is written again in place, and removing the ledger leaves that text after the
   body. A change that another tool makes there stays there, and has its entry in the ledger in
   front of it, the file's last.
-- Documents joined by Quarto includes or knitr child documents can contain several ledgers. A
-  marker belongs to the first ledger after it. The editor always writes one. (Not done yet, #144:
-  the library reads every marker against the last ledger in the file, so marks in front of an
-  earlier ledger show with no author or time.)
+- Documents joined by Quarto includes or knitr child documents can contain several ledgers, one
+  for each part. A marker reads the first ledger after it, and a marker after the last ledger
+  reads the last, so each part keeps its authors and times. A mark's entry, and a comment's
+  thread, are read from that ledger only: an entry that stands in a ledger in front of its
+  marker is not read for it, and the mark shows with no author or time, as one with no entry
+  does (§2.4). The settings (`tracking`, `view`, `history`) and the keys of a later version are
+  the last ledger's, and people are everyone that any ledger lists, the last ledger's entry for a
+  handle first. Redlines writes a new change's entry into the first ledger after its marker, a
+  person new to that ledger with it, and leaves the other ledgers as they are, so that the parts
+  can be split apart again and each is the file it was. A ledger left with no mark, comment or
+  setting by a decision goes with its blank line, as the only ledger of a file does. The views
+  (§8) show none of them. The editor always writes one ledger when it starts a file's.
 - The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
   (§2.1).
 - A `<!--` with no `-->` of its own, anywhere in the text, opens a comment that runs to the first
