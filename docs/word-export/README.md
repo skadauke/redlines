@@ -4,8 +4,9 @@ Status: research and recommendation, 2026-10-13, and the exporter as built. `pac
 (`@redlines/word`) writes a Word file with `exportDocx` (the core, #834; tables, format changes,
 splits, joins, moves, images and task lists, #847; the round-trip carriers, #845), reads one back
 (`importDocx`, see [the importer plan](import.md)) and normalizes Google Docs' export (#838).
-File › Export to Word… and `redlines export-docx` call the writer (#841); Open .docx… is not built
-yet, and Word and Google Docs reach the editor through paste (#842).
+File › Export to Word… and `redlines export-docx` call the writer (#841), and File › Open .docx…
+(`redlines import-docx`) the importer (#881, with pictures, #885); Word and Google Docs also reach
+the editor through paste (#842).
 
 See also [How Word displays Track Changes in tricky cases](word-display.md),
 the [Word importer plan](import.md) and the [Word lab](../research/word.md).
