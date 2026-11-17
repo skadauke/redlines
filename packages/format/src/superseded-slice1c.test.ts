@@ -104,7 +104,7 @@ describe('#276 M2: a cluster of four or more adjacent marks is read to the end',
   });
 });
 
-describe('#1071: the walk of states is bounded by time', () => {
+describe('#1071: the walk of states in a chain of marks', () => {
   const chainOf = (n: number) => {
     const ids = MORE.slice(0, n);
     const chain = ids.map((id, i) => `<!--ins ${id}-->${'abcdefgh'[i]}<!--/${id}-->`).join('');
@@ -114,9 +114,8 @@ describe('#1071: the walk of states is bounded by time', () => {
     };
   };
 
-  it('gives up when its time is spent, and a key beside the chain is still written', () => {
+  it('reads a chain of five to the end, and a key beside it is written', () => {
     const { ids, before } = chainOf(5);
-    expect(emphasisReadsAlike(before, new Set(ids), 0)).toBe(false);
     expect(emphasisReadsAlike(before, new Set(ids))).toBe(true);
     const two = at(before, 'two');
     const done = trackedEdits(

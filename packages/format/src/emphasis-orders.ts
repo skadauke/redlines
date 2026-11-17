@@ -37,13 +37,6 @@ export function unreadDelimiters(s: string): string {
  * grows the states about 2.6 times a mark (a chain of four of one person's marks, with the key's own
  * beside them, reads 55; seven marks 380), at about 0.4 ms a state. */
 const MOST_STATES = 400;
-/**
- * How long the walk of states may take, in ms. A key in a chain of marks reads 50 to 65 states, at
- * about 1 ms each, on a development Mac; the states' own cap (400) would allow some 400 ms on one
- * key. Past the time the walk gives up as it does past the cap, and the edit is written again or
- * widened to its unit (format §3.12), never refused for it (#1071).
- */
-const MOST_MS = 120;
 /** How many lines on either side of a marker belong to its paragraph. */
 const MOST_LINES = 30;
 
@@ -139,21 +132,16 @@ function paragraphsRead(text: string, parsed: Parsed, ids: ReadonlySet<string>):
  * Whether the marks `created` of an edit, with the marks they stand against, leave the emphasis of
  * their paragraphs as it reads in the newest view, in the file and after each decision of those
  * marks, accepted or rejected, in every order. A decision that is refused is not read. False where
- * there are more states than are read, or the walk takes longer than `budget` ms.
+ * there are more states than are read.
  */
-export function emphasisReadsAlike(
-  after: string,
-  created: ReadonlySet<string>,
-  budget = MOST_MS,
-): boolean {
-  const deadline = performance.now() + budget;
+export function emphasisReadsAlike(after: string, created: ReadonlySet<string>): boolean {
   const cluster = clusterOf(parse(after), created);
   if (cluster.size === 0) return true;
   const seen = new Set<string>();
   const walk = (text: string): boolean => {
     if (seen.has(text)) return true;
     seen.add(text);
-    if (seen.size > MOST_STATES || performance.now() > deadline) return false;
+    if (seen.size > MOST_STATES) return false;
     const parsed = parse(text);
     const pending: MarkRange[] = parsed.marks.filter((mark) => cluster.has(mark.id));
     if (pending.length === 0) return true;
