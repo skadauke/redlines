@@ -7,7 +7,8 @@
 // `deps`.
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
-import type { AgentModel, AgentState } from '@redlines/plugin-api';
+import type { AgentModel, AgentScope, AgentState } from '@redlines/plugin-api';
+import { narrower } from './reach.ts';
 import { privacyMessage } from './blocked-message.ts';
 import { button, el, reasonOf, row, textField, uniqueId } from './pane-dom.ts';
 import { defaultAgentRow, type DefaultChoice } from './default-agent-field.ts';
@@ -283,8 +284,12 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
     scope.append(option);
   }
   scope.value = deps.settings().agentScope;
-  /** The setting as it was when last drawn, to tell what a widening brings back. */
-  let scopeWas = deps.settings().agentScope;
+  /**
+   * The narrowest setting since the pane opened: what a widening brings back is counted from it, so
+   * that widening in two steps (document, folder, everything) still counts every answer that stands
+   * again, and narrowing back to it counts none.
+   */
+  let scopeBase = deps.settings().agentScope;
   // The note comes with the widest choice, where the risk is, and goes with it.
   // The risk is said where the choice is made, and a screen reader says it with the choice and
   // again when the choice changes it.
@@ -336,8 +341,8 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   scope.addEventListener('change', () => {
     const chosen = scope.value;
     const next = chosen === 'document' || chosen === 'everything' ? chosen : 'folder';
-    showAgain(readableAgain(deps.settings().consent, scopeWas, next, (agent) => names.has(agent)));
-    scopeWas = next;
+    showAgain(next);
+    scopeBase = narrower(scopeBase, next);
     deps.update({
       agentScope: chosen === 'document' || chosen === 'everything' ? chosen : 'folder',
     });
@@ -348,12 +353,15 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   // forget them, rather than asking again folder by folder.
   const again = el('div', 'rl-pref-note');
   again.setAttribute('role', 'status');
-  const showAgain = (keys: readonly string[]) => {
+  const showAgain = (next: AgentScope) => {
+    const standing = () =>
+      readableAgain(deps.settings().consent, scopeBase, next, (agent) => names.has(agent));
+    const keys = standing();
     again.replaceChildren();
     if (keys.length === 0) return;
     const forget = button('Forget them');
     forget.addEventListener('click', () => {
-      deps.update({ consent: forgetting(deps.settings().consent, keys) });
+      deps.update({ consent: forgetting(deps.settings().consent, standing()) });
       again.replaceChildren();
       drawRemembered();
     });

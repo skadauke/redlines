@@ -770,6 +770,22 @@ describe('the Agents pane', () => {
       );
     });
 
+    it('counts every answer that stands again when widened in two steps, and none after narrowing back', () => {
+      const { deps, container, now } = setup(
+        {},
+        { agentScope: 'document', consent: { ...consent } },
+      );
+      renderAgentsPane(container, deps);
+      const line = () => row(container, 'What agents may read').textContent;
+      widen(container, 'folder');
+      widen(container, 'everything');
+      expect(line()).toContain('2 folders you allowed before are readable again.');
+      buttonOf(container, 'What agents may read', 'Forget them').click();
+      expect(now().consent).toEqual({ 'codex|/c': 'no' });
+      widen(container, 'document');
+      expect(line()).not.toContain('allowed before');
+    });
+
     it('forgets those answers and no others, and the line goes', () => {
       const { deps, container, now } = setup({}, { agentScope: 'folder', consent: { ...consent } });
       renderAgentsPane(container, deps);
