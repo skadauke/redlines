@@ -9,6 +9,13 @@
 
 import { scaffold, continuationPrefix, bodyStart, lineEnd, lineStart } from './blocks.ts';
 import { micromark } from 'micromark';
+import {
+  gfmAutolinkLiteral,
+  gfmAutolinkLiteralHtml,
+} from 'micromark-extension-gfm-autolink-literal';
+import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
+import { gfmTable, gfmTableHtml } from 'micromark-extension-gfm-table';
+import { gfmTaskListItem, gfmTaskListItemHtml } from 'micromark-extension-gfm-task-list-item';
 import { applyChanges, eolOf } from './changes.ts';
 import { accept, isDecidable, reject, rejectMarks } from './decide.ts';
 import { addPerson, changesBetween, paragraphBreaks, workingLedger } from './edit-support.ts';
@@ -175,7 +182,7 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
     );
     // The unit with the block after it is kept only where micromark reads its file as the newest
     // view (the check of the oracle's reader), else the ladder ends in an alert.
-    if (done && !(fromSpare && readsOtherwise(text, done.changes))) return done;
+    if (done && !(fromSpare && readsOtherMicromark(text, done.changes))) return done;
     const wider = widerThan(closed);
     fromSpare = !wider && spare !== undefined;
     rung = wider ?? spare;
@@ -696,7 +703,7 @@ const LIST_LINE = /^[ \t>]*(?:\d{1,9}[.)]|[-*+])(?:[ \t]|$)/;
  * Whether an edit is where a fine write can read otherwise in the file than in the newest view: it
  * starts inside a block's syntax (the `>` of a tag, the space of `## `, right behind a bare
  * marker), or it is in indented code with a list item close below it. Only these are read by
- * micromark (`readsOtherwise`), so that a keystroke elsewhere costs what it did.
+ * micromark (`readsOtherMicromark`), so that a keystroke elsewhere costs what it did.
  */
 export function atBlockBoundary(text: string, edits: readonly TextChange[]): boolean {
   return edits.some((edit) => {
@@ -712,6 +719,8 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     ) {
       return true;
     }
+    // Text typed in indented code or an item's text never changes the blocks: only a line break can.
+    if (!edit.insert.includes('\n') && edit.from === edit.to) return false;
     if (!/^(?: {4}|\t)/.test(text.slice(start))) return false;
     let at = lineEnd(text, edit.to);
     for (let i = 0; i < 4 && at < text.length; i++) {
@@ -724,11 +733,20 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
 }
 
 /** Whether micromark reads the file the changes make otherwise than its newest view. */
-export function readsOtherwise(text: string, changes: readonly TextChange[]): boolean {
+export function readsOtherMicromark(text: string, changes: readonly TextChange[]): boolean {
   const file = applyChanges(text, changes);
   const ledger = parse(file).ledgerRange;
   const read = (source: string) =>
-    micromark(source, { allowDangerousHtml: true })
+    micromark(source, {
+      allowDangerousHtml: true,
+      extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+      htmlExtensions: [
+        gfmAutolinkLiteralHtml(),
+        gfmStrikethroughHtml(),
+        gfmTableHtml(),
+        gfmTaskListItemHtml(),
+      ],
+    })
       .replace(/<!--[^]*?-->/g, '')
       .replace(/\s+/g, ' ')
       .replace(/ ?(<[^>]*>) ?/g, '$1')

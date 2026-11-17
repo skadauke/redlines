@@ -28,6 +28,13 @@ const rows: Script[] = [
     expect: {},
   },
   {
+    name: 'GFM: Return over the space of a heading that starts with strikethrough',
+    doc: '## ‸~~alpha~~⏎',
+    keys: ['Shift-ArrowLeft', 'Enter'],
+    tc: true,
+    expect: {},
+  },
+  {
     name: '#601 1: Shift-Return in indented code before a 2. item',
     doc: '      1. ‸ship a⏎2. a a⏎',
     keys: ['Shift-Enter'],
