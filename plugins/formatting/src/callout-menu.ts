@@ -9,13 +9,13 @@ export interface CalloutMenu {
   /** The button the menu hangs from: just below it, or above it with no room below. */
   anchor: HTMLElement;
   /** The types offered, in order, and the one the alert has now. */
-  types: readonly { type: string; name: string }[];
+  types: readonly { type: string; name: string; disabled?: string }[];
   current: string;
   /** Called with the type chosen, when it is not the current one. */
   choose(type: string): void;
   /** A Quarto callout has a title, set after the types: the title it has, and what sets it (null
    * takes it away). The menu names itself for a callout, not an alert. */
-  title?: { current: string | null; set(title: string | null): void };
+  title?: { current: string | null; disabled?: string; set(title: string | null): void };
 }
 
 /** The menu that is open on a view, so that there is never more than one, and the button it hangs
@@ -76,6 +76,7 @@ export const calloutMenuTheme = EditorView.baseTheme({
     color: 'inherit',
     font: 'inherit',
   },
+  '.rl-callout-item[aria-disabled="true"]': { opacity: '0.45' },
   '.rl-callout-item-check': { width: '18px', flex: 'none', color: 'var(--rl-ink-2)' },
 });
 
@@ -98,11 +99,15 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
   list.setAttribute('role', 'menu');
   list.setAttribute('aria-label', menu.title ? 'Callout type and title' : 'Alert type');
   const items: HTMLButtonElement[] = [];
-  for (const { type, name } of menu.types) {
+  for (const { type, name, disabled } of menu.types) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'rl-callout-item';
     item.dataset['type'] = type;
+    if (disabled) {
+      item.setAttribute('aria-disabled', 'true');
+      item.title = disabled;
+    }
     item.setAttribute('role', 'menuitemradio');
     item.setAttribute('aria-checked', String(type === menu.current));
     const check = document.createElement('span');
@@ -124,6 +129,10 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
       item.type = 'button';
       item.className = 'rl-callout-item';
       item.dataset['action'] = id;
+      if (menu.title?.disabled) {
+        item.setAttribute('aria-disabled', 'true');
+        item.title = menu.title.disabled;
+      }
       item.setAttribute('role', 'menuitem');
       const gap = document.createElement('span');
       gap.className = 'rl-callout-item-check';
@@ -173,6 +182,8 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
   menu.anchor.setAttribute('aria-expanded', 'true');
 
   const pick = (item: HTMLButtonElement) => {
+    // A disabled item says why on hover and does nothing.
+    if (item.getAttribute('aria-disabled') === 'true') return;
     const type = item.dataset['type'];
     const current = !stale();
     close(true);
@@ -208,6 +219,7 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
   };
   for (const item of titleItems) {
     item.addEventListener('click', () => {
+      if (item.getAttribute('aria-disabled') === 'true') return;
       if (item.dataset['action'] === 'title') editTitle();
       else {
         const current = !stale();

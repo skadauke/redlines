@@ -141,4 +141,44 @@ describe('the menu in a Quarto callout’s title', () => {
     const text = editor.view.state.doc.toString();
     expect(text).toMatch(/was=fence=\{\.callout-note\}-->\n\n::: \{\.callout-note title="Scope"\}/);
   });
+
+  it('changes a callout that stands under a line of text as a substitution, not a refusal', () => {
+    const doc = 'Intro line.\n::: {.callout-note}\nUse the form.\n:::\n\nAfter.\n';
+    const { editor, notices } = mount(doc, { tracking: true });
+    const menu = openMenu(editor);
+    expect(menu.querySelector('[data-type="tip"]')?.getAttribute('aria-disabled')).toBeNull();
+    click(menu, '[data-type="tip"]');
+    const text = editor.view.state.doc.toString();
+    expect(notices).toEqual([]);
+    expect(text).toContain('.callout-tip');
+    expect(text).toContain('<!--sub');
+  });
+
+  it('disables an item with its reason where nothing can be written', () => {
+    // Another person's pending change in the callout's own fence line is in the way of both forms.
+    const doc = [
+      'Intro.',
+      '',
+      '::: {.callout-note}',
+      'Use the <!--ins k3x9-->new <!--/k3x9-->form.',
+      ':::',
+      '',
+      '<!-- redlines',
+      'version: 1',
+      'people:',
+      '  bob: {name: Bob}',
+      'marks:',
+      '  k3x9: {by: bob, at: 2026-10-13T22:40Z}',
+      '-->',
+      '',
+    ].join('\n');
+    const { editor, notices } = mount(doc, { tracking: true });
+    const menu = openMenu(editor);
+    const items = [...menu.querySelectorAll<HTMLElement>('[data-type]')];
+    for (const item of items.filter((each) => each.getAttribute('aria-disabled') === 'true')) {
+      expect(item.title).not.toBe('');
+      item.click();
+    }
+    expect(notices).toEqual([]);
+  });
 });

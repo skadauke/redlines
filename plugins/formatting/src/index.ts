@@ -472,6 +472,27 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     }
   };
 
+  /** Why a format change can't be written at `range`, or undefined where it can: asked before a menu
+   * offers it, so that an item is disabled with the reason, and no click is refused. */
+  const whyNot = (range: Range, op: FormatOp): string | undefined => {
+    if (!editable()) return undefined;
+    try {
+      writeFormat(view.state.doc.toString(), {
+        tracking: view.state.field(trackingField),
+        ranges: [range],
+        op,
+        author: personOf(options.author),
+        time: ledgerTime(new Date()),
+        dialect: view.state.facet(dialectFacet),
+        ...sourceOf(),
+      });
+      return undefined;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      return error.message;
+    }
+  };
+
   /** Inserts text as typing: an insertion with Track Changes on, plain text with it off. */
   const insert = (changes: readonly TextChange[]): boolean =>
     editable() && put(changes, 'input.format', false);
@@ -1174,11 +1195,19 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         const here = { from: pos, to: pos };
         openCalloutMenu(view, {
           anchor,
-          types: QUARTO_CALLOUTS.map((each) => ({ type: each, name: calloutName(each) })),
+          types: QUARTO_CALLOUTS.map((each) => {
+            const reason =
+              each === type ? undefined : whyNot(here, { kind: 'callout', type: each });
+            return { type: each, name: calloutName(each), ...(reason ? { disabled: reason } : {}) };
+          }),
           current: type,
           choose: (to) => void format(here, { kind: 'callout', type: to }, 'format.callout'),
           title: {
             current: quarto.title,
+            ...(() => {
+              const reason = whyNot(here, { kind: 'callout-title', title: quarto.title ?? 'x' });
+              return reason ? { disabled: reason } : {};
+            })(),
             set: (title) =>
               void format(here, { kind: 'callout-title', title }, 'format.callout-title'),
           },
