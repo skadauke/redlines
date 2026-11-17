@@ -1,224 +1,193 @@
-// @codemirror/collab 6.1.1, MIT (Copyright (C) 2018-2021 by Marijn Haverbeke and others; see
-// LICENSE). Rewritten as TypeScript from the published dist, with one fix: updates are rebased and
-// received one at a time (see README.md).
+// @ts-nocheck
+import {Facet, ChangeSet, ChangeDesc, StateField, Annotation, EditorState, StateEffect,
+        Transaction, combineConfig, Extension} from "@codemirror/state"
 
-import type { ChangeDesc, EditorState, Extension, Transaction as Tr } from '@codemirror/state';
-import {
-  Annotation,
-  ChangeSet,
-  combineConfig,
-  Facet,
-  StateEffect,
-  StateField,
-  Transaction,
-} from '@codemirror/state';
+// Redlines: this is upstream's collab.ts (see upstream.ts) with one fix: receiveUpdates and
+// rebaseUpdates take the updates one at a time. The diff against upstream.ts is the fix.
 
-/** An update as the authority logs it: a change, the effects shared with it, and who made it. */
+// Redlines: what an authority's log keeps of an update.
+export type LoggedUpdate = {changes: ChangeDesc, clientID: string}
+
+/// An update is a set of changes and effects.
 export interface Update {
-  changes: ChangeSet;
-  effects?: readonly StateEffect<unknown>[];
-  clientID: string;
+  /// The changes made by this update.
+  changes: ChangeSet,
+  /// The effects in this update. There'll only ever be effects here
+  /// when you configure your collab extension with a
+  /// [`sharedEffects`](#collab.collab^config.sharedEffects) option.
+  effects?: readonly StateEffect<any>[]
+  /// The [ID](#collab.collab^config.clientID) of the client who
+  /// created this update.
+  clientID: string
 }
 
-/** An update known by its change description only (what an authority's log needs to keep). */
-export interface LoggedUpdate {
-  changes: ChangeDesc;
-  clientID: string;
-}
-
-export class LocalUpdate implements Update {
-  readonly origin: Tr;
-  readonly changes: ChangeSet;
-  readonly effects: readonly StateEffect<unknown>[];
-  readonly clientID: string;
+class LocalUpdate implements Update {
   constructor(
-    origin: Tr,
-    changes: ChangeSet,
-    effects: readonly StateEffect<unknown>[],
-    clientID: string,
-  ) {
-    this.origin = origin;
-    this.changes = changes;
-    this.effects = effects;
-    this.clientID = clientID;
-  }
+    readonly origin: Transaction,
+    readonly changes: ChangeSet,
+    readonly effects: readonly StateEffect<any>[],
+    readonly clientID: string
+  ) {}
 }
 
-export class CollabState {
-  // The version up to which changes have been confirmed.
-  readonly version: number;
-  // The local updates that haven't been successfully sent to the authority yet.
-  readonly unconfirmed: readonly LocalUpdate[];
-  constructor(version: number, unconfirmed: readonly LocalUpdate[]) {
-    this.version = version;
-    this.unconfirmed = unconfirmed;
-  }
+class CollabState {
+  constructor(
+    // The version up to which changes have been confirmed.
+    readonly version: number,
+    // The local updates that havent been successfully sent to the
+    // server yet.
+    readonly unconfirmed: readonly LocalUpdate[]) {}
 }
 
-interface CollabConfig {
-  startVersion: number;
-  clientID: string | null;
-  sharedEffects: (tr: Tr) => readonly StateEffect<unknown>[];
-  generatedID?: string;
+type CollabConfig = {
+  /// The starting document version. Defaults to 0.
+  startVersion?: number,
+  /// This client's identifying [ID](#collab.getClientID). Will be a
+  /// randomly generated string if not provided.
+  clientID?: string,
+  /// It is possible to share information other than document changes
+  /// through this extension. If you provide this option, your
+  /// function will be called on each transaction, and the effects it
+  /// returns will be sent to the server, much like changes are. Such
+  /// effects are automatically remapped when conflicting remote
+  /// changes come in.
+  sharedEffects?: (tr: Transaction) => readonly StateEffect<any>[]
 }
 
-export const collabConfig = Facet.define<CollabConfig, CollabConfig & { clientID: string }>({
+const collabConfig = Facet.define<CollabConfig & {generatedID: string}, Required<CollabConfig>>({
   combine(configs) {
-    const combined = combineConfig<CollabConfig>(
-      configs,
-      { startVersion: 0, clientID: null, sharedEffects: () => [] },
-      { generatedID: (a: unknown) => a } as never,
-    );
-    const first = configs[0];
-    return { ...combined, clientID: combined.clientID ?? (first && first.generatedID) ?? '' };
-  },
-});
+    let combined = combineConfig(configs, {startVersion: 0, clientID: null as any, sharedEffects: () => []}, {
+      generatedID: a => a
+    })
+    if (combined.clientID == null) combined.clientID = (configs.length && configs[0].generatedID) || ""
+    return combined
+  }
+})
 
-export const collabReceive = Annotation.define<CollabState>();
+const collabReceive = Annotation.define<CollabState>()
 
-export const collabField = StateField.define<CollabState>({
+const collabField = StateField.define({
   create(state) {
-    return new CollabState(state.facet(collabConfig).startVersion, []);
+    return new CollabState(state.facet(collabConfig).startVersion, [])
   },
-  update(collab, tr) {
-    const isSync = tr.annotation(collabReceive);
-    if (isSync) return isSync;
-    const { sharedEffects, clientID } = tr.startState.facet(collabConfig);
-    const effects = sharedEffects(tr);
-    if (effects.length || !tr.changes.empty) {
-      return new CollabState(
-        collab.version,
-        collab.unconfirmed.concat(new LocalUpdate(tr, tr.changes, effects, clientID)),
-      );
-    }
-    return collab;
-  },
-});
 
-let idCounter = 0;
+  update(collab: CollabState, tr: Transaction) {
+    let isSync = tr.annotation(collabReceive)
+    if (isSync) return isSync
+    let {sharedEffects, clientID} = tr.startState.facet(collabConfig)
+    let effects = sharedEffects(tr)
+    if (effects.length || !tr.changes.empty)
+      return new CollabState(collab.version, collab.unconfirmed.concat(new LocalUpdate(tr, tr.changes, effects, clientID)))
+    return collab
+  }
+})
 
-/** Create an instance of the collaborative editing plugin. */
-export function collab(config: Partial<CollabConfig> = {}): Extension {
-  const generatedID = (Math.floor(Math.random() * 1e9) + idCounter++).toString(36);
-  return [
-    collabField,
-    collabConfig.of({
-      startVersion: 0,
-      clientID: null,
-      sharedEffects: () => [],
-      generatedID,
-      ...config,
-    }),
-  ];
+/// Create an instance of the collaborative editing plugin.
+export function collab(config: CollabConfig = {}): Extension {
+  return [collabField, collabConfig.of({generatedID: Math.floor(Math.random() * 1e9).toString(36), ...config})]
 }
 
-/**
- * Create a transaction that represents a set of new updates received from the authority. Applying
- * it moves the state forward to the authority's view of the document.
- *
- * Upstream composed every remote change into one and mapped the unconfirmed updates over that. Here
- * each received update is taken in turn: the unconfirmed updates are mapped over it, and it is
- * mapped over them, before the next one is looked at.
- */
+/// Create a transaction that represents a set of new updates received
+/// from the authority. Applying this transaction moves the state
+/// forward to adjust to the authority's view of the document.
 export function receiveUpdates(state: EditorState, updates: readonly Update[]) {
-  const field = state.field(collabField);
-  const { clientID } = state.facet(collabConfig);
-  const version = field.version + updates.length;
-  let unconfirmed: readonly LocalUpdate[] = field.unconfirmed;
-  let effects: readonly StateEffect<unknown>[] = [];
-  // What to apply to the document, in steps that follow each other.
-  let changes: ChangeSet | null = null;
-  for (const update of updates) {
-    const ours = unconfirmed[0];
-    effects = StateEffect.mapEffects(effects, update.changes);
-    if (ours && ours.clientID === update.clientID) {
-      // Confirmed: the document already holds it, and the updates after it are based on it.
-      unconfirmed = unconfirmed.slice(1);
-      continue;
+  let {version, unconfirmed} = state.field(collabField)
+  let {clientID} = state.facet(collabConfig)
+
+  version += updates.length
+  let effects: readonly StateEffect<any>[] = [], changes = null
+
+  for (let update of updates) {
+    let ours = unconfirmed.length ? unconfirmed[0] : null
+    if (ours && ours.clientID == update.clientID) {
+      // Redlines: the changes so far already lie beyond ours, so they are not mapped over it
+      effects = StateEffect.mapEffects(effects, update.changes)
+      unconfirmed = unconfirmed.slice(1)
+    } else {
+      effects = StateEffect.mapEffects(effects, update.changes)
+      if (update.effects) effects = effects.concat(update.effects)
+      // Redlines: map the unconfirmed updates over this one now, not over all of them composed
+      let remote = update.changes
+      unconfirmed = unconfirmed.map(local => {
+        let localChanges = local.changes.map(remote)
+        remote = remote.map(local.changes, true)
+        return new LocalUpdate(local.origin, localChanges, StateEffect.mapEffects(local.effects, remote), clientID)
+      })
+      changes = changes ? changes.compose(remote) : remote
     }
-    if (update.effects) effects = effects.concat(update.effects);
-    let remote: ChangeSet = update.changes;
-    unconfirmed = unconfirmed.map((local) => {
-      const mapped = local.changes.map(remote);
-      remote = remote.map(local.changes, true);
-      return new LocalUpdate(
-        local.origin,
-        mapped,
-        StateEffect.mapEffects(local.effects, remote),
-        clientID,
-      );
-    });
-    changes = changes ? changes.compose(remote) : remote;
   }
-  const first = unconfirmed[0];
-  if (first && effects.length) {
-    const composed = unconfirmed.reduce(
-      (ch, u) => ch.compose(u.changes),
-      ChangeSet.empty(first.changes.length),
-    );
-    effects = StateEffect.mapEffects(effects, composed);
+
+  if (unconfirmed.length) {
+    if (effects.length) {
+      let composed = unconfirmed.reduce((ch, u) => ch.compose(u.changes),
+                                        ChangeSet.empty(unconfirmed[0].changes.length))
+      effects = StateEffect.mapEffects(effects, composed)
+    }
   }
-  const next = new CollabState(version, unconfirmed);
-  if (!changes) return state.update({ annotations: [collabReceive.of(next)] });
+
+  if (!changes)
+    return state.update({annotations: [collabReceive.of(new CollabState(version, unconfirmed))]})
+
   return state.update({
-    changes,
-    effects: effects as StateEffect<unknown>[],
+    changes: changes,
+    effects,
     annotations: [
       Transaction.addToHistory.of(false),
       Transaction.remote.of(true),
-      collabReceive.of(next),
+      collabReceive.of(new CollabState(version, unconfirmed))
     ],
-    filter: false,
-  });
+    filter: false
+  })
 }
 
-/**
- * The locally made updates that still have to be sent to the authority. Each has an `origin` that
- * points at the transaction that made it (the update may have been mapped since).
- */
-export function sendableUpdates(state: EditorState): readonly LocalUpdate[] {
-  return state.field(collabField).unconfirmed;
+/// Returns the set of locally made updates that still have to be sent
+/// to the authority. The returned objects will also have an `origin`
+/// property that points at the transaction that created them. This
+/// may be useful if you want to send along metadata like timestamps.
+/// (But note that the updates may have been mapped in the meantime,
+/// whereas the transaction is just the original transaction that
+/// created them.)
+export function sendableUpdates(state: EditorState): readonly (Update & {origin: Transaction})[] {
+  return state.field(collabField).unconfirmed
 }
 
-/** The version up to which the plugin has synced with the authority. */
-export function getSyncedVersion(state: EditorState): number {
-  return state.field(collabField).version;
+/// Get the version up to which the collab plugin has synced with the
+/// central authority.
+export function getSyncedVersion(state: EditorState) {
+  return state.field(collabField).version
 }
 
-/** This editor's collaborative editing client ID. */
-export function getClientID(state: EditorState): string {
-  return state.facet(collabConfig).clientID;
+/// Get this editor's collaborative editing client ID.
+export function getClientID(state: EditorState) {
+  return state.facet(collabConfig).clientID
 }
 
-/**
- * Rebase and deduplicate client-submitted updates that came in with an out-of-date version number.
- * `over` holds the updates accepted since that version. The result has the updates that were already
- * accepted filtered out, and the rest moved over the others, so that they apply to the current
- * version.
- *
- * Upstream composed `over` into one change. Here each logged update is taken in turn, which is how
- * a client receives them.
- */
-export function rebaseUpdates(updates: readonly Update[], over: readonly LoggedUpdate[]): Update[] {
-  if (!over.length || !updates.length) return updates.slice();
-  let pending: Update[] = updates.slice();
-  for (const logged of over) {
-    if (!pending.length) break;
-    const head = pending[0];
-    if (head && head.clientID === logged.clientID) {
-      pending = pending.slice(1);
-      continue;
+/// Rebase and deduplicate an array of client-submitted updates that
+/// came in with an out-of-date version number. `over` should hold the
+/// updates that were accepted since the given version (or at least
+/// their change descs and client IDs). Will return an array of
+/// updates that, firstly, has updates that were already accepted
+/// filtered out, and secondly, has been moved over the other changes
+/// so that they apply to the current document version.
+export function rebaseUpdates(updates: readonly Update[], over: readonly LoggedUpdate[]) {
+  if (!over.length || !updates.length) return updates
+  // Redlines: map the updates over each logged update in turn, not over all of them composed
+  for (let logged of over) {
+    let other = updates.length ? updates[0] : null
+    if (other && other.clientID == logged.clientID) {
+      updates = updates.slice(1)
+      continue
     }
-    let changes: ChangeDesc = logged.changes;
-    pending = pending.map((update) => {
-      const mapped = update.changes.map(changes);
-      changes = changes.mapDesc(update.changes, true);
+    let changes = logged.changes
+    updates = updates.map(update => {
+      let updateChanges = update.changes.map(changes)
+      changes = changes.mapDesc(update.changes, true)
       return {
-        changes: mapped,
+        changes: updateChanges,
         effects: update.effects && StateEffect.mapEffects(update.effects, changes),
-        clientID: update.clientID,
-      };
-    });
+        clientID: update.clientID
+      }
+    })
   }
-  return pending;
+  return updates
 }

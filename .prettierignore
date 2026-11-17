@@ -11,3 +11,7 @@ apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/permissions/
 apps/desktop/src-tauri/icons/
 apps/desktop/redlines/bundle/
+
+# Upstream source kept as its author formats it
+packages/collab/src/vendor/collab.ts
+packages/collab/src/vendor/upstream.ts

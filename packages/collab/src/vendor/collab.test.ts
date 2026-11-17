@@ -2,22 +2,27 @@ import { ChangeSet, EditorState, StateEffect, Text } from '@codemirror/state';
 import type { Transaction } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import type { LoggedUpdate, Update } from './collab.ts';
-import {
-  collab,
-  getClientID,
-  getSyncedVersion,
-  rebaseUpdates,
-  receiveUpdates,
-  sendableUpdates,
-} from './collab.ts';
-import { upstreamRebaseUpdates, upstreamReceiveUpdates } from './upstream.ts';
+import * as fixedLib from './collab.ts';
+import * as upstreamLib from './upstream.ts';
 
+const { collab, getClientID, getSyncedVersion, sendableUpdates } = fixedLib;
+
+/** A collab to run: the extension and state it keeps, and the two functions that differ. */
 interface Impl {
-  rebase: typeof rebaseUpdates;
-  receive: typeof receiveUpdates;
+  lib: Pick<typeof fixedLib, 'collab' | 'getSyncedVersion' | 'sendableUpdates'>;
+  rebase: typeof fixedLib.rebaseUpdates;
+  receive: typeof fixedLib.receiveUpdates;
 }
-const fixed: Impl = { rebase: rebaseUpdates, receive: receiveUpdates };
-const upstream: Impl = { rebase: upstreamRebaseUpdates, receive: upstreamReceiveUpdates };
+const fixed: Impl = {
+  lib: fixedLib,
+  rebase: fixedLib.rebaseUpdates,
+  receive: fixedLib.receiveUpdates,
+};
+const upstream: Impl = {
+  lib: upstreamLib,
+  rebase: upstreamLib.rebaseUpdates,
+  receive: upstreamLib.receiveUpdates,
+};
 
 /** The smallest authority: a log of accepted updates and the text they make. */
 class Authority {
@@ -39,8 +44,8 @@ class Authority {
   }
 }
 
-function client(text: string, id: string) {
-  return EditorState.create({ doc: text, extensions: [collab({ clientID: id })] });
+function client(text: string, id: string, impl: Impl = fixed) {
+  return EditorState.create({ doc: text, extensions: [impl.lib.collab({ clientID: id })] });
 }
 
 /** Everything the client has not confirmed, sent from the version it has seen. */
@@ -50,6 +55,7 @@ function sync(
   impl: Impl,
   mode: 'one' | 'all',
 ): EditorState {
+  const { getSyncedVersion, sendableUpdates } = impl.lib;
   const sendable = sendableUpdates(state);
   if (sendable.length) authority.push(getSyncedVersion(state), sendable);
   const fresh = authority.log.slice(getSyncedVersion(state));
@@ -92,7 +98,7 @@ function session(impl: Impl, seed: number, mode: 'one' | 'all'): string | null {
   const next = rng(seed);
   const start = 'abcdef';
   const authority = new Authority(start, impl);
-  let clients = ['a', 'b', 'c'].map((id) => client(start, id));
+  let clients = ['a', 'b', 'c'].map((id) => client(start, id, impl));
   for (let step = 0; step < 14; step++) {
     const i = Math.floor(next() * clients.length);
     let state = clients[i]!;
@@ -115,7 +121,9 @@ function session(impl: Impl, seed: number, mode: 'one' | 'all'): string | null {
     clients = clients.map((c) => sync(authority, c, impl, mode));
   }
   const want = authority.doc.toString();
-  const bad = clients.find((c) => c.doc.toString() !== want || sendableUpdates(c).length > 0);
+  const bad = clients.find(
+    (c) => c.doc.toString() !== want || impl.lib.sendableUpdates(c).length > 0,
+  );
   return bad ? `seed ${seed}: authority "${want}", client "${bad.doc.toString()}"` : null;
 }
 
@@ -177,7 +185,7 @@ describe('the vendored collab', () => {
     });
 
     it('the rebase alone is the cause: the fixed receive agrees with the fixed authority only', () => {
-      const mixed: Impl = { rebase: upstreamRebaseUpdates, receive: receiveUpdates };
+      const mixed: Impl = { lib: fixedLib, rebase: upstream.rebase, receive: fixed.receive };
       const bad = [11, 14, 15].filter((seed) => run(mixed, seed, 'one') !== null);
       expect(bad.length).toBeGreaterThan(0);
     });
@@ -217,8 +225,8 @@ describe('the vendored collab', () => {
     a = a.update({ effects: mark.of(2) }).state;
     const remote: Update = { changes: ChangeSet.of({ from: 0, insert: 'XY' }, 3), clientID: 'b' };
     const out = fixed.rebase(sendableUpdates(a), [{ changes: remote.changes.desc, clientID: 'b' }]);
-    expect(out[0]?.effects?.map((e) => e.value)).toEqual([4]);
+    expect(out[0]?.effects?.map((e) => e.value as number)).toEqual([4]);
     const received = fixed.receive(a, [remote]).state;
-    expect(sendableUpdates(received)[0]?.effects.map((e) => e.value)).toEqual([4]);
+    expect(sendableUpdates(received)[0]?.effects?.map((e) => e.value as number)).toEqual([4]);
   });
 });
