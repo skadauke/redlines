@@ -894,6 +894,8 @@ const ask = createAsk(editor, {
   settings: agentSettings,
   // An Ask that names no agent goes to the one the person chose in Preferences (#528).
   defaultAgent: () => loadSettings().defaultAgent ?? undefined,
+  // The model the bubble's list starts at: Preferences' choice for the agent (#530, #507).
+  chosenModel: (agent) => loadSettings().agentModels[agent],
   notice: (message) => notice.flash(message),
   attachToField: attachAgentPicker,
   showThread: (thread) => review.showThread(thread),

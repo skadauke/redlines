@@ -18,6 +18,7 @@ import type { Person } from '@redlines/format';
 import type {
   AgentEvent,
   AgentInfo,
+  AgentModel,
   AgentRequest,
   AgentScope,
   HostAgents,
@@ -51,6 +52,11 @@ export interface AskDeps {
    * choice, where there is one. Default: the first agent found on this Mac that is signed in.
    */
   defaultAgent?: () => string | undefined;
+  /**
+   * The model Preferences chose for an agent, by agent id (#530): what the picker shows until the
+   * person picks another for this question. Without it the picker starts at Default.
+   */
+  chosenModel?: (agent: string) => string | undefined;
 }
 
 /**
@@ -65,6 +71,14 @@ export interface AskTurn {
   web?: true;
 }
 
+/** The agent that answers the next question, and the models it can be told to run (#507). */
+export interface AskChoice {
+  agent: { id: string; name: string };
+  models: readonly AgentModel[];
+  /** The model that runs, one of `models`; undefined is the agent's own default. */
+  model: string | undefined;
+}
+
 export interface AskState {
   /** The exchange so far. */
   turns: readonly AskTurn[];
@@ -72,6 +86,8 @@ export interface AskState {
   pending: string | null;
   /** What the run shows: the first-run question, what it is doing, or why it failed. */
   line: LiveLine | null;
+  /** Who answers next and with which model, once the agents are known; null before. */
+  choice: AskChoice | null;
 }
 
 export interface AskSession {
@@ -81,6 +97,8 @@ export interface AskSession {
    * explains the selected text; after an answer an empty one asks nothing.
    */
   ask(question: string): void;
+  /** Picks the model the next questions run, one the agent lists; undefined is its default. */
+  setModel(model: string | undefined): void;
   /** The answer to the first-run question: read the folder, just this document, or not at all. */
   answerConsent(answer: AgentScope | 'no'): void;
   /** Stops the run, and leaves the question unanswered. */
@@ -154,7 +172,9 @@ function withoutMentions(question: string, agents: readonly AgentInfo[], named: 
  * Starts a session about `quote`, the text the person selected, as it reads.
  */
 export function createAskSession(deps: AskDeps, about: { quote: string }): AskSession {
-  let state: AskState = { turns: [], pending: null, line: null };
+  let state: AskState = { turns: [], pending: null, line: null, choice: null };
+  /** The model picked in the bubble, for every question after it; Preferences' choice until then. */
+  let picked: { model: string | undefined } | null = null;
   const listeners = new Set<(state: AskState) => void>();
   let closed = false;
   /** Counts the questions, so that a stopped one's late events are not taken for the next's. */
@@ -166,6 +186,9 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     answer?: (answer: 'folder' | 'document' | 'no' | null) => void;
     over: boolean;
   } | null = null;
+
+  /** The agent the choice is about, to draw it again when the model is picked. */
+  let lastAgent: AgentInfo | null = null;
 
   const set = (next: Partial<AskState>) => {
     if (closed) return;
@@ -222,6 +245,19 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     const ready = agents.find((agent) => agent.state.found && agent.state.signedIn);
     return ready ?? agents.find((agent) => agent.state.found) ?? null;
   };
+
+  /** The model that runs for `agent`: the picked one, else Preferences' if the agent lists it. */
+  const modelFor = (agent: AgentInfo): string | undefined => {
+    const listed = (id: string | undefined) =>
+      id !== undefined && agent.models?.some((model) => model.id === id) === true ? id : undefined;
+    return picked ? listed(picked.model) : listed(deps.chosenModel?.(agent.id));
+  };
+
+  const choiceOf = (agent: AgentInfo): AskChoice => ({
+    agent: { id: agent.id, name: agent.name },
+    models: agent.models ?? [],
+    model: modelFor(agent),
+  });
 
   /**
    * What the agent may read, as a run decides it: This document for a document with no file, a
@@ -311,7 +347,8 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
         );
       }
       if (run) run.agent = agent;
-      set({ line: running(agent, STARTING) });
+      lastAgent = agent;
+      set({ line: running(agent, STARTING), choice: choiceOf(agent) });
       if (agent.state.found && !agent.state.signedIn) {
         deps.agents.forget?.();
         return fail(mine, agent, cannotRun(agent, agent.state.reason), undefined, true);
@@ -406,6 +443,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
         folder: reach.folder,
       }),
       thread: `ask-${mine}`,
+      ...(modelFor(agent) === undefined ? {} : { model: modelFor(agent) }),
       ...(path === null ? {} : { documentPath: path }),
       ...(reach.folder === undefined ? {} : { folder: reach.folder }),
       scope: reach.scope,
@@ -454,6 +492,21 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     }
   }
 
+  // Who would answer, and with which models, is known before the first question: the picker shows it.
+  void deps.agents
+    .list()
+    .then((agents) => {
+      if (closed || lastAgent) return;
+      const first = pick(
+        agents.filter((other) => other.toolbox !== false),
+        '',
+      );
+      if (!first || state.choice) return;
+      lastAgent = first;
+      set({ choice: choiceOf(first) });
+    })
+    .catch(() => {});
+
   return {
     get state() {
       return state;
@@ -464,6 +517,12 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
       // stray Return in the empty follow-up field asks nothing.
       if (state.turns.length > 0 && question.trim() === '') return;
       void turn(question);
+    },
+    setModel(model) {
+      if (closed) return;
+      picked = { model };
+      const agent = lastAgent;
+      if (agent) set({ choice: choiceOf(agent) });
     },
     answerConsent(answer) {
       // An agent that reads the whole machine can't be held to this document.
