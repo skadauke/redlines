@@ -1578,14 +1578,18 @@ the deletion would join, or the opener would start a line that has text after it
 and the first line's indentation alone are not a prefix of this kind, and are refused as before.
 A task item's box is part of the prefix (`- [ ] `). The lines below the first, up to the next blank
 line, are read three ways, in the file, in the newest view and in the original view (a CRLF file as
-the same file in LF), and the rule is written only where all three read alike and nothing there
+the same file in LF), and the rule is written only where nothing there
 turns into text of the first line or into its heading: an underline (`===`, `--`), and, because an
 empty item (a bullet, or a number of any value) or an item numbered other than 1 can't interrupt a
 paragraph, such an item once the first item's marker is gone (`1. one\n2. two` leaves `one\n2. two`,
 one paragraph). Such an item is let through only where no marker is on the lines below, so that the
 file, the newest and the original view read it alike. A pending deletion that empties an item reads as
 an item with text in the file and as an empty item in the view, and is refused, as is any mark on
-those lines in front of such an item. A refusal says that the changes below are to be decided first,
+those lines in front of such an item. Another person's pending insertion on those lines, which adds lines
+to the newest view and none to the original, is no reason to refuse where none of the lines is one
+of those; a split of theirs is, where the three readings differ, because rejecting it would leave the
+indentation of the line after it behind (#291). The first item may follow front matter and the blank
+lines after it. A refusal says that the changes below are to be decided first,
 or that the marker can be taken out with Track Changes off. The editor keeps the first item of a
 list in its list while a line below it would read as text of it, and says so. The editor's Backspace
 at a first item does not rely on that rule alone. Wherever the item is in the file, with Track Changes
