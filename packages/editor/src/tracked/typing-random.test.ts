@@ -168,16 +168,17 @@ function randomTyping(
         // the blank lines, to the next text (#811).
         const bare = (s: string) => s.replace(/^(?:[ \t>]*\n)+/, '');
         const shown = (s: string) => s.replace(/[\s>]+$/, '');
+        // Only typed text that is blank, or ends in a line break, may leave blank lines between
+        // the caret and the typed text; any other must have the caret right after it.
+        const hiddenTyped = /^[\s>]*$/.test(typed) || typed.endsWith('\n');
+        const placed = hiddenTyped
+          ? shown(after.text.slice(0, caret)).endsWith(shown(typed)) &&
+            (rest === bare(tail) || rest === bare(joined))
+          : false;
         const ok =
-          shown(after.text.slice(0, caret)).endsWith(shown(typed)) &&
-          (after.text.slice(0, caret).endsWith(typed) ||
-            rest === bare(tail) ||
-            rest === bare(joined)) &&
-          (rest === tail ||
-            rest === joined ||
-            rest === past ||
-            rest === bare(tail) ||
-            rest === bare(joined));
+          placed ||
+          (after.text.slice(0, caret).endsWith(typed) &&
+            (rest === tail || rest === joined || rest === past));
         // A block that starts with spaces and then a marker gets the marker's own line with
         // the spaces in front of it, where format §3.3 wants them after it, and the editor hides
         // that line, so the caret can't stand after spaces typed there. That is how the format
