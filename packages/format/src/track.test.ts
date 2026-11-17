@@ -1437,7 +1437,9 @@ describe('on random documents', { timeout: 600_000 }, () => {
             view.text[lineStart - 1] === '\n' &&
             (view.text[lineEnd] === '\n' || lineEnd === view.text.length) &&
             /\S/.test(above) &&
-            !/^[ \t>]*(?:#{1,6}[ \t]|[-*+][ \t]|\d+[.)][ \t])/.test(above)
+            !/^[ \t>]*(?:#{1,6}[ \t]|[-*+][ \t]|\d+[.)][ \t]|```|~~~|<|\||\[[^\]]*\]:|(?:-{3,}|\*{3,}|_{3,})\s*$)/.test(
+              above,
+            )
           ) {
             asked.push(applyChanges(view.text, [{ ...wanted, from: lineStart - 1 }]));
           }
@@ -1472,7 +1474,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
         }
         // No mark is lost, except an insertion, deletion, substitution or split of the author's own
         // that was used up, or cancelled (a substitution whose new text is taken away is the old
-        // text again).
+        // text again; one dropped with its new text differing from its old would break the
+        // original or the newest view, which are held above).
         const kept = new Set(parsed.marks.map((m) => m.id));
         for (const mark of before.marks) {
           if (kept.has(mark.id)) continue;
