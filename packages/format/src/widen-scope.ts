@@ -10,11 +10,11 @@ import type { Unit } from './widen-units.ts';
 export type WidenScope = 'cell' | 'code' | 'list' | 'block';
 
 /** The places whose format changes are widened when no fine form writes them. */
-export const WIDEN_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['cell', 'list']);
+export const WIDEN_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['cell', 'code', 'list']);
 
 /** The places whose typed, pasted and key edits are widened. The table's own edits go through its
  * operations (`table-widen.ts`), and a cell's typing keeps the rules of the table. */
-export const WIDEN_EDIT_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['list']);
+export const WIDEN_EDIT_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['code', 'list']);
 
 /** Where the source range `[from, to]` is: by the innermost unit that holds it. */
 export function scopeOfUnits(units: readonly Unit[], from: number, to: number): WidenScope {
