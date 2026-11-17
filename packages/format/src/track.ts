@@ -1257,10 +1257,11 @@ function coverBreaks(
   from: number,
   to: number,
   typed = '',
-): Range & { kept: string; lead: string; tail: string } {
+): Range & { kept: string; lead: string; tail: string; retype: boolean } {
   let kept = '';
   let lead = '';
   let tail = '';
+  let retype = false;
   // The first line of the file has no break in front of it.
   const first = from < to ? prefixEnd(plan, from) : undefined;
   if (first !== undefined && to > first) from = first;
@@ -1323,15 +1324,18 @@ function coverBreaks(
       // next block, with no line break in the range: the break stays, all of it, with what is typed
       // in it. (A deletion there is another rule: `blankLineCut`, or it takes the break.)
       if (
-        typed !== '' &&
+        (typed !== '' || deletedInBlank(plan, from, to)) &&
         !partly &&
         from > found.start &&
         lineStart(plan.text, from) < prefix &&
-        to <= lineEnd(plan.text, from) &&
-        !own()
+        to <= lineEnd(plan.text, from)
       ) {
         lead = visibleText(plan.text, plan.markers, found.start, from);
         tail = visibleText(plan.text, plan.markers, to, found.end);
+        // The break of the author's own split is her own insertion: the split is cancelled with
+        // its break, and what stays of it is typed again with what is typed, its line breaks as
+        // new splits, not as raw line breaks in an insertion (#419).
+        retype = own();
         // Two spaces or more at the end of the line above are a hard break once the line under it
         // goes on the paragraph (what is typed is not blank): in front of the opener, and not in the
         // text that is typed again, they would no longer end their line for a reader that does not
@@ -1359,7 +1363,22 @@ function coverBreaks(
       to = Math.max(to, found.end);
     }
   }
-  return { from, to, kept, lead, tail };
+  return { from, to, kept, lead, tail, retype };
+}
+
+/**
+ * Whether `from` to `to` is white space and quote markers inside one blank line of a quote, in the
+ * break between two blocks, where `blankLineCut` has no rule: the indentation in front of the
+ * markers, or a line of the break of a split. Such a deletion takes no line break away, and is
+ * written as a substitution that keeps the break, as the replaced text of #358 is (#447).
+ */
+function deletedInBlank(plan: Plan, from: number, to: number): boolean {
+  const { text } = plan;
+  if (from >= to || !/^[ \t>]+$/.test(text.slice(from, to))) return false;
+  const line = text.slice(lineStart(text, from), lineEnd(text, from));
+  if (to > lineEnd(text, from) || !/^[ \t>]*$/.test(line) || !line.includes('>')) return false;
+  const read = blockQuoteAt(text, lineStart(text, from));
+  return read !== undefined;
 }
 
 /**
@@ -2904,10 +2923,18 @@ function splitBehind(plan: Plan, at: number, typed: string): Behind | undefined 
     if (!commutes(place)) return undefined;
     const tokens = tokenize(typed, linePrefixAt(text, place));
     if (tokens.length === 0) return undefined;
+    // A bare line break typed in a list goes in behind the indentation of the line it stands on,
+    // which would leave the text after it out of the item: the last break takes the indentation
+    // with it, as Enter's own does (#120).
+    const indent = text.slice(lineStart(text, place), place);
     let insert = '';
-    for (const token of tokens) {
+    for (const [i, token] of tokens.entries()) {
       if (!('brk' in token)) return undefined;
-      insert += SPLIT + String.fromCharCode(LENGTH + token.brk.length) + token.brk;
+      const brk =
+        i === tokens.length - 1 && /^[ \t]+$/.test(indent) && !token.brk.endsWith(indent)
+          ? token.brk + indent
+          : token.brk;
+      insert += SPLIT + String.fromCharCode(LENGTH + brk.length) + brk;
     }
     return { change: { from: place, to: place, insert } };
   }
@@ -4242,6 +4269,11 @@ function planEdit(plan: Plan, edit: TextChange): void {
     typed += covered.kept;
     lead = covered.lead;
     tail = covered.tail;
+    if (covered.retype) {
+      typed = lead + typed + tail;
+      lead = '';
+      tail = '';
+    }
   }
   const covers = { from, to };
   // Whether the range starts at the text of a line that goes on a paragraph, and no marker may stand
@@ -4576,7 +4608,7 @@ function selfCheck(
   const letters = (s: string) =>
     s
       .replace(/\r\n?/g, '\n')
-      .replace(lines ? /[^\p{L}\n]+/gu : /[^\p{L}]+/gu, '')
+      .replace(lines ? /[^\p{L}\p{N}\n]+/gu : /[^\p{L}]+/gu, '')
       .replace(/\n+/g, '\n')
       .replace(/^\n|\n$/g, '');
   // The original text of a deletion has the line breaks of its payload, which are LF.
