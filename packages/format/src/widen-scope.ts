@@ -55,13 +55,25 @@ export function widensEditHere(text: string, from: number, to: number): boolean 
   return WIDEN_EDIT_SCOPES.has(scopeOf(text, from, to));
 }
 
-/** Whether the range is in a `$$` pair. */
+/** Whether the range is in display math: a `$$` line that no `$$` closes on the same line opens it,
+ * the next such line closes it, and a line of `$$ … $$` is math of one line. */
 function inDisplayMath(text: string, from: number, to: number): boolean {
-  const fences = [...text.matchAll(/^[ \t>]*\$\$/gm)].map((m) => m.index);
-  for (let i = 0; i + 1 < fences.length; i += 2) {
-    const open = fences[i]!;
-    const end = text.indexOf('\n', fences[i + 1]);
-    if (from <= (end < 0 ? text.length : end) && open <= to) return true;
+  let open: number | undefined;
+  let at = 0;
+  for (const line of text.split('\n')) {
+    const end = at + line.length;
+    if (/^[ \t>]*\$\$/.test(line)) {
+      const whole = /^[ \t>]*\$\$.*\$\$[ \t]*$/.test(line) && line.trim().length > 4;
+      if (whole) {
+        if (at <= to && from <= end) return true;
+      } else if (open === undefined) {
+        open = at;
+      } else {
+        if (open <= to && from <= end) return true;
+        open = undefined;
+      }
+    }
+    at = end + 1;
   }
-  return fences.length % 2 === 1 && (fences.at(-1) ?? 0) <= to;
+  return open !== undefined && open <= to;
 }

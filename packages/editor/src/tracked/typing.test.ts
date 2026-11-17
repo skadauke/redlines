@@ -430,7 +430,7 @@ describe('tracked typing', () => {
     expect(editor.getDoc()).toBe('Zero. One two three.\n\nFour.\n');
   });
 
-  it('refuses a tracked edit inside code, and says why', () => {
+  it('writes a tracked edit inside inline code as a substitution of the paragraph', () => {
     const notices: string[] = [];
     const doc = 'Run `make all` now.\n';
     // The edit is tried as marks, then as a replacement: each draws ids.
@@ -440,8 +440,9 @@ describe('tracked typing', () => {
     });
     caret(editor, doc.indexOf('all'));
     type(editor, 'x');
-    expect(editor.getDoc()).toBe(doc);
-    expect(notices).toEqual([expect.stringContaining('code')]);
+    expect(editor.getDoc()).toContain('<!--sub ');
+    expect(editor.getDoc()).toContain('Run `make xall` now.<!--/');
+    expect(notices).toEqual([]);
   });
 
   it('makes typing, Enter and Backspace inside code a substitution of the block, and refuses them in indented code of an item (#153)', () => {
@@ -2122,7 +2123,13 @@ describe('every way to change text', () => {
     });
     caret(editor, 2);
     expect(press(editor, key)).toBe(true);
-    // The format can't mark either at the start of a paragraph's line, so both are refused.
+    if (key === 'Mod-]') {
+      // The indent is a replacement of the paragraph (format §3.12).
+      expect(editor.getDoc()).toContain('<!--sub ');
+      expect(notices).toEqual([]);
+      return;
+    }
+    // The format can't mark a comment at the start of a paragraph's line, so it is refused.
     expect(editor.getDoc()).toBe(doc);
     expect(notices).toHaveLength(1);
   });
@@ -2132,8 +2139,9 @@ describe('every way to change text', () => {
     const notices: string[] = [];
     const editor = load(doc, { ids: ['q4gt', 'r5tw'], onNotice: (m) => notices.push(m) });
     editor.view.dispatch({ changes: { from: 0, insert: '  ' }, userEvent: 'indent' });
-    expect(editor.getDoc()).toBe(doc);
-    expect(notices).toHaveLength(1);
+    // A replacement of the paragraph (format §3.12).
+    expect(editor.getDoc()).toContain('<!--sub ');
+    expect(notices).toEqual([]);
   });
 
   it('comments out as a plain edit with tracking off', () => {
