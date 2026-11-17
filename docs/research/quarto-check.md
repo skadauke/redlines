@@ -42,8 +42,9 @@ The checks, for every format and engine:
 4. **A changed chunk never runs its old code** (knitr and jupyter). The old code is in a payload
    with its backticks and `#|` escaped; if Quarto ran it, "old code" would be in the output.
 5. **An include with pending changes** (markdown engine): a `{{< include _part.qmd >}}` of a file
-   with a change pending renders as the same file with the change accepted. This answers the
-   untested row of the research note, whether Quarto expands an include inside a comment.
+   with a change pending renders as the same file with the change accepted: the included file's
+   marks are comments to Quarto too. (Whether Quarto expands an include that stands inside a mark
+   is not tested: no mark holds an include, which stands alone on its line.)
 
 `src/quarto-check.node.test.ts` holds the part that needs no Quarto: the probe is marked at those
 places, no marker stands on a fence line or inside the reference, and accept and reject give files

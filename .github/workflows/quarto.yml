@@ -75,4 +75,5 @@ jobs:
 
       - name: Run the check
         working-directory: apps/desktop
+        shell: bash
         run: node scripts/quarto-check.ts --markdown | tee "$GITHUB_STEP_SUMMARY"

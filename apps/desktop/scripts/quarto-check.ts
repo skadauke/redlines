@@ -142,7 +142,7 @@ function available(engine: Engine): string | null {
     const run = spawnSync('Rscript', ['-e', 'library(knitr)'], { encoding: 'utf8' });
     return run.status === 0 ? null : 'R with knitr is not installed';
   }
-  const run = spawnSync('python3', ['-c', 'import jupyter_core, nbformat, yaml'], {
+  const run = spawnSync('python3', ['-c', 'import jupyter_core, nbformat, yaml, ipykernel'], {
     encoding: 'utf8',
   });
   return run.status === 0 ? null : 'Python with Jupyter is not installed';
@@ -150,7 +150,9 @@ function available(engine: Engine): string | null {
 
 /** Renders `name` to `format` in a folder of its own, and returns the folder. */
 function render(dir: string, name: string, format: Format, label: string): string {
-  const out = join(dir, `out-${label}-${format}`);
+  // Quarto reads the output folder as relative to the input.
+  const folder = `out-${label}-${format}`;
+  const out = join(dir, folder);
   mkdirSync(out, { recursive: true });
   const to = format;
   const run = quarto(
@@ -160,7 +162,7 @@ function render(dir: string, name: string, format: Format, label: string): strin
       '--to',
       to,
       '--output-dir',
-      out,
+      folder,
       ...(format === 'typst' ? ['-M', 'keep-typ:true'] : []),
       ...(format === 'html' ? ['-M', 'embed-resources:true'] : []),
     ],
