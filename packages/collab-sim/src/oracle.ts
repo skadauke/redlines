@@ -82,6 +82,16 @@ export class Oracle {
     this.options = options;
   }
 
+  /** A copy with the same record of comments and decisions, for a history that branches. */
+  clone(): Oracle {
+    const copy = new Oracle(this.options);
+    for (const [note, thread] of this.threads) {
+      copy.threads.set(note, { by: thread.by, replies: new Map(thread.replies) });
+    }
+    for (const id of this.decided) copy.decided.add(id);
+    return copy;
+  }
+
   /** The checks of the step from `before` to `after`, the `version`th. */
   step(version: number, before: string, after: string, summary: Summary): Violation[] {
     const found: Violation[] = [];
