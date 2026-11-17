@@ -4315,6 +4315,14 @@ A file changes only when its content does.
   opener alone on the line before and its closer alone on the line after, each with its line
   break as syntax, as a block change's marks have theirs (§3.3); every view reads the file as it
   was, and deleting the thread gives the bytes back.
+- A comment or a highlight whose range starts or ends on a `:::` fence line is widened, not refused:
+  a range that reaches out of the div, or lies only on its fences, takes the whole div, with its
+  opener alone on the line before the opening fence and its closer alone on the line after the
+  closing fence (on the blank line there, where one follows, so that no line break is added); a
+  range inside the div with an end on a fence, or starting at the first column of the body, is
+  pulled in to the body, its opener alone on the line under the opening fence and its closer alone on
+  the line above the closing fence. Every view reads the file as it was, and deleting the threads
+  gives the bytes back in every order.
 - Fenced divs (`:::`, callouts, columns, tabsets) and cross-references. Pandoc takes a fence only
   when nothing else is on its line, and reads `@fig-x`, `@sec-x` and `[@a; @b]` as one key, so
   these are held in a file of the pandoc dialect (§9.1), where a marker never stands on a `:::`

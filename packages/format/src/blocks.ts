@@ -1431,6 +1431,8 @@ export const INCLUDE_LINE =
 export const HTML_START_7 =
   /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
 
+const FENCE_CLOSE = /^ {0,3}:{3,}[ \t]*\r?$/;
+
 /**
  * The range that a closer takes away with it. A closer alone on the line after a whole tag that
  * stands alone on its line (after a blank line, or at the start of the file, with no container
@@ -1443,6 +1445,16 @@ export function closerRange(text: string, close: Range): Range {
   const next = text.indexOf('\n', close.to);
   if (text.slice(close.to, next === -1 ? text.length : next).trim() !== '') return close;
   const eol = text[close.from - 2] === '\r' ? 2 : 1;
+  // A closer alone on the last line of a div's body, right above its closing fence (div-ends.ts).
+  const id = /^<!--\/(\w+)-->$/.exec(text.slice(close.from, close.to))?.[1];
+  if (
+    id !== undefined &&
+    next !== -1 &&
+    FENCE_CLOSE.test(text.slice(next + 1, lineEnd(text, next + 1))) &&
+    (text.includes(`<!--cmt ${id}-->`) || text.includes(`<!--hl ${id}-->`))
+  ) {
+    return { from: close.from - eol, to: close.to };
+  }
   const lineEndAt = close.from - eol;
   const start = text.lastIndexOf('\n', lineEndAt - 1) + 1;
   const tagLine = text.slice(start, lineEndAt);
