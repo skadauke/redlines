@@ -760,6 +760,38 @@ describe('OpenClaw’s bridge', () => {
     });
   });
 
+  it('says where to name the agent when the Gateway has more than one (#401)', async () => {
+    const inner = bridgeThat(() => {});
+    const host = fakeHost((message, agent) => {
+      if (message.method !== 'session/new') return inner(message, agent);
+      agent.say({
+        jsonrpc: '2.0',
+        id: message.id,
+        error: {
+          code: -32603,
+          message: 'Internal error',
+          data: {
+            details: 'Use an agent-prefixed session key or select an agent explicitly',
+          },
+        },
+      });
+    });
+    const provider = createAcpProvider(host.processes, bridgeConfig, {
+      emptyFolder: () => Promise.resolve('/var/folders/T/redlines-run.x'),
+      removeFolder: () => Promise.resolve(),
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of provider.run(asked, tools, new AbortController().signal)) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      message: expect.stringContaining(
+        'Name the agent in Preferences › Agents › OpenClaw.',
+      ) as string,
+    });
+  });
+
   it('says why the bridge failed, from the words it keeps in `data`', async () => {
     // A session that names the toolbox, as the provider of any other agent would write it.
     const host = fakeHost(bridgeThat(() => {}));
