@@ -83,6 +83,7 @@ import {
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -401,6 +402,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
+    options.includes ? includeFacet.of(options.includes) : [],
+    quartoIncludes(),
     imageSelection(),
     undoHistory(),
     trackingBack,

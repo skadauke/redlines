@@ -226,6 +226,13 @@ let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
+/** The file that an include names, as the open document writes it: null where it is none. */
+function includedFile(path: string): string | null {
+  const document = imageDocument;
+  const project = imageFolder ?? (isTauri ? null : '');
+  return document && project !== null ? localImagePath(path, document, project) : null;
+}
+
 /** The size of each local image file, read from its header once and kept until it is saved again. */
 const imageSizes = createImageSizes((paths) => host.imageSizes(paths));
 /** The images the preview has drawn, which are looked at again when the window regains the focus. */
@@ -390,6 +397,24 @@ const editor = createEditor(element('#editor'), {
     const path = imageDocument;
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
     return file === null ? null : imageSizes.of(file);
+  },
+  // An include of a Quarto document (`{{< include _part.qmd >}}`) is read and opened as a file of
+  // its own, as a local image is found: relative to the document, and only inside its project (a
+  // browser tab's one folder in memory has no path of its own).
+  includes: {
+    read: async (path) => {
+      const file = includedFile(path);
+      if (file === null) return null;
+      try {
+        return await host.read(file);
+      } catch {
+        return null;
+      }
+    },
+    open: (path) => {
+      const file = includedFile(path);
+      if (file !== null) void controller.open(file);
+    },
   },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).
