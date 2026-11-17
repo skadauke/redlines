@@ -5,9 +5,11 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { rejectAll } from './decide.ts';
+import { EditError } from './errors.ts';
 import { expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
-import { ada, bodyOf, context, file } from './test-helpers.ts';
+import { trackedFormat, untrackedFormat } from './formatting.ts';
+import { TIME, ada, bodyOf, context, expectEveryOrderAlike, file } from './test-helpers.ts';
 import { trackedEdits } from './track.ts';
 
 /** The body once every change is rejected, without the line breaks that end it. */
@@ -31,6 +33,54 @@ describe('#284: code that starts a list item, and indented code in an item or a 
       expect(parse(after).marks.map((mark) => mark.kind)).toEqual(['sub']);
       expect(bodyOf(after)).toContain('oxne');
       expect(back(after)).toBe(body);
+    });
+  }
+});
+
+describe('#429: a tracked _ at the start of a bare header that begins with **', () => {
+  it('writes the leading pipe plain, and reads alike in every order of decisions', () => {
+    const text = file('**b** | c\n--- | ---\nx | y');
+    const result = trackedEdits(text, [{ from: 0, to: 0, insert: '_' }], context(ada, ['m2bd', 'n8fx']));
+    for (const change of result.changes) expect(change.from).toBeLessThanOrEqual(change.to);
+    const after = applyChanges(text, result.changes);
+    expectEveryOrderAlike('429', after);
+    expect(bodyOf(after).startsWith('|')).toBe(true);
+  });
+});
+
+describe('#445: a paragraph made a list item, with a tab-indented block after it', () => {
+  const text = file('Intro.\n\nA plain paragraph\n\n\tindent');
+  const at = text.indexOf('plain');
+  for (const to of ['ul', 'ol', 'task'] as const) {
+    it(`${to} is refused as the block of spaces is, tracked or not`, () => {
+      const op = { kind: 'block', to } as never;
+      const ctx = { author: ada, time: TIME, random: () => new Uint8Array(8) } as never;
+      expect(() => trackedFormat(text, { from: at, to: at }, op, ctx)).toThrow(
+        "This block can't become a list item",
+      );
+      expect(() => untrackedFormat(text, { from: at, to: at }, op, ctx)).toThrow(
+        "This block can't become a list item",
+      );
+    });
+  }
+});
+
+describe('#420: a block change with the caret before a quote whose paragraph a marker opens', () => {
+  const text = file("> <!--ins k3x9-->\n>\n> Bo's new words<!--/k3x9--> and older text.", {
+    k3x9: 'bo',
+  });
+  for (const to of ['h2', 'quote', 'ul'] as const) {
+    it(`${to} writes a change or refuses with words, and never does nothing`, () => {
+      const op = { kind: 'block', to } as never;
+      const ctx = { author: ada, time: TIME, random: () => new Uint8Array(8) } as never;
+      let changes: unknown[];
+      try {
+        changes = trackedFormat(text, { from: 0, to: 0 }, op, ctx).changes;
+      } catch (error) {
+        expect(error).toBeInstanceOf(EditError);
+        return;
+      }
+      expect(changes.length).toBeGreaterThan(0);
     });
   }
 });

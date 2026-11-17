@@ -1377,7 +1377,10 @@ function planFormat(
     // change does, and not the block it ends at the start of.
     const outside =
       forBlocks && from === to
-        ? paragraph.to < from || paragraph.from > to
+        ? paragraph.to < from ||
+          (paragraph.from > to &&
+            // Only hidden markers and container syntax between the caret and the paragraph (#420).
+            !/^[ \t>\r\n]*$/.test(visible(planning.text, planning.hidden, to, paragraph.from).text))
         : paragraph.to <= from || paragraph.from >= to;
     if (outside) continue;
     if (isRawParagraph(planning, paragraph)) {
