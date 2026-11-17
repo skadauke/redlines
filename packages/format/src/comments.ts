@@ -3,7 +3,7 @@
 // only the ledger; deleting a thread removes both. Where the anchor's markers go is the same for a
 // highlight (anchors.ts).
 
-import { openerRange } from './blocks.ts';
+import { closerRange, openerRange } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, markerRanges, visibleText, workingLedger } from './edit-support.ts';
 import type { MarkerRange } from './edit-support.ts';
@@ -214,7 +214,7 @@ export function deleteThread(text: string, threadId: string): TextChange[] {
   const removals: TextChange[] = [];
   for (const segment of anchor?.segments ?? []) {
     removals.push({ ...openerRange(segment), insert: '' });
-    if (segment.close) removals.push({ ...segment.close, insert: '' });
+    if (segment.close) removals.push({ ...closerRange(text, segment.close), insert: '' });
   }
   return commitEdit(text, removals, ledger, { parsed, removes: true, keeps: 'both' });
 }
