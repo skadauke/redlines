@@ -93,12 +93,136 @@ function bare(address: string): string {
   return address;
 }
 
+/**
+ * What a document (not a selection) is drawn with, for a page or a file: the parts of the language
+ * that a clip leaves as text. Everything here is off for a copy.
+ */
+export interface DocumentParts {
+  /** The address an image is loaded from, for the written one; null draws its alt text only. */
+  imageUrl?: (written: string) => string | null;
+  /** A block of HTML as the sanitized HTML that is drawn of it; null leaves it as text. */
+  html?: (source: string) => string | null;
+  /**
+   * Draw for a program that pastes (Word, Google Docs): `<s>` for a strike, a code color of its own,
+   * borders and widths on every table cell, a quote that reads without its rule, and no class.
+   */
+  office?: boolean;
+  /** A selection of a document, not a whole one: footnotes, alerts and HTML blocks stay text. */
+  clip?: boolean;
+  /** Which images (by destination) come out as their alt text. */
+  altOnly?: (href: string) => boolean;
+}
+
+/** The widest a picture goes on a page of Word or Docs: 6.5 in at 96 dpi. */
+const COLUMN_PX = 624;
+
+/** The size in px of an image given as a `data:` address, read from its header; null if unknown. */
+export function dataImageSize(url: string): { width: number; height: number } | null {
+  const comma = url.indexOf(',');
+  if (!/^data:image\/[\w+.-]+;base64$/i.test(url.slice(0, comma))) return null;
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(url.slice(comma + 1, comma + 1 + 262_144).replace(/=+$/, ''));
+    bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+  const u16 = (i: number) => (bytes[i] ?? 0) | ((bytes[i + 1] ?? 0) << 8);
+  const be16 = (i: number) => ((bytes[i] ?? 0) << 8) | (bytes[i + 1] ?? 0);
+  const be32 = (i: number) => be16(i) * 65536 + be16(i + 2);
+  const ascii = (i: number, n: number) => String.fromCharCode(...bytes.subarray(i, i + n));
+  let size: { width: number; height: number } | null = null;
+  if (ascii(1, 3) === 'PNG') size = { width: be32(16), height: be32(20) };
+  else if (ascii(0, 3) === 'GIF') size = { width: u16(6), height: u16(8) };
+  else if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') {
+    const kind = ascii(12, 4);
+    if (kind === 'VP8X') {
+      size = {
+        width: 1 + (bytes[24]! | (bytes[25]! << 8) | (bytes[26]! << 16)),
+        height: 1 + (bytes[27]! | (bytes[28]! << 8) | (bytes[29]! << 16)),
+      };
+    } else if (kind === 'VP8 ') size = { width: u16(26) & 0x3fff, height: u16(28) & 0x3fff };
+    else if (kind === 'VP8L') {
+      const bits = bytes[21]! | (bytes[22]! << 8) | (bytes[23]! << 16) | (bytes[24]! << 24);
+      size = { width: 1 + (bits & 0x3fff), height: 1 + ((bits >>> 14) & 0x3fff) };
+    }
+  } else if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let turned = false;
+    for (let i = 2; i + 9 < bytes.length;) {
+      if (bytes[i] !== 0xff) {
+        i++;
+        continue;
+      }
+      const marker = bytes[i + 1]!;
+      // Fill bytes, and markers with no length.
+      if (marker === 0xff) {
+        i++;
+        continue;
+      }
+      if (marker === 0 || marker === 1 || (marker >= 0xd0 && marker <= 0xd8)) {
+        i += 2;
+        continue;
+      }
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+        size = turned ? null : { height: be16(i + 5), width: be16(i + 7) };
+        break;
+      }
+      // EXIF orientation 5 to 8 turns the picture a quarter: its stored size isn't how it shows.
+      if (marker === 0xe1 && ascii(i + 4, 4) === 'Exif') {
+        const t = i + 10;
+        const little = ascii(t, 2) === 'II';
+        const w16 = (j: number) => (little ? u16(j) : be16(j));
+        const w32 = (j: number) => (little ? u16(j) + u16(j + 2) * 65536 : be32(j));
+        const ifd = t + w32(t + 4);
+        for (let n = 0, count = w16(ifd); n < count && n < 64; n++) {
+          if (w16(ifd + 2 + n * 12) === 0x0112 && w16(ifd + 2 + n * 12 + 8) >= 5) turned = true;
+        }
+      }
+      i += 2 + be16(i + 2);
+    }
+  }
+  return size && size.width > 0 && size.height > 0 ? size : null;
+}
+
+/**
+ * The `width` and `height` attributes of a picture for a program that pastes, so it doesn't guess:
+ * the width set in the document, else the file's own, kept inside the column, aspect kept.
+ */
+function pictureSize(shown: string, set: number | null): string {
+  const natural = dataImageSize(shown);
+  let width = set ?? natural?.width ?? null;
+  if (width === null) return '';
+  width = Math.min(width, COLUMN_PX);
+  if (!natural) return ` width="${Math.round(width)}"`;
+  return ` width="${Math.round(width)}" height="${Math.max(1, Math.round((width * natural.height) / natural.width))}"`;
+}
+
+const OFFICE_CODE = 'background:#f2f2f2;color:#24292f;';
+const OFFICE_CELL = 'border:1px solid #8c8c8c;padding:4px 8px;';
+const OFFICE_QUOTE =
+  'margin:0 0 0 1.5em;padding:0 0 0 1em;border-left:3px solid #b0b0b0;color:#555555';
+
+/** A footnote's mark in prose: `[^1]`, not followed by the colon of its definition. */
+const FOOTNOTE_MARK = /\[\^([^\]\s&]+)\](?!:)/g;
+
 function render(
   src: string,
   fonts: FontStacks,
   keepAsText: (href: string) => boolean,
   emoji: EmojiLookup = () => undefined,
+  doc?: DocumentParts,
 ): string {
+  const office = doc?.office === true;
+  // The parts of the language that a whole page draws and a selection leaves as text.
+  const page = doc && !doc.clip ? doc : undefined;
+  // A picture as data is what a program that pastes can always draw.
+  const pictureOk = (href: string) =>
+    safe(href) || (office && /^data:image\/(?:png|jpe?g|gif|webp);base64,[\w+/=]+$/i.test(href));
+  if (doc?.altOnly) {
+    const first = keepAsText;
+    const also = doc.altOnly;
+    keepAsText = (href) => first(href) || also(href);
+  }
   const tree = markdown.parse(src);
   // Reference links take the address of their definition, when the copy has it.
   const definitions = new Map<string, string>();
@@ -128,10 +252,13 @@ function render(
     const value = (name: string) => attributes.find((a) => a.name === name)?.value ?? null;
     const href = value('src') ?? '';
     if (!href) return null;
-    if (!safe(href) || keepAsText(href)) return escape(value('alt') ?? '');
+    if (!pictureOk(href) || keepAsText(href)) return escape(value('alt') ?? '');
+    const shown = doc?.imageUrl ? doc.imageUrl(href) : href;
+    if (shown === null) return escape(value('alt') ?? '');
     const width = /^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$/i.exec(value('width') ?? '')?.[1];
-    return `<img src="${escape(href)}" alt="${escape(value('alt') ?? '')}"${
-      width && Number(width) > 0 ? ` width="${Math.round(Number(width))}"` : ''
+    const set = width && Number(width) > 0 ? Number(width) : null;
+    return `<img src="${escape(shown)}" alt="${escape(value('alt') ?? '')}"${
+      office ? pictureSize(shown, set) : set ? ` width="${Math.round(set)}"` : ''
     }>`;
   }
 
@@ -142,17 +269,21 @@ function render(
   /** Text between nodes, as the Markdown it was written. */
   const text = (from: number, to: number) => escape(slice(from, to));
 
+  /** Text of a document's prose, in which a footnote's mark is a superscript. */
+  const prose = (from: number, to: number) =>
+    page ? text(from, to).replace(FOOTNOTE_MARK, '<sup>$1</sup>') : text(from, to);
+
   /** The children of `node` between `from` and `to`, with the text between them. */
   function inlines(node: SyntaxNode, from = node.from, to = node.to): string {
     let pos = from;
     let out = '';
     for (let child = node.firstChild; child; child = child.nextSibling) {
       if (child.to <= from || child.from >= to) continue;
-      out += text(pos, child.from);
+      out += prose(pos, child.from);
       out += inline(child);
       pos = child.to;
     }
-    return out + text(pos, to);
+    return out + prose(pos, to);
   }
 
   /** The children of `node` that are not marks, with the text between them. */
@@ -160,11 +291,11 @@ function render(
     let pos = node.from;
     let out = '';
     for (let child = node.firstChild; child; child = child.nextSibling) {
-      out += text(pos, child.from);
+      out += prose(pos, child.from);
       if (!marks.has(child.name)) out += inline(child);
       pos = child.to;
     }
-    return out + text(pos, node.to);
+    return out + prose(pos, node.to);
   }
 
   const wrap = (tag: string, node: SyntaxNode, marks: string) =>
@@ -173,7 +304,7 @@ function render(
   function link(node: SyntaxNode): string {
     const marks = node.getChildren('LinkMark');
     const url = node.getChild('URL');
-    if (!marks[0] || !marks[1]) return text(node.from, node.to);
+    if (!marks[0] || !marks[1]) return prose(node.from, node.to);
     const label = inlines(node, marks[0].to, marks[1].from);
     let href: string | undefined;
     if (url) href = destination(slice(url.from, url.to));
@@ -185,7 +316,7 @@ function render(
       );
       href = definitions.get(key(inside.trim() ? inside : slice(marks[0].to, marks[1].from)));
     }
-    if (href === undefined) return text(node.from, node.to);
+    if (href === undefined) return prose(node.from, node.to);
     return safe(href) ? `<a href="${escape(href)}">${label}</a>` : label;
   }
 
@@ -196,7 +327,7 @@ function render(
       case 'StrongEmphasis':
         return wrap('strong', node, 'EmphasisMark');
       case 'Strikethrough':
-        return wrap('del', node, 'StrikethroughMark');
+        return wrap(office ? 's' : 'del', node, 'StrikethroughMark');
       case 'Subscript':
         return wrap('sub', node, 'SubscriptMark');
       case 'Superscript':
@@ -205,7 +336,7 @@ function render(
         const marks = node.getChildren('CodeMark');
         const from = marks[0]?.to ?? node.from;
         const to = marks.length > 1 ? marks[marks.length - 1]!.from : node.to;
-        return `<code${style(fonts.mono)}>${text(from, to)}</code>`;
+        return `<code style="font-family:${escape(fonts.mono)}${office ? `;${OFFICE_CODE}` : ''}">${text(from, to)}</code>`;
       }
       case 'Link':
         return link(node);
@@ -216,8 +347,9 @@ function render(
         const alt = slice(marks[0]!.to, marks[1].from);
         const href = destination(slice(url.from, url.to));
         // An image the preview doesn't fetch is not one a target should: its alt text only.
-        return safe(href) && !keepAsText(href)
-          ? `<img src="${escape(href)}" alt="${escape(alt)}">`
+        const shown = doc?.imageUrl ? doc.imageUrl(href) : href;
+        return pictureOk(href) && !keepAsText(href) && shown !== null
+          ? `<img src="${escape(shown)}" alt="${escape(alt)}"${office ? pictureSize(shown, null) : ''}>`
           : escape(alt);
       }
       case 'Autolink':
@@ -259,6 +391,7 @@ function render(
     }
   }
 
+  let columns = 1;
   function cells(row: SyntaxNode, tag: string, aligns: string[]): string {
     inCell = true;
     try {
@@ -275,7 +408,11 @@ function render(
         .getChildren('TableCell')
         .map((cell, i) => {
           const align = aligns[i];
-          return `<${tag}${align ? ` style="text-align:${align}"` : ''}>${inlines(cell)}</${tag}>`;
+          const css =
+            (office
+              ? `${OFFICE_CELL}width:${Math.floor(100 / columns)}%;${tag === 'th' ? 'background:#f2f2f2;font-weight:bold;' : ''}`
+              : '') + (align ? `text-align:${align}` : '');
+          return `<${tag}${css ? ` style="${css}"` : ''}>${inlines(cell)}</${tag}>`;
         })
         .join('') +
       '</tr>'
@@ -303,8 +440,9 @@ function render(
       });
     const head = node.getChild('TableHeader');
     const rows = node.getChildren('TableRow');
+    columns = Math.max(1, aligns.length, head?.getChildren('TableCell').length ?? 0);
     return (
-      '<table>' +
+      (office ? '<table style="border-collapse:collapse;width:100%">' : '<table>') +
       (head ? `<thead>${cells(head, 'th', aligns)}</thead>` : '') +
       (rows.length
         ? `<tbody>${rows.map((row) => cells(row, 'td', aligns)).join('')}</tbody>`
@@ -329,7 +467,10 @@ function render(
         parts.push(block(child));
       }
     }
-    return `<li>${parts.join('')}</li>`;
+    const task = doc && parts.some((part) => /^[\u2610\u2611]/.test(part));
+    // A task item is its box alone, with no bullet (Word and Docs draw one beside it otherwise).
+    const mark = !task ? '' : office ? ' style="list-style-type:none"' : ' class="rl-task"';
+    return `<li${mark}>${parts.join('')}</li>`;
   }
 
   function list(node: SyntaxNode): string {
@@ -367,10 +508,24 @@ function render(
     const level = /^(?:ATX|Setext)Heading([1-6])$/.exec(node.name)?.[1];
     if (level) return heading(node, Number(level));
     switch (node.name) {
-      case 'Paragraph':
+      case 'Paragraph': {
+        const note = page ? /^\[\^([^\]\s]+)\]:[ \t]*/.exec(slice(node.from, node.to)) : null;
+        if (note) {
+          const body = inlines(node, node.from + note[0].length);
+          return `<p class="rl-footnote"><sup>${escape(note[1]!)}</sup> ${body}</p>`;
+        }
         return `<p>${inlines(node)}</p>`;
-      case 'Blockquote':
-        return `<blockquote>${blocks(node)}</blockquote>`;
+      }
+      case 'Blockquote': {
+        const body = blocks(node);
+        const alert = page ? /^<p>\[!([A-Za-z][A-Za-z0-9-]*)\][ \t]*/.exec(body) : null;
+        if (!alert) {
+          return `<blockquote${office ? ` style="${OFFICE_QUOTE}"` : ''}>${body}</blockquote>`;
+        }
+        const type = alert[1]!.toLowerCase();
+        const title = type.charAt(0).toUpperCase() + type.slice(1);
+        return `<blockquote class="rl-callout rl-callout-${escape(type)}"><p class="rl-callout-title">${escape(title)}</p><p>${body.slice(alert[0].length)}</blockquote>`;
+      }
       case 'BulletList':
       case 'OrderedList':
         return list(node);
@@ -381,11 +536,25 @@ function render(
         return '<hr>';
       case 'Table':
         return table(node);
-      case 'LinkReference':
+      case 'LinkReference': {
+        const note = page
+          ? /^\[\^([^\]\s]+)\]:[ \t]*([\s\S]*)$/.exec(slice(node.from, node.to))
+          : null;
+        if (note) {
+          return `<p class="rl-footnote"><sup>${escape(note[1]!)}</sup> ${escape(note[2]!.trim())}</p>`;
+        }
         return `<p>${text(node.from, node.to)}</p>`;
+      }
       case 'HTMLBlock': {
         const picture = tagPicture(slice(node.from, node.to));
         if (picture !== null) return `<p>${picture}</p>`;
+        if (page) {
+          // A comment is not shown; other HTML is drawn as the sanitizer allows.
+          const source = slice(node.from, node.to);
+          if (/^\s*<!--(?:(?!-->)[\s\S])*-->\s*$/.test(source)) return '';
+          const drawn = page.html?.(source);
+          if (drawn !== null && drawn !== undefined) return `<div class="rl-html">${drawn}</div>`;
+        }
         return `<p>${text(node.from, node.to).replace(/\n/g, '<br>')}</p>`;
       }
       default:
@@ -400,6 +569,20 @@ function render(
   }
 
   return `<div data-redlines${style(fonts.body)}>${blocks(tree.topNode)}</div>`;
+}
+
+/**
+ * The HTML of a whole document's Markdown, for a page or a file: `markdownToHtml` and the parts of
+ * the language that a copy leaves as text (footnotes, alerts, task items, HTML blocks, the images
+ * the host resolves). `documentHtml` (document-html.ts) reads the document first.
+ */
+export function markdownToDocumentHtml(
+  source: string,
+  fonts: FontStacks,
+  emoji: EmojiLookup | undefined,
+  parts: DocumentParts,
+): string {
+  return render(source, fonts, () => false, emoji, parts);
 }
 
 /**

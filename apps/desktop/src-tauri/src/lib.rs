@@ -68,6 +68,8 @@ mod updates;
 
 // Renaming a file, showing it in Finder, and printing the window.
 mod files;
+#[cfg(target_os = "macos")]
+mod pdf;
 
 // Dragging the window's file out of it, from the title bar's document icon.
 mod drag;
@@ -402,6 +404,7 @@ pub fn run() {
             files::rename_file,
             files::reveal_in_finder,
             files::print_window,
+            files::export_pdf,
             files::folder_exists,
             files::choose_folder,
             drag::start_file_drag,
@@ -442,6 +445,7 @@ pub fn run() {
             links::open_link,
             project::show_images,
             images::image_for_agent,
+            images::image_for_crop,
             images::image_stamps,
             images::image_sizes,
             project::allow_document,

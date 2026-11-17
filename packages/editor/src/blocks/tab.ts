@@ -9,12 +9,18 @@
 // that the keys of other kinds of block (code, tables) can be tried beside it.
 
 import { type ChangeSpec, EditorSelection, type EditorState } from '@codemirror/state';
-import { EditError, type FormatOp } from '@redlines/format';
-import { blockFormatChanges, caretKeptFromEnd, trackingField } from '../tracked/typing.ts';
+import { EditError, type FormatOp, widenedFirstEdits } from '@redlines/format';
+import {
+  blockFormatChanges,
+  caretKeptFromEnd,
+  contextFor,
+  trackingField,
+} from '../tracked/typing.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
 import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
 import { type Item, itemsAround, type KeyEdit, nothing } from './edits.ts';
 import { openBlock, recordField } from './open.ts';
+import { readsWorse } from './read-check.ts';
 import { type Block, blockAt } from './structure.ts';
 
 /** The innermost list item that a paragraph block is in, with the text position that stands for it. */
@@ -67,14 +73,41 @@ function planned(
           mark.segments.some((g) => g.open.to === state.doc.line(item.line.number - 1).to),
       );
   if (theirs) return { ...nothing(state), userEvent: 'indent', refusal: THEIR_SPLIT };
-  return {
+  const plain: KeyEdit = {
     changes,
     selection: EditorSelection.single(state.changes(changes).mapPos(head, 1)),
     userEvent: 'indent',
     caretAt: head,
-    ...(state.field(trackingField, false) ? { final: true } : {}),
     ...more,
   };
+  if (!state.field(trackingField, false)) return plain;
+  // The edit is final, as it stands, only where the format's check finds that the file reads as it
+  // did, in every order of decisions (#465); otherwise the list that holds the item is replaced.
+  const text = state.doc.toString();
+  if (!readsWorse(text, state.changes(changes).apply(state.doc).toString())) {
+    return { ...plain, final: true };
+  }
+  const edits = changes.map((change) => {
+    const {
+      from,
+      to = from,
+      insert = '',
+    } = change as { from: number; to?: number; insert?: string };
+    return { from, to, insert: String(insert) };
+  });
+  try {
+    const widened = widenedFirstEdits(text, edits, contextFor(state));
+    return {
+      ...plain,
+      caretAt: undefined,
+      changes: widened.changes,
+      selection: EditorSelection.single(caretKeptFromEnd(state, widened.changes, head)),
+      final: true,
+    };
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+    return { ...nothing(state), userEvent: 'indent', refusal: error.message };
+  }
 }
 
 /**

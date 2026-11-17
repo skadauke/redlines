@@ -38,7 +38,7 @@ const AS_WRITTEN = /[A-Za-z0-9\-._~!$*+,;=@/]/;
  * `?`, `%` itself, `:`, which would make the first name a scheme, and `&`, which could begin a
  * character reference). The preview reads it back the same way (`preview/image.ts`).
  */
-function destination(path: string): string {
+export function destination(path: string): string {
   return Array.from(path, (char) => {
     if (AS_WRITTEN.test(char) || (char.codePointAt(0)! > 0x7f && !/\s/.test(char))) return char;
     // A percent code for each byte of the character: one for ASCII, more for a space of another kind.

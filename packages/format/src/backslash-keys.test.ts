@@ -731,10 +731,6 @@ describe('random keys next to backslashes read as micromark reads them (#223, #2
             if (!MEANT.test(error.message)) unmeant.push(`${label}: ${error.message}`);
             continue;
           }
-          // A change that goes on over a pending deletion of a block break and its bullet is read
-          // otherwise in some order of decisions on main as well (rule 11 over a foreign deletion).
-          // Nor over backslashes next to a pending deletion of one: rejecting it gives an odd run.
-          if (/<!--del \w+ [^>]*(?:\\n\\n|\\-->)/.test(bodyOf(text))) break;
           made++;
           // Backslashes typed at the end of the document: with a line break of their own, or taking the
           // body's.

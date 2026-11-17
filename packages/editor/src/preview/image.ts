@@ -30,6 +30,14 @@ export const imageResolver = Facet.define<ImageResolver, ImageResolver | null>({
   combine: (values) => values[0] ?? null,
 });
 
+/** A local image's bytes, base64, with its type, for a copy to embed; null when it can't be read. */
+export type ImageData = (path: string) => Promise<{ mimeType: string; data: string } | null>;
+
+/** The host's reader of local image files (`EditorOptions.imageData`). */
+export const imageReader = Facet.define<ImageData, ImageData | null>({
+  combine: (values) => values[0] ?? null,
+});
+
 /** An image's size in px, as its file says: what a page may reserve the room for before it loads. */
 export interface ImageSize {
   width: number;
@@ -59,7 +67,7 @@ type Source =
   | { kind: 'local'; path: string }
   | { kind: 'none' };
 
-function sourceOf(written: string): Source {
+export function sourceOf(written: string): Source {
   let url = written.trim();
   if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
   if (REMOTE.test(url)) return { kind: 'remote', url };

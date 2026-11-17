@@ -304,6 +304,12 @@ export interface EditorOptions {
    */
   resolveImage?: (src: string) => string | null;
   /**
+   * The bytes of a local image's file (base64 and its MIME type), given the path as `resolveImage`
+   * is, or null when it can't be read. A copy embeds the images of the selection with them, since
+   * Word and Google Docs fail to load an address of the app's own. Default: none.
+   */
+  imageData?: (src: string) => Promise<{ mimeType: string; data: string } | null>;
+  /**
    * The size in px of a local image's file, given the path as `resolveImage` is: read from the
    * file's header, so that the page holds the image's room before it loads and doesn't move when
    * it arrives. May answer later (a promise); null for a size not known. Default: none.
@@ -324,6 +330,19 @@ export interface EditorOptions {
    * the command isn't registered.
    */
   openImage?: (src: string) => void;
+  /**
+   * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
+   * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
+   * to keep, as fractions of its width and height. Writes the copy beside the original, in the
+   * project's folder for images, never replacing a file, and answers with the copy's path as the
+   * document links it, or rejects with a sentence for the person. The editor points the image at the
+   * copy (one change, tracked with Track Changes on) and keeps its width and alignment. Default:
+   * none, and the command isn't registered.
+   */
+  cropImage?: (
+    src: string,
+    crop: { x: number; y: number; width: number; height: number },
+  ) => Promise<string>;
   /**
    * Called when image files are pasted into the document, or dropped on it, with the files and the
    * spot their links will go to (`ImageSpot`). The host saves each file where the document can

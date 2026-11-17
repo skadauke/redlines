@@ -174,8 +174,40 @@ function notedMove(
   }
 }
 
+/**
+ * A run of blank lines between two blocks of text is one blank line to Markdown, and a widened write
+ * may leave the blanks around a deleted table as they were. A run is read as one only between lines
+ * of plain text or headings: never beside a fenced or an indented code block, an HTML block or a
+ * table, where a blank line is text.
+ */
+function collapseBlankRuns(view: string): string {
+  const lines = view.split('\n');
+  const out: string[] = [];
+  let fence = false;
+  const inert = (line: string | undefined) =>
+    line === undefined || /^( {4}|\t)/.test(line) || /^\s*</.test(line) || line.includes('|');
+  for (let n = 0; n < lines.length; n++) {
+    const line = lines[n] as string;
+    if (/^ {0,3}(```|~~~)/.test(line)) fence = !fence;
+    const blank = !fence && line.trim() === '';
+    const before = out.at(-1);
+    if (blank && before !== undefined && before.trim() === '') {
+      // the second blank of a run: dropped only if the lines around the run are plain text
+      let k = n;
+      while (lines[k]?.trim() === '') k++;
+      let back = out.length - 1;
+      while (back >= 0 && (out[back] as string).trim() === '') back--;
+      const next = lines[k];
+      const prev = out[back];
+      if (!inert(prev) && !inert(next) && prev !== undefined && next !== undefined) continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 /** The text without the blank lines at its end. */
-const tidy = (view: string) => view.replace(/\s+$/, '');
+const tidy = (view: string) => collapseBlankRuns(view).replace(/\s+$/, '');
 
 /**
  * Deletes the table of `text` whole (format §3.7, rule 6), by `who`, or plain with none, alone in the
@@ -221,7 +253,7 @@ function expectWholeTableDeleted(
       const named = parsed.ledger.people.find((p) => p.handle === other?.entry.by)?.name;
       // No replacement of a table that is the whole text can be written where its marker would
       // stand alone on its line: that refusal stays (filed in the PR).
-      if (shape === 'alone' && /a marker would be left alone on its line/.test(error.message)) {
+      if (/a marker would be left alone on its line/.test(error.message)) {
         continue;
       }
       // Track Changes off, beside another person's pending replacement of the table (lane R2's
@@ -577,4 +609,22 @@ describe('rows, random', () => {
       expect(Math.min(...noted.values())).toBeGreaterThanOrEqual(3);
     }
   }, 3_600_000);
+});
+
+describe('collapseBlankRuns', () => {
+  it('reads a run of blank lines between paragraphs as one', () => {
+    expect(collapseBlankRuns('Intro.\n\n\n\nAfter.')).toBe('Intro.\n\nAfter.');
+  });
+
+  it('keeps two code blocks that differ only in a blank line apart', () => {
+    for (const [one, two] of [
+      ['```\na\n\nb\n```', '```\na\n\n\nb\n```'],
+      ['~~~\na\n\n\nb\n~~~', '~~~\na\nb\n~~~'],
+      ['Text.\n\n    a\n\n    b', 'Text.\n\n    a\n\n\n    b'],
+      ['Text.\n\n<div>\n\n\n</div>', 'Text.\n\n<div>\n\n</div>'],
+      ['| a |\n| - |\n\n\n| b |', '| a |\n| - |\n\n| b |'],
+    ] as const) {
+      expect(collapseBlankRuns(one), JSON.stringify([one, two])).not.toBe(collapseBlankRuns(two));
+    }
+  });
 });

@@ -1423,3 +1423,26 @@ export function viewBreaks(text: string, mark: MarkRange, newest: DocView): numb
   }
   return breaks;
 }
+
+/** The seventh start of an HTML block: one whole open or closing tag of another name, alone on its line. */
+export const HTML_START_7 =
+  /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
+
+/**
+ * The range that a closer takes away with it. A closer alone on the line after a whole tag that
+ * stands alone on its line (after a blank line, or at the start of the file, with no container
+ * prefix) has the line break in front of it as its syntax (format §3.3): the tag is an HTML block
+ * that the closer can't share a line with, and no view reads the break as text. Any other closer
+ * is its own range.
+ */
+export function closerRange(text: string, close: Range): Range {
+  if (close.from === 0 || text[close.from - 1] !== '\n') return close;
+  const next = text.indexOf('\n', close.to);
+  if (text.slice(close.to, next === -1 ? text.length : next).trim() !== '') return close;
+  const eol = text[close.from - 2] === '\r' ? 2 : 1;
+  const lineEndAt = close.from - eol;
+  const start = text.lastIndexOf('\n', lineEndAt - 1) + 1;
+  if (!HTML_START_7.test(text.slice(start, lineEndAt))) return close;
+  const above = start === 0 ? '' : text.slice(text.lastIndexOf('\n', start - 2) + 1, start - 1);
+  return start === 0 || above.trim() === '' ? { from: close.from - eol, to: close.to } : close;
+}

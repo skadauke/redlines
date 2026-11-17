@@ -22,8 +22,10 @@ import {
 import { codeFileHighlight, codeLanguages } from '@redlines/code';
 import {
   createEditor,
+  editorDocumentHtml,
   PLAIN_ONLY_TRACKING,
   type Author,
+  type CropRect,
   type EditorTyping,
   type EditorUiState,
   type ImageSpot,
@@ -39,7 +41,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { watchAgentsChanged } from './agent-changes.ts';
-import { acpAgents, createProcesses, createRelay, homeAccess, homeReach } from './agent-host.ts';
+import {
+  acpAgents,
+  createProcesses,
+  createRelay,
+  homeAccess,
+  homeReach,
+  listedAcpAgents,
+} from './agent-host.ts';
 import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
@@ -47,6 +56,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
+import { croppedFile } from './image-crop.ts';
 import { createImageWatch } from './image-watch.ts';
 import { createImageSizes } from './image-sizes.ts';
 import { localImagePath, localImageUrl, relativeImagePath } from './images.ts';
@@ -65,7 +75,9 @@ import {
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
-import { holdWholeDocument, printPage } from './print.ts';
+import { fillPrintPage, plainPageHtml, printPage } from './print.ts';
+import { exportToWord } from './word-export.ts';
+import { openWord } from './word-import.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import { createShortcutBook, shortcutEntries } from './shortcut-book.ts';
 import { publishShortcutEntries } from './shortcuts-published.ts';
@@ -114,6 +126,7 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './zoom.css';
 import './styles.css';
+import './print.css';
 import './ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
@@ -236,6 +249,45 @@ function openImageInPreview(src: string): void {
 }
 
 /**
+ * Crop… (`image.crop`, #624): writes the part `crop` of the local image `src` as a copy in the
+ * project's folder for images, beside the others, and answers with the path the document links the
+ * copy by. The original file stays. The app reads the picture (`image_for_crop`), under the rules
+ * that hold what the page may load; a plain page in development reads it from its own memory.
+ */
+async function cropLocalImage(src: string, crop: CropRect): Promise<string> {
+  const document = imageDocument;
+  const root = imageFolder;
+  const path = document && root !== null ? localImagePath(src, document, root) : null;
+  if (document === null || path === null) {
+    throw new Error('Only an image in this document’s folder can be cropped.');
+  }
+  let blob: Blob;
+  if (isTauri) {
+    const read = await invoke<{ mimeType: string; data: string }>('image_for_crop', { path }).catch(
+      (error: unknown) => {
+        throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
+      },
+    );
+    const bytes = Uint8Array.from(atob(read.data), (char) => char.charCodeAt(0));
+    blob = new Blob([bytes], { type: read.mimeType });
+  } else {
+    const url = host.imageUrl(path);
+    const response = url === null ? null : await fetch(url).catch(() => null);
+    if (!response?.ok) throw new Error('The image file isn’t there.');
+    blob = await response.blob();
+  }
+  const file = await croppedFile(blob, path, crop);
+  const added = await host.addImages(document, loadSettings().imageFolderName, {
+    kind: 'files',
+    files: [file],
+    pasted: false,
+  });
+  const copy = added.paths[0];
+  if (copy === undefined) throw new Error(added.refused[0] ?? 'Couldn’t save the cropped image.');
+  return copy;
+}
+
+/**
  * The person comes back from Preview, where an image was saved: the images whose files changed are
  * drawn again from the file, the others as they are, and the document's text is not touched.
  */
@@ -331,6 +383,9 @@ const editor = createEditor(element('#editor'), {
       return url === null ? null : imageWatch.url(file, url);
     });
   },
+  // A copy embeds the bytes of the selection's local images, read as an agent's are: only inside the
+  // document's folder, as PNG, JPEG, GIF or WebP, up to 3.5 MB; any other keeps its address.
+  imageData: (src) => readImageForAgent(src).catch(() => null),
   imageSize: (src) => {
     const path = imageDocument;
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
@@ -339,6 +394,8 @@ const editor = createEditor(element('#editor'), {
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).
   openImage: isTauri || import.meta.env.DEV ? (src) => openImageInPreview(src) : undefined,
+  // Crop… (#624): a cropped copy of the picture goes in the project's folder for images.
+  cropImage: isTauri || import.meta.env.DEV ? (src, crop) => cropLocalImage(src, crop) : undefined,
   typing: typingOf(settings),
   // A word ended with Return gets the system's correction, which only the app can ask for; a plain
   // browser has none. Asked only while Preferences' spell check is on (the editor sees to that).
@@ -421,7 +478,7 @@ const agents =
           ...(isTauri
             ? {
                 more: async () =>
-                  (await acpAgents.list()).map(({ id, name, program, args, bridge }) =>
+                  (await listedAcpAgents()).map(({ id, name, program, args, bridge }) =>
                     createAcpProvider(processes, {
                       id,
                       name,
@@ -1320,11 +1377,58 @@ const commands: MenuCommands = {
   print: () =>
     void printPage({
       print: () => host.print(),
-      hold: () => holdWholeDocument(editor.view),
+      prepare: () => fillPrintPage(printableHtml()),
       back: [editor.view.dom, element('#titlebar')],
     }).catch((error: unknown) => {
       console.error('Could not print', error);
       notice.flash('Couldn’t print.');
+    }),
+  exportPdf: () => {
+    const path = controller.state.path;
+    void (async () => {
+      const release = await fillPrintPage(printableHtml());
+      try {
+        const folder = path === null ? null : path.slice(0, Math.max(0, path.lastIndexOf('/')));
+        const written = await host.exportPdf(controller.state.name, folder);
+        if (written) notice.flash('Saved the PDF.');
+      } finally {
+        release();
+      }
+    })().catch((error: unknown) => {
+      console.error('Could not export the PDF', error);
+      notice.flash('Couldn’t export the PDF.');
+    });
+  },
+  openDocx: () =>
+    void openWord({
+      host,
+      // An untouched window takes it; another window is opened for it where the app can (a browser
+      // tab can't be given text, and asks before it replaces what it has).
+      open: (markdown) =>
+        controller.untouched || !isTauri
+          ? controller.createWith(markdown)
+          : host.openWindow(undefined, undefined, markdown),
+      folderName: () => loadSettings().imageFolderName,
+      openFile: (path) =>
+        controller.untouched || !isTauri
+          ? openHere(path)
+          : openInNewWindow(path).then(() => undefined),
+      show: (options) => void notifications.show(options),
+    }).catch((error: unknown) => {
+      console.error('Could not open the Word file', error);
+      notice.flash('Couldn’t open the Word file.');
+    }),
+  exportWord: () =>
+    void exportToWord({
+      host,
+      text: editor.getDoc(),
+      name: doc?.name ?? 'Untitled',
+      path: doc?.path ?? null,
+      show: (options) => void notifications.show(options),
+      canReveal: isTauri,
+    }).catch((error: unknown) => {
+      console.error('Could not export to Word', error);
+      notice.flash('Couldn’t export to Word.');
     }),
   quit: () => void windows?.quit(),
   setView: (view) => editor.showView(view),
@@ -1441,6 +1545,17 @@ const historyRoute: HistoryRoute = {
 const historyIsTheDocuments = () =>
   historyIsDocuments(editor.view.dom, document.activeElement, document.hasFocus());
 const undoOrRedo = (redo: boolean) => routeHistory(historyRoute, redo);
+
+/**
+ * What a printed page holds: the document as it reads now, clean, with no marks (`print.css`), or
+ * the Original while the window shows that. A text or code file is its text as it is.
+ */
+function printableHtml(): string {
+  const current = ui ?? editor.getUiState();
+  if (current.kind === 'plain-only') return plainPageHtml(editor.getDoc());
+  // `view` has no Original yet; a window that shows one prints it.
+  return editorDocumentHtml(editor.view, (current.view as string) === 'original');
+}
 
 function render(): void {
   if (!doc || !ui) return;

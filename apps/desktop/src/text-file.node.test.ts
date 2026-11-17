@@ -16,6 +16,8 @@ import { BROWSER_IDENTITY, decodeText, FileExistsError, type Host } from './host
 function nodeHost(): Host {
   return {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
+    exportWord: () => Promise.resolve(null),
+    openDocx: () => Promise.resolve(null),
     open: () => Promise.resolve(null),
     read: async (path) => decodeText(await readFile(path)),
     write: (path, text) => writeFile(path, text),
@@ -27,6 +29,7 @@ function nodeHost(): Host {
     exists: (path) => Promise.resolve(existsSync(path)),
     reveal: () => Promise.resolve(),
     print: () => Promise.resolve(),
+    exportPdf: () => Promise.resolve(null),
     saveAs: () => Promise.resolve(null),
     watch: () => Promise.resolve(() => {}),
     projectRoot: (path) =>

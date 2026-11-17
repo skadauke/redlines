@@ -52,6 +52,7 @@ export {
   isOpen as isSectionOpen,
   setFold,
 } from './blocks/containers.ts';
+import { tabItems } from './blocks/tab-items.ts';
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
@@ -92,10 +93,13 @@ import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
+import { imageInSelection } from './image-size.ts';
+import { CROP_NO_IMAGE, CROP_RAW, CROP_REMOTE, startCrop } from './image-crop.ts';
 import { dialectFacet, noticeFacet } from './image-size.ts';
 import { likelyParsing } from './likely/parse.ts';
 import {
   imageOpening,
+  imageReader,
   imageResolver,
   imageSizer,
   imageSelection,
@@ -143,7 +147,14 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
-export { imageAt, imageInSelection, setImageAlt, type ImageElement } from './image-size.ts';
+export { type CropRect, type ImageCropper } from './image-crop.ts';
+export {
+  imageAt,
+  imageInSelection,
+  setImageAlt,
+  setImageSrc,
+  type ImageElement,
+} from './image-size.ts';
 /** Whether the parse has a node at `pos` other than the document: what the journeys ask of a far jump. */
 export const parsedAt = (state: EditorState, pos: number): boolean =>
   syntaxTree(state).resolveInner(pos, 1).name !== 'Document';
@@ -166,6 +177,13 @@ export {
 } from './preview/callout.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
+export {
+  documentHtml,
+  documentText,
+  editorDocumentHtml,
+  type DocumentHtmlOptions,
+  type DocumentViewKind,
+} from './clipboard/document-html.ts';
 export { indentItems } from './blocks/keys.ts';
 export { indentReason } from './blocks/tab.ts';
 export { disabledReasonOf } from './commands.ts';
@@ -323,7 +341,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const markdownSupport = markdown({
-    extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
+    extensions: [GFM, tabItems, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
     codeLanguages: options.codeLanguages,
   });
   const extensions = [
@@ -366,6 +384,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
+    options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     imageSelection(),
@@ -785,6 +804,24 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   };
   // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
   queueMicrotask(tellNewPeople);
+  const { cropImage } = options;
+  if (cropImage) {
+    // Crop… of a host's Image menu (#624): a host that can write a cropped copy of an image file
+    // gives `cropImage`.
+    commands.register([
+      {
+        id: 'image.crop',
+        title: 'Crop Image',
+        disabledReason: (state) => {
+          if (state.field(viewModeField) === 'raw') return CROP_RAW;
+          if (imageInSelection(state) === null) return CROP_NO_IMAGE;
+          return localImageAt(state) === null ? CROP_REMOTE : undefined;
+        },
+        run: ({ view }) =>
+          startCrop(view, cropImage, (message) => options.onNotice?.(message)) !== null,
+      },
+    ]);
+  }
   const { openImage } = options;
   if (openImage) {
     // For a host's Image menu (a host that has one gives `openImage`): the image under the caret or

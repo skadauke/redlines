@@ -67,6 +67,8 @@ export interface HeldEdit {
   changes: ChangeSet;
   selection: EditorSelection | undefined;
   annotations: readonly Annotation<unknown>[];
+  /** Effects the edit makes with it, besides the answer's own (the open block it takes back). */
+  effects?: readonly StateEffect<unknown>[];
   scrollIntoView: boolean;
 }
 
@@ -162,7 +164,10 @@ class Resolver {
             changes: held.changes,
             selection: held.selection,
             annotations: [...held.annotations, untrackedAnswerAnnotation.of(true)],
-            effects: held.reason === 'accept-pending' ? [] : runOf(held.reason, Date.now()),
+            effects: [
+              ...(held.effects ?? []),
+              ...(held.reason === 'accept-pending' ? [] : [runOf(held.reason, Date.now())]),
+            ],
             scrollIntoView: held.scrollIntoView,
           });
         }

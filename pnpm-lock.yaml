@@ -89,6 +89,9 @@ importers:
       '@redlines/toolbar':
         specifier: workspace:*
         version: link:../../plugins/toolbar
+      '@redlines/word':
+        specifier: workspace:*
+        version: link:../../packages/word
       '@tauri-apps/api':
         specifier: ^2.12.4
         version: 2.12.4
@@ -105,6 +108,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.12.3
         version: 2.12.3
+      docx:
+        specifier: 9.15.1
+        version: 9.15.1
       redlines:
         specifier: workspace:*
         version: link:../../packages/cli
@@ -228,6 +234,9 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
+      '@redlines/word':
+        specifier: workspace:*
+        version: link:../word
     devDependencies:
       rolldown:
         specifier: 1.2.14
@@ -291,12 +300,18 @@ importers:
       micromark:
         specifier: 4.0.2
         version: 4.0.2
+      micromark-extension-gfm-autolink-literal:
+        specifier: 2.1.0
+        version: 2.1.0
       micromark-extension-gfm-strikethrough:
         specifier: 2.1.0
         version: 2.1.0
       micromark-extension-gfm-table:
         specifier: 2.1.1
         version: 2.1.1
+      micromark-extension-gfm-task-list-item:
+        specifier: 2.1.0
+        version: 2.1.0
 
   packages/plugin-api: {}
 

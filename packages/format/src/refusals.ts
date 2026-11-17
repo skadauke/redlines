@@ -47,6 +47,30 @@ export function tierOfCode(code: EditErrorCode | undefined): RefusalTier {
 
 export const REFUSALS: readonly RefusalEntry[] = [
   [
+    'packages/editor/src/image-crop.ts',
+    'CROP_RAW',
+    'disable',
+    "Crop… is disabled in Raw, with this reason as the menu item's hint (#624)",
+  ],
+  [
+    'packages/editor/src/image-crop.ts',
+    'CROP_MOVED',
+    'info',
+    'the cropped copy is written, and the image it was made from is gone from the text meanwhile: there is nothing to point, and the notice says so (#624)',
+  ],
+  [
+    'packages/editor/src/image-crop.ts',
+    'CROP_NOT_POINTED',
+    'info',
+    'the cropped copy is written and the reference could not be set to it: a notice that tells, the original is untouched (#624)',
+  ],
+  [
+    'packages/editor/src/image-crop.ts',
+    'error instanceof Error ? error.message : String(error)',
+    'info',
+    "the host's own sentence about why the copy could not be written, which has its own tier (#624)",
+  ],
+  [
     'packages/editor/src/image-size.ts',
     'IMAGE_IN_HEADING',
     'widen',
@@ -203,6 +227,18 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'message',
     'info',
     'shows an error or a refusal that has its own tier',
+  ],
+  [
+    'packages/editor/src/table/ops.ts',
+    'UNTRACKED_OPERATION',
+    'info',
+    "the sheet's question for a table operation that no tracked write holds (an unclosed `<!--` in its header): the operation is made untracked on Make Edit (§3.13), never refused",
+  ],
+  [
+    'packages/editor/src/table/paste.ts',
+    'PASTE_UNTRACKED',
+    'info',
+    "the sheet's question for a paste that no tracked write holds: made untracked on Make Edit (§3.13), never refused",
   ],
   ['packages/editor/src/table/stops.ts', 'TEXT_IN_CELLS', 'disable', 'inventory #118'],
   [
@@ -524,6 +560,24 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'widen',
     'no fine form reads alike in every order: written as a replacement of its unit (format §3.12)',
   ],
+  [
+    'packages/format/src/table-widen.ts',
+    'There is no such table.',
+    'keep',
+    'an argument error: an index or a place that is not there (design §5)',
+  ],
+  [
+    'packages/format/src/table-widen.ts',
+    'Nothing to paste.',
+    'keep',
+    'an argument error: a paste that changes no cell has nothing to write',
+  ],
+  [
+    'packages/format/src/table-ops.ts',
+    'IN_REPLACEMENT',
+    'widen',
+    'the fine form is refused so that `tableEdit` writes the operation into the replacement (#449)',
+  ],
   ['packages/format/src/table-align.ts', 'LOST', 'disable', 'inventory #41'],
   ['packages/format/src/table-align.ts', 'MARK_PLACE', 'widen', 'inventory #105'],
   [
@@ -542,7 +596,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'packages/format/src/table-cols.ts',
     'A table keeps at least one column.',
     'disable',
-    'inventory #110',
+    'inventory #110; since #477 only where rejecting the last inserted column would leave more than one deleted column, or another change, pending in the table',
   ],
   [
     'packages/format/src/table-diff.ts',
@@ -778,6 +832,24 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/format/src/track.ts', 'MIXED_BREAKS', 'widen', 'inventory #128'],
   ['packages/format/src/track.ts', 'NOT_CODE', 'widen', 'inventory #127'],
   ['packages/format/src/track.ts', 'SELF_CHECK', 'widen', 'inventory #76'],
+  [
+    'packages/format/src/track.ts',
+    "This block can't be added as a tracked change he",
+    'widen',
+    'a block start typed into an empty item (#583): written as a replacement of the item; where none holds it, the edit is asked about',
+  ],
+  [
+    'packages/format/src/track.ts',
+    'SPLIT_ALONE',
+    'widen',
+    'a split that would stand alone at the start of a lazy line (#615): written as a replacement of the item',
+  ],
+  [
+    'packages/format/src/track.ts',
+    'SPLIT_IN_INDENT',
+    'widen',
+    "a split inside the change of an item's indent (#605): written as a replacement of the item",
+  ],
   [
     'packages/format/src/track.ts',
     "Text can't be typed inside ${name} while it is p",

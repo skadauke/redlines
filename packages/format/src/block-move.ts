@@ -179,6 +179,8 @@ interface Plan {
   view: TextChange[];
   /** Where the moved blocks are in the newest view after the move. */
   moved: Range;
+  /** The move brings two lists side by side (`joinsLists`): the fine write isn't sound (#871). */
+  joins?: boolean;
 }
 
 /**
@@ -261,8 +263,33 @@ function plansOf(text: string, run: BlockRun, gap: BlockGap): Plan[] {
       : build(text, read, last + 1, g - 1, first, false),
   );
   const [primary, ...others] = plans.filter((plan): plan is Plan => plan !== undefined);
+  if (!primary) return [];
+  const joins = joinsLists(read.siblings, first, last, g);
   // Every way reads as the same file, and the run the person moved is where the first puts it.
-  return primary ? [primary, ...others.map((plan) => ({ ...plan, moved: primary.moved }))] : [];
+  return [primary, ...others.map((plan) => ({ ...plan, moved: primary.moved }))].map((plan) => ({
+    ...plan,
+    joins,
+  }));
+}
+
+/**
+ * Whether moving siblings `first` to `last` to the gap `g` brings two lists side by side that were
+ * not. The newest view reads them as one list (the second nested in the last item of the first, or
+ * both a loose list), where the file, with a marker of the move between them, reads two.
+ */
+function joinsLists(siblings: readonly Unit[], first: number, last: number, g: number): boolean {
+  const run = siblings.slice(first, last + 1);
+  const rest = siblings.filter((_, i) => i < first || i > last);
+  const at = g <= first ? g : g - run.length;
+  const after = [...rest.slice(0, at), ...run, ...rest.slice(at)];
+  return after.some((unit, i) => {
+    const next = after[i + 1];
+    return (
+      unit.kind === 'list' &&
+      next?.kind === 'list' &&
+      Math.abs(siblings.indexOf(next) - siblings.indexOf(unit)) !== 1
+    );
+  });
 }
 
 /**
@@ -286,7 +313,7 @@ export function trackedBlockMove(
   const [plan] = plans;
   if (!plan) return undefined;
   const group = ctx.group ?? newId(idsIn(text), ctx.random);
-  for (const next of plans) {
+  for (const next of plans.filter((other) => !other.joins)) {
     try {
       return {
         changes: trackedEdits(text, next.source, { ...ctx, group }).changes,

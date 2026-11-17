@@ -892,17 +892,6 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
     return applyChanges(text, tableEdit(text, op, context(ada, ['m2bd'])).changes);
   }
 
-  /** The error that a highlight on `range` is refused with. */
-  function refusedWith(text: string, range: Range): EditError {
-    try {
-      addHighlight(text, range, context(bo, ['h4kz']));
-    } catch (error) {
-      if (error instanceof EditError) return error;
-      throw error;
-    }
-    throw new Error(`A highlight was made on ${JSON.stringify(text.slice(range.from, range.to))}`);
-  }
-
   /** What deciding the pending changes of `text` gives: whether each decision of each is possible. */
   function decisions(text: string): Map<string, string> {
     const found = new Map<string, string>();
@@ -923,10 +912,6 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
     }
     return found;
   }
-
-  /** The words of a highlight that runs from one row of a table into another, or out of it. */
-  const ACROSS =
-    "Ada Lovelace's change of rows in this table is pending, and this highlight would run from one row into the next, or out of the table. Decide the change first, or highlight inside one row.";
 
   it('goes in a cell, across the cells of a row, and across rows, and is decided in every order', () => {
     const text = file(FRUIT, {});
@@ -957,7 +942,7 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
     expect(expectNoDecisionRefused(op.kind, result), op.kind).toBeGreaterThan(0);
   });
 
-  it('is refused across rows, and out of the table, while a row is inserted or moved, naming who did', () => {
+  it('is widened across rows, and out of the table, while a row is inserted or moved, to rows that are not pending', () => {
     for (const table of [FRUIT, BARE]) {
       for (const [what, text] of [
         ['a move of rows', moved(around(table), 3)],
@@ -971,42 +956,39 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
           { from: text.indexOf('Pears') + 3, to: text.indexOf('Outro') + 5 },
           { from: text.indexOf('Intro'), to: text.indexOf('Apples') + 3 },
         ]) {
-          const error = refusedWith(text, range);
-          expect(error.code, label).toBe('no-legal-placement');
-          expect(error.message, `${label}: ${JSON.stringify(range)}`).toBe(ACROSS);
+          const { result } = highlight(text, range);
+          expect(
+            parse(result).marks.some((m) => m.kind === 'hl'),
+            label,
+          ).toBe(true);
+          expect(expectNoDecisionRefused(label, result), label).toBeGreaterThan(0);
         }
       }
     }
   });
 
-  it('is refused out of the table from a cell of a moved row, while the move is pending', () => {
-    // The row that is moved, now at the top, and the text after the table: its decision would take
-    // the cell away and leave the closer.
+  it('is widened out of the table from a cell of a moved row, while the move is pending', () => {
     for (const table of [FRUIT, BARE]) {
       const text = moved(around(table), 2);
       const cell = text.indexOf('5');
-      expect(text.slice(cell - 2, cell + 1), table).toMatch(/\| ?5|\| 5/);
-      const error = refusedWith(text, { from: cell, to: text.indexOf('Outro') + 5 });
-      expect(error.message, table).toBe(ACROSS);
+      const { result } = highlight(text, { from: cell, to: text.indexOf('Outro') + 5 });
+      expect(expectNoDecisionRefused(table, result), table).toBeGreaterThan(0);
     }
   });
 
-  it('says what fails, not what does not help, for the first cell of a row with no pipe at its start', () => {
+  it('is widened, for the first cell of a row with no pipe at its start, to rows that are not pending', () => {
     // The row has no pipe in front of its first cell to put an opener after: the highlight would
     // start at the end of the row above, which is the inserted row.
     const text = inserted(around(BARE), 2);
-    const first =
-      "Ada Lovelace's change of rows in this table is pending, and this highlight would start at the end of the row above, as a row with no pipe at its start can't hold a marker at its start. Decide the change first, or start the highlight after the first cell of the row.";
     for (const range of [
       at(text, 'Plums'),
       { from: text.indexOf('Plums'), to: text.indexOf('7') + 1 },
+      { from: text.indexOf('Plums'), to: text.indexOf('Outro') + 5 },
     ]) {
-      expect(refusedWith(text, range).message, JSON.stringify(range)).toBe(first);
+      const { result } = highlight(text, range);
+      expect(expectNoDecisionRefused(JSON.stringify(range), result)).toBeGreaterThan(0);
     }
-    // The rows below, to the end of the table and past it, run out of the row, and are told so.
-    const below = { from: text.indexOf('Plums'), to: text.indexOf('Outro') + 5 };
-    expect(refusedWith(text, below).message).toBe(ACROSS);
-    // After the first cell it does what the words say: it is made, and decided in every order.
+    // After the first cell it is made as it was, and decided in every order.
     const { result } = highlight(text, at(text, '7'));
     expect(bodyOf(result)).toContain('Plums | <!--hl h4kz-->7<!--/h4kz-->');
     expect(expectNoDecisionRefused('after the first cell', result)).toBeGreaterThan(0);
@@ -1048,11 +1030,9 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
     }
   });
 
-  it('is refused at the very start of a row that is inserted or moved, in front of its mark', () => {
+  it('is widened, from the very start of a row that is inserted or moved, to the rows that are not pending', () => {
     // A marker in front of the mark of a row hides it from the table: neither accepting nor
     // rejecting the row could be done. The text of the row is fine.
-    const hides =
-      "Claude's change of rows in this table is pending, and this highlight would start at the very start of the first cell of a row that is inserted or moved, where the mark of the row is. Decide the change first, or start the highlight at the text of the row.";
     for (const table of [FRUIT, BARE]) {
       const base = around(table);
       const at2 = readTables(base, parse(base))[0]?.from ?? 0;
@@ -1066,9 +1046,10 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
       const text = applyChanges(base, tableEdit(base, op, context(claudeAda, ['m2bd'])).changes);
       const mark = text.indexOf('<!--ins m2bd row-->');
       const row = { from: mark, to: text.indexOf('Kiwis') + 5 };
-      expect(refusedWith(text, row).message, table).toBe(hides);
+      expect(expectNoDecisionRefused(table, highlight(text, row).result), table).toBeGreaterThan(0);
       // Or just the space in front of it, which the opener would stand in.
-      expect(refusedWith(text, { from: mark - 1, to: mark }).message, table).toBe(hides);
+      const space = highlight(text, { from: mark - 1, to: mark }).result;
+      expect(expectNoDecisionRefused(table, space), table).toBeGreaterThan(0);
       // From its text on, it is made, and the row is decided in every order.
       const { result } = highlight(text, {
         from: text.indexOf('Kiwis'),
@@ -1155,10 +1136,10 @@ describe('a highlight in a table', { timeout: 60_000 }, () => {
         }
       }
     }
-    // Some are made, and more are refused: those across rows and out of the table, and those
-    // that cover no text.
+    // Most are made, those across rows and out of the table widened to rows that are not pending;
+    // those that cover no text are refused.
     expect(checked.made).toBeGreaterThan(400);
-    expect(checked.refused).toBeGreaterThan(checked.made);
+    expect(checked.refused).toBeGreaterThan(0);
   });
 });
 

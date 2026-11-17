@@ -6,6 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { openClawAgents } from '@redlines/agents';
 
 /** The program `program` names on this machine, or nothing. */
 export const findProgram = (program: string) => invoke<string | null>('agent_which', { program });
@@ -49,3 +50,13 @@ export const acpAgents = {
     return () => void stop.then((unlisten) => unlisten());
   },
 };
+
+/**
+ * The agents the `@` picker lists: those Preferences shows, which are OpenClaw's. One added by an
+ * earlier build, which the pane can't show or remove, is not listed and never runs (#357).
+ */
+export async function listedAcpAgents(): Promise<AcpAgent[]> {
+  const all = await acpAgents.list();
+  const shown = new Set(openClawAgents(all).map(({ id }) => id));
+  return all.filter(({ id }) => shown.has(id));
+}

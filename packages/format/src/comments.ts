@@ -3,15 +3,18 @@
 // only the ledger; deleting a thread removes both. Where the anchor's markers go is the same for a
 // highlight (anchors.ts).
 
-import { openerRange } from './blocks.ts';
+import { closerRange, openerRange } from './blocks.ts';
+import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, markerRanges, visibleText, workingLedger } from './edit-support.ts';
+import type { MarkerRange } from './edit-support.ts';
 import { anchorRange, assertRange, checkAnchor } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import { commentAcrossRows } from './table-rules.ts';
+import { commentAcrossRows, inPendingRow, pastRowMark, rowWidenings } from './table-rules.ts';
+import type { TableRead } from './table.ts';
 import { applyChanges } from './changes.ts';
 import type { EditContext, Ledger, Parsed, Range, TextChange, Thread } from './types.ts';
 
@@ -58,11 +61,16 @@ export function addComment(
   range: Range,
   body: string,
   ctx: EditContext,
+  rowsWidened = false,
 ): { changes: TextChange[]; id: string } {
+  const recorded = recordIds(ctx);
+  if (!rowsWidened) ctx = recorded.ctx;
   assertRange(text, range);
   const parsed = parse(text);
   const markers = markerRanges(parsed);
-  const { from, to } = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
+  let placed = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
+  placed = pastPendingRowMarks(text, parsed, markers, placed);
+  const { from, to } = placed;
   const point = from === to;
 
   const id = newId(idsIn(text), ctx.random);
@@ -88,8 +96,47 @@ export function addComment(
     verify: (after) => checkAnchor(after, id, !point, IN_CODE),
     inCode: IN_CODE,
   });
-  refuseAcrossMovedRows(applyChanges(text, changes), id);
-  return { changes, id };
+  const after = applyChanges(text, changes);
+  const across = acrossMovedRows(after, id, rowsWidened);
+  if (!across) return { changes, id };
+  // A comment that runs from one row into another while a move is pending can't be left as a point
+  // when the move is decided: its ends are taken to rows that are not pending (format §3.12).
+  if (rowsWidened) throw across.error;
+  const table = readTables(text, parsed).find(
+    (read) => range.from <= read.to && read.from <= range.to,
+  );
+  for (const candidate of table ? rowWidenings(table, text, range) : []) {
+    try {
+      return addComment(text, candidate, body, recorded.replay(), true);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+  }
+  throw across.error;
+}
+
+/**
+ * `placed`, with an end that would stand in front of the mark of an inserted or moved row, at the
+ * start of its first cell, or between the mark and its space, moved past the mark and its space:
+ * there it hides the mark from the table, and the row could not be decided. The comment then
+ * covers the mark, which is no text, and the row stays decidable in every order.
+ */
+function pastPendingRowMarks(
+  text: string,
+  parsed: Parsed,
+  markers: readonly MarkerRange[],
+  placed: Range,
+): Range {
+  if (!text.includes(' row-->')) return placed;
+  let { from, to } = placed;
+  for (const table of readTables(text, parsed)) {
+    from = pastRowMark(table, text, from);
+    to = pastRowMark(table, text, to);
+  }
+  if (from === placed.from && to === placed.to) return placed;
+  // Where the ends are now, the rules of every anchor hold again.
+  const range = { from, to: Math.max(from, to) };
+  return anchorRange(text, parsed, markers, range, COMMENT_WORDS);
 }
 
 /**
@@ -98,21 +145,39 @@ export function addComment(
  * at its start can't begin with a marker, so a comment on its first word starts at the end of the
  * row above.) The words name the person who moved the rows.
  */
-function refuseAcrossMovedRows(after: string, id: string): void {
-  if (!after.includes(' row-->')) return;
+function acrossMovedRows(
+  after: string,
+  id: string,
+  widened: boolean,
+): { error: EditError; table: TableRead } | undefined {
+  if (!after.includes(' row-->')) return undefined;
   const parsed = parse(after);
   for (const table of readTables(after, parsed)) {
     const moved = table.rows.find((row) => row.insertion?.entry.move !== undefined);
     if (!moved?.insertion) continue;
     const across = commentAcrossRows(table, parsed);
     if (across?.mark.id !== id) continue;
+    // Widened to rows that are not pending, no decision of a row takes an end away.
+    const segment = across.mark.segments[0];
+    if (
+      widened &&
+      segment?.close &&
+      !inPendingRow(table, after, segment.open.from) &&
+      !inPendingRow(table, after, segment.close.from)
+    ) {
+      continue;
+    }
     const by = moved.insertion.entry.by;
     const name = parsed.ledger.people.find((p) => p.handle === by)?.name ?? by;
-    throw new EditError(
-      `${name}'s move of rows in this table is pending, and this comment would run from one row into the next. Decide the move first, or comment inside one row.`,
-      'no-legal-placement',
-    );
+    return {
+      error: new EditError(
+        `${name}'s move of rows in this table is pending, and this comment would run from one row into the next. Decide the move first, or comment inside one row.`,
+        'no-legal-placement',
+      ),
+      table,
+    };
   }
+  return undefined;
 }
 
 /**
@@ -187,7 +252,7 @@ export function deleteThread(text: string, threadId: string): TextChange[] {
   const removals: TextChange[] = [];
   for (const segment of anchor?.segments ?? []) {
     removals.push({ ...openerRange(segment), insert: '' });
-    if (segment.close) removals.push({ ...segment.close, insert: '' });
+    if (segment.close) removals.push({ ...closerRange(text, segment.close), insert: '' });
   }
   return commitEdit(text, removals, ledger, { parsed, removes: true, keeps: 'both' });
 }

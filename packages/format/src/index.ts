@@ -1,7 +1,7 @@
 export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
-export { frontMatterEnd, openerRange } from './blocks.ts';
+export { closerRange, frontMatterEnd, openerRange } from './blocks.ts';
 export { deletedBlocks, deletedTable } from './deleted-blocks.ts';
 export type {
   DeletedBlock,
@@ -57,7 +57,14 @@ export { fineFormat, trackedFormat, trackedFormatRanges, untrackedFormat } from 
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
 export { recordTracking, setView } from './settings.ts';
-export { fineEdit, fineEdits, trackedEdit, trackedEdits, widenedFirstEdits } from './track.ts';
+export {
+  fineEdit,
+  fineEdits,
+  readsOtherAtBoundary,
+  trackedEdit,
+  trackedEdits,
+  widenedFirstEdits,
+} from './track.ts';
 export type { TrackedEdits } from './track.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';
 export type { UntrackedContext } from './untracked.ts';
@@ -78,7 +85,16 @@ export type {
   TableRead,
   TableRowRead,
 } from './table.ts';
-export { fineTableEdit, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+export { widenedPaste } from './table-widen.ts';
+export type { PasteOnTable } from './table-widen.ts';
+export {
+  askedTableEdit,
+  fineTableEdit,
+  pendingOf,
+  ruleTwo,
+  tableEdit,
+  untrackedTableEdit,
+} from './table-ops.ts';
 export type { TableOp, TablePending } from './table-ops.ts';
 export { alignLabel, alignWas, isAlignMark, isAlignPoint } from './table-align.ts';
 export { blankTrailingMarkers, readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';

@@ -19,7 +19,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
 | `packages/agent-process` | `@redlines/agent-process`: what the agent providers share               |
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
-| `packages/word`         | `@redlines/word`: Word (.docx) export (import and Google Docs to come); not in the editor bundle |
+| `packages/word`         | `@redlines/word`: Word (.docx) export, import and Google Docs' export normalizer; not in the editor bundle |
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
@@ -115,7 +115,7 @@ repo root.
   `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
   the same, and `VITE_ZOOM_CHECK=1` (the column and the rail at every text size, and the window
   zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
-  (`src/print-check.ts`) shows that printing holds the whole document. They read nothing in a
+  (`src/print-check.ts`) shows that the printed page holds the document and no mark (and, in `pnpm tauri dev` with `REDLINES_EXPORT_PDF=<path>`, writes the PDF there with no panel). They read nothing in a
   release build, and are no part of CI
 - Crashes (`apps/desktop/src-tauri/src/crash.rs`, `src/crash.ts`): errors in the page, the web content
   process ending, Rust panics, the last run's macOS crash report and a page that stops answering are
@@ -202,10 +202,8 @@ repo root.
   cancelled; a scheduled one is skipped when a finished full run, scheduled or dispatched (not
   cancelled), already tested main's head, meaning nothing has merged since. The workflow **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the
   skill's files, which a test checks. The Epic's final sweep runs everything.
-- **Until Epic #537's final sweep, CI runs no Mac jobs on its own:** no Quick Look job and no journeys,
-  on pull requests or on main. Run them by hand: `gh workflow run ci.yml --ref main -f macos=true`
-  (the full run with Quick Look and the journeys), or `gh workflow run journeys.yml --ref <branch>`.
-  The sweep turns them back on.
+- **The Mac jobs are on** (#900): the Quick Look job and the journeys run as the entries below say,
+  on pull requests and on main.
 - `journeys.yml`: the journeys, on a macOS runner (WebKit there is the app's engine, and the
   baselines are drawn by it), as a job of its own beside `check`: **pull requests** run it only when
   someone adds the **`journeys` label** (lanes run their journeys locally and attach screenshots;

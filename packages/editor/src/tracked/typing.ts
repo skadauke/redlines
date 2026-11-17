@@ -48,6 +48,7 @@ import {
   idsIn,
   type MarkRange,
   newId,
+  closerRange,
   openerRange,
   parse,
   type Parsed,
@@ -55,6 +56,7 @@ import {
   rangeEdge,
   type TextChange,
   fineEdit,
+  fineEdits,
   fineFormat,
   trackedEdit,
   trackedFormat,
@@ -62,6 +64,7 @@ import {
   unitsOf,
   untrackedEdit,
   untrackedFormat,
+  readsOtherAtBoundary,
   widenedFirstEdits,
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
@@ -353,7 +356,7 @@ function markersOf(parsed: Parsed): Range[] {
   for (const { segments } of parsed.marks) {
     for (const segment of segments) {
       ranges.push(openerRange(segment));
-      if (segment.close) ranges.push(segment.close);
+      if (segment.close) ranges.push(closerRange(parsed.text, segment.close));
     }
   }
   return ranges.sort((a, b) => a.from - b.from);
@@ -599,6 +602,8 @@ function trackEdits(
   // A group of its own for several edits, or the one a caller has made for them.
   if (typeof grouped === 'string') ctx = { ...ctx, group: grouped };
   else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
+  const together = widening === false ? deletedTogether(text, parsed, edits, ctx) : null;
+  if (together) return together;
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
@@ -608,11 +613,62 @@ function trackEdits(
             widenedFirstEdits(at, [change], made).changes
         : widening
           ? trackedEdit
-          : fineEdit;
+          : (at: string, change: TextChange, made: typeof ctx) => {
+              const fine = fineEdit(at, change, made);
+              // A fine write that micromark reads otherwise than the newest view is replaced by the
+              // write of the whole unit (#597, #601, #588); where no unit holds it, the fine write
+              // stays, as it was.
+              if (readsOtherAtBoundary(at, [change], fine)) {
+                try {
+                  return trackedEdit(at, change, made);
+                } catch {
+                  return fine;
+                }
+              }
+              return fine;
+            };
     if (edit.from !== edit.to) return write(doc, edit, ctx);
     const at = rangeEdge(read, edit.from, edit.insert);
     return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
   });
+}
+
+/** How many deletions are written together (below it, one at a time, as each is checked). */
+const TOGETHER = 8;
+
+/**
+ * Many deletions with room between them (the text of the cells of a rectangle that ⌫ clears) as
+ * marks, written in one pass: each edit planned and read on its own made a 300-row column take
+ * seconds (#456). `fineEdits` makes the per-cell checks of format §3.7 once, for all of them. Null
+ * when the edits are not that, or the format refuses them together: then each is written in turn.
+ * The caret goes where the last deletion starts; the tracked layer moves it out of hidden text.
+ */
+function deletedTogether(
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  ctx: EditContext,
+): Tracked | null {
+  if (edits.length < TOGETHER) return null;
+  if (
+    edits.some(
+      (edit, i) =>
+        edit.insert !== '' || edit.from >= edit.to || (i > 0 && edit.from <= edits[i - 1]!.to),
+    )
+  ) {
+    return null;
+  }
+  try {
+    const written = fineEdits(text, edits, ctx).changes;
+    const changes = ChangeSet.of(written, text.length);
+    const after = parse(applyChanges(text, written), parsed);
+    if (lineStartMarkers(after) > lineStartMarkers(parsed)) return null;
+    const main = edits.find((edit) => edit.main);
+    return { changes, caret: main ? changes.mapPos(main.from, -1) : null };
+  } catch (error) {
+    if (error instanceof EditError) return null;
+    throw error;
+  }
 }
 
 /**

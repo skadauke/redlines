@@ -123,18 +123,23 @@ async function checks(
   );
   const items = [...(palette?.querySelectorAll<HTMLElement>('.rl-toolbar-item') ?? [])];
   const commands = items.map((item) => item.dataset['command']);
+  // The items are menu rows with a word beside the icon (the toolbar, cf142aaf, #504), so each has
+  // its label as text and as its aria-label; Ask is the bar's own button, not a menu row.
   report(
     'items-are-the-registry-commands',
     ['comment.add', 'block.table', 'format.bold', 'format.italic', 'edit.paste'].every((id) =>
       commands.includes(id),
-    ) && items.every((item) => item.textContent === '' && !!item.getAttribute('aria-label')),
+    ) &&
+      !!palette?.querySelector('.rl-toolbar-ask[data-command="ask.start"]') &&
+      items.every((item) => !!item.textContent && !!item.getAttribute('aria-label')),
     commands,
   );
 
-  // The hint comes after the delay, with the name and the keys.
-  const bold = palette?.querySelector<HTMLElement>('[data-command="format.bold"]');
+  // The hint comes after the delay. A row of text has none (it names itself); a grayed item's hint
+  // says why it can't be used, and so does a button of a shared line of icons, with the keys.
+  const grayed = palette?.querySelector<HTMLElement>('.rl-toolbar-item[data-reason]');
   const hovered = performance.now();
-  bold?.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }));
+  grayed?.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, pointerType: 'mouse' }));
   const early = query<HTMLElement>('.rl-toolbar-tip')?.hidden;
   // Waited for, not slept for: a busy machine runs a timer late, and never early.
   const tip = await waitFor(() => {
@@ -144,8 +149,8 @@ async function checks(
   const after = Math.round(performance.now() - hovered);
   report(
     'hint-comes-after-the-delay',
-    early === true && !!tip && after >= 350 && tip.textContent === 'Bold⌘B',
-    { early, after, text: tip?.textContent },
+    early === true && !!tip && after >= 350 && tip.textContent === grayed?.dataset['name'],
+    { early, after, text: tip?.textContent, wanted: grayed?.dataset['name'] },
   );
   escape();
   await sleep(50);
@@ -166,7 +171,7 @@ async function checks(
     const box = range.getBoundingClientRect();
     rightClick(Math.round(box.left + 10), Math.round(box.top + 5));
     await sleep(150);
-    query<HTMLElement>('.rl-toolbar-item[data-command="ask.start"]')?.click();
+    query<HTMLElement>('.rl-toolbar-ask[data-command="ask.start"]')?.click();
     await sleep(150);
     const bubble = query<HTMLElement>('.rl-qa');
     const field = bubble?.querySelector('textarea');

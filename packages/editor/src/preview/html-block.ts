@@ -138,14 +138,27 @@ const VOID = new Set(['br', 'hr', 'img', 'wbr', 'source']);
  * element GitHub drops is unwrapped (its text stays), or, with nothing to show, a muted chip with
  * its name; one of the nine GFM escapes is its source as text; a comment is nothing.
  */
-export function renderHtml(source: string, doc: Document = document): DocumentFragment {
+export function renderHtml(
+  source: string,
+  doc: Document = document,
+  image?: (written: string) => string | null,
+): DocumentFragment {
   const template = doc.createElement('template');
   template.innerHTML = source;
   const out = doc.createDocumentFragment();
   const budget = { nodes: 0 };
-  copyChildren(template.content, out, doc, 0, budget);
+  imageUrl = image ?? null;
+  try {
+    copyChildren(template.content, out, doc, 0, budget);
+  } finally {
+    imageUrl = null;
+  }
   return out;
 }
+
+/** Where a page that draws images (a printed page) finds the one an HTML block names; the editor
+ * itself loads nothing, and draws a box. */
+let imageUrl: ((written: string) => string | null) | null = null;
 
 function copyChildren(
   from: Node,
@@ -187,6 +200,16 @@ function copyElement(
     return;
   }
   if (name === 'img') {
+    const shown = imageUrl?.(element.getAttribute('src') ?? '') ?? null;
+    if (shown !== null) {
+      const picture = doc.createElement('img');
+      picture.setAttribute('src', shown);
+      picture.setAttribute('alt', (element.getAttribute('alt') ?? '').slice(0, MAX_TEXT));
+      const width = element.getAttribute('width') ?? '';
+      if (VALUES['width']?.test(width)) picture.setAttribute('width', width);
+      to.appendChild(picture);
+      return;
+    }
     // Nothing is loaded: an image is a box with its alt text.
     const box = doc.createElement('span');
     box.className = 'rl-html-img';
