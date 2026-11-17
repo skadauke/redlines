@@ -525,7 +525,13 @@ function plainOf(layout: Layout): string {
     else if (kind === 'tag' || kind === 'comment') drop(from, to);
     // The type of an alert is syntax, as bold's stars are: changing it changes no words (#311).
     else if (kind === 'alert') drop(from + 2, to - 1);
-    else if (alt) {
+    // So are the attributes of a Quarto callout's fence: its type, and its title.
+    // A braced block is also an attribute symbol, which stands as one character: a bare class
+    // stands as one too, so that adding the braces for a title changes no words.
+    else if (kind === 'fence') {
+      drop(from, to);
+      symbols.add(from);
+    } else if (alt) {
       drop(from, alt.from);
       drop(alt.to, to);
     }
