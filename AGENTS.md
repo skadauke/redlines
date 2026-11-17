@@ -131,6 +131,10 @@ repo root.
   (`~/Library/Application Support/md.redlines.editor/recovery/`), never next to the file; saving or
   closing without saving deletes it, and so does a quit that asked about every document. A window
   that opens the document after a crash puts the edits back and says so in a notification
+- The Quarto check, in `apps/desktop`: `node scripts/quarto-check.ts` (Node 24; Quarto on the PATH)
+  renders a marked-up `.qmd` to HTML, Word and Typst and checks that the newest text comes out
+  ([docs/research/quarto-check.md](docs/research/quarto-check.md)). CI runs it in an optional
+  workflow (`quarto.yml`: the open Epic's schedule, and pull requests that touch Quarto code)
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
