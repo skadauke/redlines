@@ -20,7 +20,7 @@ export const REAL_CASES: RealCase[] = [
       seed: 512995246,
       at: 1000,
       body: { kind: 'sub', tokens: ['u021', 'u022', 'u023'], words: ['eb000', 'eb001'] },
-    } as Intent,
+    },
   },
   {
     label:
@@ -33,7 +33,7 @@ export const REAL_CASES: RealCase[] = [
       seed: 311533260,
       at: 5000,
       body: { kind: 'sub', tokens: ['ec001', 'ec002'], words: ['ec003'] },
-    } as Intent,
+    },
   },
   {
     label: "typing beside another person's pending change (delimiters beside a break)",
@@ -55,7 +55,7 @@ export const REAL_CASES: RealCase[] = [
         ],
         words: ['ea002'],
       },
-    } as Intent,
+    },
   },
   {
     label: 'a replacement beside a delimiter and a break',
@@ -67,7 +67,7 @@ export const REAL_CASES: RealCase[] = [
       seed: 343611704,
       at: 6000,
       body: { kind: 'sub', tokens: ['u004', 'eb000', 'u006'], words: ['ea000'] },
-    } as Intent,
+    },
   },
   {
     label: "deleting the whole text of a bold that holds the author's own insertion",
@@ -79,6 +79,6 @@ export const REAL_CASES: RealCase[] = [
       seed: 1370471545,
       at: 10000,
       body: { kind: 'delete', tokens: ['u020', 'eb002', 'u021'] },
-    } as Intent,
+    },
   },
 ];
