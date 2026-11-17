@@ -43,14 +43,14 @@ pub enum Credential {
 }
 
 impl Credential {
-    fn kind(&self) -> &'static str {
+    pub(super) fn kind(&self) -> &'static str {
         match self {
             Credential::Token(_) => "token",
             Credential::SetupCode(_) => "bootstrapToken",
         }
     }
 
-    fn secret(&self) -> &Secret {
+    pub(super) fn secret(&self) -> &Secret {
         match self {
             Credential::Token(secret) | Credential::SetupCode(secret) => secret,
         }
@@ -96,7 +96,7 @@ impl Identity {
         format!("{}-{}", &id[..3], &id[3..6])
     }
 
-    fn sign(&self, text: &str) -> String {
+    pub(super) fn sign(&self, text: &str) -> String {
         URL_SAFE_NO_PAD.encode(self.key.sign(text.as_bytes()).to_bytes())
     }
 }
@@ -195,21 +195,21 @@ pub struct Config {
 }
 
 /// How one connection ended.
-enum Ended {
+pub(super) enum Ended {
     Stopped,
     Dropped(String),
     Refused(Refusal),
     ToolsRefused(String),
 }
 
-fn now_ms() -> u64 {
+pub(super) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |since| since.as_millis() as u64)
 }
 
 /// Waits for the next frame of text within `until`, sending nothing, or says how it ended.
-fn next_frame(
+pub(super) fn next_frame(
     socket: &mut Socket,
     until: Instant,
     stop: &AtomicBool,
@@ -242,7 +242,7 @@ fn next_frame(
     }
 }
 
-fn set_poll(socket: &mut Socket, poll: Duration) {
+pub(super) fn set_poll(socket: &mut Socket, poll: Duration) {
     if let tungstenite::stream::MaybeTlsStream::Plain(stream) = socket.get_mut() {
         let _ = stream.set_read_timeout(Some(poll));
     } else if let tungstenite::stream::MaybeTlsStream::Rustls(stream) = socket.get_mut() {
@@ -250,7 +250,7 @@ fn set_poll(socket: &mut Socket, poll: Duration) {
     }
 }
 
-fn send(
+pub(super) fn send(
     socket: &mut WebSocket<impl std::io::Read + std::io::Write>,
     text: String,
 ) -> Result<(), Ended> {
@@ -260,7 +260,7 @@ fn send(
 }
 
 /// Waits for the response to the request `id`, passing over other frames.
-fn response_to(
+pub(super) fn response_to(
     socket: &mut Socket,
     id: &str,
     until: Instant,
