@@ -51,12 +51,12 @@ const ESCAPED_AFTER_BACKSLASH = new Set([
  * in a CRLF file as `LF_IN_CRLF`.
  */
 export function payloadText(raw: string, style: '\r\n' | '\n'): string {
-  let out = '';
-  for (const part of raw.split(/(\r\n|\r|\n)/)) {
+  // One pass of replace, not a split and a string built by parts: a code block of thousands of
+  // lines is read on its first key.
+  return raw.replace(/\r\n|\r|\n/g, (found, at: number) =>
     // A CRLF right after a CR alone stays explicit: `\r` and an implicit `\n` would read as one CRLF.
-    out += part === style && !out.endsWith('\r') ? '\n' : part === '\n' ? LF_IN_CRLF : part;
-  }
-  return out;
+    found === style && raw.charAt(at - 1) !== '\r' ? '\n' : found === '\n' ? LF_IN_CRLF : found,
+  );
 }
 
 /**
