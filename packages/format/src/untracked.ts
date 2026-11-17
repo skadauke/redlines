@@ -16,6 +16,9 @@
 import { assertWholeCharacters } from './characters.ts';
 import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
+import { accept, reject } from './decide.ts';
+import { encodePayload } from './payload.ts';
+import { readLine } from './table.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import {
   KIND_WORDS,
@@ -454,6 +457,88 @@ export function untrackedEditHalf(
   return edited(text, edit, ctx, true);
 }
 
+/** The characters that a cell's new text may add around the old text's: format syntax, which the old
+ * rows do not have. */
+const SYNTAX_CHARS = /[*_~]/g;
+
+/**
+ * The changes of a plain typing in a cell of the new rows of a table replacement (a `sub` whose old text
+ * is the table's old rows, as a pending alignment change writes it): the typing, and the same typing in
+ * the cell of the old rows that it stands for, in the payload. The cells of the two correspond one to
+ * one, and only the delimiter row differs. Null where no old cell corresponds (the delimiter row, a cell
+ * that holds a marker, a replacement that added or rewrote the cell beyond format syntax, rows that are
+ * not as many in both, text with a character that needs care): that typing goes on as it did, and
+ * takes the alert where it splits the replacement where the old rows can not follow.
+ */
+function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[] | null {
+  if (/[`<\\\r\n]/.test(edit.insert)) return null;
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'sub') continue;
+    for (const segment of mark.segments) {
+      const { open, close, payload } = segment;
+      if (!close || payload === undefined || !payload.includes('|')) continue;
+      if (edit.from < open.to || edit.to > close.from) continue;
+      const lines = payload.split('\n');
+      const rows: { from: number; to: number }[] = [];
+      for (let at = open.to; at < close.from;) {
+        const end = Math.min(lineEnd(text, at), close.from);
+        if (text.slice(at, end).trim() !== '') rows.push({ from: at, to: end });
+        at = end + 1;
+      }
+      if (rows.length !== lines.length) continue;
+      const k = rows.findIndex((row) => row.from <= edit.from && edit.to <= row.to);
+      const row = rows[k];
+      const old = lines[k];
+      if (!row || old === undefined || k === 1) continue;
+      const line = text.slice(row.from, row.to);
+      if (line.includes('<!--')) continue;
+      const mine = readLine(text, row.from, row.to).cells;
+      const kept = readLine(old, 0, old.length).cells;
+      const i = mine.findIndex((c) => c.contentFrom <= edit.from && edit.to <= c.contentTo);
+      const cell = mine[i];
+      const was = kept[i];
+      if (!cell || !was || mine.length !== kept.length) continue;
+      const content = text.slice(cell.contentFrom, cell.contentTo);
+      const before = old.slice(was.contentFrom, was.contentTo);
+      if (content.replace(SYNTAX_CHARS, '') !== before.replace(SYNTAX_CHARS, '')) continue;
+      // The place in the old cell: after as many of its characters that are not syntax as the new
+      // cell has before the edit.
+      const counted = (side: string) => side.replace(SYNTAX_CHARS, '').length;
+      const place = (from: number) => {
+        let want = counted(content.slice(0, from - cell.contentFrom));
+        let at = 0;
+        while (want > 0 && at < before.length) {
+          if (!/[*_~]/.test(before[at] ?? '')) want--;
+          at++;
+        }
+        return at;
+      };
+      const a = place(edit.from);
+      const b = place(edit.to);
+      const base = was.contentFrom;
+      const rewritten = [
+        ...lines.slice(0, k),
+        old.slice(0, base + a) + edit.insert + old.slice(base + b),
+        ...lines.slice(k + 1),
+      ].join('\n');
+      const sub = `<!--sub ${mark.id} ${encodePayload(rewritten)}-->`;
+      const changes = [edit, { from: open.from, to: open.to, insert: sub }].sort(
+        (x, y) => x.from - y.from || x.to - y.to,
+      );
+      try {
+        const done = applyChanges(text, changes);
+        accept(done, mark.id);
+        reject(done, mark.id);
+      } catch (error) {
+        if (error instanceof EditError) continue;
+        throw error;
+      }
+      return changes;
+    }
+  }
+  return null;
+}
+
 function edited(
   text: string,
   edit: TextChange,
@@ -511,6 +596,11 @@ function edited(
     const made = scan(applyChanges(text, plain));
     if (made.markers.length === 0 && made.ledgers.length === 0) return plain;
   }
+  // Text typed in a cell of the new rows of a replacement whose old text is a table (an alignment change
+  // pending, or the old rows of a rewritten table) belongs to both views: it is written in the cell of
+  // the old rows as well (#955), as a plain edit in a move's copy is (`table-move-edit.ts`).
+  const both = typed === '' || half ? null : inOldRows(text, parsed, { from, to, insert: typed });
+  if (both) return both;
   // So does an edit away from every mark, which is most of them.
   const away = awayFromMarks(text, parsed, markers, { from, to, insert: typed });
   if (away) return away;
@@ -670,13 +760,12 @@ function edited(
   const ledger = workingLedger(parsed.ledger);
   const created: string[] = [];
   let closers = '';
-  let around: Seg[] = [];
   let openers = '';
   /** The mark that typed text splits, or the one next to the edit: a refusal names it. */
   let named: MarkRange | undefined;
   for (const i of [g, g - 1, g + 1, g - 2]) named ??= kept[i]?.marker?.mark;
   if (typed !== '') {
-    around = segs
+    const around = segs
       .filter((seg) => isContainer(seg) && at.get(seg.open)! < g && g <= at.get(seg.close)!)
       .toSorted((a, b) => at.get(a.open)! - at.get(b.open)!);
     named = around[0]?.mark ?? named;
@@ -807,18 +896,7 @@ function edited(
     const typedAt = startOf(insertion) + (ahead ? 0 : closers.length);
     const close = inspectPlace(mid, hidden, ahead ? startOf(closing) : startOf(insertion));
     const open = inspectPlace(mid, hidden, typedAt + typed.length);
-    // A table's old rows stay with the first part of the replacement they are in, so text typed in the middle
-    // of its new rows would come out of the old table, after its last pipe, in the original (#955).
-    const tableOld = around.some(
-      (seg) =>
-        seg.segment.payload?.includes('|') &&
-        /\|/.test(mid.slice(lineStart(mid, typedAt), lineEnd(mid, typedAt))),
-    );
-    if (
-      close.kind !== 'ok' ||
-      tableOld ||
-      (openers !== '' && open.kind !== 'ok' && open.kind !== 'block')
-    ) {
+    if (close.kind !== 'ok' || (openers !== '' && open.kind !== 'ok' && open.kind !== 'block')) {
       throw new EditError(
         `Text can't be typed here with Track Changes off: it would split ${name} where Markdown can't hold its hidden marks, such as at the start of a line or inside a link. ${wayAround(named)}`,
         'no-legal-placement',
