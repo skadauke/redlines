@@ -16,6 +16,9 @@ import {
   type SkillInstalled,
   type SkillState,
   type GatewayProbe,
+  type NewOpenClawConnection,
+  type OpenClawChange,
+  type OpenClawConnection,
   type TailscaleStatus,
 } from '@redlines/agents';
 import type { HostProcesses } from '@redlines/plugin-api';
@@ -118,6 +121,25 @@ export const tailscale = {
   status: () => invoke<TailscaleStatus>('tailscale_status'),
   openApp: () => invoke<void>('tailscale_open_app'),
   download: () => invoke<void>('tailscale_download'),
+};
+
+/**
+ * The OpenClaw connections the person made (agents/connections.rs): their records, and a flag for
+ * each secret that is kept, never a secret. Adding one, or giving one more (a level, a folder),
+ * is a question of the system's, which this window can neither draw nor answer, and fails with a
+ * line to show when the person says no. A token the person typed goes to files only this user can
+ * read, and is never shown or returned.
+ */
+export const openClawConnections = {
+  list: () => invoke<OpenClawConnection[]>('openclaw_connections'),
+  add: (connection: NewOpenClawConnection) =>
+    invoke<OpenClawConnection[]>('openclaw_connection_add', { new: connection }),
+  change: (handle: string, change: OpenClawChange) =>
+    invoke<OpenClawConnection[]>('openclaw_connection_change', { handle, change }),
+  remove: (handle: string) =>
+    invoke<OpenClawConnection[]>('openclaw_connection_remove', { handle }),
+  useToken: (handle: string, token: string) =>
+    invoke<OpenClawConnection[]>('openclaw_use_token', { handle, token }),
 };
 
 /**

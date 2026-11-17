@@ -16,6 +16,7 @@ mod acp;
 mod acp_gate;
 mod acp_runs;
 mod allowed;
+pub mod connections;
 pub mod gateway;
 mod latest;
 mod log;
@@ -39,6 +40,7 @@ pub use process::Runs;
 pub use which::Programs;
 
 use acp::{AcpAgent, AcpAgents, Found};
+use connections::{Change, Connections, Kind, NewConnection, Secret, View};
 use acp_runs::AcpRuns;
 use allowed::Agent;
 use log::RunInfo;
@@ -48,6 +50,9 @@ use setup::{Outcome, Setups};
 
 /// What the windows hear when the list of ACP agents changes, to look for agents again.
 const ACP_AGENTS_CHANGED: &str = "acp-agents-changed";
+
+/// What the windows hear when an OpenClaw connection is added, changed or removed.
+const OPENCLAW_CHANGED: &str = "openclaw-connections-changed";
 
 /// Puts what the commands below use in the app's state, and clears out old logs.
 pub fn set_up(app: &AppHandle) {
@@ -63,6 +68,14 @@ pub fn set_up(app: &AppHandle) {
         .unwrap_or_default();
     app.manage(AcpAgents::new(list));
     app.manage(AcpRuns::default());
+    // The OpenClaw connections and what their Gateways gave (connections.rs). With no folder of the
+    // app's own, nothing is kept.
+    let root = app
+        .path()
+        .app_config_dir()
+        .map(|folder| folder.join("openclaw"))
+        .unwrap_or_default();
+    app.manage(Connections::new(root));
     if let Ok(folder) = log_folder(app) {
         std::thread::spawn(move || log::delete_old_logs(&folder, SystemTime::now()));
     }
@@ -166,6 +179,69 @@ pub fn acp_agent_add(
     )?;
     let _ = app.emit(ACP_AGENTS_CHANGED, ());
     Ok(list)
+}
+
+/// The OpenClaw connections, and for each a flag that says which secrets are kept. No secret is
+/// ever returned.
+#[tauri::command(async)]
+pub fn openclaw_connections(app: AppHandle) -> Vec<View> {
+    app.state::<Connections>().views()
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+/// Adds an OpenClaw connection, once the person has allowed it in a question of the system's. Only
+/// Preferences is granted the command. Returns the list as it then is.
+#[tauri::command(async)]
+pub fn openclaw_connection_add(app: AppHandle, new: NewConnection) -> Result<Vec<View>, String> {
+    let list = app
+        .state::<Connections>()
+        .add(new, now(), |asked| question::ask(&app, asked))?;
+    let _ = app.emit(OPENCLAW_CHANGED, ());
+    Ok(list)
+}
+
+/// Changes a connection's level or folders; giving it more asks the person.
+#[tauri::command(async)]
+pub fn openclaw_connection_change(
+    app: AppHandle,
+    handle: String,
+    change: Change,
+) -> Result<Vec<View>, String> {
+    let list = app
+        .state::<Connections>()
+        .update(&handle, change, |asked| question::ask(&app, asked))?;
+    let _ = app.emit(OPENCLAW_CHANGED, ());
+    Ok(list)
+}
+
+/// Removes a connection and every secret it kept.
+#[tauri::command(async)]
+pub fn openclaw_connection_remove(app: AppHandle, handle: String) -> Result<Vec<View>, String> {
+    let list = app.state::<Connections>().remove(&handle)?;
+    let _ = app.emit(OPENCLAW_CHANGED, ());
+    Ok(list)
+}
+
+/// Keeps a token the person typed, for a Gateway where they can't make a setup code: for the
+/// connection's node and its operator both. It is written to files only this user can read and
+/// never shown or returned.
+#[tauri::command(async)]
+pub fn openclaw_use_token(
+    app: AppHandle,
+    handle: String,
+    token: String,
+) -> Result<Vec<View>, String> {
+    let secret = Secret::new(&token)?;
+    let store = app.state::<Connections>();
+    store.keep(&handle, Kind::NodeToken, &secret)?;
+    store.keep(&handle, Kind::OperatorToken, &secret)?;
+    let _ = app.emit(OPENCLAW_CHANGED, ());
+    Ok(store.views())
 }
 
 /// Removes an Agent Client Protocol agent, once the person has said so in a question of the

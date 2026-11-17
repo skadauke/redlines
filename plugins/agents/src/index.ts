@@ -63,6 +63,13 @@ export type {
   TailscaleStatus,
   TailscaleView,
 } from './openclaw/tailscale.ts';
+export { authorHandle, isSetUp, LEVELS } from './openclaw/connection.ts';
+export type {
+  Level as OpenClawLevel,
+  NewOpenClawConnection,
+  OpenClawChange,
+  OpenClawConnection,
+} from './openclaw/connection.ts';
 export { failure, FAILURE_IDS } from './openclaw/failures.ts';
 export type { Failure, FailureAction, FailureId, Subject } from './openclaw/failures.ts';
 export { gatewayView } from './openclaw/gateway.ts';
