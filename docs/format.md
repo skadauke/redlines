@@ -4310,6 +4310,11 @@ A file changes only when its content does.
 - Code keeps running. Markers never appear inside chunks, inline R code, chunk options (`#|`
   lines), front matter, math, shortcodes or cross-reference labels, and a chunk's fence always
   holds its newest code. Chunk options are kept byte for byte.
+- Includes. `{{< include _part.qmd >}}` alone on a line is expanded as text before the file is
+  parsed, so no marker stands on that line. A comment on it, or whose end falls on it, has its
+  opener alone on the line before and its closer alone on the line after, each with its line
+  break as syntax, as a block change's marks have theirs (§3.3); every view reads the file as it
+  was, and deleting the thread gives the bytes back.
 - Fenced divs (`:::`, callouts, columns, tabsets) and cross-references. Pandoc takes a fence only
   when nothing else is on its line, and reads `@fig-x`, `@sec-x` and `[@a; @b]` as one key, so
   these are held in a file of the pandoc dialect (§9.1), where a marker never stands on a `:::`

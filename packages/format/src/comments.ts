@@ -5,6 +5,7 @@
 
 import { withDialect } from './dialect.ts';
 import { closerRange, openerRange } from './blocks.ts';
+import { awayFromIncludes } from './include.ts';
 import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, markerRanges, visibleText, workingLedger } from './edit-support.ts';
@@ -16,7 +17,7 @@ import { parse } from './parse.ts';
 import { readTables } from './table.ts';
 import { commentAcrossRows, inPendingRow, pastRowMark, rowWidenings } from './table-rules.ts';
 import type { TableRead } from './table.ts';
-import { applyChanges } from './changes.ts';
+import { applyChanges, eolOf } from './changes.ts';
 import type { EditContext, Ledger, Parsed, Range, TextChange, Thread } from './types.ts';
 
 /** The thread with this id. When there is none, a ledger that can't be read is the reason to give
@@ -72,7 +73,9 @@ export function addComment(
     const markers = markerRanges(parsed);
     let placed = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
     placed = pastPendingRowMarks(text, parsed, markers, placed);
-    const { from, to } = placed;
+    // No marker on the line of a Quarto include: the comment goes around it (include.ts).
+    const around = awayFromIncludes(text, placed);
+    const { from, to } = around;
     const point = from === to;
 
     const id = newId(idsIn(text), ctx.random);
@@ -90,8 +93,14 @@ export function addComment(
     addPerson(ledger, ctx.author);
     ledger.comments.push(thread);
 
-    const anchors: TextChange[] = [{ from, to: from, insert: `<!--cmt ${id}-->` }];
-    if (!point) anchors.push({ from: to, to, insert: `<!--/${id}-->` });
+    // Next to an include, each marker is a line of its own, and the line break goes with it.
+    const eol = eolOf(text, parsed.ledgerRange);
+    const anchors: TextChange[] = [
+      { from, to: from, insert: `<!--cmt ${id}-->${around.openerLine ? eol : ''}` },
+    ];
+    if (!point) {
+      anchors.push({ from: to, to, insert: `${around.closerLine ? eol : ''}<!--/${id}-->` });
+    }
     const changes = commitEdit(text, anchors, ledger, {
       parsed,
       created: [id],

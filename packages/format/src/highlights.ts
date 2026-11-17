@@ -4,7 +4,9 @@
 // comment's go (anchors.ts), and accepting or rejecting it, which dismisses it and leaves the text
 // (decide.ts), is how it is taken away.
 
+import { eolOf } from './changes.ts';
 import { withDialect } from './dialect.ts';
+import { awayFromIncludes } from './include.ts';
 import { anchorRange, assertRange, checkAnchor, withinBody } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
@@ -144,7 +146,9 @@ export function addHighlight(
       }
       throw error;
     }
-    const { from, to } = placed;
+    // No marker on the line of a Quarto include: the highlight goes around it (include.ts).
+    const around = awayFromIncludes(text, placed);
+    const { from, to } = around;
     // The ends moved together, or what is between them is not text of the newest view: the range was
     // white space between blocks, or lines, or markers, or a deletion, and nothing that reads.
     if (from === to || !coversText(text, from, to)) throw new EditError(NO_TEXT, 'empty-range');
@@ -157,9 +161,10 @@ export function addHighlight(
     addPerson(ledger, ctx.author);
     ledger.marks[id] = entry;
 
+    const eol = eolOf(text, parsed.ledgerRange);
     const anchors: TextChange[] = [
-      { from, to: from, insert: `<!--hl ${id}-->` },
-      { from: to, to, insert: `<!--/${id}-->` },
+      { from, to: from, insert: `<!--hl ${id}-->${around.openerLine ? eol : ''}` },
+      { from: to, to, insert: `${around.closerLine ? eol : ''}<!--/${id}-->` },
     ];
     const changes = commitEdit(text, anchors, ledger, {
       parsed,
