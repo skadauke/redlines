@@ -30,8 +30,16 @@ export class People {
 
   private readonly model: DocxModel;
 
-  constructor(model: DocxModel) {
+  /** People the file already knew, by the name Word shows for them. */
+  private readonly known = new Map<string, LedgerPerson>();
+
+  constructor(model: DocxModel, known: readonly LedgerPerson[] = []) {
     this.model = model;
+    for (const person of known) {
+      this.known.set(person.name, person);
+      if (person.org) this.known.set(`${person.name} (${person.org})`, person);
+      this.taken.add(person.handle);
+    }
   }
 
   private slug(name: string): string {
@@ -53,6 +61,12 @@ export class People {
     if (name === '' || /^unknown$/i.test(name)) return 'unknown';
     const known = this.byName.get(name);
     if (known) return known;
+    const earlier = this.known.get(name);
+    if (earlier) {
+      this.byName.set(name, earlier.handle);
+      this.list.push(earlier);
+      return earlier.handle;
+    }
     const base = this.slug(name);
     let handle = base;
     for (let n = 2; this.taken.has(handle); n++) handle = `${base}-${n}`;
@@ -100,9 +114,9 @@ export class Ctx {
 
   readonly model: DocxModel;
 
-  constructor(model: DocxModel) {
+  constructor(model: DocxModel, known: readonly LedgerPerson[] = []) {
     this.model = model;
-    this.people = new People(model);
+    this.people = new People(model, known);
     for (const entry of model.report) this.entries.push(entry);
     for (const thread of model.threads) {
       const state: ThreadState = {

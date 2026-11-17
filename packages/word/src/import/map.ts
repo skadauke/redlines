@@ -22,13 +22,14 @@ import type {
   Revision,
   Run,
   Table,
-  TableRow,
 } from './model.ts';
 
 /** What the exporter's source part holds that the mapper needs (`readSourceXml` of the carriers). */
 export interface RestoreSource {
   markdown: string;
   blocks: { id: string; type: string; from: number; to: number }[];
+  /** The ledger of that Markdown: the people in it keep their handles. */
+  ledger?: Ledger;
 }
 
 export interface ImportOptions {
@@ -76,6 +77,8 @@ interface Chunk {
   replaces?: { rev: Revision; old: string };
   /** Whether the chunk carries marks of its own. */
   marked: boolean;
+  /** The body is the source's, word for word: no line is touched. */
+  restored?: boolean;
 }
 
 const CODE_STYLES =
@@ -210,7 +213,7 @@ class Mapper {
   constructor(model: DocxModel, options: ImportOptions) {
     this.model = model;
     this.options = options;
-    this.ctx = new Ctx(model);
+    this.ctx = new Ctx(model, options.source?.ledger?.people ?? []);
     this.writer = new InlineWriter(this.ctx);
   }
 
@@ -502,7 +505,7 @@ class Mapper {
     );
     const carried = this.ctx.threads.filter((thread) => thread.open);
     for (const thread of carried) thread.open = false;
-    for (const row of table.rows as TableRow[]) {
+    for (const row of table.rows) {
       if (view === 'newest' && row.deleted) continue;
       if (view === 'original' && row.inserted) continue;
       const cells: string[] = [];
@@ -567,6 +570,17 @@ class Mapper {
         continue;
       }
       const stripped = text.replace(/^\s*(?:#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+|>[ \t]?)/, '');
+      chunk.restored = true;
+      // The list marker or quote mark the paragraph stood after, as it was written.
+      const lineStart = source.markdown.lastIndexOf('\n', block.from - 1) + 1;
+      const before = source.markdown.slice(lineStart, block.from);
+      if (
+        (chunk.kind === 'item' || chunk.kind === 'quote') &&
+        /^[ \t>]*(?:[-*+]|\d+[.)])?[ \t>]*$/.test(before) &&
+        before !== ''
+      ) {
+        chunk.prefix = before;
+      }
       chunk.body =
         chunk.kind === 'heading' || chunk.kind === 'item' || chunk.kind === 'quote'
           ? stripped
@@ -585,6 +599,7 @@ class Mapper {
   /** A block's lines, with the openers of marks that start it on lines of their own (format §3.3). */
   private lines(chunk: Chunk): string {
     const { prefix, cont, body, kind } = chunk;
+    if (chunk.restored) return `${prefix}${body}`;
     const openers: string[] = [];
     let rest = body;
     for (let found = OPENER.exec(rest); found; found = OPENER.exec(rest)) {
@@ -698,7 +713,7 @@ class Mapper {
       }
     }
     flushDel();
-    if (ins) out += `<!--/${(ins as { id: string }).id}-->`;
+    if (ins) out += `<!--/${ins.id}-->`;
     return out;
   }
 

@@ -45,3 +45,4 @@ export type {
 } from './import/model.ts';
 export { mapDocx, warningsOf } from './import/map.ts';
 export type { ImportOptions, ImportResult, RestoreSource } from './import/map.ts';
+export { importDocx } from './import/import.ts';
