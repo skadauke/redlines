@@ -145,11 +145,17 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     const { main } = view.state.selection;
     if (!main.empty) return { from: main.from, to: main.to };
     // On screen, a caret beside a hidden marker is at the end of the word past it (as the rail's
-    // Add Comment reads it).
+    // Add Comment reads it). Only a marker counts: hidden line breaks between paragraphs don't make
+    // a blank line the word before it.
+    const past = (forward: boolean): number => {
+      const at = pastHidden(view.state, main.head, forward);
+      const skipped = view.state.sliceDoc(Math.min(at, main.head), Math.max(at, main.head));
+      return skipped.trim() === '' ? main.head : at;
+    };
     const word =
       view.state.wordAt(main.head) ??
-      view.state.wordAt(pastHidden(view.state, main.head, true)) ??
-      view.state.wordAt(pastHidden(view.state, main.head, false));
+      view.state.wordAt(past(true)) ??
+      view.state.wordAt(past(false));
     return word ? { from: word.from, to: word.to } : null;
   };
 
