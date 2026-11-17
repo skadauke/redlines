@@ -71,7 +71,8 @@ repo root.
   Every `cargo` in `src-tauri` needs the program for its target, which isn't in git, and stops
   without it (`bundle.externalBin`). `pnpm build`, `pnpm tauri dev` and `pnpm tauri build` run the
   script for themselves. It bundles `packages/cli` (`pnpm --filter redlines bundle`, to
-  `apps/desktop/redlines/bundle/redlines.js`), compiles the crate and copies the program to
+  `apps/desktop/redlines/bundle/redlines.js`, and `@redlines/word` apart as `word.js`, which the
+  program evaluates only for `import-docx` and `export-docx`), compiles the crate and copies the program to
   `src-tauri/binaries/redlines-<triple>` (Python 3; a triple as its argument, or
   `TAURI_ENV_TARGET_TRIPLE`, picks the target, and `universal-apple-darwin` makes three files)
 - Desktop app, in `apps/desktop`: `pnpm dev` serves the frontend on port 1420 for a plain browser

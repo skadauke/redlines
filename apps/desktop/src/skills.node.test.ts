@@ -24,12 +24,18 @@ import {
 const read = (path: string) => readFileSync(join(ROOT, path), 'utf8');
 const REGENERATE = 'Run `node scripts/build-skills.ts --write` in apps/desktop.';
 
+/** The Word commands. They leave the file alone, so they are no entry of `COMMANDS`; each takes
+ * `-o` (or `--output`) and no other option. */
+const WORD: Record<string, string[]> = { 'export-docx': ['output'], 'import-docx': ['output'] };
+const NAMES = [...Object.keys(COMMANDS), ...Object.keys(WORD)];
+
 const copies = buildCopies();
 const claude = copies.find((copy) => copy.kind === 'claude');
 const generic = copies.filter((copy) => copy.kind === 'generic');
 
 /** The options a command takes: the ones that hold a text can be given as a file too. */
 function optionsOf(name: string): Set<string> {
+  if (Object.hasOwn(WORD, name)) return new Set(WORD[name]);
   const command = COMMANDS[name];
   if (!command) return new Set();
   return new Set([
@@ -172,7 +178,7 @@ describe('the skill and the command line', () => {
       const commands = shown(copy.text);
       expect(commands.length, copy.path).toBeGreaterThan(8);
       for (const { command, options } of commands) {
-        expect(Object.keys(COMMANDS), `${copy.path}: redlines ${command}`).toContain(command);
+        expect(NAMES, `${copy.path}: redlines ${command}`).toContain(command);
         const takes = optionsOf(command);
         for (const option of options) {
           expect([...takes], `${copy.path}: redlines ${command} --${option}`).toContain(option);
@@ -183,7 +189,7 @@ describe('the skill and the command line', () => {
 
   it('names, anywhere in its text, only options that some command has', () => {
     // The prose too: a bullet may not name an option (`--notes`) that was never there.
-    const known = new Set(Object.keys(COMMANDS).flatMap((name) => [...optionsOf(name)]));
+    const known = new Set(NAMES.flatMap((name) => [...optionsOf(name)]));
     for (const copy of copies) {
       // Every `--word` that isn't part of a longer word, a dash run or a marker (`{--`, `<!--`).
       const named = [...copy.text.matchAll(/(?<![\w{<!~=+>-])--([a-z][a-z-]*)/g)].map(
@@ -211,7 +217,7 @@ describe('the skill and the command line', () => {
 
   it('teaches every command of the command line', () => {
     const taught = new Set(copies.flatMap((copy) => shown(copy.text).map((s) => s.command)));
-    expect([...taught].sort()).toEqual(Object.keys(COMMANDS).sort());
+    expect([...taught].sort()).toEqual([...NAMES].sort());
   });
 
   it('shows the commands the way the command line takes them', () => {

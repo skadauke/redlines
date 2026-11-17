@@ -588,7 +588,7 @@ README-style snippets) holds the editor to it.
   or an end of a selection is inside the block, while the current match of Find is in it, and while
   a pending change touches it (a change is seen and decided in its text, never drawn away). Edits
   in the source are ordinary edits, tracked or not, written by the same rules as any text; none is
-  refused. An image in a rendered block is a small box with its alt text: nothing is loaded.
+  refused. An image in a rendered block is drawn when it is a local one, through the host's resolver, at its numeric `width` and `height`; a `<picture>` draws the `<source>` that matches the window's appearance (`prefers-color-scheme`), else its `<img>`. Any other image is a small box with its alt text: nothing remote is loaded.
 - **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
   WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
   `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
@@ -1393,7 +1393,10 @@ ordinary copy writes the HTML that Word and Docs draw well); File › Print and 
   never copied: the link is its path from the document. It is one step to undo, and a tracked
   insertion with Track Changes on, and is refused where an image may not go (in code, say).
 - **Cropping an image** (#624). Image › Crop… puts a crop box with a handle at each corner and edge over a
-  local image; Return or Done applies it, Escape cancels. The app writes the part inside the box as
+  local image; Return or Done applies it, Escape cancels. With the keys alone: the arrow keys move the
+  box, Tab reaches each of the eight handles (named, "Top left corner, crop handle"), and the arrow keys
+  on a handle resize from that side or corner (Shift for larger steps); the box's size is spoken once
+  after a run of key presses. The app writes the part inside the box as
   a copy beside the others in the project's folder for images (`photo-crop.png`, numbered when the
   name is taken), and the Markdown points at the copy, keeping the text, the title, the width and
   the alignment. The original stays, so rejecting the change gets it back. With Track Changes on
