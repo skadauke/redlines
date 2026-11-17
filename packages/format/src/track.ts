@@ -58,6 +58,7 @@ import {
   underlineOfBreak,
   viewBreaks,
   withoutMarkers,
+  HTML_START_7,
 } from './blocks.ts';
 import { readBlocks, sameBlocks } from './block-read.ts';
 import {
@@ -1869,9 +1870,6 @@ const HTML_START = [
   /^<!\[CDATA\[/,
   new RegExp(`^</?(?:${HTML_BLOCK_TAGS})(?:[ \\t>]|/>|$)`, 'i'),
 ];
-/** The seventh: one whole open or closing tag of another name, alone on its line. */
-const HTML_START_7 =
-  /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
 
 /**
  * Whether a line, past its container prefix, starts an HTML block, where a marker is not read: one
@@ -5155,6 +5153,16 @@ function editsWidening(
   widening: boolean,
 ): TrackedEdits {
   for (const edit of edits) assertWholeCharacters(text, edit);
+  // A block's start typed into an empty item is a block of its own in the newest view, and the file
+  // reads it as text of the item (#583): the whole item is written as a replacement.
+  if (edits.some((edit) => startsBlockInEmptyItem(text, edit))) {
+    const done = widening ? widenedAtOnce(text, edits, ctx) : undefined;
+    if (done) return done;
+    throw new EditError(
+      "This block can't be added as a tracked change here.",
+      'no-legal-placement',
+    );
+  }
   const random = ctx.random;
   // The next try draws the ids that the first one did.
   const drawn: Uint8Array[] = [];
@@ -5363,6 +5371,62 @@ function codeEdits(
 /** How many ways of writing a change next to a mark are tried (as typed, then by a character). */
 const MOST_MODES = 8;
 
+const SPLIT_ALONE = 'A line break here would leave a change marker at the start of the new line.';
+
+/** A split that stands alone on a line, with only closers in front of it, on a line that goes on a
+ * paragraph: an HTML block that ends the paragraph, and the list it is in, which the file reads and
+ * the newest view doesn't (#598, #615). Whether `changes` write one that `text` has not. */
+function splitsAlone(text: string, changes: readonly TextChange[]): boolean {
+  const alone = /^[ \t>]*(?:<!--\/[^>]*-->)+<!--split [^>]*-->[ \t]*$/;
+  const count = (body: string) => {
+    const lines = body.split('\n');
+    let found = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i] ?? '';
+      if (!line.includes('<!--split') || !alone.test(line)) continue;
+      // The line above has words of a paragraph: nothing but markers, quote marks and spaces would
+      // be a blank line or a marker's own.
+      // (A closing fence above is the code's: a split stands alone after it by design, §3.2.)
+      const above = (lines[i - 1] ?? '').replace(/<!--[^]*?-->/g, '');
+      // Nor is indented code above it, four columns in from this line.
+      const indent = (l: string) => /^[ \t>]*/.exec(l)?.[0].replace(/>/g, '').length ?? 0;
+      // Only in a list: the paragraph above starts with an item's marker (a quote or a paragraph
+      // outside a list keeps the split alone after its closer, as a backslash's break does).
+      let top = i - 1;
+      while (top > 0 && /[^\s>]/.test((lines[top - 1] ?? '').replace(/<!--[^]*?-->/g, ''))) top--;
+      const inList = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/.test(
+        (lines[top] ?? '').replace(/<!--[^]*?-->/g, ''),
+      );
+      if (
+        inList &&
+        /[^\s>]/.test(above) &&
+        !/^[ \t>]*(?:`{3,}|~{3,})/.test(above) &&
+        indent(above) - indent(line) < 4
+      ) {
+        found++;
+      }
+    }
+    return found;
+  };
+  return count(applyChanges(text, changes)) > count(text);
+}
+
+const SPLIT_IN_INDENT =
+  'A line break here would stand inside the change of the indent of this item.';
+
+/** Whether a split stands inside a change of an indent (`fmt … was=indent=…`): the blank line that
+ * the split makes is spaced by which of the two is decided first (#605). */
+function splitsIndent(after: string): number {
+  if (!after.includes('indent=')) return 0;
+  let n = 0;
+  for (const open of after.matchAll(/<!--fmt (\w{4})\b[^>]*\bindent=[^>]*-->/g)) {
+    const close = after.indexOf(`<!--/${open[1]}-->`, open.index);
+    if (close < 0) continue;
+    if (after.slice(open.index, close).includes('<!--split')) n++;
+  }
+  return n;
+}
+
 /** A change next to another mark, written as typed, reads otherwise in some order of decisions. */
 class ReadsOtherwise extends Error {}
 
@@ -5497,6 +5561,12 @@ function editsOnce(
     views,
   });
   selfCheck(plan, edits, changes, views);
+  if (changes.some((change) => change.insert.includes('<!--split'))) {
+    if (splitsAlone(text, changes)) throw new EditError(SPLIT_ALONE, 'no-legal-placement');
+    if (splitsIndent(applyChanges(text, changes)) > splitsIndent(text)) {
+      throw new EditError(SPLIT_IN_INDENT, 'no-legal-placement');
+    }
+  }
   const markIds = [...new Set(plan.created)];
   const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
   return { changes, markIds, extendedIds };
@@ -5506,6 +5576,52 @@ function editsOnce(
  * is nested in (each space belongs to one quantifier only, so that no line backtracks), with nothing after it: `-`, `*`, `+`, `1.` or `1)`, a bare marker. */
 export const BARE_MARKER =
   /^(?:[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])[ \t]))*[ \t]*(?:[-+*]|\d{1,9}[.)])$/;
+
+/** What a thematic break, a setext underline, or a link reference definition
+ * starts with, in the text typed into an empty list item: the file reads these lines as text of
+ * the item, with the insertion's mark between the marker and them, and the view as a block. */
+const BLOCK_START =
+  /^(?:([-*_])(?:[ \t]*\1){2,}[ \t]*(?:\n|$)|\[[^\]\n]+\]:)|^[^\n]*\S[^\n]*\n[ \t]*(?:=+|-+)[ \t]*(?:\n|$)/;
+
+/** A line of an item that is three or more of one of `-`, `*` and `_`, with spaces between. */
+const THEMATIC_ITEM =
+  /^(?:[ \t]*>)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)+([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+
+/** Whether the typed character completes a thematic break after an item's marker (`- --` and `-`):
+ * the file, with the marks' comments in it, reads the line as an item of text. */
+function makesThematicBreak(text: string, edit: TextChange, start: number): boolean {
+  if (!/^[-*_ \t]+$/.test(edit.insert)) return false;
+  let left = text.slice(start, edit.from).replace(/<!--[^]*?-->/g, '');
+  // The opener of a mark that starts a block stands after the marker, and the text on the next line:
+  // the item's line is the two together.
+  if (/^[ \t]+[-*_ \t]*$/.test(left) && start > 0) {
+    const above = text.slice(lineStart(text, start - 1), start - 1).replace(/<!--[^]*?-->/g, '');
+    if (
+      /^(?:[ \t]*>)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(above)
+    ) {
+      left = `${above.replace(/[ \t]*$/, '')} ${left.trim()}`;
+    }
+  }
+  const right = text.slice(edit.from, lineEnd(text, edit.from)).replace(/<!--[^]*?-->/g, '');
+  if (!/^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]/.test(left + ' ') && left.trim() !== '') return false;
+  const after = left + edit.insert + right.replace(/\r$/, '');
+  return THEMATIC_ITEM.test(after) && !THEMATIC_ITEM.test(left + right.replace(/\r$/, ''));
+}
+
+/** Whether `edit` types, in an item with no text, text that starts a block of its own (#583). */
+function startsBlockInEmptyItem(text: string, edit: TextChange): boolean {
+  if (edit.from !== edit.to || edit.insert === '') return false;
+  const start = lineStart(text, edit.from);
+  if (makesThematicBreak(text, edit, start)) return true;
+  if (
+    !/^(?:[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])[ \t]))*[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]?$/.test(
+      text.slice(start, edit.from),
+    )
+  )
+    return false;
+  if (!/^(?:<!--[^]*?-->)*\r?$/.test(text.slice(edit.from, lineEnd(text, edit.from)))) return false;
+  return BLOCK_START.test(edit.insert.replace(/^[ \t]+/, ''));
+}
 
 /**
  * The edits that write text with a space first right after a bare list marker (`-` or `2.` alone

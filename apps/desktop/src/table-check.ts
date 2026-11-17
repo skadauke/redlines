@@ -1456,7 +1456,7 @@ const CHECKS: Check[] = [
     // draws a row's bar) and a click on it, which never reaches the row's text, switches the views
     // (`bar-switch.ts`'s `.rl-trow` fallback, which happy-dom cannot reach). A click beside the bar
     // does nothing.
-    name: 'bar-click-on-an-inserted-row-switches-views',
+    name: 'bar-click-on-an-inserted-row-opens-its-card-in-simple',
     async run(editor) {
       await load(editor, WITH_ROW, false);
       editor.setViewMode('simple');
@@ -1483,7 +1483,11 @@ const CHECKS: Check[] = [
       editor.view.scrollDOM.dispatchEvent(mouse('mousedown', x));
       document.dispatchEvent(mouse('mouseup', x));
       await frames();
-      if (editor.getUiState().view !== 'redlines') problems['switched'] = editor.getUiState().view;
+      // In the simple look a bar click opens the change's card and the look stays (#716).
+      if (editor.getUiState().markupView !== 'simple') {
+        problems['switched'] = editor.getUiState().markupView;
+      }
+      if (!editor.view.dom.querySelector('.rl-card-what')) problems['card'] = 'none opened';
       // Beside the bar: nothing.
       editor.setViewMode('simple');
       await frames();

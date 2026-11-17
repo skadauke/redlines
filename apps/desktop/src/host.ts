@@ -99,6 +99,21 @@ export interface Host {
    */
   saveAs(text: string, suggestedName: string, folder?: string | null): Promise<string | null>;
   /**
+   * Asks for a Word file (.docx) and reads its bytes; null when the dialog is cancelled. In the
+   * development page, a file picker.
+   */
+  openDocx(): Promise<{ name: string; bytes: Uint8Array } | null>;
+  /**
+   * Asks where to save a Word file, starting from `suggestedName` in `folder` (as `saveAs` does),
+   * and writes the bytes there. Resolves to the name it was saved as, or null when the dialog is
+   * cancelled. In the development page the browser downloads it.
+   */
+  exportWord(
+    bytes: Uint8Array,
+    suggestedName: string,
+    folder?: string | null,
+  ): Promise<string | null>;
+  /**
    * Calls `onChange` after the file changes on disk; resolves to a function that stops watching. In
    * the app, only the window's document, a file it may use, which the app watches for it.
    */
@@ -327,6 +342,9 @@ export function createHost(): Host {
   return '__TAURI_INTERNALS__' in window ? createTauriHost() : createBrowserHost();
 }
 
+/** The media type of a Word file. */
+const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
 /** What the open and save panels offer: the documents (`DOCUMENT_EXTENSIONS`). */
 const PANEL_EXTENSIONS = DOCUMENT_EXTENSIONS;
 
@@ -422,6 +440,17 @@ async function sendImageData(
   return added;
 }
 
+/**
+ * Writes bytes to a file the window may write: the one the save panel just returned, which the
+ * dialog added to its scope. The file plugin's text command writes the body it is given as it is,
+ * so the window needs no other write permission (`fs:allow-write-file` would be a broader one).
+ */
+export function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
+  return invoke('plugin:fs|write_text_file', bytes, {
+    headers: { path: encodeURIComponent(path) },
+  });
+}
+
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
   return {
@@ -457,6 +486,27 @@ function createTauriHost(): Host {
       // document.
       if (!isDocument(path)) throw new NotADocumentError(SAVES_DOCUMENTS_ONLY);
       await write(path, text);
+      return path;
+    },
+    async openDocx() {
+      const path = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: 'Word document', extensions: ['docx'] }],
+      });
+      if (!path) return null;
+      return { name: basename(path), bytes: await readFile(path) };
+    },
+    async exportWord(bytes, suggestedName, folder) {
+      const defaultPath = await savePanelStart(suggestedName, folder);
+      const path = await saveDialog({
+        defaultPath,
+        filters: [{ name: 'Word document', extensions: ['docx'] }],
+      });
+      if (!path) return null;
+      // Written where the panel said: only that path is in the window's scope. The Mac's panel
+      // adds the extension itself.
+      await writeBytes(path, bytes);
       return path;
     },
     watch: watchDocument,
@@ -665,6 +715,34 @@ function createBrowserHost(): Host {
       const path = basename(suggestedName);
       files.set(path, text);
       return Promise.resolve(path);
+    },
+    openDocx: () =>
+      new Promise((resolve, reject) => {
+        // A tab has no open panel of the app's: the page's own file picker.
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.docx';
+        input.addEventListener('cancel', () => resolve(null));
+        input.addEventListener('change', () => {
+          const file = input.files?.[0];
+          if (!file) return resolve(null);
+          file
+            .arrayBuffer()
+            .then((buffer) => resolve({ name: file.name, bytes: new Uint8Array(buffer) }), reject);
+        });
+        input.click();
+      }),
+    exportWord: (bytes, suggestedName) => {
+      // A tab has no save panel: the browser downloads the file.
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: DOCX_TYPE }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = suggestedName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return Promise.resolve(suggestedName);
     },
     watch: () => Promise.resolve(() => {}),
     // One folder, with no name and no repository.

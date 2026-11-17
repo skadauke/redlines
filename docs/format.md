@@ -1023,7 +1023,11 @@ at the outer edge of a whole inline construct. A marker never goes:
    would leave half a character in the file, which no tool reads back (the editor never makes one;
    a program that counts in code units can). A shortcode is `:name:` of gemoji's kind: lowercase
    letters, digits, `_` and `-` with a letter among them, `+1`, `-1`, `100` and `1234`, and the
-   six names of one letter (`:x:`), whichever of them GitHub knows;
+   six names of one letter (`:x:`), whichever of them GitHub knows. The construct is read as it is when pending deletions are rejected, too: a comment's or a
+   highlight's marker never stands between the pieces of an entity, a tag or a link's syntax that
+   rejecting deletions would put together (`&a` deleted, `m`, `p`, `;` deleted is `&amp;`). It goes to
+   the construct's nearest edge, the left one when both are as near, and the mark covers the
+   whole construct or none of it (#467);
 2. inside a link destination, title or reference label, between `]` and `(`, or inside the text of
    a collapsed or shortcut reference link (`[text]`, `[text][]`). The text of an inline link is
    fine;
@@ -1189,7 +1193,8 @@ middle of a paragraph it splits the paragraph.
 - The new text of a substitution that is a whole tag alone on its line, at the start of the file or after a blank line (CommonMark's
   seventh kind of HTML block: an image given a size is written as `<img …>`), has its closer on the
   next line, because a closer after the tag on its line would make the line a paragraph, which the
-  newest view doesn't read (#628).
+  newest view doesn't read (#628). That line break is the closer's syntax: the views, accepting and rejecting take
+  it away with the closer, and no view has it as text: a document gains no line break from where this marker stands.
 
 A tracked insertion never stands between a list marker and the space after it. A marker with no
 space after it (`-` or `2.` alone on its line) is an empty item to Markdown, but `-<!--ins x--> a<!--/x-->`
@@ -1266,7 +1271,7 @@ a list, the keys are as they were: after a blank line, a list that starts at `1.
 continues one above it. An empty numbered item, which the file doesn't hold (it is the open item of
 the editor's keys), and a numbered line that has a list or other blocks of its own under it, are
 not read so yet: the keys treat them by the parse, as before, and no write for them is known
-(lane R widens such an edit, #497). Tested: `sublist-two.test.ts` of
+(not widened yet, #497). Tested: `sublist-two.test.ts` of
 `packages/editor/src/blocks`, and the editor's walks over lists side by side.
 
 A break typed at the start of a line that goes on a paragraph, right after a line break that a
@@ -1545,7 +1550,7 @@ holds the text, they stay. With Track Changes on the lines are written again as 
 the end of the paragraph's last line (or the break above it) through the item's last line, beside the
 deletion of the marker (`<!--del k3x9 * -->⏎⏎note<!--sub m2bd \n    - a-->⏎  - a<!--/m2bd-->`): it reads
 alike in every order of decisions. A fence or indented code among those lines is not held by a
-substitution in an item, so the key is refused in words (lane R widens it into a replacement of the
+substitution in an item, so the key is refused in words (not widened yet into a replacement of the
 whole item, #497). Shift-Tab in indented code outdents it as it always did, to a paragraph at the end,
 and keeps the four columns that make it code only where a line stands right under the code (an item
 or text), which the paragraph would take in; there it is refused in words, with Track Changes off too. Tested: `nested-keep.test.ts` of
@@ -2381,13 +2386,14 @@ operation with Track Changes on is refused for another person's pending change, 
 that is pending, or a mark that has no place ("Decide it first", "Accept or reject the … changes in
 this table first", a marker that can't follow), the operation is made as Track Changes off makes it
 on the table as the newest view reads it, and written as the replacement of the table (§3.12), with
-other people's pending changes in its old text. The words stay for what no unit holds (a table that is the
-whole text, where the closer would stand alone on its line; a marker inside an unclosed comment; a
-row with no leading pipe; a header alignment while the header's row change is pending), for the
-operations with Track Changes off (also those inside another person's pending replacement of the
-table, which can't be made without changing the text around it), for a paste that needs more of a
-table beside another person's change, and for the requests that have no meaning (an index outside
-the table, the last row or column, a request that changes nothing).
+other people's pending changes in its old text. A paste that needs more rows or columns than the table has is written the same
+way, and an operation on a table in the new text of another person's pending replacement is written
+into that text (#726). The words stay for what no unit holds (a table that is the whole text, where
+the closer would stand alone on its line; a marker inside an unclosed comment; a row with no
+leading pipe; a header alignment while the header's row change is pending), where the person is
+asked and the operation or the paste is made without tracking, as §3.13 says (the app asks; a host
+with no sheet refuses), for the operations with Track Changes off (§3.10), and for the requests that have no meaning (an index outside the
+table, the last row or column, a request that changes nothing).
 
 **Deleted rows and columns** leave the table and are kept in deletions after one blank line below
 it, one per line:
@@ -2448,8 +2454,16 @@ it, one per line:
   would leave its end without its start: the operation with Track Changes on is a replacement of the
   table, which takes the comment's blocks into the unit (§3.12). Another column of the table, and the
   operation with Track Changes off, are written as they were. A table keeps at least one column:
-  deleting the last, or rejecting the insertion of the last, is refused ("Delete the table
-  instead."). With Track Changes off the columns go from the original as well, so the last column
+  the operation that deletes the last one is refused ("Delete the table instead."). A decision that
+  leaves a table with no column of its original is not (#477): when every column that is left is a
+  pending insertion, the table reads as inserted whole, with nothing as its original (the original
+  view has no table, and no view throws), and rejecting the last inserted column takes the table
+  away, with the blank line after it; a comment in it stays as a point where the table was. Where the
+  original column is a pending deletion, rejecting the last inserted column is the deletion of the
+  whole table (rule 6) in the mark of that deletion, with the original table as its payload:
+  accepting it gives no table, rejecting it the original, as deciding the column's deletion does, in
+  either order. With several deleted columns or another change pending in the table the decision
+  keeps its refusal ("A table keeps at least one column."), which no order reads alike yet. With Track Changes off the columns go from the original as well, so the last column
   that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
 - **Rule 6, deleting the table.** This is what the operation writes; an edit that merely covers the
@@ -2481,23 +2495,16 @@ it, one per line:
     end of the text of the block before it. A comment with a part that stays loses only the part in
     the table. A highlight has no point form and goes. A comment is a mark in the payload, and one
     that crosses the table's edge takes the block it crosses into the unit (§3.12).
-  - **Where Track Changes has no place to write it.** The deletion's marker stands in front of the
-    block after the table, or behind the block before it when the table ends the text. It can't
-    stand in front of a code fence, which it would unread. It can't end a code block or a rule, so
-    a table that ends the text right after one is refused too. A table that starts right under the
-    line above it, with no blank line between, and is followed by something, is refused as well,
-    unless that line is a `#` heading with no closing `#`s or attributes. Each of these refusals,
-    except that of a table before a never-closed fence (issue #454), says which it is and what to
-    do: put a paragraph between the table and the code block or the rule (a pending insertion
-    counts), or a blank line above the table, or turn off Track Changes, which takes the table as
-    text ("This table can't be deleted with Track Changes on while a code block follows it with no
-    text between. Put a paragraph between them first, or turn off Track Changes."). A heading that
-    has closing `#`s or attributes (`## Head ##`, `## Head {#intro}`) takes no change at its end. A
-    table right under one is refused, whether something follows it or not, and so is a table that
-    ends the text right after one, with a blank line between or not. Those refusals are in the
-    words of any edit at the end of such a heading ("A heading's closing #s and attributes take no
-    change."), which don't say what to do. A blank line between them gives a table that has text
-    after it its place, and a paragraph between them gives one that ends the text its place.
+  - **Where the deletion's marker has no place.** The marker stands in front of the block after the
+    table, or behind the block before it when the table ends the text. It can't stand in front of a
+    code fence, which it would unread, it can't end a code block or a rule, and it can't follow a
+    table that starts right under the line above it, with no blank line between, or a heading with
+    closing `#`s or attributes (`## Head ##`, `## Head {#intro}`), which takes no change at its end.
+    In these shapes the deletion is not refused: it is written as the replacement of a larger unit
+    (§3.12), the table with the line above it or the block beside it, that holds the table's old text,
+    and it reads alike in every order of decisions (#726). Another person's pending change in the
+    table is taken into the old text, as above. Only where no unit holds it is the person asked
+    (§3.13).
   - **With Track Changes off** the table goes as text, with the changes in it, its deletion lines
     and their ledger entries, and the blank lines after it (the break before it, when nothing
     follows). Its comments become points as above. A comment that has no place so, or runs out of
@@ -2528,7 +2535,7 @@ it, one per line:
   Accepting a change in the moved row (another person's typing, say) writes the kept copy again, as the
   row now reads with the changes still pending in it rejected, so that the original view, and the row
   that rejecting the move gives back, hold the accepted text: the typing travels with the row, either
-  half rejects, and accepting the typing and rejecting the move read the same in either order (#475).
+  half rejects, and accepting the typing and rejecting the move read the same in either order (#475), also when the same decision accepts another move (#890).
   A comment or a highlight in the row goes with it: a range in a cell, a range across two cells or a
   point. At the new place it stands in the row where it stood. Rejecting the move gives the row back
   with it, in the same place, and nothing of it stays behind. The kept copy below the table holds
@@ -2544,8 +2551,11 @@ it, one per line:
   as many cells as the header has columns ("This row has a different number of cells than the
   header, so the table would stop reading as a table. Make its cells match the header first."),
   tracked or not; a table whose header has another number of cells than its delimiter row is no
-  table. And with Track Changes on, a comment that runs from one row of the table into another is
-  refused, naming its author ("Bo Chen's comment runs from one row of this table into the next.
+  table. And with Track Changes on, a comment that runs from one row of the table into another, or a
+  highlight that would leave one row for another or the table (below), is first widened: its start is taken
+  to the text of a row above that is not pending, its end to one below, or past the table to the
+  line of text before or after it, so that no decision of a row takes a marker away (§3.12, #726).
+  Where no such place holds the markers, the comment is refused, naming its author ("Bo Chen's comment runs from one row of this table into the next.
   Delete or resolve it first, or turn off Track Changes."). A comment that starts a row with no pipe
   at its start has its opener at the end of the row above, so it crosses the line break, and moving
   rows beside it could be accepted but not rejected. For the same reason, adding such a comment in a
@@ -2635,13 +2645,15 @@ it, one per line:
   is never written with a pipe or a line break of a row in a change that its author did not type.
   Where the only way to keep a backslash or an underscore apart from a marker beside it would be to
   write the pipe at the edge of a cell again, in a change of its own (a cell with no space between
-  its text and its pipe, next to a marker such as a comment point), rejecting half of it would leave
-  the row a cell too many or too few, and the key is refused: "This key can't be written here with
-  Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending
-  change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the
-  change next to it first, or turn off Track Changes." A cell with a space after its text and a
-  closing pipe after that takes the key. A row with no closing pipe may refuse it, in these words
-  or in those of §3.1 (rules 4 and 5).
+  its text and its pipe, next to a marker such as a comment point), the key is written as a
+  replacement of the table (§3.12): the old table, with its pending marks, is the old text, so every
+  order of decisions reads the row alike. Only where no unit holds the replacement is the key refused,
+  in the words "This key can't be written here with Track Changes on: it would have to rewrite a
+  pipe or a line break of the table next to a pending change, and Markdown would read the row
+  otherwise in some order of decisions. Accept or reject the change next to it first, or turn off
+  Track Changes." A cell with a space after its text and a closing pipe after that takes the key
+  as typed. A row with no closing pipe may refuse it, in these words or in those of §3.1 (rules 4
+  and 5).
 - **A cell a row lacks.** GFM reads a row with fewer cells than the header as having blank cells
   after its last. The file has no text for them, so there is no place in it to type. Typing into one
   writes the pipes it needs first, plain: both versions have them, as in rule 7, so nothing reads
@@ -3121,7 +3133,9 @@ typed text is in both views, and deleted text that both had is gone from both. T
 the original where it was typed, at the place of the mark it was typed in or beside. Deleted new
 text was never in the original, and old text deleted with its marker goes from it.
 
-**What has no legal form is refused,** and the file is left as it was. Typed text must not leave a
+**What has no legal form is refused,** and the file is left as it was. (In the app, an edit that
+can't be made without changing the pending changes around it is asked about instead, and made after
+the person agrees, as §3.13 says; the refusal is what a host without a sheet, and an agent, get.) Typed text must not leave a
 marker where §3.1 to §3.3 allow none, and some edits have no form that keeps it out of a mark: a
 single line break typed in front of an insertion or in one, after which a marker of the insertion
 would start a wrapped line; text typed at the start of a wrapped line in an insertion, whose closer
@@ -3253,7 +3267,8 @@ typing is recorded as it is typed and is never joined.
 An edit that can't be written as marks at the grain it was made, so that every order of decisions
 reads alike, is written as a substitution of the smallest unit that holds it (below) with the unit
 as the old text and the unit as it reads with the edit made as the new text. There is no refusal for
-an edit that would read differently in some order of decisions: it is written this way. A
+an edit that would read differently in some order of decisions: it is written this way, but for the
+guard over other people's marks (below). A
 substitution of this kind is written in the forms of §3.3 (a paragraph, a heading, a quote's
 paragraph, a list item, a list) and of §3.5 (a code block, display math, raw-text HTML) and §3.7 (a
 table), and nothing about its markers differs from theirs.
@@ -3270,6 +3285,14 @@ quote) and code (a typed, pasted or key edit in a fenced or indented block, disp
 text, and a key that moves the lines under an item that leaves its list, with the same guard).
 Until a writer calls it, it still refuses, in the words of its own section.
 
+Every place that refuses has one of four tiers (`refusals.ts`, which a test holds to it): the edit
+is **widened** (this section), or **asked** about and made untracked (§3.13), or its command is
+**disabled** with a hint, or, only where every write would leave the file wrong or the request has no
+meaning, the refusal is **kept**. The kept ones are an unreadable ledger, a file that ends inside code or a
+comment that is never closed, new text that holds Redlines markup, an unknown id, and an agent's text
+that matches nothing or several places, and, under the guard below, an edit whose unit holds another
+person's pending mark.
+
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
 bullet outside), a list, a code block or a table. The edit is written as the replacement of the
 smallest of them that holds it and for which the file reads as its newest view with the replacement
@@ -3283,7 +3306,12 @@ new text of someone else's substitution, the unit is a unit of that new text, wr
 the old text of the second is the new text of the first, and the first's marks stand around it.
 Accepting the first leaves the second pending; rejecting the first takes the second with it.
 
-**The old text holds other people's marks.** Marks in a payload are written in the payload's
+**The old text holds other people's marks.** In a table's cells the old text may hold another
+person's pending marks. Elsewhere, with Track Changes on, a replacement whose old text would hold another
+person's pending change, or next to whose edge another person's mark ends (a split's break right in
+front of the unit, an insertion right after it), is **not written** and the refusal stands: some
+order of decisions would not read as the original (#808, #107; `heldByOthers` of `widen`). The
+rest of this paragraph is what is written. Marks in a payload are written in the payload's
 encoding (§2.5): `<!--ins k3x9-->` is `<!-\-ins k3x9-\->`. A decoded payload's marker is a mark
 when its id has a ledger entry (a thread, for a comment) and stands nowhere else in the file, its
 opener and closer are in the same payload, and payloads nest at most three deep
@@ -3327,7 +3355,7 @@ alike is the replacement of the block, or of the quote that holds it. This takes
 the fine forms refused today: a type typed in front of a block after another person's break, a join
 or a split next to another person's change, a join that has to write text again that holds another
 person's mark, a block change beside pending changes, and a join of a block whose text another
-person deleted. A key whose fine form the format accepts, although a reader of the file reads it
+person deleted, where the guard over other people's marks (above) lets the replacement be written. A key whose fine form the format accepts, although a reader of the file reads it
 otherwise than the newest view (the join of a paragraph onto a setext heading, at the top level, and
 the blank line that keeps a numbered item apart, in a list or a quote), is written as the
 replacement at once (`widenedFirstEdits`). Display math, code and raw HTML are the code's (§3.5),
@@ -3362,7 +3390,7 @@ still the one it was made against, and dropped if not. One answer holds for the 
 the same run (the same reason, no pause of five seconds). "Don't ask again" is the app's, kept for
 the file by its path and never in the file, so that somebody else who opens it is asked. Where the
 host has no sheet, such an edit is refused as before. One "Don't ask again" covers front matter and
-Raw together: a person who has said it doesn't want either asked.
+Plain together: a person who has said it doesn't want either asked.
 
 **With Track Changes off** an edit that §3.10 refuses, because it can't be made without changing the
 pending changes around it, is asked about in the same way, with its own title, "This edit can't be
@@ -3400,6 +3428,9 @@ blocks of the document's own flow, §3.7.)
   the blocks from the old place to the new, one substitution that keeps others' changes in its
   old text (§3.12). A move that reaches more blocks than a widened edit may is not refused: the
   person is asked first, and the move is made as plain edits, untracked, as Word does (§3.13).
+  So is a move that leaves two lists side by side (a paragraph between them moved away, or a list
+  moved up to one): the newest view reads them as one list and the marker between them in the file
+  reads two, so no fine write is tried, and where no unit passes either, the person is asked (#883).
 - **Track Changes off.** The same two edits are made plain.
 
 ### 3.15 HTML with a Markdown twin
@@ -3474,7 +3505,8 @@ A comment thread is anchored in the body and stored in the ledger under the same
   in front matter (`front-matter`, "A highlight can't be made in front matter yet. Select text in
   the body instead."), where no place keeps the text as it reads (`no-legal-placement`, with the
   reason, and "Select other text to highlight."), and across rows of a table, or out of it, while a
-  row is inserted or moved and pending in it (§3.7). A highlight has no point form, and covers text: a range that covers no
+  row is inserted or moved and pending in it, where its ends can't be taken to rows that are not
+  pending first (§3.7). A highlight has no point form, and covers text: a range that covers no
   text that reads in the newest view, once its ends are placed, is refused with the error code
   `empty-range` ("Select some text to highlight."). That is a point, the line breaks between two
   blocks, markers alone (the opener or the closer of an insertion, a comment's anchor, a
@@ -3563,9 +3595,17 @@ front matter in R Markdown and Quarto.
   body. A change that another tool makes there stays there, and has its entry in the ledger in
   front of it, the file's last.
 - Documents joined by Quarto includes or knitr child documents can contain several ledgers. A
-  marker belongs to the first ledger after it. The editor always writes one.
+  marker belongs to the first ledger after it. The editor always writes one. (Not done yet, #144:
+  the library reads every marker against the last ledger in the file, so marks in front of an
+  earlier ledger show with no author or time.)
 - The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
   (§2.1).
+- A `<!--` with no `-->` of its own, anywhere in the text, opens a comment that runs to the first
+  `-->` after it, and in a file with a ledger that is the ledger's own. A reader (and every other
+  renderer) then finds no ledger and no marks, though the ledger is in the file. Redlines refuses
+  every edit that writes a change or a ledger in such a file, a tracked edit or a table operation, with "Close or remove the `<!--` first.", so that the file keeps exactly
+  one ledger, and the `<!--` stays text until its owner closes or removes it. Once the comment is
+  closed, or removed, the ledger is read again and edits write as they always do.
 
 ### 5.2 Keys
 

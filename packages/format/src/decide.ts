@@ -4,7 +4,7 @@
 // gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
 // changes; block format changes, table marks and moves are kept as they are.
 
-import { breakEnd, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
+import { breakEnd, closerRange, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
   commitEdit,
@@ -43,6 +43,7 @@ import type { PayloadFound } from './payload-marks.ts';
 import { tablesOfText } from './table.ts';
 import { colMarkIds, decideCols } from './table-cols.ts';
 import { isAlignMark, isAlignPoint } from './table-align.ts';
+import { wholeTableDeleted } from './table-bare.ts';
 import { decideRows, originalRowText, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, PayloadMarks, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalView, syntaxOnly } from './views.ts';
@@ -219,11 +220,11 @@ function decisionChanges(
       // Accepting keeps the new text and drops the markers, the old text and the marks in it, but a
       // comment in it stays, as a point comment where the new text starts (format §3.12).
       changes.push(...acceptedOpener(parsed, mark, index, segment));
-      if (close) remove(close);
+      if (close) remove(closerRange(text, close));
     } else {
       // Accepting keeps the text and drops the markers; a highlight is dismissed either way.
       remove(open);
-      if (close) remove(close);
+      if (close) remove(closerRange(text, close));
     }
   }
   return changes;
@@ -373,10 +374,10 @@ function emptiedAnnotations(
     // the first of them (format §4). A highlight has no point form and goes.
     const [point] = live.length === 0 && mark.kind === 'cmt' ? emptied : [];
     for (const segment of emptied) {
-      if (segment === point && segment.close) remove(segment.close);
+      if (segment === point && segment.close) remove(closerRange(text, segment.close));
       else {
         remove(openerRange(segment));
-        if (segment.close) remove(segment.close);
+        if (segment.close) remove(closerRange(text, segment.close));
       }
     }
   }
@@ -417,8 +418,13 @@ function decide(
   marks: readonly MarkRange[],
   action: Action,
 ): TextChange[] {
-  const changes = decideTiers(text, parsed, marks, action);
-  if (action !== 'accept' || changes.length === 0 || marks.some(isRowMove)) return changes;
+  // Rejecting every inserted column of a table whose original column is a pending deletion (#477).
+  const bare =
+    action === 'reject' && parsed.marks.some((mark) => mark.kind === 'del' && isColMark(mark))
+      ? wholeTableDeleted(text, parsed, marks, (all) => decideTiers(text, parsed, all, 'reject'))
+      : undefined;
+  const changes = bare ?? decideTiers(text, parsed, marks, action);
+  if (action !== 'accept' || changes.length === 0) return changes;
   if (!parsed.marks.some((mark) => isRowMove(mark) && mark.kind === 'ins')) return changes;
   return resyncMoves(text, changes);
 }

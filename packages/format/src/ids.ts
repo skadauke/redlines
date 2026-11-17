@@ -31,6 +31,16 @@ export function idsIn(text: string): Set<string> {
 }
 
 /**
+ * A random source that gives the bytes `newId` draws `id` from, for a caller that writes a mark in the
+ * place of another and keeps its id: the id must be free (not in the text) when it is drawn.
+ */
+export function randomFor(id: string): (n: number) => Uint8Array {
+  const bytes = [...id].map((char, i) => (i === 0 ? FIRST : REST).indexOf(char));
+  let at = 0;
+  return (n) => Uint8Array.from({ length: n }, () => bytes[at++ % bytes.length] ?? 0);
+}
+
+/**
  * How many ids, or bytes, may be drawn in vain before the random source is taken to be broken: one
  * that gives the same bytes every time never finds a free id. A source that works finds one in a
  * few draws, as the ids that are used are a tiny part of the 373,977 there are.

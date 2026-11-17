@@ -2,7 +2,8 @@
 
 Status: scope and plan, 2026-10-14. The reader (step 1 of the plan) is written, in
 `packages/word/src/import/`, and so is the mapper to Markdown (`map.ts`, entered through
-`importDocx(bytes)` in `import.ts`). The importer is planned together with the [exporter](README.md).
+`importDocx(bytes)` in `import.ts`). The importer is planned together with the [exporter](README.md), which is written too; File › Export
+to Word… calls the exporter, and no command of the app calls the importer yet.
 
 ## What it is for
 

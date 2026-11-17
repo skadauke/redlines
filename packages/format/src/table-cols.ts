@@ -23,12 +23,13 @@ import {
   afterRemoval,
   afterWriting,
   joinPoints,
+  plainRange,
   removeDeletionLines,
   rowMarker,
   setPositions,
 } from './table-rows.ts';
 import { EditError } from './errors.ts';
-import { commentsOfCols } from './table-rules.ts';
+import { commentsOfCols, tableExtent } from './table-rules.ts';
 import type { MarkRange, Parsed, Range, TextChange } from './types.ts';
 
 /** The lines of a table as cells: the header, the delimiter row, and the body rows. */
@@ -447,7 +448,8 @@ export function originalOrder(table: TableRead): number[] {
  * back where they were and moves a moved column back to its place. Both halves of a move are decided
  * together. Every deletion's position is rewritten as the columns around it go and come.
  *
- * @throws EditError when the table would be left with no column.
+ * @throws EditError when the table would be left with no column of its own and a deleted column still
+ *   pending (see below).
  */
 export function decideCols(
   text: string,
@@ -532,7 +534,21 @@ export function decideCols(
     positions = positions.map((p, k) => (k === line ? p : afterWriting(p, index, k, line)));
   }
   if (items.length === 0) {
-    throw new EditError('A table keeps at least one column.', 'no-legal-placement');
+    // Every column that is left is an inserted one that goes: the table reads as inserted whole, with
+    // nothing as its original, and it goes with them (#477). A column deleted and still pending is
+    // the original of the table, which rejecting the last inserted column can't take with it
+    // (`wholeTableDeleted` writes that, with the deciding of the other).
+    const kept = colDeletions.some(({ line }) => !decidedLines.has(line));
+    if (kept) throw new EditError('A table keeps at least one column.', 'no-legal-placement');
+    const extent = tableExtent(text, table);
+    const range = plainRange(text, parsed, { ...table, to: extent.to });
+    return {
+      changes: [{ from: range.from, to: range.to, insert: '' }],
+      decided,
+      // The comments in it stay, as they do where text goes: each is a point where the table was.
+      anchored: new Set<string>(),
+      travelling: new Set<string>(),
+    };
   }
   const pending = new Set(table.deletions.map((_, k) => k).filter((k) => !decidedLines.has(k)));
   const grid = gridOf(text, table, keepMark ? parsed : undefined);

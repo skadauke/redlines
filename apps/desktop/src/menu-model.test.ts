@@ -23,6 +23,8 @@ function commands() {
     rename: vi.fn(),
     revealInFinder: vi.fn(),
     print: vi.fn(),
+    exportWord: vi.fn(),
+    openDocx: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
     switchLook: vi.fn(),
@@ -202,6 +204,9 @@ describe('the menu model', () => {
       '---',
       'Close',
       '---',
+      ['Open .docx…', undefined],
+      ['Export to Word…', undefined],
+      '---',
       ['Print…', 'CmdOrCtrl+P'],
     ]);
     expect(readsAll(model, 'Edit')).toEqual([
@@ -288,6 +293,10 @@ describe('the menu model', () => {
     expect(c.revealInFinder).toHaveBeenCalledOnce();
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
+    click('File', 'Open .docx…');
+    expect(c.openDocx).toHaveBeenCalledOnce();
+    click('File', 'Export to Word…');
+    expect(c.exportWord).toHaveBeenCalledOnce();
     click('View', 'Plain');
     expect(c.setView).toHaveBeenLastCalledWith('raw');
     // Redlines, which the editor shows in the look last chosen with a click on a change bar or the

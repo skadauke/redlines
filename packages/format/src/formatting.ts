@@ -27,6 +27,7 @@
 import {
   breakEnd,
   breakStart,
+  closerRange,
   frontMatterEnd,
   lineEnd,
   lineStart,
@@ -1956,7 +1957,7 @@ function withoutAnnotations(text: string): string {
     if (mark.kind !== 'cmt' && mark.kind !== 'hl') return [];
     return mark.segments.flatMap((segment) => {
       const gone: TextChange[] = [{ ...openerRange(segment), insert: '' }];
-      if (segment.close) gone.push({ ...segment.close, insert: '' });
+      if (segment.close) gone.push({ ...closerRange(text, segment.close), insert: '' });
       return gone;
     });
   });
@@ -2765,8 +2766,20 @@ function ownBlockEdit(
   if ([...near.values()].some(breaks)) return undefined;
   // Your own splits and the comments and highlights near it are what the typing of syntax into your
   // insertion has always stood next to. Anything else near, and your split after it, is tried.
+  // A split of yours between the lines of the block itself is not next to it but in it: parting the
+  // lines, it decides, rejected, how the second one joins the first (what is taken off its start),
+  // which a change of the lines' indentation changes (#870), so that it too is tried.
+  const within =
+    op.kind === 'indent' &&
+    markerRanges(parsed).some(
+      (marker) =>
+        marker.mark?.kind === 'split' &&
+        map.toSource(first, 1) <= marker.from &&
+        marker.to <= map.toSource(last, -1),
+    );
   const trial =
     neighbors.size > 0 ||
+    within ||
     [...near.values()].some(
       (mark) =>
         !(mark.kind === 'split' && mark.entry.by === me) &&

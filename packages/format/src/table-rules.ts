@@ -103,7 +103,7 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
   }
 }
 
-const PENDING_PIPE =
+export const PENDING_PIPE =
   "This key can't be written here with Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the change next to it first, or turn off Track Changes.";
 
 /**
@@ -376,6 +376,24 @@ export function highlightAgainstRows(
     }
   }
   return null;
+}
+
+/**
+ * Where a marker of a comment, to be written at `at` in `text`, goes so that it does not hide the
+ * mark of a pending inserted or moved row: a marker in front of the mark, at the start of the row's
+ * first cell, or between the mark and its space, would take the mark out of the table's reading and
+ * the row could be neither accepted nor rejected. It goes past the mark and its space, where the
+ * text of the row starts. `at` when it is anywhere else.
+ */
+export function pastRowMark(table: TableRead, text: string, at: number): number {
+  for (const row of table.rows) {
+    const open = row.insertion?.segments[0]?.open;
+    if (!open || at < row.from || at > open.to) continue;
+    if (at === open.to || /^[\s|]*$/.test(text.slice(row.from, at))) {
+      return text[open.to] === ' ' ? open.to + 1 : open.to;
+    }
+  }
+  return at;
 }
 
 /** The marks, other than comments and highlights, that have a marker inside `row`. */
@@ -917,7 +935,17 @@ export interface TableNeighbours {
   indentedAbove: boolean;
   /** The line right above the table has text: the table starts on the line under it, with no blank line. */
   underText: boolean;
+  /** The nearest line with text below the table is indented as code. */
+  indentedBelow: boolean;
+  /** The line right below the table has text that opens an HTML comment or block, with no blank line. */
+  htmlBelow: boolean;
+  /** The line right above the table is a heading. */
+  headingAbove: boolean;
 }
+
+/** A line that opens an HTML comment or block (CommonMark's block tags), not an autolink or inline tag. */
+const HTML_OPENS =
+  /^ {0,3}<(?:!--|[?!]|\/?(?:address|article|aside|blockquote|body|center|details|dialog|div|dl|dt|dd|fieldset|figure|figcaption|footer|form|h[1-6]|header|hr|html|iframe|li|main|nav|ol|p|pre|script|section|style|summary|table|tbody|td|th|thead|tr|ul)(?:[ \t>]|\/>|$))/i;
 
 /** What stands next to `table`. */
 export function neighboursOf(text: string, parsed: Parsed, table: TableRead): TableNeighbours {
@@ -928,6 +956,9 @@ export function neighboursOf(text: string, parsed: Parsed, table: TableRead): Ta
   let after = nextLineStart(text, end);
   while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
   const next = after < stop ? text.slice(after, lineEnd(text, after)) : null;
+  const right = nextLineStart(text, end);
+  const directBelow =
+    right < stop && !blankAt(text, right) ? text.slice(right, lineEnd(text, right)) : null;
   // The nearest line with text above the table, and whether it is the line right above.
   const first = bodyStart(text);
   let above: { line: string; directly: boolean } | null = null;
@@ -942,6 +973,9 @@ export function neighboursOf(text: string, parsed: Parsed, table: TableRead): Ta
     fenceOrRuleAbove: above !== null && FENCE_CLOSE_OR_RULE.test(above.line),
     indentedAbove: above !== null && indentOf(above.line) >= 4,
     underText: above?.directly === true,
+    indentedBelow: next !== null && indentOf(next) >= 4,
+    htmlBelow: directBelow !== null && HTML_OPENS.test(directBelow),
+    headingAbove: above?.directly === true && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(above.line),
   };
 }
 
@@ -957,6 +991,15 @@ export const NEXT_TO_WORDS = {
   /** The table starts right under the line above it, with no break in front of it. */
   underText:
     "This table can't be deleted with Track Changes on while it starts right under the line above it, with no blank line between. Put a blank line between them first, or turn off Track Changes.",
+  /** An HTML comment or block follows the table on the next line. */
+  htmlBelow:
+    "This table can't be deleted with Track Changes on while an HTML comment or block follows it with no blank line between. Put a blank line between them first, or turn off Track Changes.",
+  /** Indented code stands above the table and below it. */
+  codeBetween:
+    "This table can't be deleted with Track Changes on while indented code stands both above and below it. Put a paragraph between the table and one of the code blocks first, or turn off Track Changes.",
+  /** The table starts right under a heading with closing #s or attributes. */
+  underHeading:
+    "This table can't be deleted with Track Changes on while it starts right under a heading that has closing #s or attributes. Put a blank line between them first, or turn off Track Changes.",
 } as const;
 
 /** A pipe written plain beside an edit (format §3.7, rule 7): where, what, and whether text at that
@@ -1066,4 +1109,68 @@ export function throughPipes(
     text: written,
     changes: changes.toSorted((a, b) => a.from - b.from || a.to - b.to),
   };
+}
+
+/**
+ * Whether a marker of a highlight or a comment placed at `at` is in a row that is inserted or
+ * moved and pending, or in front of its mark, where a decision of the row would take it away or
+ * hide the mark (`highlightAgainstRows`'s `hides`).
+ */
+export function inPendingRow(table: TableRead, text: string, at: number): boolean {
+  // Among the deleted rows kept under the table, a marker would hide a row's line.
+  const end = table.deletions.reduce(
+    (last, deletion) => Math.max(last, deletion.mark.segments[0]?.open.to ?? last),
+    table.to,
+  );
+  return (
+    (at > table.to && at <= end) ||
+    table.rows.some((row) => row.insertion !== null && row.from <= at && at <= row.to) ||
+    highlightAgainstRows(table, text, { from: at, to: at }) === 'hides'
+  );
+}
+
+/**
+ * The ranges that a highlight or a comment on `wanted` is widened to, for a table with a row
+ * inserted or moved and pending, smallest first: each end that is in a row is taken to the text of a
+ * row that is not pending, above for the start and below for the end, so that no decision of a row
+ * can take a marker away (format §3.12). An end outside the table stays where it is. The caller
+ * tries each, as the places of the markers may still fall in a pending row.
+ */
+export function rowWidenings(table: TableRead, text: string, wanted: Range): Range[] {
+  const rowOf = (at: number) => table.rows.findIndex((row) => row.from <= at && at <= row.to);
+  // The text of a row, between its outer pipes: where its first marker may start, and its last end.
+  const span = (index: number): Range => {
+    const row = table.rows[index] as TableRowRead;
+    const line = text.slice(row.from, row.to);
+    const first = line.search(/[^\s|]/);
+    const last = line.search(/[^\s|][\s|]*$/);
+    return { from: row.from + Math.max(first, 0), to: row.from + Math.max(last, 0) + 1 };
+  };
+  const a = rowOf(wanted.from);
+  const b = rowOf(wanted.to);
+  const froms = [wanted.from];
+  if (a !== -1) {
+    for (let i = a; i >= 0; i--) {
+      if (table.rows[i]?.insertion === null) froms.push(span(i).from);
+    }
+  }
+  const tos = [wanted.to];
+  if (b !== -1) {
+    for (let i = b; i < table.rows.length; i++) {
+      if (table.rows[i]?.insertion === null) tos.push(span(i).to);
+    }
+  }
+  // Last: past the table, to the line of text before it or after it, where its rows have no place.
+  if (a !== -1) {
+    const before = text.slice(0, table.from).replace(/\s+$/, '');
+    if (before !== '') froms.push(before.lastIndexOf('\n') + 1);
+  }
+  if (b !== -1) {
+    const after = /^(?:\s*<!--del [^\n]*-->)*\s*([^\n]+)/.exec(text.slice(table.to));
+    if (after?.[1] && !after[1].startsWith('<!-- redlines')) {
+      tos.push(table.to + after[0].length);
+    }
+  }
+  const pairs = froms.flatMap((from, i) => tos.map((to, j) => ({ from, to, size: i + j })));
+  return pairs.toSorted((x, y) => x.size - y.size).map(({ from, to }) => ({ from, to }));
 }

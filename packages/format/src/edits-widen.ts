@@ -5,11 +5,12 @@
 
 import { EditError } from './errors.ts';
 import { SYNTAX_ONLY } from './inline.ts';
+import { PENDING_PIPE } from './table-rules.ts';
 import { tierOfCode } from './refusals.ts';
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, TextChange } from './types.ts';
 import { newestView } from './views.ts';
-import { widensEditHere } from './widen-scope.ts';
+import { widensEditHere, widensHere } from './widen-scope.ts';
 import { Untrackable, widen } from './widen.ts';
 
 /**
@@ -27,7 +28,9 @@ export function widenedEdits(
   if (!(first instanceof EditError) || tierOfCode(first.code) !== 'widen') throw first;
   // An edit on a line that is only syntax is the editor's to answer (a key takes another form).
   if (first.message === SYNTAX_ONLY) throw first;
-  const done = widenedAtOnce(text, edits, ctx);
+  // A key that would rewrite a pipe of a row next to a pending change is written as a replacement
+  // of the table, which holds the row (format §3.7, §3.12).
+  const done = widenedAtOnce(text, edits, ctx, first.message === PENDING_PIPE);
   if (!done) throw first;
   return done;
 }
@@ -41,9 +44,11 @@ export function widenedAtOnce(
   text: string,
   edits: readonly TextChange[],
   ctx: EditContext,
+  cells = false,
 ): TrackedEdits | undefined {
   if (edits.length === 0) return undefined;
-  if (edits.some((edit) => !widensEditHere(text, edit.from, edit.to))) return undefined;
+  if (edits.some((edit) => !(cells ? widensHere : widensEditHere)(text, edit.from, edit.to)))
+    return undefined;
   try {
     const view = newestView(text);
     const made = edits.map((edit) => ({
@@ -54,7 +59,8 @@ export function widenedAtOnce(
     const done = widen(text, made, ctx);
     // Another person's pending mark in the old text keeps the refusal: some order of decisions
     // would not read as the original (issue #808).
-    if (done.heldByOthers.length > 0) return undefined;
+    // In a table's cell, they stay in the old text of the replacement, as for a table operation.
+    if (!cells && done.heldByOthers.length > 0) return undefined;
     return { changes: done.changes, markIds: [done.id], extendedIds: [] };
   } catch (error) {
     if (error instanceof Untrackable || error instanceof EditError) return undefined;

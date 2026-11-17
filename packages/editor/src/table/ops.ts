@@ -8,11 +8,13 @@ import {
   ChangeSet,
   EditorSelection,
   type EditorState,
+  Transaction,
   type TransactionSpec,
 } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   EditError,
+  askedTableEdit,
   fineTableEdit,
   tableEdit,
   type TableOp,
@@ -26,6 +28,7 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from '../tracked/field.ts';
+import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
 import {
   contextFor,
   editSourceFacet,
@@ -40,7 +43,8 @@ import { tablesField } from './model.ts';
 
 /** What `planned` gives: the changes, where the caret goes, and the rows or columns made. */
 export type Planned =
-  { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[] } | { refusal: string };
+  | { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[]; untracked?: true }
+  | { refusal: string };
 
 /** The format's changes for `op` on the state's text, as Track Changes says; or the refusal. */
 export function planned(
@@ -52,8 +56,14 @@ export function planned(
   /** The operation as the table's own rules write it, never as a replacement of the table: for a
    * caller that works on where the operation put the cells (a paste that goes on to fill them). */
   fine = false,
+  /** The operation as Track Changes off writes it, whatever the setting: what a question to the
+   * person answered Make Edit asks for. */
+  untracked = false,
+  /** Where no tracked write holds the operation, the plain one, marked `untracked`, for a caller that
+   * asks the person first. */
+  asked = false,
 ): Planned {
-  return plannedIn(view.state, op, group, onText, fine);
+  return plannedIn(view.state, op, group, onText, fine, untracked, asked);
 }
 
 /** `planned` for a state, where there is no view (a transaction filter's). */
@@ -63,11 +73,13 @@ export function plannedIn(
   group?: string,
   onText?: string,
   fine = false,
+  untracked = false,
+  asked = false,
 ): Planned {
   const text = onText ?? state.doc.toString();
   try {
-    if (state.field(trackingField))
-      return (fine ? fineTableEdit : tableEdit)(text, op, {
+    if (state.field(trackingField) && !untracked)
+      return (fine ? fineTableEdit : asked ? askedTableEdit : tableEdit)(text, op, {
         ...contextFor(state),
         ...(group ? { group } : {}),
       });
@@ -97,6 +109,9 @@ export function coalesced(text: string, changes: readonly TextChange[]): TextCha
   return [{ from, to, insert: insert + text.slice(at, to) }];
 }
 
+/** The sheet's question for a table operation that no tracked write holds. */
+const UNTRACKED_OPERATION = "This change to the table can't be tracked. Make it without tracking?";
+
 /** Makes an operation's changes one step to undo, the caret where the operation says; or says why
  * it can't. */
 function perform(
@@ -109,12 +124,12 @@ function perform(
     changes: readonly TextChange[],
   ) => EditorSelection,
 ): boolean {
-  const done = planned(view, op);
+  const done = planned(view, op, undefined, undefined, false, false, true);
   if ('refusal' in done) {
     view.dispatch({ effects: refusedEditEffect.of(done.refusal) });
     return true;
   }
-  const tracked = view.state.field(trackingField);
+  const tracked = view.state.field(trackingField) && !done.untracked;
   // An operation on columns writes into every line of the table: as many changes as lines, which the
   // syntax tree would read again one by one. Written as one change over the lines they span, the table
   // is read again once.
@@ -124,11 +139,32 @@ function perform(
   const selection = select
     ? select({ state: next.state } as EditorView, done, changes)
     : EditorSelection.single(done.caret);
+  const annotations = [trackedEditAnnotation.of(true), isolateHistory.of('full')];
+  if (done.untracked) {
+    // No tracked write holds it: the person is asked, and the operation is made without tracking
+    // (design: widen, alert or disable, §3.1), never refused.
+    const asker = view.state.facet(untrackedAskFacet);
+    if (asker) {
+      view.dispatch({
+        effects: heldEditEffect.of({
+          reason: 'accept-pending',
+          words: { title: UNTRACKED_OPERATION },
+          doc: view.state.doc,
+          changes: ChangeSet.of(changes, view.state.doc.length),
+          selection,
+          annotations: [Transaction.userEvent.of(userEvent), ...annotations],
+          scrollIntoView: true,
+        }),
+      });
+      return true;
+    }
+    annotations.push(untrackedAnswerAnnotation.of(true));
+  }
   view.dispatch({
     changes,
     selection,
     userEvent,
-    annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+    annotations,
     // A tracked change made in Clean shows in Redlines, in the look chosen last, as typing's do.
     effects:
       tracked && view.state.field(viewModeField) === 'clean'
