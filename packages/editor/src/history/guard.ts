@@ -231,7 +231,11 @@ function stepInfo(tr: Transaction): StepInfo {
   const intent = made?.kind === 'steps' ? made.steps[0] : made;
   if (!intent) return { person: null, marks: [] };
   const person = intent.author?.handle ?? null;
-  if (!person || !('tracking' in intent && intent.tracking)) return { person, marks: [] };
+  const tracked =
+    'tracking' in intent
+      ? intent.tracking
+      : intent.kind === 'move' || intent.kind === 'widened-paste';
+  if (!person || !tracked) return { person, marks: [] };
   const before = tr.startState.field(parsedField, false);
   const after = tr.state.field(parsedField, false);
   if (!before || !after) return { person, marks: [] };
