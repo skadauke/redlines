@@ -113,15 +113,20 @@ function plain(char: string): string {
 
 /** `text` with its white space gathered and its quotes straightened, and where each character was. */
 function squash(text: string): { text: string; index: number[] } {
-  let out = '';
+  // Pieces joined once at the end, and the last one remembered: `out.endsWith(' ')` on a growing
+  // string is quadratic in V8.
+  const out: string[] = [];
   const index: number[] = [];
+  let spaced = false;
   for (let i = 0; i < text.length; i++) {
     const next = plain(text[i] ?? '');
-    if (next === ' ' && out.endsWith(' ')) continue;
-    out += next;
+    const space = next === ' ';
+    if (space && spaced) continue;
+    spaced = space;
+    out.push(next);
     index.push(i);
   }
-  return { text: out, index };
+  return { text: out.join(''), index };
 }
 
 /** A letter, a digit, or a mark that belongs to one: what a word is made of. */
@@ -200,7 +205,18 @@ const LEAST = 2;
  */
 export function quoteFinder(text: string): (quote: string, near?: number) => Range | null {
   const newest = newestView(text);
+  // One lookup of a quote can take long in a long document (the fuzzy one reads all of it), and
+  // the bubble asks again for each quote it draws: each is looked up once per near position.
+  const known = new Map<string, Range | null>();
   return (quote, near) => {
+    const key = `${near ?? ''}\u0000${quote}`;
+    if (known.has(key)) return known.get(key) ?? null;
+    const found = lookup(quote, near);
+    known.set(key, found);
+    return found;
+  };
+
+  function lookup(quote: string, near: number | undefined): Range | null {
     const words = quote.trim();
     if ([...words].length < LEAST) return null;
     const around = near === undefined ? undefined : newest.map.fromSource(near);
@@ -226,7 +242,7 @@ export function quoteFinder(text: string): (quote: string, near?: number) => Ran
     }
     if (!found) return null;
     return { from: newest.map.toSource(found.from, 1), to: newest.map.toSource(found.to, -1) };
-  };
+  }
 }
 
 /** Where `quote` is in the document `text` (see `quoteFinder`). */

@@ -28,6 +28,7 @@ import { reviewTheme } from './styles.ts';
 export type { FieldAttachment, PostedComment } from './comment-box.ts';
 export { icon, type IconName } from './icons.ts';
 export type { PinnedElement, ThreadExtras } from './rail.ts';
+export { RAIL_GAP } from './styles.ts';
 
 /**
  * What the review interface is and needs. It reads and changes the document, and keeps the comments

@@ -222,6 +222,20 @@ describe('the command', () => {
     expect(tinted.join('')).toBe('Lender');
   });
 
+  it('is about the word before a hidden marker when the caret sits after it', () => {
+    const doc = 'A <!--ins k3x9-->tracked<!--/k3x9--> word.\n';
+    const { editor, notices } = mount({ doc, view: 'redlines' });
+    const text = editor.view.state.doc.toString();
+    // Just after the closing marker, which is hidden: a space is next, so there is no word at it.
+    editor.view.dispatch({ selection: { anchor: text.indexOf('<!--/k3x9-->') + 12 } });
+    expect(editor.commands.run('ask.start')).toBe(true);
+    expect(notices).toEqual([]);
+    const tinted = [...editor.view.dom.querySelectorAll('.rl-qa-target')].map(
+      (el) => el.textContent,
+    );
+    expect(tinted.join('')).toContain('tracked');
+  });
+
   it('says so, and opens nothing, with no text to ask about', () => {
     // On a blank line there is no word.
     const { editor, notices } = mount({ doc: 'a\n\n\nb\n' });
