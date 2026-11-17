@@ -13,7 +13,7 @@ import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
 import { fineEdits as trackedEdits } from './track.ts';
 import type { EditContext, Range, TextChange } from './types.ts';
-import { widen } from './widen.ts';
+import { Untrackable, widen } from './widen.ts';
 import { unitsOf } from './widen-units.ts';
 import type { Unit, UnitKind } from './widen-units.ts';
 import { newestView } from './views.ts';
@@ -191,6 +191,9 @@ interface Plan {
   joins?: boolean;
   /** How many comments and highlights have a marker in the text that the plan takes out. */
   anchors: number;
+  /** The text that the plan takes out holds pending changes (insertions, deletions, replacements,
+   * splits, format changes), of anyone. */
+  pending: boolean;
   /** The edits are the file's own text, markers and all, taken out and put in again: they can't go
    * through the writers of typed text, which refuse markup. */
   verbatim?: boolean;
@@ -248,6 +251,14 @@ function build(
         (segment) => segment.open.from < takenTo && (segment.close ?? segment.open).to > takenFrom,
       ),
   ).length;
+  const pending = parse(text).marks.some(
+    (mark) =>
+      mark.kind !== 'cmt' &&
+      mark.kind !== 'hl' &&
+      mark.segments.some(
+        (segment) => segment.open.from < takenTo && (segment.close ?? segment.open).to > takenFrom,
+      ),
+  );
   const lead = place.insert.startsWith(chunk) ? 0 : breakOf.length;
   let insert = place.insert;
   const cut = { from: takenFrom, to: takenTo };
@@ -260,6 +271,7 @@ function build(
   const start = place.at + lead - (place.at > taken.from ? removed : 0);
   return {
     anchors,
+    pending,
     ...(verbatim ? { verbatim } : {}),
     moved: { from: start, to: start + chunk.length },
     source: [
@@ -380,6 +392,17 @@ export function trackedBlockMove(
     const [plan] = plans;
     if (!plan) return undefined;
     const group = ctx.group ?? newId(idsIn(text), ctx.random);
+    if (plan.pending && !plan.joins) {
+      // Text that holds pending changes goes one way only: the blocks from the old place to the
+      // new replaced, with the changes kept in the old text. The fine write puts deletions among
+      // the markers of an insertion, a mark each on a line of its own, which read otherwise when
+      // some of them are decided and others not (#1052, walk seed 44).
+      try {
+        return { changes: widen(text, plan.view, ctx).changes, moved: plan.moved };
+      } catch (error) {
+        if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
+      }
+    }
     for (const next of plans.filter((other) => !other.joins)) {
       try {
         return {
