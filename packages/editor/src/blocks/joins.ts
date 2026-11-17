@@ -428,25 +428,6 @@ function leaving(
   return { needed, changes, replace: { from, to, insert: text }, code };
 }
 
-/**
- * Why the lines under an item that leaves its list can't be written again as a tracked change
- * where code stands among them: the one substitution that holds the old lines holds no fence or
- * indented code of an item (the tracked layer refuses it). The lane that widens such an edit into
- * a replacement of the whole item, lane R (#497), writes it.
- */
-const NESTED_CODE =
-  "This item can't leave its list while Track Changes is on: what is under it has to move out a level, and code among it can't be written again as a tracked change yet. Take the marker out with Track Changes off, or move the code out first.";
-
-/** `leaving`'s refusal, if Track Changes is on and the lines hold indented code that must move with them. */
-const codeRefusal = (
-  state: EditorState,
-  under: { needed: boolean; code: boolean },
-  userEvent: 'delete.backward.block' | 'delete.forward.block',
-): KeyEdit | null =>
-  under.needed && under.code && state.field(trackingField, false)
-    ? { ...nothing(state), userEvent, refusal: NESTED_CODE }
-    : null;
-
 /** The edits of `leaving`'s lines as the file is edited: Track Changes on writes the replacement. */
 const movedLines = (
   state: EditorState,
@@ -539,8 +520,6 @@ function join(
       doc.lineAt(below.lines.to).number,
       holder?.name === 'ListItem' ? textOffset(state, holder) : 0,
     );
-    const stuck = codeRefusal(state, under, userEvent);
-    if (stuck) return stuck;
     changes.push(...movedLines(state, under));
   }
   return { ...edit(state, changes, from, userEvent), ...(widenFirst ? { widenFirst } : {}) };
@@ -944,8 +923,6 @@ function outdent(state: EditorState, block: Block): KeyEdit {
   const first = state.doc.lineAt(block.lines.to).number;
   const into = textOffset(state, own.node) - moved;
   const tracked = leaving(state, own.node, first, into);
-  const stuck = moved > 0 ? codeRefusal(state, tracked, userEvent) : null;
-  if (stuck) return stuck;
   const under =
     moved <= 0
       ? []
@@ -1050,8 +1027,6 @@ function outOfList(
       }
     }
   }
-  const stuck = codeRefusal(state, under, userEvent);
-  if (stuck) return stuck;
   const moving = movedLines(state, under);
   if (moving.length && prev && state.field(trackingField, false)) {
     // Under a block, the marker's removal is a substitution of the break before it, which a

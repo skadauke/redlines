@@ -42,7 +42,8 @@ interface Line {
 
 const BULLET = /^( {0,3})([-*+]|\d{1,9}[.)])( +|$)/;
 const QUOTE = /^( {0,3})>( ?)/;
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+// A backtick fence has no backtick in its info string (CommonMark 4.5): else it is text.
+const FENCE = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
 const ATX = /^ {0,3}#{1,6}(?:[ \t]|$)/;
 const RULE = /^ {0,3}(?:(?:\* *){3,}|(?:- *){3,}|(?:_ *){3,})$/;
 const MARKER = /<!--.*?-->/g;

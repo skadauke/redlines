@@ -476,6 +476,15 @@ function tryRung(
  * stays one item, a list stays a list, a block of text stays one block. An edit that makes an item
  * two, or takes its text out of the list, belongs to the unit around it. */
 function sameFrame(kind: UnitKind, prefix: string, now: string): boolean {
+  // Code in a container that an edit makes text of is no code: its closer, on a line of its own,
+  // would end a paragraph that the closer is no part of, so the unit around it takes it.
+  if (kind === 'code' && /^ +$/.test(prefix)) {
+    // A line of the text that stands less deep than its item leaves the item, and its code.
+    return now
+      .split(/\r?\n/)
+      .slice(1)
+      .every((line) => line.trim() === '' || line.startsWith(prefix));
+  }
   if (kind !== 'item' && kind !== 'list') return true;
   const source = `${prefix}${now}`;
   const units = unitsOf(source, parse(source));

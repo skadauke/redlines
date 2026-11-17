@@ -146,9 +146,12 @@ scriptRows(
   60_000,
 );
 
+/** What is left of those two refusals in Track Changes on: main's, which the guard of #808 keeps. */
+const CODE_WHOLE =
+  "This code block can't be added as a tracked change here. Add it whole, from its opening fence to its closing one, and with a blank line after it in a list or a quote.";
+const NO_MARKER_THERE =
+  "A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.";
 /** Other shapes of what is under the item: tabs, a quote, a fence, code, a task item, a quote around it. */
-const NESTED_CODE =
-  "This item can't leave its list while Track Changes is on: what is under it has to move out a level, and code among it can't be written again as a tracked change yet. Take the marker out with Track Changes off, or move the code out first.";
 scriptRows(
   rows([
     ['a nested item indented with a tab', '- ‸a⏎\t- b', ['Backspace'], 'a⏎  - b'],
@@ -165,14 +168,14 @@ scriptRows(
       '- ‸a⏎⏎    ```⏎    x⏎    ```',
       ['Backspace'],
       'a⏎⏎  ```⏎  x⏎  ```',
-      { refusal: NESTED_CODE },
+      { refusal: CODE_WHOLE },
     ],
     [
       'indented code beside a nested list',
       '- ‸a⏎⏎      code⏎⏎    - b',
       ['Backspace'],
       'a⏎⏎    code⏎⏎  - b',
-      { refusal: NESTED_CODE },
+      { refusal: NO_MARKER_THERE },
     ],
     [
       'indented code alone keeps its content untracked, as it was tracked',
@@ -245,11 +248,7 @@ scriptRows(
  */
 const KEEP_CODE =
   "This code can't be outdented any further: the line right under it would become part of the paragraph it turns into. Put a blank line under the code first.";
-// With Track Changes on, outdenting indented code is refused by the tracked layer, in words.
-const END_CODE =
-  'This would end the code block it is typed in. Change the code first, or turn off Track Changes.';
-const CODE_IN_ITEM =
-  "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.";
+// With Track Changes on, outdenting indented code is written as a replacement of the block (R5).
 scriptRows(
   rows([
     [
@@ -257,22 +256,22 @@ scriptRows(
       'p⏎⏎    co‸de',
       ['Shift-Tab'],
       'p⏎⏎code',
-      { refusal: END_CODE },
+      'p⏎⏎code⏎',
     ],
-    ['in an item', '- a⏎⏎      co‸de', ['Shift-Tab'], '- a⏎⏎  code', { refusal: CODE_IN_ITEM }],
+    ['in an item', '- a⏎⏎      co‸de', ['Shift-Tab'], '- a⏎⏎  code', '- a⏎⏎  code⏎  '],
     [
       'before a list, a blank line between',
       '    co‸de⏎⏎- a⏎    - b',
       ['Shift-Tab'],
       'code⏎⏎- a⏎    - b',
-      { refusal: END_CODE },
+      'code⏎⏎- a⏎    - b',
     ],
     [
       'past the four columns it takes what more there is',
       'p⏎⏎      co‸de',
       ['Shift-Tab'],
       'p⏎⏎code',
-      { refusal: END_CODE },
+      'p⏎⏎code⏎',
     ],
     [
       'with a list item right under it, in an item (the issue, seed 297)',
