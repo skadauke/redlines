@@ -518,8 +518,11 @@ function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[]
         line !== undefined && DELIMITER_ROW.test(line) && line.includes('|');
       const under = rows[1];
       if (!isTable(under && text.slice(under.from, under.to)) || !isTable(lines[1])) continue;
-      if (rows.length !== lines.length || /[`<\\|\r\n]/.test(edit.insert)) return 'alert';
       const k = rows.findIndex((row) => row.from <= edit.from && edit.to <= row.to);
+      // An edit across rows (a deletion of the rows, or of the whole table) is no edit in a cell: it
+      // is written as it was before this function, and not made an alert.
+      if (k === -1) continue;
+      if (rows.length !== lines.length || /[`<\\|\r\n]/.test(edit.insert)) return 'alert';
       const row = rows[k];
       const old = lines[k];
       if (!row || old === undefined || k === 1) return 'alert';
