@@ -18,7 +18,7 @@ import {
 } from '@redlines/agent-tools';
 import type { ToolContext, ToolDocument } from '@redlines/agent-tools';
 import type { AgentStep, Author } from '@redlines/editor';
-import { parse } from '@redlines/format';
+import { dialectOfName, parse } from '@redlines/format';
 import type { Parsed, Person } from '@redlines/format';
 import type {
   AgentEvent,
@@ -582,6 +582,7 @@ export function createRuns(deps: RunDeps): RunController {
       now: () => new Date(),
       requestedBy: me,
       plainOnly: () => deps.document.plainOnly(),
+      dialect: () => dialectOfName(deps.document.path() ?? ''),
       onStatus: (status) => running(run, status),
       onReply: () => {
         run.replied = true;

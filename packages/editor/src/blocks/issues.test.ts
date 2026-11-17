@@ -124,7 +124,7 @@ describe('the linked issues', () => {
         others: 'bo',
         keys: [{ type: '## x' }],
         // Refused, tracked or not: bo's break right in front of the block is decided with it, so
-        // the guard of #808 keeps the refusal (#107).
+        // a replacement of the block would not read alike in every order (#107).
         off: { refusal: SELF_CHECK },
         on: {
           refusal:
@@ -136,22 +136,15 @@ describe('the linked issues', () => {
         doc: 'new‸<split>⏎words',
         others: 'bo',
         keys: ['Delete', 'Delete'],
-        // The second Delete is refused (#109 open); the first is a join of bo's break.
-        on: {
-          refusal:
-            "This edit would leave bo's line break right next to your deletion, and deciding one would change the other. Decide bo's line break first.",
-        },
+        // The first Delete is a join of bo's break, the second a replacement that holds what is
+        // left of it in its old text (#808, #109).
       },
       {
         name: "#119: Backspace at the start of the line of another person's split in an item",
         doc: '- one⏎new<split>⏎  ‸two',
         others: 'bo',
         keys: ['Backspace'],
-        // Refused with Track Changes on, #119 open.
-        on: {
-          refusal:
-            "A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.",
-        },
+        // With Track Changes on, a replacement of the item that holds bo's break (#808, #119).
       },
       {
         name: '#154: list keys under front matter closed by ...',
@@ -336,16 +329,13 @@ describe('the linked issues', () => {
         },
       },
       {
-        name: '#204: Delete in an empty nested item whose break is another person’s split: refused',
+        name: '#204: Delete in an empty nested item whose break is another person’s split: written whole',
         doc: '- one<split>⏎  - ‸⏎- two',
         others: 'bo',
         keys: ['Delete'],
         off: { file: '- one<split>⏎  - ⏎- two', refusal: SELF_CHECK },
-        on: {
-          file: '- one<split>⏎  - ⏎- two',
-          refusal:
-            "This edit would leave bo's line break right next to your deletion, and deciding one would change the other. Decide bo's line break first.",
-        },
+        // The item and its split are the old text of a replacement (#808).
+        on: { file: '- <sub one<!--split zbb9-->⏎  - >⏎  one</sub>⏎- two' },
       },
       {
         name: '#204: a character with a combining accent goes in two presses, as elsewhere',

@@ -131,6 +131,10 @@ repo root.
   (`~/Library/Application Support/md.redlines.editor/recovery/`), never next to the file; saving or
   closing without saving deletes it, and so does a quit that asked about every document. A window
   that opens the document after a crash puts the edits back and says so in a notification
+- The Quarto check, in `apps/desktop`: `node scripts/quarto-check.ts` (Node 24; Quarto on the PATH)
+  renders a marked-up `.qmd` to HTML, Word and Typst and checks that the newest text comes out
+  ([docs/research/quarto-check.md](docs/research/quarto-check.md)). CI runs it in an optional
+  workflow (`quarto.yml`: the open Epic's schedule, and pull requests that touch Quarto code)
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
@@ -184,6 +188,17 @@ repo root.
 
 ## CI (`.github/workflows/`)
 
+- **Epics work on an integration branch** (#773). `epic/<issue>` starts from main; lane PRs target
+  it and get the **thin** CI below; one PR from it to main, after the final sweep, gets the full
+  CI and merges as a merge commit. **Thin** is `ci.yml` on a pull request (but the one from `epic/*` to main, which is full) and on
+  a push to `epic/**`: typecheck, lint, format, `vitest run --changed <base>` plus the rule tests,
+  and the Rust, Quick Look and journeys jobs only when their paths change (the journeys on a pull
+  request by the label, as below; a push runs none). A push that makes a branch has no base, so
+  it runs every test. **Full** is a push to main, and the scheduled run.
+  **Which branch the scheduled run tests:** a schedule always runs main's copy of `ci.yml`, and its
+  `changes` job picks the commit: the repository variable `EPIC_BRANCH` when it is set, else the one
+  `epic/*` branch there is (the highest number if several; `epic/collab`, a long-lived branch,
+  never), else main. Every job checks out that commit. `deploy-website.yml` and `release.yml` stay on main.
 - `ci.yml`: a `changes` job (Ubuntu, no install) lists the files a change touches, against the
   pull request's base or the push's previous commit, and sets flags: `rust` (`apps/desktop/src-tauri`,
   `apps/desktop/redlines`, `packages/cli`, and on main `packages/format`), `quicklook`
@@ -199,7 +214,7 @@ repo root.
     `cargo test` for the program and `src-tauri`) and `quicklook` (macOS) run only when their flag is
     set; otherwise the job is skipped, which counts as passing.
   **A full run** (`schedule`, `23 */2 * * *`, or `workflow_dispatch`, started by
-  `gh workflow run ci.yml --ref main`) sets every flag, runs every test with `REDLINES_COST=check`
+  `gh workflow run ci.yml --ref <branch>`) sets every flag, runs every test with `REDLINES_COST=check`
   and calls `journeys.yml` (the middle tier). It has a concurrency group of its own and is never
   cancelled; a scheduled one is skipped when a finished full run, scheduled or dispatched (not
   cancelled), already tested main's head, meaning nothing has merged since. The workflow **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the

@@ -1,5 +1,7 @@
 export type * from './types.ts';
 export { EditError } from './errors.ts';
+export { dialectOfName } from './dialect.ts';
+export type { MarkdownDialect } from './dialect.ts';
 export type { EditErrorCode } from './errors.ts';
 export { closerRange, frontMatterEnd, openerRange } from './blocks.ts';
 export { deletedBlocks, deletedTable } from './deleted-blocks.ts';
@@ -14,6 +16,7 @@ export { readBlocks } from './block-read.ts';
 export type { BlockRead } from './block-read.ts';
 export { idsIn, isId, newId } from './ids.ts';
 export { decodePayload, encodePayload } from './payload.ts';
+export { plainPayload } from './changes.ts';
 export { parse } from './parse.ts';
 export type { Change as ParseChange } from './scan.ts';
 export { applyChanges, eolOf } from './changes.ts';
@@ -67,6 +70,15 @@ export {
   writeLedger,
 } from './ledger-map.ts';
 export type { LedgerMap, LedgerOp, LedgerSettings } from './ledger-map.ts';
+export { applyLog, applyLogEntry, ledgerState } from './ledger-log.ts';
+export type {
+  Decision,
+  DroppedDecision,
+  LedgerState,
+  LogBody,
+  LogEntry,
+  Outcome,
+} from './ledger-log.ts';
 export { mergeLedgers, renameMarkId } from './ledger-merge.ts';
 export type { LedgerMerge, LedgerMergeOptions, LedgerRename, MergeSide } from './ledger-merge.ts';
 export { recordTracking, setView } from './settings.ts';

@@ -6,8 +6,9 @@ import { EditorSelection } from '@codemirror/state';
 import { newestView, originalView } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
+import { openBlock } from './open.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
-import { BlockDrag, type DragGeometry, draggableRun, pickGap } from './drag.ts';
+import { BlockDrag, type DragGeometry, draggableRead, draggableRun, pickGap } from './drag.ts';
 import { runOfSelection } from './move.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -148,4 +149,28 @@ describe('a drag as the editor scrolls', () => {
     expect(drag.scrollFor(1)).toBe(true);
     drag.cancel();
   });
+});
+
+describe('a drag with the empty paragraph that Return opened (#888)', () => {
+  for (const tracking of [false, true]) {
+    it(`reads the run in the file's text and moves it, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      const editor = mount(BODY, [4, 4], tracking);
+      const { view } = editor;
+      // Return at the end of the first block opens an empty paragraph; the block's text is selected.
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+      view.dispatch({ selection: EditorSelection.range(0, 4) });
+      expect(openBlock(view.state)).not.toBeNull();
+      const found = draggableRead(view)!;
+      expect(found.run.count).toBe(1);
+      const drag = new BlockDrag(view, found.run, lines, found.read);
+      drag.move(38);
+      expect(drag.gap?.index).toBe(3);
+      expect(drag.drop()).toBe(true);
+      const text = view.state.doc.toString();
+      expect(newestView(text).text.trimEnd()).toBe('Two.\n\nThree.\n\nOne.\n\nFour.');
+      if (tracking) expect(originalView(text).text.trimEnd()).toBe(BODY);
+    });
+  }
 });

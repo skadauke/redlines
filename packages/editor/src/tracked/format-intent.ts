@@ -14,7 +14,14 @@ import {
   trackedFormatRanges,
   untrackedFormat,
 } from '@redlines/format';
-import type { EditContext, FormatOp, Person, Range, TextChange } from '@redlines/format';
+import type {
+  EditContext,
+  FormatOp,
+  MarkdownDialect,
+  Person,
+  Range,
+  TextChange,
+} from '@redlines/format';
 import { ChangeSet } from '@codemirror/state';
 import { recording, replaying } from './intent.ts';
 
@@ -38,6 +45,8 @@ export interface FormatIntent {
   /** The group of the marks of several ranges, decided together. */
   group?: string;
   author: Person | null;
+  /** The dialect of the file it was written for (format §9.1). */
+  dialect?: MarkdownDialect;
   /** To the minute. Empty when the format was written without tracking. */
   time: string;
   drawn: readonly (readonly number[])[];
@@ -56,6 +65,8 @@ export interface FormatRequest {
   group?: string;
   author: Person | null;
   time: string;
+  /** The dialect of the file (format §9.1); GitHub's when left out. */
+  dialect?: MarkdownDialect;
   /** Where ids come from; none for the system's. */
   random?: (n: number) => Uint8Array;
 }
@@ -78,18 +89,19 @@ export function writeFormat(
     author: needAuthor(author, tracking),
     time,
     random: drawing.random,
+    ...(request.dialect === undefined ? {} : { dialect: request.dialect }),
     ...(group === undefined ? {} : { group }),
   });
   const made = (() => {
     if (tracking && writer === 'ranges')
       return trackedFormatRanges(text, ranges, op, ctx()).changes;
     if (ranges.length === 1)
-      return one(text, ranges[0]!, op, tracking, writer, ctx, author, drawing);
+      return one(text, ranges[0]!, op, tracking, writer, ctx, author, drawing, request.dialect);
     let doc = text;
     let total = ChangeSet.empty(text.length);
     for (const found of ranges.toReversed()) {
       const range = { from: total.mapPos(found.from, -1), to: total.mapPos(found.to, 1) };
-      const step = one(doc, range, op, tracking, writer, ctx, author, drawing);
+      const step = one(doc, range, op, tracking, writer, ctx, author, drawing, request.dialect);
       const set = ChangeSet.of(
         step.map(({ from, to, insert }) => ({ from, to, insert })),
         doc.length,
@@ -114,6 +126,7 @@ export function writeFormat(
       ...(request.compose ? { compose: true } : {}),
       ...(group === undefined ? {} : { group }),
       author,
+      ...(request.dialect === undefined ? {} : { dialect: request.dialect }),
       time: tracking ? time : '',
       drawn: drawing.drawn,
     },
@@ -135,11 +148,13 @@ function one(
   ctx: () => EditContext,
   author: Person | null,
   drawing: { random: ((n: number) => Uint8Array) | undefined },
+  dialect: MarkdownDialect | undefined,
 ): TextChange[] {
   if (!tracking) {
     return untrackedFormat(text, range, op, {
       ...(drawing.random ? { random: drawing.random } : {}),
       ...(author ? { author } : {}),
+      ...(dialect === undefined ? {} : { dialect }),
     });
   }
   return (writer === 'fine' ? fineFormat : trackedFormat)(text, range, op, ctx()).changes;
@@ -168,6 +183,7 @@ export function deriveFormat(
     ...(intent.group === undefined ? {} : { group: intent.group }),
     author: intent.author,
     time: intent.time,
+    ...(intent.dialect === undefined ? {} : { dialect: intent.dialect }),
     random: replaying(intent),
   }).changes;
 }
