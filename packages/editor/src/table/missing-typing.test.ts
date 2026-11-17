@@ -380,37 +380,23 @@ describe('an input method composing in a cell a row lacks', () => {
   for (const tracking of [false, true]) {
     const mode = `Track Changes ${tracking ? 'on' : 'off'}`;
 
-    it(`writes the pipes, plain, when it starts, and the composed text is in the new cell, ${mode}`, async () => {
+    it(`writes the pipes, plain, with the first composed text, and nothing before it, ${mode}`, async () => {
       const editor = load(DOC, AT_ONE, tracking);
       press(editor, 'Tab');
       press(editor, 'Tab');
       start(editor);
-      // The pipes only: no mark, and the cell is there, the caret in it.
-      const written = editor.getDoc();
-      expect(written.startsWith('| a | b | c |\n| - | - | - |\n| 1 | |  |\n')).toBe(true);
-      expect(written).not.toContain('<!--ins');
-      const stop = written.indexOf('|  |\n| 4') + 2;
-      expect(head(editor)).toBe(stop);
-      expect(lacking(editor)).toBeNull();
-      // The composition goes on in a real empty cell, with its filler.
-      const row = editor.view.contentDOM.querySelectorAll('.cm-line.rl-trow')[1];
-      // The two empty cells it has now, with a filler each, and none that the row lacks.
-      expect(row?.querySelectorAll('.rl-tc-fill')).toHaveLength(2);
-      expect(row?.querySelectorAll('.rl-tc-missing')).toHaveLength(0);
-      // An update that leaves the cell alone leaves its filler where it is, for the input method to
-      // work beside: the same element, not one drawn again.
-      const filler = row?.querySelectorAll('.rl-tc-fill')[1];
-      editor.view.dispatch({ selection: { anchor: head(editor) }, userEvent: 'select' });
-      expect(
-        editor.view.contentDOM
-          .querySelectorAll('.cm-line.rl-trow')[1]
-          ?.querySelectorAll('.rl-tc-fill')[1],
-      ).toBe(filler);
+      // Starting writes nothing.
+      expect(editor.getDoc()).toBe(DOC);
+      const stop = DOC.indexOf('| 1 |') + 5;
       composing(editor, true);
       compose(editor, stop, stop, '¨', true);
-      compose(editor, stop, stop + 1, 'ö');
+      // The pipes are there with the first text, in a real cell.
+      expect(newestView(editor.getDoc()).text).toContain('| 1 | | ¨ |');
+      expect(lacking(editor)).toBeNull();
+      const stopped = head(editor);
+      compose(editor, stopped - 1, stopped, 'ö');
       await tick();
-      expect(editor.getDoc()).toContain('| 1 | | ö |');
+      expect(newestView(editor.getDoc()).text).toContain('| 1 | | ö |');
       composing(editor, false);
       editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
       await tick();
@@ -419,21 +405,51 @@ describe('an input method composing in a cell a row lacks', () => {
       expect(done.includes('<!--ins')).toBe(tracking);
       if (tracking) expect(reads(originalView(done).text)).toEqual(reads(DOC));
       expect(notices(editor)).toEqual([]);
-      // The pipes are a step of their own: one Undo takes the text, the next the pipes.
-      undo(editor.view);
-      expect(editor.getDoc()).toBe(written);
-      undo(editor.view);
-      expect(editor.getDoc()).toBe(DOC);
     });
   }
 
-  it('writes the pipes of a row with no closing pipe, so that the cell is there to compose in', () => {
+  it('writes nothing when the composition is cancelled, and leaves undo and redo as they were', async () => {
+    for (const tracking of [false, true]) {
+      const editor = load(DOC, AT_ONE, tracking);
+      // A step to undo and one to redo: the cell's pipes aside, the file has history of its own.
+      editor.view.dispatch({
+        changes: { from: DOC.indexOf('4'), insert: 'z' },
+        userEvent: 'input.type',
+      });
+      undo(editor.view);
+      const before = editor.getDoc();
+      expect(before).toBe(DOC);
+      redo(editor.view);
+      expect(editor.getDoc()).toMatch(/z/);
+      undo(editor.view);
+      press(editor, 'Tab');
+      press(editor, 'Tab');
+      start(editor);
+      composing(editor, true);
+      editor.view.contentDOM.dispatchEvent(new Event('compositionupdate', { bubbles: true }));
+      composing(editor, false);
+      editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
+      await tick();
+      expect(editor.getDoc()).toBe(DOC);
+      // The redo of the typed z is still there.
+      redo(editor.view);
+      expect(editor.getDoc()).toMatch(/z/);
+    }
+  });
+
+  it('writes the pipes of a row with no closing pipe with the first composed text', () => {
     const doc = '| a | b | c |\n| - | - | - |\n| 1 | 2';
     const editor = load(doc, doc.length, false);
     press(editor, 'Tab');
     start(editor);
-    expect(editor.getDoc()).toBe('| a | b | c |\n| - | - | - |\n| 1 | 2 |  |');
-    expect(head(editor)).toBe(editor.getDoc().length - 2);
+    expect(editor.getDoc()).toBe(doc);
+    const at = head(editor);
+    editor.view.dispatch({
+      changes: { from: at, insert: '¨' },
+      selection: { anchor: at + 1 },
+      userEvent: 'input.type.compose.start',
+    });
+    expect(editor.getDoc()).toBe('| a | b | c |\n| - | - | - |\n| 1 | 2 | ¨');
   });
 
   it('does nothing when the caret is not in a cell its row lacks', () => {

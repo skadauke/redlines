@@ -998,8 +998,9 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   typed. Typing in one writes its pipes first, plain, and then the text, as any typing is written:
   `| 1 |` under a header of three columns becomes `| 1 | | x |` for an `x` in the third. Tracked,
   only the `x` is the insertion, and rejecting it gives back a table that reads as it did, for the
-  pipes are no change (format §3.7, "A cell a row lacks"). An input method that starts to compose
-  there writes the pipes first, so that it composes in a real cell. A row with more cells than the
+  pipes are no change (format §3.7, "A cell a row lacks"). An input method that composes
+  there writes the pipes with its first composed text (not when it starts, so a composition
+  cancelled before any text writes nothing). A row with more cells than the
   header has its extra cells hidden and kept: no key puts the caret in one, selecting a row, a
   column or the table leaves them out, and no text is lost while the row stays (a deleted row takes
   its hidden extra cells with it).
