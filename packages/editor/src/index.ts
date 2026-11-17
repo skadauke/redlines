@@ -24,6 +24,7 @@ import {
   type TextChange,
 } from '@redlines/format';
 import type {
+  AgentEditOutcome,
   Author,
   DocumentKind,
   Editor,
@@ -42,6 +43,8 @@ import {
   disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
+import { agentIntent, agentIntentAnnotation } from './tracked/agent-intent.ts';
+import { rebaseAgentEdit } from './tracked/agent-rebase.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
 export { inFrontMatter };
@@ -257,6 +260,9 @@ export {
   trackingField,
 } from './tracked/typing.ts';
 export { intentAnnotation, intentOf } from './tracked/intent.ts';
+export { agentIntentAnnotation, agentIntentOf } from './tracked/agent-intent.ts';
+export type { AgentIntent } from './tracked/agent-intent.ts';
+export { anchorChanges, rebaseAgentEdit } from './tracked/agent-rebase.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
 export type { Intent, IntentEdit, TypingIntent } from './tracked/intent.ts';
@@ -655,8 +661,18 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         trackingChosen = null;
       }
     },
-    applyAgentEdit: (doc, step) => {
-      if (doc === fileText(view.state)) return;
+    applyAgentEdit: (written, step, base) => {
+      const was = fileText(view.state);
+      let doc = written;
+      let dropped: AgentEditOutcome['dropped'] = [];
+      const rebased = base !== undefined && base !== was && base !== written;
+      if (rebased) {
+        const placed = rebaseAgentEdit(was, base, written);
+        doc = placed.text;
+        dropped = placed.dropped.map(({ removed, insert }) => ({ removed, insert }));
+      }
+      const outcome = { rebased, dropped };
+      if (doc === was) return outcome;
       const next = loadFile(doc, plain());
       const { state } = view;
       const { changes, selection, effects } = newVersion(state, next.doc);
@@ -666,8 +682,19 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         // The file and its line breaks, which the history gives back with the step.
         effects: [...next.effects, ...effects],
         // A step of the agent's, which Track Changes leaves as the agent wrote it.
-        annotations: [agentStep.of(step), trackedEditAnnotation.of(true)],
+        annotations: [
+          agentStep.of(step),
+          trackedEditAnnotation.of(true),
+          ...(base === undefined
+            ? []
+            : [
+                agentIntentAnnotation.of(
+                  agentIntent({ group: step.group, agent: step.agent, base, next: written }),
+                ),
+              ]),
+        ],
       });
+      return outcome;
     },
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),

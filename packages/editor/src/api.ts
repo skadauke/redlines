@@ -407,6 +407,14 @@ export interface EditorOptions {
   onNothingToUndo?: (redo: boolean) => void;
 }
 
+/** What an agent's edit did on the text it met. */
+export interface AgentEditOutcome {
+  /** The edit was placed on newer text, not written as it was. */
+  rebased: boolean;
+  /** The agent's changes that could not be placed, since the text they changed is gone. */
+  dropped: readonly { removed: string; insert: string }[];
+}
+
 /** An agent's edit, for the history: what it is part of, and who made it (design: What a step is). */
 export interface AgentStep {
   /**
@@ -475,8 +483,15 @@ export interface Editor {
    * scroll stay where the text stayed; unlike one, it is a step to undo, joined to the newest step
    * when that is `step.group`'s, and Track Changes leaves it as it is. `getDoc()` is then `next`
    * byte for byte; Undo gives back the text before, byte for byte, and Redo `next`.
+   *
+   * With `base`, the text the agent's tool read to work out `next`, and a document that is no longer
+   * that text (someone typed meanwhile), what the agent changed is placed on the text as it is, and
+   * what others wrote since stays: the edit is a push, not a whole-text write. A change of the
+   * agent's whose text is gone is left out and told in the outcome; nothing throws for it. The
+   * ledger's entries are merged by key, so both writers' marks and comments are kept. With no `base`,
+   * or a document still at it, the edit is `next`, as before.
    */
-  applyAgentEdit(next: string, step: AgentStep): void;
+  applyAgentEdit(next: string, step: AgentStep, base?: string): AgentEditOutcome;
   /**
    * The parse of the document as CodeMirror holds it, with LF line breaks, so its offsets are
    * CodeMirror positions. Its `text` matches `getDoc()` only when all the file's line breaks
