@@ -92,6 +92,9 @@ const COLUMNS_FIRST = 'Accept or reject the column changes in this table first.'
 const ROWS_FIRST = 'Accept or reject the row changes in this table first.';
 const PLACE =
   "A marker can't go at the end of this table's header, where Markdown would read it otherwise. Change the end of its last cell first, then align.";
+/** The refusal of an edit in a file whose ledger a lone `<!--` hides (#483). */
+const HIDES_LEDGER =
+  "The end of this file is inside a code block or a comment that is never closed, or a `<!--` with no `-->` of its own hides its ledger, so Redlines can't write the ledger. Close or remove the `<!--` first.";
 /** The words of a refusal to align while more changes than are looked at in every order are pending in the header's last cell. */
 const TOO_MANY = "Decide the changes in the last cell of this table's header first, then align.";
 const LOST =
@@ -318,13 +321,15 @@ describe('aligning a column, tracked (format §3.7)', () => {
         'a | `b\n--|--\nc | d`',
       ]) {
         const text = file(body);
-        // An unclosed comment is no text that a replacement can hold either: the refusal stays, as
-        // it is today (filed). A backtick that a later cell closes is widened.
+        // An unclosed comment is no text that a replacement can hold either: the refusal stays, in
+        // the words of a `<!--` that hides the file's ledger (#483): the file has one, which the
+        // comment covers, so nothing is written beside it. A backtick that a later cell closes is
+        // widened.
         if (body.includes('<!--'))
           expect(
             said(() => align(text, [0], 'right')),
             body,
-          ).toBe(PLACE);
+          ).toBe(HIDES_LEDGER);
         else widened(body, text, () => align(text, [0], 'right'));
         expect(
           said(() => edit(text, { kind: 'align', cols: [0], align: 'right' }, null)),

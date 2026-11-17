@@ -239,8 +239,8 @@
     border-bottom: 1px solid #c7c7cc;
     padding: 0.3em 0.55em;
     text-align: left;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    /* Wrap at spaces; break a word anywhere only when it can't fit (an address). */
+    overflow-wrap: break-word;
   }
 
   #rl-print th {

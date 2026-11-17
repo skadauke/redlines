@@ -295,3 +295,40 @@ describe('Align, with Track Changes on', () => {
     expect(editor.getDoc()).toBe(doc);
   });
 });
+
+describe('an operation that no tracked write holds', () => {
+  const UNCLOSED = '| A | B <!-- x |\n| - | - |\n| a1 | b1 |\n';
+  const mounted: Editor[] = [];
+  afterEach(() => {
+    for (const editor of mounted.splice(0)) editor.destroy();
+    document.body.replaceChildren();
+  });
+
+  it('is asked about, never refused, and held until the person answers', async () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const asked: string[] = [];
+    const editor = createEditor(parent, {
+      doc: UNCLOSED,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking: true,
+      askUntracked: {
+        ask: (_reason, words) => {
+          asked.push(words?.title ?? '');
+          return Promise.resolve('cancel');
+        },
+        skip: () => false,
+      },
+      onNotice: (message) => asked.push(`notice: ${message}`),
+    });
+    mounted.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    editor.view.dispatch({ selection: { anchor: UNCLOSED.indexOf('a1') + 1 } });
+    expect(alignCols(editor.view, 'center')).toBe(true);
+    // Not refused: the edit is held for the sheet, and the file is as it was until it answers.
+    expect(asked.filter((line) => line.startsWith('notice:'))).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(asked).toEqual(["This change to the table can't be tracked. Make it without tracking?"]);
+    expect(editor.getDoc()).toBe(UNCLOSED);
+  });
+});

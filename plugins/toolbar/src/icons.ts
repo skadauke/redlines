@@ -97,6 +97,8 @@ const ICONS = {
     '<path d="M2.5 5h4M10.5 5h3M2.5 11h2M8.5 11h5"/><circle cx="8.5" cy="5" r="1.7"/><circle cx="6.5" cy="11" r="1.7"/>',
   /** The search box's mark. */
   search: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L13.5 13.5"/>',
+  /** Crop: two corner marks crossing. */
+  crop: '<path d="M4.5 1.8v9.7h9.7M1.8 4.5h9.7v9.7"/>',
   /** The mark of a menu in the bar. */
   chevron: '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
   /** Cut: scissors. */

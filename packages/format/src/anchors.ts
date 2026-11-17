@@ -16,10 +16,11 @@ import {
   nextLineStart,
   prefixLength,
 } from './blocks.ts';
+import { readBlocks } from './block-read.ts';
 import { EditError } from './errors.ts';
 import { snapOut } from './edit-support.ts';
 import type { MarkerRange } from './edit-support.ts';
-import { inspectPlace, stepLeft, stepRight } from './inline.ts';
+import { hitsIn, inspectPlace, stepLeft, stepRight, visible } from './inline.ts';
 import { scan } from './scan.ts';
 import type { Parsed, Range } from './types.ts';
 
@@ -86,6 +87,121 @@ function pastBlankLines(text: string, position: number, end: number): number {
   return position;
 }
 
+/**
+ * `range` with an end that falls inside an HTML block moved out to the edge of the whole block: its
+ * start back to the block's first character, its end on to the block's last. A comment or a
+ * highlight there is anchored to the whole block, not refused, as the block is drawn as one thing and
+ * its raw text is hidden (format §4). The blocks are read from the text without its markers, as the
+ * views read it; a text the block reader doesn't know (tabs, a lone carriage return) is left as it is.
+ */
+function widenToHtmlBlocks(
+  text: string,
+  markers: readonly MarkerRange[],
+  body: number,
+  range: Range,
+  frontEnd: number,
+): Range {
+  // The blocks are read from the body: front matter is no Markdown, and a line of it that an HTML
+  // block would start with must not take in the body after it.
+  const begin = frontEnd >= 0 ? frontEnd + 1 : 0;
+  if (begin >= body || !text.slice(begin, body).includes('<')) return range;
+  const shown = visible(text, markers, begin, body);
+  const blocks = readBlocks(shown.text)?.filter((block) => block.kind === 'html');
+  if (!blocks?.length) return range;
+  const lines = shown.text.split('\n');
+  const starts: number[] = [];
+  for (let at = 0, n = 0; n < lines.length; n++) {
+    starts.push(at);
+    at += (lines[n]?.length ?? 0) + 1;
+  }
+  let { from, to } = range;
+  const start = from;
+  const end = to;
+  for (const { first, last } of blocks) {
+    const at = starts[first];
+    const after = starts[last];
+    if (at === undefined || after === undefined) continue;
+    const line = lines[last] ?? '';
+    const lineEndAt = after + line.length - (line.endsWith('\r') ? 1 : 0);
+    const open = lineTextStart(text, shown.offsets[at] ?? 0);
+    const close = shown.offsets[lineEndAt] ?? body;
+    if (start > open && start < close) from = Math.min(from, open);
+    if (end > open && end < close) to = Math.max(to, close);
+  }
+  return { from, to };
+}
+
+/**
+ * Where a marker at `position` may stand when pending deletions are rejected: out of an entity, a
+ * tag or a link's syntax that rejecting them puts together around it (#467). Deleted text is read
+ * as it was written, so `&a` deleted, `m`, then the marker, then `p`, then `;` deleted is the entity
+ * `&amp;` with the marker inside it. The marker goes to the nearest edge of that construct, the
+ * left one where the edges are as near; the file's own offset of the edge is returned, or undefined
+ * where the position is in no construct that a deletion takes part in.
+ */
+function outOfRejected(
+  text: string,
+  markers: readonly MarkerRange[],
+  position: number,
+  end: number,
+): number | undefined {
+  // Most files have no deletion before the position: nothing to read then.
+  if (
+    !markers.some(
+      (m) => m.from < end && m.role === 'open' && m.mark?.kind === 'del' && m.segment?.payload,
+    )
+  ) {
+    return undefined;
+  }
+  // The text as it reads with every deletion rejected: each character with where it stands in the
+  // file; the characters of a deletion's payload stand at its marker, before or after as a whole.
+  const chars: string[] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let payloads = 0;
+  let cursor = 0;
+  const visibleTo = (to: number) => {
+    for (; cursor < to; cursor++) {
+      chars.push(text[cursor] ?? '');
+      starts.push(cursor);
+      ends.push(cursor + 1);
+    }
+  };
+  for (const marker of markers) {
+    if (marker.from >= end) break;
+    if (marker.to <= cursor) continue;
+    visibleTo(Math.max(marker.from, cursor));
+    cursor = Math.max(cursor, marker.to);
+    const payload = marker.mark?.kind === 'del' ? marker.segment?.payload : undefined;
+    if (marker.role === 'open' && payload) {
+      for (const c of payload) {
+        chars.push(c);
+        starts.push(marker.from);
+        ends.push(marker.to);
+        payloads++;
+      }
+    }
+  }
+  if (payloads === 0) return undefined;
+  visibleTo(end);
+  const rest = chars.join('');
+  // The characters in front of the position: a deletion's payload is before it when its marker is.
+  let q = 0;
+  while (q < starts.length && (ends[q] ?? 0) <= position) q++;
+  const { hits } = hitsIn(rest, text);
+  for (const hit of hits) {
+    if (q < hit.lo || q > hit.hi || hit.refuse !== undefined) continue;
+    // Only a construct that a deletion's text is part of: the others are the newest view's.
+    let part = false;
+    for (let i = hit.from; i < hit.to; i++)
+      if ((ends[i] ?? 0) - (starts[i] ?? 0) !== 1) part = true;
+    if (!part) continue;
+    const edge = q - hit.from <= hit.to - q ? hit.from : hit.to;
+    return edge === hit.from ? starts[edge] : ends[edge - 1];
+  }
+  return undefined;
+}
+
 /** The range of an anchor, moved to where its markers may stand (see the head of this file).
  * `end` is where the body ends. */
 function placeAnchor(
@@ -111,6 +227,10 @@ function placeAnchor(
   if (to < from) to = from;
   for (let attempt = 0; attempt < 24; attempt++) {
     const state = `${from} ${to}`;
+    // Not inside an entity, a tag or a link that rejecting pending deletions puts together (#467).
+    from = outOfRejected(text, markers, from, end) ?? from;
+    if (to > from) to = outOfRejected(text, markers, to, end) ?? to;
+    if (to < from) to = from;
     const open = inspectPlace(text, markers, from);
     if (open.kind === 'refuse') refuse(open.reason);
     else if (open.kind === 'construct') {
@@ -176,7 +296,17 @@ export function anchorRange(
   words: AnchorWords,
 ): Range {
   const frontEnd = frontMatterEnd(text);
-  const inBody = withinBody(text, parsed, range);
+  const bounded = withinBody(text, parsed, range);
+  if (frontEnd >= 0 && bounded.from <= frontEnd) {
+    throw new EditError(words.frontMatter, 'front-matter');
+  }
+  const inBody = widenToHtmlBlocks(
+    text,
+    markers,
+    parsed.ledgerRange?.from ?? text.length,
+    bounded,
+    frontEnd,
+  );
   if (frontEnd >= 0 && inBody.from <= frontEnd) {
     throw new EditError(words.frontMatter, 'front-matter');
   }

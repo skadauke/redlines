@@ -4,7 +4,7 @@
 // gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
 // changes; block format changes, table marks and moves are kept as they are.
 
-import { breakEnd, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
+import { breakEnd, closerRange, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
   commitEdit,
@@ -43,7 +43,8 @@ import type { PayloadFound } from './payload-marks.ts';
 import { tablesOfText } from './table.ts';
 import { colMarkIds, decideCols } from './table-cols.ts';
 import { isAlignMark, isAlignPoint } from './table-align.ts';
-import { decideRows, rowMarkIds } from './table-ops.ts';
+import { wholeTableDeleted } from './table-bare.ts';
+import { decideRows, originalRowText, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, PayloadMarks, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalView, syntaxOnly } from './views.ts';
 
@@ -219,11 +220,11 @@ function decisionChanges(
       // Accepting keeps the new text and drops the markers, the old text and the marks in it, but a
       // comment in it stays, as a point comment where the new text starts (format §3.12).
       changes.push(...acceptedOpener(parsed, mark, index, segment));
-      if (close) remove(close);
+      if (close) remove(closerRange(text, close));
     } else {
       // Accepting keeps the text and drops the markers; a highlight is dismissed either way.
       remove(open);
-      if (close) remove(close);
+      if (close) remove(closerRange(text, close));
     }
   }
   return changes;
@@ -373,10 +374,10 @@ function emptiedAnnotations(
     // the first of them (format §4). A highlight has no point form and goes.
     const [point] = live.length === 0 && mark.kind === 'cmt' ? emptied : [];
     for (const segment of emptied) {
-      if (segment === point && segment.close) remove(segment.close);
+      if (segment === point && segment.close) remove(closerRange(text, segment.close));
       else {
         remove(openerRange(segment));
-        if (segment.close) remove(segment.close);
+        if (segment.close) remove(closerRange(text, segment.close));
       }
     }
   }
@@ -412,6 +413,70 @@ const isRowMove = (mark: MarkRange) => isRowMark(mark) && mark.entry.move !== un
  * pending in it decided already, which a decision over the same lines could not do together.
  */
 function decide(
+  text: string,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  action: Action,
+): TextChange[] {
+  // Rejecting every inserted column of a table whose original column is a pending deletion (#477).
+  const bare =
+    action === 'reject' && parsed.marks.some((mark) => mark.kind === 'del' && isColMark(mark))
+      ? wholeTableDeleted(text, parsed, marks, (all) => decideTiers(text, parsed, all, 'reject'))
+      : undefined;
+  const changes = bare ?? decideTiers(text, parsed, marks, action);
+  if (action !== 'accept' || changes.length === 0) return changes;
+  if (!parsed.marks.some((mark) => isRowMove(mark) && mark.kind === 'ins')) return changes;
+  return resyncMoves(text, changes);
+}
+
+/**
+ * A decision that accepts a change inside a row that a pending move wrote is a change of the row, and
+ * the row goes back with it when the move is rejected (format §3.7, #475): the kept copy, which the
+ * original view reads at the old place, is written again as the row now reads with its pending changes
+ * rejected, so that the original view is what rejecting the move gives and every order of the decisions
+ * reads alike.
+ */
+function resyncMoves(text: string, changes: TextChange[]): TextChange[] {
+  const after = applyChanges(text, changes);
+  const read = parse(after);
+  const step: TextChange[] = [];
+  for (const table of tablesOfText(after, read)) {
+    table.rows.forEach((row, index) => {
+      const copy = row.insertion;
+      if (!copy || copy.entry.move === undefined || copy.payload !== 'row') return;
+      const twin = table.deletions.find((d) => d.mark.id === copy.entry.move);
+      const open = twin?.mark.segments[0]?.open;
+      const payload = twin?.mark.payload;
+      if (!twin || !open || payload === undefined) return;
+      try {
+        const moved = applyChanges(after, decide(after, read, [copy], 'accept'));
+        const readMoved = parse(moved);
+        const mine = tablesOfText(moved, readMoved).find((t) => t.from === table.from);
+        const placed = mine?.rows[index];
+        if (!placed) return;
+        const prefix = /^(?:row|col)=\d+ ?/.exec(payload)?.[0] ?? '';
+        const wanted = prefix + originalRowText(moved, readMoved, placed);
+        if (wanted === payload) return;
+        step.push({
+          from: open.from,
+          to: open.to,
+          insert: `<!--del ${twin.mark.id} ${encodePayload(wanted)}-->`,
+        });
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+    });
+  }
+  if (step.length === 0) return changes;
+  return spliceRepairs(
+    text,
+    changes,
+    after,
+    step.sort((a, b) => a.from - b.from),
+  );
+}
+
+function decideTiers(
   text: string,
   parsed: Parsed,
   marks: readonly MarkRange[],

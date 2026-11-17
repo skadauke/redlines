@@ -1128,3 +1128,38 @@ describe('the mark of an alignment change, through a rewrite of the columns (for
     expect(older).toBeLessThan(fuzzCount(300) / 10);
   });
 });
+
+describe('a plain column operation beside another person’s pending row, under a lone comment half (#480)', () => {
+  const start = file(
+    '| hdra | hdrb | hdrc |\n| -- | ----- | -- |\n| r0c0 | r0c1 | r0c2 |\n| r1c0 | r1c1 <!-- | r1c2 --> |\n',
+  );
+  const pending = edit(start, { kind: 'insertRows', after: 2 }, bo, ['c2dd']).after;
+  const HIDE = /would hide other changes/;
+
+  it('refuses a deletion that carries the row’s marker into the comment the row above opens', () => {
+    expect(said(() => edit(pending, { kind: 'deleteCols', cols: [2] }, null))).toMatch(HIDE);
+    expect(said(() => edit(pending, { kind: 'deleteCols', cols: [0, 2] }, null))).toMatch(HIDE);
+  });
+
+  it('never leaves the pending row unread, whatever plain column operation is made', () => {
+    const read = (text: string) => parse(text).marks.length;
+    for (const shape of [
+      { kind: 'deleteCols', cols: [0] },
+      { kind: 'deleteCols', cols: [1] },
+      { kind: 'deleteCols', cols: [0, 2] },
+      { kind: 'deleteCols', cols: [1, 2] },
+      { kind: 'moveCols', cols: [0], to: 3 },
+      { kind: 'moveCols', cols: [2], to: 0 },
+      { kind: 'moveCols', cols: [0, 1], to: 3 },
+    ] as Shape[]) {
+      const said_ = said(() => {
+        const done = edit(pending, shape, null);
+        expect(read(done.after), JSON.stringify(shape)).toBe(read(pending));
+        expectEveryOrderAlike(JSON.stringify(shape), done.after);
+      });
+      expect(said_ === 'no error' || HIDE.test(said_), `${JSON.stringify(shape)}: ${said_}`).toBe(
+        true,
+      );
+    }
+  });
+});

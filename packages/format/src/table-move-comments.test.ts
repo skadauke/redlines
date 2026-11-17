@@ -511,4 +511,35 @@ describe('a comment in a row that moves (#371)', () => {
       );
     }
   });
+
+  it('is widened to rows that are not pending, when a comment across rows is made beside a pending move', () => {
+    // A comment that runs from one row into another, made while rows are moved and pending, has no
+    // form that every decision of the move leaves: its ends are taken to rows that are not pending.
+    let made = 0;
+    for (const layout of Object.keys(LAYOUTS)) {
+      const { lines } = LAYOUTS[layout] as (typeof LAYOUTS)[string];
+      const base = file(lines.join('\n'));
+      for (const row of [2, 3]) {
+        for (const to of [0, 1, 4]) {
+          if (to === row || to === row + 1) continue;
+          const { text } = moved(base, row, to);
+          const wanted = { from: text.indexOf('b'), to: text.lastIndexOf('x') + 1 };
+          const label = `${layout}, row ${row} to ${to}`;
+          let done: string;
+          try {
+            const { changes } = addComment(text, wanted, 'Why?', context(bo, ['d4rs', 'e5st']));
+            done = applyChanges(text, changes);
+          } catch (error) {
+            if (error instanceof EditError) continue;
+            throw error;
+          }
+          made++;
+          expect(parse(done).ledger.comments.length, label).toBe(1);
+          expectEveryOrderRead(label, done);
+          expect(expectNoDecisionRefused(label, done), label).toBeGreaterThan(0);
+        }
+      }
+    }
+    expect(made).toBeGreaterThan(10);
+  });
 });

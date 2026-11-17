@@ -55,6 +55,7 @@ export function imagesLoaded(root: ParentNode, timeout = IMAGE_WAIT_MS): Promise
 export async function fillPrintPage(html: string, doc: Document = document): Promise<() => void> {
   const container = printContainer(doc);
   container.innerHTML = html;
+  fitTableColumns(container);
   keepHeadingsWithNext(container);
   // A release only empties the page it filled: an older print's hold may let go later, under a
   // newer page that is being written to a PDF.
@@ -70,6 +71,36 @@ export async function fillPrintPage(html: string, doc: Document = document): Pro
 export function plainPageHtml(text: string): string {
   const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return `<div data-redlines><pre><code>${escaped}</code></pre></div>`;
+}
+
+/**
+ * Gives every column of every table one share of its row's width, worked out once from the whole
+ * table, so that the columns are the same on every page: a column is as wide as its longest word
+ * needs (up to 14 characters, and a little over), or as its text is long on average (up to 40),
+ * whichever is more. Cells wrap at spaces; only a longer unbroken string, such as an address, is
+ * broken anywhere (print.css).
+ */
+export function fitTableColumns(root: ParentNode): void {
+  for (const table of Array.from(root.querySelectorAll('table'))) {
+    const rows = Array.from(table.querySelectorAll('tr'));
+    const columns = Math.max(0, ...rows.map((row) => row.children.length));
+    for (let column = 0; column < columns; column++) {
+      const texts = rows.flatMap((row) => {
+        const text = row.children[column]?.textContent?.trim();
+        return text ? [text] : [];
+      });
+      const longest = Math.max(
+        0,
+        ...texts.flatMap((text) => text.split(/\s+/).map((w) => w.length)),
+      );
+      const average = texts.reduce((sum, text) => sum + text.length, 0) / Math.max(1, texts.length);
+      const share = Math.max(Math.min(longest, 14) + 3, Math.min(average, 40), 5);
+      for (const row of rows) {
+        const cell = row.children[column];
+        if (cell instanceof HTMLElement) cell.style.flexGrow = String(Math.round(share * 10) / 10);
+      }
+    }
+  }
 }
 
 /**

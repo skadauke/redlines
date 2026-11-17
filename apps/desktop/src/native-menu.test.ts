@@ -128,6 +128,8 @@ function commands() {
     revealInFinder: vi.fn(),
     print: vi.fn(),
     exportPdf: vi.fn(),
+    exportWord: vi.fn(),
+    openDocx: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
     switchLook: vi.fn(),

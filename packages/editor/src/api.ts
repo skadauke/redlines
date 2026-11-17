@@ -331,6 +331,19 @@ export interface EditorOptions {
    */
   openImage?: (src: string) => void;
   /**
+   * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
+   * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
+   * to keep, as fractions of its width and height. Writes the copy beside the original, in the
+   * project's folder for images, never replacing a file, and answers with the copy's path as the
+   * document links it, or rejects with a sentence for the person. The editor points the image at the
+   * copy (one change, tracked with Track Changes on) and keeps its width and alignment. Default:
+   * none, and the command isn't registered.
+   */
+  cropImage?: (
+    src: string,
+    crop: { x: number; y: number; width: number; height: number },
+  ) => Promise<string>;
+  /**
    * Called when image files are pasted into the document, or dropped on it, with the files and the
    * spot their links will go to (`ImageSpot`). The host saves each file where the document can
    * reach it, then writes the links with `spot.insert`, or lets the spot go. `pasted` tells

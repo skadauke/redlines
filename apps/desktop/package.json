@@ -30,6 +30,7 @@
     "@redlines/plugin-api": "workspace:*",
     "@redlines/review": "workspace:*",
     "@redlines/themes": "workspace:*",
+    "@redlines/word": "workspace:*",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-clipboard-manager": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.8.4",
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.3",
+    "docx": "9.15.1",
     "redlines": "workspace:*",
     "vite": "^8.3.4"
   }

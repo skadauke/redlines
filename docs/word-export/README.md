@@ -1,7 +1,12 @@
 # Exporting Redlines to Word (.docx)
 
-Status: research and recommendation, 2026-10-13. Nothing here is implemented
-yet.
+Status: research and recommendation, 2026-10-13, and the exporter as built. `packages/word`
+(`@redlines/word`) writes a Word file with `exportDocx` (the core, #834; tables, format changes,
+splits, joins, moves, images and task lists, #847; the round-trip carriers, #845), reads one back
+(`importDocx`, see [the importer plan](import.md)) and normalizes Google Docs' export (#838).
+File › Export to Word… and `redlines export-docx` call the writer (#841), and File › Open .docx…
+(`redlines import-docx`) the importer (#881, with pictures, #885); Word and Google Docs also reach
+the editor through paste (#842).
 
 See also [How Word displays Track Changes in tricky cases](word-display.md),
 the [Word importer plan](import.md) and the [Word lab](../research/word.md).
@@ -10,7 +15,7 @@ the [Word importer plan](import.md) and the [Word lab](../research/word.md).
 
 Build the exporter in TypeScript on [`docx`](https://github.com/dolanmiu/docx)
 (MIT, `npm i docx`, version 9.8 or later), as a new workspace package
-`packages/docx`. It walks the parsed Markdown tree plus the marks from
+`packages/word` (`@redlines/word`). It walks the parsed Markdown tree plus the marks from
 `@redlines/format` and emits `docx` objects directly. Do not use
 python-docx. Use pandoc as a test oracle, not as the exporter.
 
@@ -94,7 +99,7 @@ export a fixture, read it back with `pandoc --track-changes=all`, and compare.
 
 The [pandoc filter](../format.md#11-the-pandoc-filter) for R Markdown and
 Quarto uses the same writer, with the same limits. It serves the render
-pipeline; full-fidelity Word files come from `packages/docx`.
+pipeline; full-fidelity Word files come from `packages/word`.
 
 ### python-docx — no Track Changes
 
@@ -138,6 +143,28 @@ Redlines syntax:
    `2026-10-13T22:30:00Z`.
 7. **Open with Track Changes on** (`trackRevisions: true`) so edits made in
    Word come back as revisions too.
+
+### What the exporter writes beyond the core
+
+`packages/word` writes these as well. What has no Word form is said in the second column, and the
+export's `report` (an option, a list of `{kind, message}`) names the ones that need a person.
+
+| Redlines                              | Word                                                                 | What does not map                                                                 |
+| ------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Inserted row (`ins … row`)            | `w:ins` in the row's properties, its text as inserted runs           |                                                                                   |
+| Deleted row (`del … row=N`)           | A row of deleted text at its place, `w:del` in its properties        |                                                                                   |
+| Cell edit                             | `w:ins` and `w:del` runs in the cell                                 |                                                                                   |
+| Inserted column (`ins … col`)         | The new cells' text as inserted runs                                 | Word can't track a new column: rejecting the text leaves an empty column. Reported |
+| Deleted column (`del … col=N`)        | A cell of deleted text in each row, and a comment on the header's    | Word tracks no deleted column: the column stays after accepting. Reported         |
+| Column alignment, alignment change    | `w:jc` on each cell's paragraph; `w:pPrChange` with the old `w:jc`   |                                                                                   |
+| Inline format change (`fmt +bold`…)   | `w:rPrChange` with the old properties: bold, italic, strike, code (font), sub, sup | Link changes (`+link`, `link=`) and `+html`, `@attr` have no run property; the text is exported as it now is |
+| Block format change (`fmt was=…`)     | `w:pPrChange` with the old style, list or indent                     | Callout types (`was=callout-…`) and the number a list item had                    |
+| Split (`<!--split-->`)                | The paragraph mark before it is inserted                             |                                                                                   |
+| Join (a deletion of `\n\n` and prefix) | The paragraph mark is deleted, so that accepting joins the two      |                                                                                   |
+| Move (a deletion and an insertion of the same text in one `group`, or named by `move`) | `w:moveFrom` and `w:moveTo` with one range name | A move that was widened into one substitution is exported as a substitution; a move whose two texts differ is a deletion and an insertion |
+| Image                                 | An inline picture (PNG, JPEG, GIF, BMP) of its own size, at most 6.5 inches wide, with alt text and title; an inserted image is a tracked insertion | Pictures whose bytes are not given (a `data:` address carries them; others through the `images` option), SVG and WebP: the description stands in, `[Image: alt]`. Reported |
+| Comment on deleted text (`about` a deletion) | A comment range around the deleted runs                       | Word drops such a comment when the deletion is accepted                           |
+| Task item                             | A box, `☐` or `☒`, and no bullet; a checked or unchecked box is the old box deleted and the new inserted | Word has no tracked checkbox: a task is only text                       |
 
 ## Proof of concept
 
@@ -250,3 +277,24 @@ mammoth.js and docx-preview ignore or only display revisions, so the importer
 reads the OOXML itself (JSZip plus an XML parser): `w:ins`, `w:del`,
 paragraph-mark revisions, `comments.xml`, `commentsExtended.xml` for threads
 and `commentsIds.xml` for the durable ids written on export.
+
+## In the app and on the command line
+
+- **File › Export to Word…** writes the open document, marks and all, to a `.docx` through a save panel
+  that starts at the document's name with `.docx`. The host writes the bytes (the window may use the
+  file plugin's text command, which writes the bytes it is given, on the file the save panel gave it; no broader write permission). What Word can't hold comes as a
+  notification that stays until it is read; a plain success passes by. Never a dialog.
+- **`redlines export-docx <file.md> [-o out.docx]`** is the same, beside the file by default. It is
+  in the Node command line (`pnpm redlines`); the program in the app, which runs the logic in QuickJS
+  without Node, doesn't carry the writer, and says so.
+- **File › Open .docx…** opens a Word or Google Docs file as a new, unsaved document (here while the
+  window is untouched, else in a new window). The import report is a notification, never a dialog.
+  A file with pictures can't be unsaved (they are files beside the document, in the project's folder
+  for images), so, as adding an image to an unsaved document does, the save panel comes first: the
+  Markdown is saved where the person says, the pictures go into the images folder, each link points at
+  its file, and the saved document opens. When the panel is cancelled the document opens unsaved
+  without its pictures, and the card says so. Pictures that can't be carried (EMF, WMF) are counted
+  in the report. In the development page it is a file picker.
+- **`redlines import-docx <file.docx> [-o out.md]`** writes the Markdown beside the file, and never over
+  a file that is there. The pictures go beside the Markdown
+  as `media/image1.png`, where its links name them, and never over a file that is there.

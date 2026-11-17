@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.setConfig({ testTimeout: 60_000 });
 import { blockRunAt, moveBlockEdits, neighbourGap, trackedBlockMove } from './block-move.ts';
 import { applyChanges } from './changes.ts';
+import { Untrackable } from './widen.ts';
 import { expectEveryOrderRead, expectSound } from './oracle.ts';
 import { parse } from './parse.ts';
 import { ada, bo, bodyOf, context, file, problemsOf } from './test-helpers.ts';
@@ -141,5 +142,20 @@ describe('moving blocks, tracked', () => {
     const two = moved(one, 'Four.', true, bo);
     expect(problemsOf(parse(two))).toEqual([]);
     expectEveryOrderRead('two', two);
+  });
+});
+
+describe('moving blocks that bring two lists side by side (#871)', () => {
+  it('is not written as marks: the newest view reads one list, the file with a marker, two', () => {
+    expect(() => moved(file('- a\n\npara\n\n- b'), 'para', false)).toThrow(Untrackable);
+    expect(() => moved(file('1. a\n\npara\n\n   1. b'), 'para', false)).toThrow(Untrackable);
+  });
+
+  it('writes a move that leaves the lists apart, or that swaps lists that are side by side', () => {
+    const apart = moved(file('- a\n\npara\n\nmore\n\n- b'), 'para', false);
+    expect(viewOf(apart)).toBe('- a\n\nmore\n\npara\n\n- b\n');
+    const swapped = moved(file('- a\n\n1. b'), '- a', false);
+    expect(viewOf(swapped)).toBe('1. b\n\n- a\n');
+    expect(problemsOf(parse(swapped))).toEqual([]);
   });
 });

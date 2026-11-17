@@ -237,28 +237,29 @@ pub fn export_pdf(
             return Err(format!("{} already exists.", path.display()));
         }
     }
-    let target = path.to_string_lossy().into_owned();
-    #[cfg(target_os = "macos")]
-    {
-        let (done, wait) = std::sync::mpsc::channel();
-        let failed = done.clone();
-        window
-            .with_webview(move |webview| {
-                if let Err(error) = crate::pdf::print_to_pdf(webview.inner(), &target, done) {
-                    let _ = failed.send(Err(error));
-                }
-            })
-            .map_err(|error| error.to_string())?;
-        wait.recv_timeout(std::time::Duration::from_secs(120))
-            .map_err(|_| "Timed out writing the PDF".to_string())??;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = target;
-        return Err("Export as PDF is for the Mac app.".into());
-    }
-    #[cfg(target_os = "macos")]
+    write_pdf(&window, path.to_string_lossy().into_owned())?;
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Writes the window's printed page to the PDF file `target`, once WebKit has run the operation.
+#[cfg(target_os = "macos")]
+fn write_pdf(window: &WebviewWindow, target: String) -> Result<(), String> {
+    let (done, wait) = std::sync::mpsc::channel();
+    let failed = done.clone();
+    window
+        .with_webview(move |webview| {
+            if let Err(error) = crate::pdf::print_to_pdf(webview.inner(), &target, done) {
+                let _ = failed.send(Err(error));
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    wait.recv_timeout(std::time::Duration::from_secs(120))
+        .map_err(|_| "Timed out writing the PDF".to_string())?
+}
+
+#[cfg(not(target_os = "macos"))]
+fn write_pdf(_window: &WebviewWindow, _target: String) -> Result<(), String> {
+    Err("Export as PDF is for the Mac app.".into())
 }
 
 /// The panel's suggested name for the document `name`: its own, with `.pdf` for its extension.

@@ -33,6 +33,8 @@ export { pageClipboard } from './edit.ts';
 export type { ToolbarSpelling } from './spelling.ts';
 export type { AppCommand, Control } from './palette.ts';
 export { formatShortcut } from './shortcuts.ts';
+export { MENUS, shownBar } from './items.ts';
+export type { MenuSpec } from './items.ts';
 
 export interface ToolbarOptions {
   /**

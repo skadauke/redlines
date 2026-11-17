@@ -7,11 +7,13 @@
 import { anchorRange, assertRange, checkAnchor, withinBody } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
+import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import { highlightAgainstRows } from './table-rules.ts';
+import { highlightAgainstRows, inPendingRow, rowWidenings } from './table-rules.ts';
+import type { TableRead } from './table.ts';
 import type { EditContext, MarkEntry, Parsed, Range, TextChange } from './types.ts';
 import { viewsOnce } from './views.ts';
 
@@ -57,11 +59,25 @@ function coversText(text: string, from: number, to: number): boolean {
  * change of rows. `wanted` is the range the person asked for, and `placed` where the markers go,
  * in offsets of `text`.
  */
-function refuseAcrossPendingRows(text: string, parsed: Parsed, wanted: Range, placed: Range): void {
-  if (!text.includes(' row-->')) return;
+function refuseAcrossPendingRows(
+  text: string,
+  parsed: Parsed,
+  wanted: Range,
+  placed: Range,
+  widened: boolean,
+): { error: EditError; table: TableRead } | undefined {
+  if (!text.includes(' row-->')) return undefined;
   for (const table of readTables(text, parsed)) {
     const pending = table.rows.find((row) => row.insertion !== null)?.insertion;
-    const trouble = pending ? highlightAgainstRows(table, text, placed) : null;
+    // A highlight that was widened to rows that are not pending is held only to its ends: a
+    // decision of a row can't take them away.
+    const trouble = !pending
+      ? null
+      : widened
+        ? inPendingRow(table, text, placed.from) || inPendingRow(table, text, placed.to)
+          ? 'hides'
+          : null
+        : highlightAgainstRows(table, text, placed);
     if (!pending || !trouble) continue;
     const by = pending.entry.by;
     const name = parsed.ledger.people.find((p) => p.handle === by)?.name ?? by;
@@ -79,8 +95,9 @@ function refuseAcrossPendingRows(text: string, parsed: Parsed, wanted: Range, pl
     } else {
       words = `${pendingRows}, and this highlight would run from one row into the next, or out of the table. Decide the change first, or highlight inside one row.`;
     }
-    throw new EditError(words, 'no-legal-placement');
+    return { error: new EditError(words, 'no-legal-placement'), table };
   }
+  return undefined;
 }
 
 /**
@@ -104,7 +121,10 @@ export function addHighlight(
   text: string,
   range: Range,
   ctx: EditContext,
+  rowsWidened = false,
 ): { changes: TextChange[]; id: string } {
+  const recorded = recordIds(ctx);
+  if (!rowsWidened) ctx = recorded.ctx;
   assertRange(text, range);
   const parsed = parse(text);
   // A range that reaches into the ledger ends where the body does, and one that is only in it is none.
@@ -145,6 +165,18 @@ export function addHighlight(
     verify: (after) => checkAnchor(after, id, true, HIGHLIGHT_WORDS.inCode),
     inCode: HIGHLIGHT_WORDS.inCode,
   });
-  refuseAcrossPendingRows(text, parsed, wanted, placed);
-  return { changes, id };
+  const across = refuseAcrossPendingRows(text, parsed, wanted, placed, rowsWidened);
+  if (!across) return { changes, id };
+  // A highlight can't leave one row for another while a row is inserted or moved, and has no point
+  // form to be left as: its ends are taken to rows that are not pending, so that no decision of a
+  // row can take a marker away (format §3.12).
+  if (rowsWidened) throw across.error;
+  for (const candidate of rowWidenings(across.table, text, wanted)) {
+    try {
+      return addHighlight(text, candidate, recorded.replay(), true);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+  }
+  throw across.error;
 }
