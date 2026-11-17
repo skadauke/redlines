@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -67,6 +67,35 @@ describe('redlines import-docx with pictures', () => {
       expect([...png.subarray(1, 4)]).toEqual([0x50, 0x4e, 0x47]);
       // A second import to the same folder doesn't replace the picture.
       expect(await run(['import-docx', docx, '-o', join(folder, 'out', 'again.md')], io)).toBe(1);
+    });
+  });
+});
+
+const DOT = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+describe('redlines export-docx with pictures', () => {
+  it('embeds a picture beside the document, and says when one is missing', async () => {
+    await inFolder(async (folder, io) => {
+      await mkdir(join(folder, 'media'));
+      await writeFile(join(folder, 'media', 'dot.png'), DOT);
+      const file = join(folder, 'pic.md');
+      await writeFile(file, 'Before.\n\n![A dot](media/dot.png)\n');
+      const said: string[] = [];
+      const loud = { ...io, stderr: (s: string) => void said.push(s) };
+      expect(await run(['export-docx', file], loud)).toBe(0);
+      expect(said.join('')).not.toContain('not in the Word file');
+      const back = join(folder, 'o', 'p.md');
+      expect(await run(['import-docx', join(folder, 'pic.docx'), '-o', back], io)).toBe(0);
+      const png = await readFile(join(folder, 'o', 'media', 'image1.png'));
+      expect(png.subarray(1, 4).toString()).toBe('PNG');
+
+      await writeFile(file, '![Gone](media/gone.png)\n');
+      said.length = 0;
+      expect(await run(['export-docx', file, '-o', join(folder, 'g.docx')], loud)).toBe(0);
+      expect(said.join('')).toContain('An image is written as its description');
     });
   });
 });
