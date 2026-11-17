@@ -322,7 +322,8 @@ describe.skipIf(!process.env['REDLINES_COST'])(
 // A letter typed and deleted with Track Changes off in a cell of a pending move's copy (tables, Stage 3b):
 // the edit is written in both halves of the move (the cell and the kept copy), and must cost what a
 // keystroke in any other cell costs on main. A timing test: it runs with REDLINES_COST set, and a run over
-// the bound is timed twice more, each time with the calibration, before it fails.
+// the median of five runs is taken in turns with the calibration (`againstMain`), and a run over
+// the bound is taken twice more before it fails.
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a moved cell', () => {
   it('costs at most twice what main’s build costs, in a moved column and a moved row', () => {
     const { doc } = longDocument({ table: true });
@@ -370,7 +371,6 @@ describe.skipIf(!process.env['REDLINES_COST'])(
   () => {
     it('costs at most twice what main’s keystroke costs, over a 300-row table', () => {
       const { doc } = longDocument({ table: true });
-      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
       for (const tracking of [true, false]) {
         const parent = document.createElement('div');
         document.body.append(parent);
@@ -394,19 +394,12 @@ describe.skipIf(!process.env['REDLINES_COST'])(
         expect(selectedCells(view.state)).toHaveLength(1500);
         view.dispatch({ selection: EditorSelection.cursor(first) });
         round();
-        const runs: number[] = [];
-        for (let i = 0; i < 7; i++) runs.push(round());
         const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
-        const ours = median(runs);
         if (record) continue;
         const main = TABLE_MAIN[label];
         expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-        const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
-          const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
-          const more: number[] = [];
-          for (let i = 0; i < 7; i++) more.push(round());
-          return { ours: median(more), limit };
-        });
+        const attempt = () => againstMain(round, main!, TABLE_CALIBRATION);
+        const result = held(attempt(), attempt);
         console.log(
           `cost: rectangle over the table, ${label}: main's keystroke ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
         );
@@ -808,7 +801,7 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Tab in a numbered li
 // paragraphs around it (Stage 6, format rule 9). With Track Changes on the first key replaces the
 // block whole, and the keys after it edit the newest code, which the block's own pending substitution
 // holds. With Track Changes off the pair is held to what the long-document tests hold an update to:
-// twice the document's markdown parse and two milliseconds for noise (`bound`, as in
+// twice the document's markdown parse and two milliseconds for noise (as in
 // `preview/long-document.test.ts`); on CI it stands at 0.44 of that bound on a median run and 0.73
 // at worst (41 runs). With Track Changes on it was held to the same, and CI failed it once, 6.35 ms
 // against 5.99: there a key costs 2.6 times the parse (the median of 41 runs), so the best of its
