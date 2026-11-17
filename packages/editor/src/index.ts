@@ -52,6 +52,7 @@ export {
   isOpen as isSectionOpen,
   setFold,
 } from './blocks/containers.ts';
+import { tabItems } from './blocks/tab-items.ts';
 import { tableMarkers } from './table/markers.ts';
 import { images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
@@ -323,7 +324,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const markdownSupport = markdown({
-    extensions: [GFM, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
+    extensions: [GFM, tabItems, tableMarkers, frontMatter, scriptTags, htmlInline, emojiCodes],
     codeLanguages: options.codeLanguages,
   });
   const extensions = [
