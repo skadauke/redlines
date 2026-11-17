@@ -264,16 +264,8 @@ its case; each is a bug. The list is what has been found, not a count of what is
   letters as well (#419).
 - Typing over one `*` of a pending bold's `**` reads otherwise than the views; the cells-apart suite
   skips micromark's reading for that shape (#299).
-- A bold change on a line that rejecting a pending deletion makes a link definition reads otherwise in
-  some orders (#335); typing at the end of a link reference definition with Track Changes on reads
-  wrongly (#262).
-- Rejecting a row move with a comment in the moved row puts the comment point in the wrong place
-  (#371, found in a table with no pipe at its row starts).
 - A highlight that runs from the text above a table into its header row can make another person's
   pending column change impossible to decide (#396).
-- The format's checks read an indented numbered item or bullet under an item as a new item where
-  CommonMark continues the paragraph, so a format change can be allowed that reads differently in some
-  order (#139).
 - The backslash and emphasis fixes leave five cases in one shape wrong, as on main, and refuse
   keys next to chains of another person's marks that main wrote (#276).
 - Return at the start of a nested first item, tracked, fails in four more shapes, and the walks over
@@ -282,10 +274,7 @@ its case; each is a bug. The list is what has been found, not a count of what is
   Tab walks), and more are not drawn by the walks as they are (#258).
 - Pandoc's `~x~` and `^x^` in `.qmd` and `.Rmd` files are not protected from markers: the reader has
   no file type yet (#370). `pre` and `title` inside a quote or a list item are not read as raw text,
-  so markers can go in them (#284, [format.md](format.md) §3.5).
-- Return at the end of a block, in two rare layouts, used to write a plain blank line that changes
-  what renders (#136). It writes the break as two line breaks that read as one now, a stray blank
-  line in the file that no reader sees, and the issue is still open.
+  so markers can go in them ([format.md](format.md) §3.5).
 
 **The guard: the refusal that widening keeps (#808, #107).** The engine that replaces refusals
 (`widen.ts`, format §3.12) is called by the writers for tables (#657, #863), lists (#797), blocks

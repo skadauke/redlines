@@ -5,7 +5,7 @@ deployed when it is merged; so this stays here until it has been read. It is for
 adopters. [hardening.md](hardening.md) is the contributors' version, with the files and switches.
 Every number below is cited from a merged pull request's own checks and was not run again for this
 page; the numbers of #297 and #277 are from a reviewer's probes, whose scripts are not in the
-repository. The state of the issues is as of 13 November 2026. Where a sentence says *proved*, the
+repository. The state of the issues is as of 17 November 2026. Where a sentence says *proved*, the
 format's specification has a written argument; everywhere else it says *tested*. The only
 comparisons are with Word and Google Docs.
 
@@ -38,7 +38,7 @@ changes are read in Redlines.
 ## What Redlines is built to hold about every edit
 
 An editor that writes into a file other programs read has a harder job than one that keeps its
-changes to itself. Four properties, and what tries to break each. They are what the tests aim at,
+changes to itself. Five properties, and what tries to break each. They are what the tests aim at,
 not a promise that nothing breaks: the exceptions found so far are listed at the end, and a known
 exception is a bug.
 
@@ -48,9 +48,14 @@ write an edit only where every order of those decisions gives the same words, an
 judged by an independent Markdown reader (micromark 4.0.2, with GitHub's tables and strikethrough),
 not by us.
 
-**When it can't be sure, it is meant to say no, and to say why.** It is meant not to guess and not to
-tidy. An edit that cannot be written soundly is refused in words that name the cause and the way out,
-and a key that does nothing and says nothing is a bug.
+**When an edit can't be written the usual way, it is meant to be written another way, or to ask.**
+Redlines does not guess and does not tidy. Where no fine form of an edit reads the same in every
+order, it writes the smallest whole unit that holds the edit (a word, a list item, a block, a table
+row) as one replacement, with anyone else's pending changes kept in the text it replaces. Where no
+unit can be written, it asks before making the edit without tracking, as Word does. A refusal stays
+only where every way of writing would leave the file wrong, and it says why in words that name the
+cause. A key that does nothing and says nothing is a bug, and a test counts the places in the code that
+refuse, so that a new one is a failing test.
 
 **No line of a paragraph, a heading, a list item, a quote or a table row is meant to begin with a
 marker.** In Markdown a line that begins with an HTML comment is read as a different kind of block,
@@ -62,39 +67,35 @@ start a line inside an HTML block's own content; nowhere else is a line to begin
 twice what the same key took in the editor before its block keys were written, and that bound is
 tested on every change, on documents of 16 KB and 150 KB with 200 changes.
 
-## Why Redlines sometimes says no, where Word wouldn't
+**When several people edit at once, every confirmed state is a sound file.** A seeded simulation of
+live sessions, run over the editor's own writers, checks each confirmed state: the markup and the
+ledger are valid, the body reads as the newest view, no word is lost, duplicated or credited to the
+wrong person, nothing decided comes back, and every copy has the same text at the same version.
+
+## Where Redlines widens, asks or refuses
 
 Word and Google Docs keep changes in a format and a place of their own. A Markdown file is read by
 many programs, by rules written for plain text, and a tracked change can change how the text *around*
 it reads: a marker in front of a line, a blank line that makes a list loose, a bold change decided
-before a row moves. So Redlines refuses some edits that Word would make. These are real refusals and
-their words:
+before a row moves. So some edits can't be written as a small change in place. What Redlines does
+then:
 
-- *"This would change how Bo Chen's insertion reads. Decide it first, or turn off Track Changes."*
-  Your edit would reach into text another person has proposed, and no way of writing it reads the
-  same in every order of deciding.
-- *"An empty item can't start a list right under a line of text in Markdown, and a blank line there
-  would make the item above it loose. Put a blank line above the list first."* Return, with Track
-  Changes on, at the start of the first item of a nested list, under the text of its parent item.
-- *"A line break typed here would be read as a different break once the changes are made together.
-  Make the changes one at a time."*
-- *"A tracked change can't go in code that starts a list item yet. Turn off Track Changes to edit
-  it."*
-- *"Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes."*
-- *"Accept or reject the alignment change in this table first."* A column inserted, deleted or moved
-  with Track Changes on, while a change to the table's alignment is pending. The alignment change
-  keeps the whole old row of dashes and colons under the header, and a deleted or moved column keeps
-  its own cell of that row; decided in some orders, the two would leave the old row a cell short or
-  long.
+- **It widens.** Return at the start of the first item of a nested list, a bold over many table
+  cells, an edit in code that starts a list item: each is written as a replacement of the smallest
+  unit that holds it. Accepting gives the new unit and rejecting gives the old
+  one back, and the same in every order.
+- **It asks.** An edit that no unit can hold, or one in front matter or in Plain, is made without
+  tracking only after you say so, and then leaves no trace, as in Word.
+- **It refuses, in a few places, and says why.** One refusal is kept on purpose: when another
+  person's pending change ends exactly at the edge of the unit (a split's break right in front of
+  it, an insertion right after it), the edit is not written, because a heading typed after another
+  person's split would read `## xbeta` in one order and `xbeta` in another (#107). The words are
+  *"This would change how Bo Chen's insertion reads. Decide it first, or turn off Track Changes."*
+  Typing in code that holds another person's pending code change was refused and is written now
+  (#285, in review). Other refusals are kept where the file would be unreadable or forged.
 
-In most of these the way out is to decide the other person's change first, or to turn Track Changes
-off for the edit; the refusal says which.
-
-**Some of these are planned to go away.** Code that starts a list item, and indented code in an item or
-a quote, can't change with Track Changes on yet (#284). Typing in code that holds another person's
-pending code change is refused (#285); the open issue asks for a way of writing it that reads the same
-in every order, or for a proof that there is none, in which case the refusal stays. Bold over more
-than five cells of a table used to be refused, and no longer is (#267).
+In the cases that remain, the way out is to decide the other person's change first, or to turn Track
+Changes off for the edit; the refusal says which.
 
 ## The evidence, in numbers
 
@@ -106,8 +107,7 @@ Each of these is from the checks of a merged pull request, and says what was com
 - **66,587 probes** by a reviewer (pastes of delimiter runs and other keys next to another person's
   pending insertions, substitutions and deletions), judged by micromark in every order of decisions
   (#277): none newly wrong, 5,081 newly sound, 812 newly refused, and over 23,000 of the old
-  version's wrong writes refused now. Five cases in one shape are still wrong, and the old version
-  writes the same bytes there (#276).
+  version's wrong writes refused now.
 - **40,000 list layouts**: the test of #288 holds every line that the reading of lists is sure is an
   item to micromark 4.0.2's reading; it draws 4,000 layouts each time it runs, and its checks ran it
   over 40,000.
@@ -127,30 +127,20 @@ We would rather say it than have you find it.
 - **Silent wrong writes, and changes that can't be decided, found so far.** In a few shapes Redlines
   still writes something that reads differently from what it shows, or leaves a change that can't be
   decided. Each is an open issue, and the list is what has been found, not a count of what is there:
-  - numbered lists under Backspace (#292);
   - a deletion inside a blank line of a quote between two paragraphs, in a few shapes (#447), and a
     change in the break of your own pending line break there (#419);
   - typing over one `*` of a pending bold's `**` (#299);
-  - a bold change on a line that rejecting a pending deletion makes a link definition (#335), and
-    typing at the end of a link reference definition (#262);
-  - rejecting a row move with a comment in the moved row (#371);
   - a highlight that runs from the text above a table into its header row can make another person's
     pending column change impossible to decide (#396);
-  - an indented numbered item or bullet under an item, which the format's checks read as a new item
-    where Markdown continues the paragraph (#139);
-  - five cases in one shape of pastes next to another person's marks (#276);
+  - a few cases in one shape of pastes next to another person's marks (#276);
   - Return at the start of a nested first item, in four more shapes (#395);
-  - pandoc's `~x~` and `^x^` in Quarto and R Markdown files, which a marker can stand inside (#370);
-  - Return at the end of a block, in two rare layouts, used to write a plain blank line that changes
-    what renders; it writes two line breaks that read as one now, a stray blank line that no reader
-    sees (#136, still open).
+  - pandoc's `~x~` and `^x^` in Quarto and R Markdown files, which a marker can stand inside (#370).
+- In a file with mixed line breaks, the editor writes a break whose line feed a tracked edit takes out
+  as the file's own kind. The command line writes it as it was (#924).
+- A unit of more than eight blocks is not written as a replacement: the edit is asked about and made
+  without tracking.
 - The specification lists what is not yet tested: Word import into the full history, and live
   sessions with several authors in the full history, among other things.
-- In a list under review, a change to its structure is refused when more than five marks have to be
-  tried with it; five shapes (numbered items with unusual numbers or nesting, the empty item that
-  Markdown can't hold, and a line the editor reads as an item that Markdown doesn't) keep their marks
-  tried, and so count toward that.
-- The refusals listed above.
 - A renderer that passes HTML through publishes the hidden text: when a document leaves review,
   publish the newest view.
 - Layout, the system's selection and input methods are only seen in the app, by hand; they are not
