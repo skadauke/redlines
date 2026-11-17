@@ -59,7 +59,7 @@ export const aiDocs = {
     'Open any `.md` file and read it formatted, with tables, images, task lists and syntax-colored code. HTML that GitHub draws, such as inline tags and collapsible sections, is drawn the same way.',
     'Edit it like a document: a toolbar you summon with the wrench, for formatting, tables, lists and images, with every command in a searchable palette, find and replace, a file sidebar. Move a block with ⌥↑ and ⌥↓, or drag it to a drop line.',
     'Drop images from Finder, align them, crop them to a copy in your images folder, and let an agent write their alt text. Their sizes are known before they load, so the page doesn’t jump.',
-    'Open a Word or Google Docs `.docx` with its tracked changes, comments and pictures, or export to Word with real tracked changes and comments. Copy and paste both ways: headings, lists, checklists, tables with their alignment, code and pictures carry across.',
+    'Open a Word or Google Docs `.docx` with its tracked changes, comments and pictures, or export to Word with real tracked changes and comments. Copy out to either keeps headings, lists, checklists, tables with their alignment, code and pictures. Pasted in, headings, lists, tables and code arrive as clean Markdown.',
     'Print, or Export as PDF: the document as it reads, set for paper.',
     'Long documents stay quick to scroll and type in. If a crash is caught, your document is recovered.',
     'Switch between Clean, Redlines and Plain from the page icon. Text and code files open in Plain, with syntax colors.',
