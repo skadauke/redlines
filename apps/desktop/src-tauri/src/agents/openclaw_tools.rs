@@ -18,12 +18,12 @@
 //! has ended is refused, in words the agent can pass on. Ending a run closes the line, which also
 //! ends a call that was waiting on it.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -124,8 +124,17 @@ pub struct RunTools {
     /// still make a call, which must not meet the thread's next run (the session key is the
     /// thread's, and calls carry no run id: `docs/research/openclaw-connection.md`). A new run
     /// in the thread waits for `settled`.
-    draining: Mutex<HashSet<String>>,
+    draining: Mutex<HashMap<String, Drain>>,
     settled: Condvar,
+}
+
+/// A run that lost its tools and may not be over at the Gateway. Whichever comes first ends it: the
+/// run's own `finish`, or `until`, which is how a run the Gateway never reported on (a dropped
+/// connection, a final event that didn't come) is let go of.
+struct Drain {
+    /// The line of the run that is draining, by address: only that run's `finish` clears it.
+    owner: usize,
+    until: Instant,
 }
 
 /// A run's hold on its tools: dropping it, or calling `end`, ends the run's tool access.
@@ -133,6 +142,8 @@ pub struct Registration {
     tools: Arc<RunTools>,
     key: String,
     line: Arc<Line>,
+    /// Whether dropping this says the run is over at the Gateway.
+    settles: bool,
 }
 
 impl Registration {
@@ -145,8 +156,14 @@ impl Registration {
             .is_some_and(|line| Arc::ptr_eq(line, &self.line))
         {
             live.remove(&self.key);
-            // Until `finish`, the thread's next run waits.
-            locked(&self.tools.draining).insert(self.key.clone());
+            // Until `finish` or the deadline, the thread's next run waits.
+            locked(&self.tools.draining).insert(
+                self.key.clone(),
+                Drain {
+                    owner: Arc::as_ptr(&self.line) as usize,
+                    until: Instant::now() + SETTLE_TIMEOUT,
+                },
+            );
         }
         drop(live);
         let _ = self.line.control.shutdown(Shutdown::Both);
@@ -156,14 +173,33 @@ impl Registration {
     /// thread's next run may begin.
     pub fn finish(&self) {
         self.end();
-        locked(&self.tools.draining).remove(&self.key);
+        let mut draining = locked(&self.tools.draining);
+        if draining
+            .get(&self.key)
+            .is_some_and(|drain| drain.owner == Arc::as_ptr(&self.line) as usize)
+        {
+            draining.remove(&self.key);
+        }
+        drop(draining);
         self.tools.settled.notify_all();
+    }
+
+    /// The run ended without the Gateway saying so (the connection failed, or the wait for its
+    /// final event ran out): its agent may still make calls, so the thread's next run waits for
+    /// the deadline instead.
+    pub fn leave(mut self) {
+        self.settles = false;
+        self.end();
     }
 }
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        self.finish();
+        if self.settles {
+            self.finish();
+        } else {
+            self.end();
+        }
     }
 }
 
@@ -184,14 +220,18 @@ impl RunTools {
     ) -> Result<Registration, String> {
         {
             let key = thread_of(session);
-            let deadline = std::time::Instant::now() + wait;
+            let deadline = Instant::now() + wait;
             let mut draining = locked(&self.draining);
-            while draining.contains(key) {
-                let left = deadline.saturating_duration_since(std::time::Instant::now());
-                if left.is_zero() {
-                    // The wait has run out: the old run is let go of, and calls from it are
-                    // refused as the new run isn't registered yet.
+            while let Some(drain) = draining.get(key) {
+                let now = Instant::now();
+                if drain.until <= now {
                     draining.remove(key);
+                    break;
+                }
+                let left = drain.until.min(deadline).saturating_duration_since(now);
+                if left.is_zero() {
+                    // This wait has run out: the old run's calls are refused as the new one
+                    // isn't registered yet, and the next ones are the new run's.
                     break;
                 }
                 draining = self
@@ -234,6 +274,7 @@ impl RunTools {
             tools: Arc::clone(self),
             key,
             line,
+            settles: true,
         })
     }
 
@@ -267,11 +308,12 @@ impl RunTools {
             .get(session)
             .is_some_and(|now| Arc::ptr_eq(now, &line));
         match answered {
-            Ok(mut message) if still_live => {
+            // An answer that came is the answer, even if the run was stopped as it came: the
+            // window had done it, and the agent is better told so than that it was refused.
+            Ok(mut message) => {
                 message["id"] = id;
                 message
             }
-            Ok(_) => refused(NOT_LIVE),
             Err(why) if still_live => refused(&why),
             Err(_) => refused(NOT_LIVE),
         }
@@ -283,7 +325,6 @@ mod tests {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
     use std::thread;
-    use std::time::Instant;
 
     use super::*;
 
@@ -423,6 +464,41 @@ mod tests {
             window_2.join().unwrap()
         };
         assert!(!heard.iter().any(|m| m == "tools/call"));
+    }
+
+    #[test]
+    fn a_run_the_gateway_never_reported_on_keeps_its_thread_waiting_until_the_deadline() {
+        let first = folder("lost-1");
+        let (socket_1, _window_1) = window(&first);
+        let tools = Arc::new(RunTools::default());
+        let old = tools.register("redlines-0a", &socket_1).unwrap();
+        old.leave();
+        let second = folder("lost-2");
+        let (socket_2, _window_2) = window(&second);
+        // It isn't let go of when its registration is: the next run waits as long as it is told.
+        let began = Instant::now();
+        let _ = tools.register_within("redlines-0a", &socket_2, Duration::from_millis(300));
+        assert!(began.elapsed() >= Duration::from_millis(300));
+    }
+
+    #[test]
+    fn a_finish_of_an_older_run_doesnt_clear_the_drain_of_a_newer_one() {
+        let first = folder("stale-1");
+        let (socket_1, _window_1) = window(&first);
+        let tools = Arc::new(RunTools::default());
+        let a = tools.register("redlines-0a", &socket_1).unwrap();
+        a.end();
+        // A's wait runs out, and B takes the thread, and is stopped.
+        let second = folder("stale-2");
+        let (socket_2, _window_2) = window(&second);
+        locked(&tools.draining).clear();
+        let b = tools.register("redlines-0a", &socket_2).unwrap();
+        b.end();
+        // A's final event comes late.
+        a.finish();
+        assert!(locked(&tools.draining).contains_key("redlines-0a"));
+        b.finish();
+        assert!(!locked(&tools.draining).contains_key("redlines-0a"));
     }
 
     #[test]

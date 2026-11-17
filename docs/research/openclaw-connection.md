@@ -618,6 +618,13 @@ the thread's next run does not register until the aborted run's final `chat` eve
 run's wait for it ends at `ABORT_GRACE`, 5 s) or `SETTLE_TIMEOUT` (8 s) has passed; calls in
 between are refused (`a_late_call_of_an_aborted_run_never_reaches_the_threads_next_run`).
 
+A run the Gateway never reported on (a dropped connection, or no `aborted` event within the grace)
+leaves its thread waiting for the full `SETTLE_TIMEOUT`; one that was reported on frees it at once.
+Known limits: a call waits on the window for up to 120 s inside the node's read loop; a gate check
+accepts any relay of the window, not only the run's own (a relay takes one connection, so it is a
+race); an edit in flight when Stop is pressed still lands; one run is one prompt, so a second
+prompt in a session has no tools.
+
 **Tool search on** (OpenClaw's default, `tools.toolSearch` unset): the six tools are deferred
 behind `tool_search`, `tool_describe` and `dispatch_action` as `mcp:redlines:<tool>`. The live
 check was repeated that way, the stand-in model calling `dispatch_action` with

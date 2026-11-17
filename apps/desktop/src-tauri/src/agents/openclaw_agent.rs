@@ -85,9 +85,18 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
             if let Ok((id, outcome)) = done.try_recv() {
                 busy = false;
                 cancel.store(false, Ordering::Relaxed);
-                // The run is over at the Gateway (its final event, or the wait for it ran out):
-                // the thread's next run may have its tools.
-                hold = None;
+                // One run is one prompt: the tools end with it, and a second prompt in this session
+                // would have none.
+                // The run is over at the Gateway when it said so (its final event, `aborted` or
+                // an error event): the thread's next run may have its tools. A run it never
+                // reported on may still be going, and its thread waits for a deadline instead.
+                if matches!(outcome, Ok(Outcome::Lost) | Err(_)) {
+                    if let Some(held) = hold.take() {
+                        held.leave();
+                    }
+                } else {
+                    hold = None;
+                }
                 match outcome {
                     Ok(Outcome::Done(text)) => {
                         if !text.trim().is_empty() {
@@ -104,7 +113,7 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
                         }
                         link.say(reply(&id, json!({"stopReason": "end_turn"})));
                     }
-                    Ok(Outcome::Cancelled) => {
+                    Ok(Outcome::Cancelled | Outcome::Lost) => {
                         link.say(reply(&id, json!({"stopReason": "cancelled"})));
                     }
                     Err(message) => link.say(failure(&id, -32603, &message)),
