@@ -25,7 +25,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
+  # Not `check`: a job named so would stand for ci.yml's check in a pull request's checks.
+  quarto:
+    name: quarto
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
