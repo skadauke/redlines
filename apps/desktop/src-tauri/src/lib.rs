@@ -366,6 +366,7 @@ pub fn run() {
             zoom::set_up(app.handle());
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
+            files::set_up(app.handle());
             // The updates are the app's, there before any window asks of them.
             updates::set_up(app.handle());
             // The preview loads the images of the project folders the sidebars show, and no others.
