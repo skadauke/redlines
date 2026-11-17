@@ -59,7 +59,7 @@ type Source =
   | { kind: 'local'; path: string }
   | { kind: 'none' };
 
-function sourceOf(written: string): Source {
+export function sourceOf(written: string): Source {
   let url = written.trim();
   if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
   if (REMOTE.test(url)) return { kind: 'remote', url };

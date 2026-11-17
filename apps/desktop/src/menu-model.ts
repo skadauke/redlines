@@ -23,6 +23,7 @@ export interface MenuCommands {
   rename(): void;
   revealInFinder(): void;
   print(): void;
+  exportPdf(): void;
   /** Quits after asking each window about its unsaved edits. */
   quit(): void;
   /** Opens the About Redlines window, or brings it forward. */
@@ -391,6 +392,7 @@ export function appMenuModel(
         { item: 'CloseWindow', text: 'Close' },
         SEPARATOR,
         { text: 'Print…', accelerator: 'CmdOrCtrl+P', action: () => commands.print() },
+        { text: 'Export as PDF…', action: () => commands.exportPdf() },
       ]),
     },
     {

@@ -127,6 +127,7 @@ function commands() {
     rename: vi.fn(),
     revealInFinder: vi.fn(),
     print: vi.fn(),
+    exportPdf: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
     switchLook: vi.fn(),

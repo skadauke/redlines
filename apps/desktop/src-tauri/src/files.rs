@@ -190,6 +190,7 @@ pub fn print_window(window: WebviewWindow) -> Result<(), String> {
     window.print().map_err(|error| error.to_string())
 }
 
+<<<<<<< HEAD
 /// The file in the app's data folder that holds the folders the person chose in Preferences.
 const CHOSEN_FILE: &str = "folders.json";
 
@@ -212,6 +213,85 @@ pub fn set_up(app: &AppHandle) {
 /// The save panel starts in the default folder for new documents only while it is there: the folder
 /// may have been moved or deleted since Preferences chose it (`src/host.ts`). It tells nothing of
 /// any other path, which gets the same `false` as a missing one: a window can't ask about the disk.
+=======
+/// Asks where to save the window's printed page as a PDF, with the system's save panel as a sheet of
+/// the window, starting from `name` in `folder` when that is a folder that is there, and writes it
+/// there, paginated as the print dialog would (`src/pdf.rs`). The page makes itself ready first
+/// (`src/print.ts`). Resolves to the file's path, or to nothing when the person cancels. The app
+/// opens the panel, not the page, so a page can never name a file to write. A debug build started
+/// with `REDLINES_EXPORT_PDF` set to a path writes there with no panel, for unattended checks.
+#[tauri::command(async)]
+pub fn export_pdf(
+    app: AppHandle,
+    window: WebviewWindow,
+    name: String,
+    folder: Option<String>,
+) -> Result<Option<String>, String> {
+    let chosen = if cfg!(debug_assertions) && std::env::var_os("REDLINES_EXPORT_PDF").is_some() {
+        std::env::var("REDLINES_EXPORT_PDF").ok().map(PathBuf::from)
+    } else {
+        let mut panel = app
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_can_create_directories(true)
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(pdf_name(&name));
+        if let Some(folder) = panel_start(folder) {
+            panel = panel.set_directory(folder);
+        }
+        match panel.blocking_save_file() {
+            Some(path) => Some(path.into_path().map_err(|error| error.to_string())?),
+            None => None,
+        }
+    };
+    let Some(mut path) = chosen else {
+        return Ok(None);
+    };
+    if path
+        .extension()
+        .is_none_or(|extension| !extension.eq_ignore_ascii_case("pdf"))
+    {
+        path.set_extension("pdf");
+    }
+    let target = path.to_string_lossy().into_owned();
+    #[cfg(target_os = "macos")]
+    {
+        let (done, wait) = std::sync::mpsc::channel();
+        let failed = done.clone();
+        window
+            .with_webview(move |webview| {
+                if let Err(error) = crate::pdf::print_to_pdf(webview.inner(), &target, done) {
+                    let _ = failed.send(Err(error));
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        wait.recv_timeout(std::time::Duration::from_secs(120))
+            .map_err(|_| "Timed out writing the PDF".to_string())??;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = target;
+        return Err("Export as PDF is for the Mac app.".into());
+    }
+    #[cfg(target_os = "macos")]
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// The panel's suggested name for the document `name`: its own, with `.pdf` for its extension.
+fn pdf_name(name: &str) -> String {
+    let stem = Path::new(name)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "Untitled".to_string());
+    format!("{stem}.pdf")
+}
+
+/// Whether `path` is a folder that is there. The save panel starts in the default folder for new
+/// documents only while it is: the folder may have been moved or deleted since Preferences chose
+/// it (`src/host.ts`). It tells nothing of what the folder holds.
+>>>>>>> 3fb65002 (Print and Export as PDF: the document as clean HTML, set for paper)
 #[tauri::command(async)]
 pub fn folder_exists(app: AppHandle, path: String) -> bool {
     let shown = app.state::<crate::project::Projects>().folders();

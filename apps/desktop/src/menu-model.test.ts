@@ -23,6 +23,7 @@ function commands() {
     rename: vi.fn(),
     revealInFinder: vi.fn(),
     print: vi.fn(),
+    exportPdf: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
     switchLook: vi.fn(),
@@ -203,6 +204,7 @@ describe('the menu model', () => {
       'Close',
       '---',
       ['Print…', 'CmdOrCtrl+P'],
+      ['Export as PDF…', undefined],
     ]);
     expect(readsAll(model, 'Edit')).toEqual([
       ['Undo', 'CmdOrCtrl+Z'],
@@ -491,7 +493,7 @@ describe('the menu model', () => {
       ['Find', 'CmdOrCtrl+F'],
     ]);
     expect(readsAll(model, 'File').slice(-3)).toEqual([
-      ['Print…', 'CmdOrCtrl+P'],
+      ['Export as PDF…', undefined],
       '---',
       ['Rename…', undefined],
     ]);

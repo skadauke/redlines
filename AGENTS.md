@@ -115,7 +115,7 @@ repo root.
   `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
   the same, and `VITE_ZOOM_CHECK=1` (the column and the rail at every text size, and the window
   zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
-  (`src/print-check.ts`) shows that printing holds the whole document. They read nothing in a
+  (`src/print-check.ts`) shows that the printed page holds the document and no mark (and, in `pnpm tauri dev` with `REDLINES_EXPORT_PDF=<path>`, writes the PDF there with no panel). They read nothing in a
   release build, and are no part of CI
 - Crashes (`apps/desktop/src-tauri/src/crash.rs`, `src/crash.ts`): errors in the page, the web content
   process ending, Rust panics, the last run's macOS crash report and a page that stops answering are

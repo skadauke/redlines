@@ -166,6 +166,13 @@ export {
 } from './preview/callout.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
+export {
+  documentHtml,
+  documentText,
+  editorDocumentHtml,
+  type DocumentHtmlOptions,
+  type DocumentViewKind,
+} from './clipboard/document-html.ts';
 export { indentItems } from './blocks/keys.ts';
 export { indentReason } from './blocks/tab.ts';
 export { disabledReasonOf } from './commands.ts';

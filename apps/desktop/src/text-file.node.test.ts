@@ -27,6 +27,7 @@ function nodeHost(): Host {
     exists: (path) => Promise.resolve(existsSync(path)),
     reveal: () => Promise.resolve(),
     print: () => Promise.resolve(),
+    exportPdf: () => Promise.resolve(null),
     saveAs: () => Promise.resolve(null),
     watch: () => Promise.resolve(() => {}),
     projectRoot: (path) =>

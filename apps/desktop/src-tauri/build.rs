@@ -49,6 +49,7 @@ const COMMANDS: &[&str] = &[
     "crash_slow",
     "default_app",
     "document_windows",
+    "export_pdf",
     "folder_exists",
     "forget_documents",
     "identity",
