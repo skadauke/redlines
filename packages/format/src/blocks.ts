@@ -1424,6 +1424,9 @@ export function viewBreaks(text: string, mark: MarkRange, newest: DocView): numb
   return breaks;
 }
 
+/** A line that is an include shortcode of Quarto alone, any spacing, either quotes. */
+export const INCLUDE_LINE =
+  /^[ \t]*\{\{<[ \t]+include[ \t]+(?:"[^"]+"|'[^']+'|[^\s>]+)[ \t]+>\}\}[ \t]*$/;
 /** The seventh start of an HTML block: one whole open or closing tag of another name, alone on its line. */
 export const HTML_START_7 =
   /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
@@ -1442,7 +1445,11 @@ export function closerRange(text: string, close: Range): Range {
   const eol = text[close.from - 2] === '\r' ? 2 : 1;
   const lineEndAt = close.from - eol;
   const start = text.lastIndexOf('\n', lineEndAt - 1) + 1;
-  if (!HTML_START_7.test(text.slice(start, lineEndAt))) return close;
+  // A Quarto include line is such a line too: no marker shares it (include.ts).
+  const tagLine = text.slice(start, lineEndAt);
+  if (INCLUDE_LINE.test(tagLine.replace(/\r$/, '')))
+    return { from: close.from - eol, to: close.to };
+  if (!HTML_START_7.test(tagLine)) return close;
   const above = start === 0 ? '' : text.slice(text.lastIndexOf('\n', start - 2) + 1, start - 1);
   return start === 0 || above.trim() === '' ? { from: close.from - eol, to: close.to } : close;
 }
