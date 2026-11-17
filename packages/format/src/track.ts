@@ -4510,6 +4510,7 @@ function carriedBehindText(text: string, parsed: Parsed): number {
     for (const segment of mark.segments) {
       if (!segment.carrier) continue;
       const start = lineStart(text, segment.open.from);
+      if (!/[ \t]/.test(text.slice(start, segment.open.from))) continue;
       for (let at = start; at < segment.open.from; at++) {
         if ((text[at] === ' ' || text[at] === '\t') && inside(at)) {
           count++;
