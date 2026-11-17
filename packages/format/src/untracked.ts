@@ -1001,6 +1001,49 @@ function editedIn(
       'no-legal-placement',
     );
   }
-  if (!half) selfCheck(text, parsed, { from, to, typed }, result);
+  if (!half) {
+    try {
+      selfCheck(text, parsed, { from, to, typed }, result);
+    } catch (error) {
+      if (error instanceof EditError && error.message === UNTRACKED_SELF_CHECK) {
+        const split = splitBefore(text, parsed, from, typed);
+        if (split) {
+          throw new EditError(
+            `This edit can't be made with Track Changes off: it would turn the start of the paragraph after ${nameOf(parsed, split, ctx.author)} into a ${blockWord(typed)}, and deciding that line break would then read it otherwise. Accept or reject the line break first, or turn on Track Changes.`,
+            'no-legal-placement',
+          );
+        }
+      }
+      throw error;
+    }
+  }
   return result;
+}
+
+/** What typed text that opens a block starts, in words; empty when it opens none. */
+function blockWord(typed: string): string {
+  if (/^ {0,3}#{1,6}(?:[ \t]|$)/.test(typed)) return 'heading';
+  if (/^ {0,3}>/.test(typed)) return 'quote';
+  if (/^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(typed)) return 'list item';
+  return '';
+}
+
+/** The pending split whose break ends exactly where the line of `from` starts, when `typed` opens a
+ * block there (#107): the typed marker then reads as the line's prefix to the split's break. */
+function splitBefore(
+  text: string,
+  parsed: Parsed,
+  from: number,
+  typed: string,
+): MarkRange | undefined {
+  if (blockWord(typed) === '') return undefined;
+  const limit = parsed.ledgerRange?.from;
+  return parsed.marks.find(
+    (mark) =>
+      mark.kind === 'split' &&
+      mark.segments.some((segment) => {
+        const end = breakEnd(text, segment.open.to, limit);
+        return end > segment.open.to && end <= from && /^[ \t]*$/.test(text.slice(end, from));
+      }),
+  );
 }
