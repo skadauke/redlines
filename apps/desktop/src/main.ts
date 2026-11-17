@@ -69,6 +69,7 @@ import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { exportToWord } from './word-export.ts';
+import { openWord } from './word-import.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import { createShortcutBook, shortcutEntries } from './shortcut-book.ts';
 import { publishShortcutEntries } from './shortcuts-published.ts';
@@ -1369,6 +1370,20 @@ const commands: MenuCommands = {
     }).catch((error: unknown) => {
       console.error('Could not print', error);
       notice.flash('Couldn’t print.');
+    }),
+  openDocx: () =>
+    void openWord({
+      host,
+      // An untouched window takes it; another window is opened for it where the app can (a browser
+      // tab can't be given text, and asks before it replaces what it has).
+      open: (markdown) =>
+        controller.untouched || !isTauri
+          ? controller.createWith(markdown)
+          : host.openWindow(undefined, undefined, markdown),
+      show: (options) => void notifications.show(options),
+    }).catch((error: unknown) => {
+      console.error('Could not open the Word file', error);
+      notice.flash('Couldn’t open the Word file.');
     }),
   exportWord: () =>
     void exportToWord({
