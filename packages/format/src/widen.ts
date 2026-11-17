@@ -855,7 +855,34 @@ export function delimiterBesideBreak(text: string, edits: readonly TextChange[])
   });
 }
 
-/** Whether micromark reads the file the changes make otherwise than its newest view. */
+/** Where each change of `changes` ends up in the text they make: the stretch they touch there. */
+function changedStretch(
+  changes: readonly TextChange[],
+  limit: number,
+): { from: number; to: number } | undefined {
+  let delta = 0;
+  let from = Infinity;
+  let to = -Infinity;
+  for (const change of changes.toSorted((a, b) => a.from - b.from || a.to - b.to)) {
+    // (the ledger is no text of the file's body)
+    if (change.from + delta < limit) {
+      from = Math.min(from, change.from + delta);
+      to = Math.max(to, change.from + delta + change.insert.length);
+    }
+    delta += change.insert.length - (change.to - change.from);
+  }
+  return from === Infinity ? undefined : { from, to };
+}
+
+/** Text that a stretch read alone would read otherwise than in the file: a block that goes on past a blank line. */
+const CONTEXT = /^[ \t]*(?:`{3,}|~{3,})|<(?:pre|script|style|textarea)\b/im;
+
+/**
+ * Whether micromark reads the file the changes make otherwise than its newest view. Only the
+ * paragraphs the changes are in are read, between blank lines, where nothing that goes on past a
+ * blank line (a fence, a raw HTML block) is open or in them; otherwise the whole file is read, which
+ * costs the size of the file, 380 ms for a key in 100 KB.
+ */
 export function readsOtherMicromark(text: string, changes: readonly TextChange[]): boolean {
   const file = applyChanges(text, changes);
   const ledger = parse(file).ledgerRange;
@@ -874,5 +901,23 @@ export function readsOtherMicromark(text: string, changes: readonly TextChange[]
       .replace(/\s+/g, ' ')
       .replace(/ ?(<[^>]*>) ?/g, '$1')
       .trim();
-  return read(ledger ? file.slice(0, ledger.from) : file) !== read(newestView(file).text);
+  const body = ledger ? file.slice(0, ledger.from) : file;
+  const stretch = changedStretch(changes, body.length);
+  if (stretch && stretch.to <= body.length && body.length > 2000) {
+    const lastBreak = body.lastIndexOf('\n\n', Math.max(0, stretch.from - 1));
+    const nextBreak = body.indexOf('\n\n', stretch.to);
+    const from = lastBreak < 0 ? 0 : lastBreak + 2;
+    const to = nextBreak < 0 ? body.length : nextBreak;
+    const here = body.slice(from, to);
+    // Whether a fence is open above it: an odd number of fence lines before it.
+    const fences = body.slice(0, from).match(/^[ \t]*(?:`{3,}|~{3,})/gm)?.length ?? 0;
+    if (
+      fences % 2 === 0 &&
+      !CONTEXT.test(here) &&
+      !/<(?:pre|script|style|textarea)\b/i.test(body.slice(0, from))
+    ) {
+      return read(here) !== read(newestView(here).text);
+    }
+  }
+  return read(body) !== read(newestView(file).text);
 }
