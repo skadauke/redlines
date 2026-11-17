@@ -105,6 +105,8 @@ struct Line {
     /// The other keys the run's calls come under: the canonical key the Gateway reported for a
     /// run started with a bare key (`RunTools::adopt`).
     aliases: Mutex<Vec<String>>,
+    /// Whether the run was started with a bare key, whose canonical form the Gateway decides.
+    bare: bool,
 }
 
 /// A run's calls, by ticket. A call that gives up before its turn leaves its ticket in `gave_up`,
@@ -395,6 +397,7 @@ impl RunTools {
             turn: Condvar::new(),
             control,
             aliases: Mutex::default(),
+            bare: canonical(session) != session,
         });
         let key = canonical(session);
         let mut live = locked(&self.live);
@@ -431,7 +434,8 @@ impl RunTools {
         let Some(line) = live.get(&own).cloned() else {
             return;
         };
-        if live.contains_key(reported) {
+        // The first agent the Gateway reports for the run is the run's: no second key.
+        if live.contains_key(reported) || !line.bare || !locked(&line.aliases).is_empty() {
             return;
         }
         locked(&line.aliases).push(reported.to_owned());
@@ -457,7 +461,21 @@ impl RunTools {
         let Some(session) = session.map(canonical) else {
             return refused(NOT_LIVE);
         };
-        let line = locked(&self.live).get(&session).cloned();
+        let mut line = locked(&self.live).get(&session).cloned();
+        if line.is_none() {
+            // A run started with a bare key that has heard no `chat` event yet takes the key of
+            // its first call, as it does from an event: a model often calls a tool before it
+            // writes a word. `adopt` takes it only for that run's own session, and only when no
+            // run is registered under exactly this key.
+            if let Some(tail) = session
+                .strip_prefix("agent:")
+                .and_then(|rest| rest.split_once(':'))
+                .map(|(_, tail)| tail)
+            {
+                self.adopt(tail, &session);
+                line = locked(&self.live).get(&session).cloned();
+            }
+        }
         let Some(line) = line else {
             return refused(NOT_LIVE);
         };
@@ -602,7 +620,7 @@ mod tests {
             NOT_LIVE
         );
         assert_ne!(text(&call(&tools, Some("redlines-0a"), "view")), NOT_LIVE);
-        for other in ["agent:main:redlines-0b", "agent:moby:redlines-0a"] {
+        for other in ["agent:main:redlines-0b", "agent:moby:redlines-0b"] {
             assert_eq!(
                 text(&call(&tools, Some(other), "view")),
                 NOT_LIVE,
@@ -645,6 +663,48 @@ mod tests {
         assert!(locked(&tools.draining).contains_key("agent:moby:redlines-0a"));
         held.finish();
         assert!(locked(&tools.draining).is_empty());
+    }
+
+    #[test]
+    fn a_first_call_before_any_chat_event_gives_a_bare_key_run_its_key() {
+        let temp = folder("first-call");
+        let (socket, _window) = window(&temp);
+        let tools = Arc::new(RunTools::default());
+        let _held = tools.register("redlines-0a", &socket, &|| false).unwrap();
+        // The model's first act is a call, under a default agent that isn't `main`.
+        let first = call(&tools, Some("agent:moby:redlines-0a"), "view");
+        assert_ne!(text(&first), NOT_LIVE);
+        // From then on that agent's key alone reaches the run.
+        assert_ne!(
+            text(&call(&tools, Some("agent:moby:redlines-0a"), "view")),
+            NOT_LIVE
+        );
+        for other in ["agent:zed:redlines-0a", "agent:main:redlines-0a"] {
+            assert_eq!(
+                text(&call(&tools, Some(other), "view")),
+                NOT_LIVE,
+                "{other}"
+            );
+        }
+        // A key that is the tail of no run adopts nothing, and a named run never takes another's.
+        assert_eq!(
+            text(&call(&tools, Some("agent:moby:redlines-0b"), "view")),
+            NOT_LIVE
+        );
+    }
+
+    #[test]
+    fn a_run_that_names_its_agent_is_never_taken_by_a_first_call_of_another() {
+        let temp = folder("named-first");
+        let (socket, _window) = window(&temp);
+        let tools = Arc::new(RunTools::default());
+        let _held = tools
+            .register("agent:main:redlines-0a", &socket, &|| false)
+            .unwrap();
+        assert_eq!(
+            text(&call(&tools, Some("agent:moby:redlines-0a"), "view")),
+            NOT_LIVE
+        );
     }
 
     #[test]

@@ -650,8 +650,12 @@ leaves its thread waiting for the full `SETTLE_TIMEOUT`; one that was reported o
   `openclaw_protocol.rs`), `ask_seen` passes it on, and `RunTools::adopt` registers the run under
   it (only when it is the run's own session under some agent). Until the first event the run is
   held under `agent:main:<key>`, a guess; once adopted, only the reported key reaches it
-  (`a_bare_key_run_is_found_by_the_key_its_gateway_files_it_under`). A call that comes before the
-  run's first `chat` event, under a default agent other than `main`, is refused. The Gateway
+  (`a_bare_key_run_is_found_by_the_key_its_gateway_files_it_under`). A model often calls a tool
+  before it writes a word, so the run's first call can come before any event: a call under
+  `agent:<any>:<the run's bare key>`, when no run is registered under exactly that key, gives the
+  run that key too (`a_first_call_before_any_chat_event_gives_a_bare_key_run_its_key`). A bare-key
+  run belongs to the first agent the Gateway reports for it, by event or by call; a later call under
+  another agent is refused, and a run that names its agent is never taken this way. The Gateway
   states no default agent on connect that the code reads, so none is used.
 - **A follow-up prompt in the same run keeps the tools.** OpenClaw offers the node's tools to every
   run, resolved afresh from the connected nodes with that run's session key (`resolvePluginTools`

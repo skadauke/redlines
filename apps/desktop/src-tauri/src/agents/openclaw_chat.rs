@@ -546,6 +546,40 @@ mod tests {
     }
 
     #[test]
+    fn the_session_key_the_gateway_reports_is_told_to_the_one_who_asked() {
+        let key = "run-3";
+        let gateway = fake(None, move |socket, frames| {
+            read(socket, frames).expect("chat.send");
+            let mut event = chat(key, json!({"state": "delta", "deltaText": "Hi"}));
+            event["payload"]["sessionKey"] = json!("agent:moby:redlines-0123456789abcdef");
+            say(socket, event);
+            say(
+                socket,
+                chat(key, json!({"state": "final", "message": {"content": []}})),
+            );
+        });
+        let stop = AtomicBool::new(false);
+        let (mut socket, _) = connect_operator(&gateway.config, &token("t"), &stop).unwrap();
+        let told = Mutex::new(Vec::<String>::new());
+        let outcome = ask_seen(
+            &mut socket,
+            &gateway.config,
+            SESSION,
+            "Hi",
+            key,
+            &stop,
+            &|reported| {
+                told.lock().unwrap().push(reported.to_owned());
+            },
+        );
+        assert_eq!(outcome.unwrap(), Outcome::Done("Hi".to_owned()));
+        assert_eq!(
+            told.lock().unwrap().first().map(String::as_str),
+            Some("agent:moby:redlines-0123456789abcdef")
+        );
+    }
+
+    #[test]
     fn a_refused_send_and_a_failed_run_are_errors_in_the_gateways_words() {
         let gateway = fake(None, |socket, frames| {
             read(socket, frames).expect("chat.send");
