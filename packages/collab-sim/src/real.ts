@@ -19,7 +19,6 @@ import {
 } from '@redlines/editor';
 import type { Editor } from '@redlines/editor';
 import type { EditContext, FormatOp, MarkRange, Range, TextChange } from '@redlines/format';
-import { formatWriters, useWriters } from './intents.ts';
 import type { Writers } from './intents.ts';
 
 /** The tracked changes of a transaction, as changes of the text it was made on. */
@@ -119,14 +118,4 @@ export function realWriters(): RealWriters {
     },
   };
   return writers;
-}
-
-/** Derives with the real writers until the returned function is called. */
-export function useRealWriters(): () => void {
-  const real = realWriters();
-  useWriters(real);
-  return () => {
-    useWriters(formatWriters);
-    real.destroy();
-  };
 }

@@ -104,7 +104,6 @@ test('the editor writes what the format library writes, on the text an intent wa
   }
   console.info(`REAL-DERIVE compared=${compared} renumbered=${renumbered} widened=${widened}`);
   // The editor widened some of what the library refuses, and refused none the library wrote.
-  expect(widened).toBeGreaterThanOrEqual(0);
   // Most of what the editor writes is the library's, ids included.
   expect(renumbered).toBeLessThan(compared / 4);
   expect(compared).toBeGreaterThan(200);

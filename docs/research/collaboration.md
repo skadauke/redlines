@@ -515,7 +515,7 @@ markup at any point:
 One person alone (60 operations): 3.3%, 5.0% and 5.0% corrupted at the end, the same with either
 writer. Not one session of 960 ended with copies that differed.
 
-- **The numbers are the library's.** The causes are the same two: the body not reading as the newest
+- **The numbers are the library's, to within the noise of 60 sessions** (typical/c2: 6.7% with the library, 5.0% with the editor). The causes are the same two: the body not reading as the newest
   view (`render`, which one person alone makes too), and a typed word inside someone else's change
   (`misattributed`). No text was lost, swallowed, duplicated, revived or left untracked at the level
   the oracle sees, except one session in each of two cells (a revived word, as before).
@@ -532,7 +532,8 @@ writer. Not one session of 960 ended with copies that differed.
 
 [Multiuser §8, decision 7](multiuser.md#8-decisions) asked for the replay merge to be built only if
 it holds up. On the editor's own intents it **holds up on the three things measured**: safety is the
-authority's (the same share of sessions corrupted, from the same causes, with neither writer),
+authority's (shares of sessions corrupted within a few sessions of 60 of each other, from the same
+causes, with either writer),
 replicas that know the same intents have the same bytes (0 of 960 differed, five replicas and
 offline periods included), and a decision is one intent among the others, dropped alike in every
 replica when its mark changed first.
