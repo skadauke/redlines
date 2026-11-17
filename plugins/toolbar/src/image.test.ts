@@ -113,6 +113,19 @@ describe('the Image menu', () => {
     expect(ids([alt])?.slice(-2)).toEqual(['image.edit', 'image.altText']);
   });
 
+  it('says Added on Alt Text… once the image has alt text', () => {
+    const alt: EditorCommand = { id: 'image.altText', title: 'Alt Text…', run: () => true };
+    const note = (doc: string) => {
+      const editor = mount(doc);
+      at(editor, 'red.png');
+      return image(editor, [alt])
+        ?.rows.flat()
+        .find((item) => item.id === 'image.altText')?.note;
+    };
+    expect(note('![A red square](red.png)\n')).toBe('Added');
+    expect(note('![](red.png)\n')).toBeNull();
+  });
+
   it('grays Edit in Preview on an image that is not a file, and says why', () => {
     const editor = mount('![far](https://example.com/a.png)\n');
     at(editor, 'far');

@@ -171,7 +171,11 @@ function randomTyping(
         // that line, so the caret can't stand after spaces typed there. That is how the format
         // places the marker, not where the caret goes; it is rare.
         const spaced = (s: string) => (s.match(/^[ \t]+(?:<!--[^\n]*?-->)+[ \t]*$/gm) ?? []).length;
+        // The same for a block inserted whole, whose opener stands on a line of its own (format
+        // §3.3), when the edit is made next to it: the caret may stay where the edit began (#811).
+        const ownLine = (s: string) => /^[ \t>]*<!--ins \w+-->$/m.test(s);
         if (!ok && spaced(editor.view.state.doc.toString()) > spaced(text)) excused++;
+        else if (!ok && ownLine(text) && (marker || typed.endsWith('\n'))) excused++;
         else if (!ok) {
           misses.push(
             `${JSON.stringify(text)}: ${JSON.stringify(before.text)} [${a}, ${b}) + ${JSON.stringify(typed)} -> ` +

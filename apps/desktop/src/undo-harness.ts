@@ -216,6 +216,7 @@ export async function openWindow(doc: string): Promise<Window> {
     author: ada,
     document: {
       path: () => controller.state.path,
+      plainOnly: () => false,
       generation: () => controller.generation,
       read: () => editor.getDoc(),
       parsed: () => editor.getParsed(),

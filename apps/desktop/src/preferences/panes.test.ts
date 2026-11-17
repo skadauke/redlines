@@ -80,8 +80,28 @@ const loseFocus = () => {
 };
 
 describe('the panes', () => {
-  it('has four panes, General first (Shortcuts is a pane of its own, later)', () => {
-    expect(PANES.map((pane) => pane.label)).toEqual(['General', 'Editor', 'Appearance', 'Agents']);
+  it('has five panes, General first and Shortcuts last', () => {
+    expect(PANES.map((pane) => pane.label)).toEqual([
+      'General',
+      'Editor',
+      'Appearance',
+      'Agents',
+      'Shortcuts',
+    ]);
+  });
+
+  it('lists text and code files in the sidebar by default, and the row leaves them out', () => {
+    const made = draw('general');
+    const code = control<HTMLInputElement>(
+      made.container,
+      'Show code and text files in the sidebar',
+      'input',
+    );
+    expect(code.checked).toBe(true);
+    code.checked = false;
+    code.dispatchEvent(new Event('change'));
+    expect(made.update).toHaveBeenLastCalledWith({ showPlainOnlyFiles: false });
+    expect(made.now().showPlainOnlyFiles).toBe(false);
   });
 
   it('holds exactly the rows of the design, each pane', () => {
@@ -89,6 +109,7 @@ describe('the panes', () => {
       'Name and handle',
       'On launch',
       'Default folder for new documents',
+      'Show code and text files in the sidebar',
       'Check for updates automatically',
       'Default app for Markdown',
       'Command line',

@@ -2,7 +2,14 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { createEditor, type Editor } from '@redlines/editor';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { codeHighlight, codeLanguages, codeSpans } from './index.ts';
+import {
+  CODE_FILE_COLOR_LIMIT,
+  codeFileHighlight,
+  codeFileLanguage,
+  codeHighlight,
+  codeLanguages,
+  codeSpans,
+} from './index.ts';
 import { loadCodeLanguage } from './highlight.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
@@ -112,4 +119,62 @@ describe('code blocks', () => {
     expect(editor.view.contentDOM.querySelectorAll('.rl-codeblock').length).toBe(3);
     expect(editor.getDoc()).toBe(doc);
   });
+});
+
+describe('code files', () => {
+  /** A Plain-only editor for a file, colored by its name. */
+  function fileEditor(name: string, doc: string, size?: number): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc, author, kind: 'plain-only' });
+    editor.addExtension(codeFileHighlight(name, size));
+    open.push(editor);
+    return editor;
+  }
+  const drawn = (editor: Editor) =>
+    [...editor.view.contentDOM.querySelectorAll('span[class]')]
+      .filter((el) => /ͼ/.test(el.className))
+      .map((el) => el.textContent);
+  const until = async (done: () => boolean) => {
+    for (let i = 0; i < 200 && !done(); i++) await new Promise((r) => setTimeout(r, 10));
+  };
+
+  it('finds a grammar by the file name, and none for text, logs and tables', () => {
+    expect(codeFileLanguage('src/app.ts')?.name).toBe('TypeScript');
+    expect(codeFileLanguage('/x/run.PY')?.name).toBe('Python');
+    expect(codeFileLanguage('Dockerfile')).not.toBeNull();
+    for (const name of ['notes.txt', 'build.log', 'data.csv', 'plain']) {
+      expect(codeFileLanguage(name), name).toBeNull();
+    }
+  });
+
+  it('colors a whole .ts file once its grammar loads, and keeps coloring as it is edited', async () => {
+    const editor = fileEditor('app.ts', 'const answer: number = 42; // yes\n');
+    await until(() => drawn(editor).includes('42'));
+    expect(drawn(editor)).toEqual(expect.arrayContaining(['const', '42', '// yes']));
+    editor.view.dispatch({ changes: { from: 0, insert: 'let b = "s";\n' } });
+    await until(() => drawn(editor).includes('"s"'));
+    expect(drawn(editor)).toEqual(expect.arrayContaining(['let', '"s"', '42']));
+    expect(editor.getDoc().startsWith('let b')).toBe(true);
+  }, 60_000);
+
+  it('colors nothing in a .txt file, or in a file over the limit', async () => {
+    const text = fileEditor('notes.txt', 'const a = 1; // not code\n');
+    const big = fileEditor('app.ts', 'const a = 1;\n', CODE_FILE_COLOR_LIMIT + 1);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(drawn(text)).toEqual([]);
+    expect(drawn(big)).toEqual([]);
+  });
+
+  it('is taken out again, with the colors, when the extension is removed', async () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc: 'const a = 1;\n', author, kind: 'plain-only' });
+    open.push(editor);
+    const remove = editor.addExtension(codeFileHighlight('a.ts'));
+    await until(() => drawn(editor).includes('const'));
+    expect(drawn(editor)).toContain('const');
+    remove();
+    expect(drawn(editor)).toEqual([]);
+  }, 60_000);
 });

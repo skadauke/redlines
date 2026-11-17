@@ -47,6 +47,8 @@ percent-encoding = "2.3.2"
 # Tells the images that asset: URLs serve by their first bytes (images.rs). Tauri's own, through
 # tauri-utils.
 infer = "0.22.0"
+# A picture an agent is shown to describe is sent in base64 (images.rs, `image_for_agent`).
+base64 = "0.23"
 
 # The window's icon, off the Mac, is read from a PNG (dock_icon.rs). The Mac sets the Dock icon
 # without it, and the tests of the icon family read its PNGs the same way.
@@ -58,7 +60,6 @@ tauri = { version = "2.12.4", features = ["image-png"] }
 tauri = { version = "2.12.4", features = ["image-png", "test"] }
 # Tell the updater's public key in tauri.conf.json from anything else, as the updater reads it.
 # Both are the updater's own dependencies.
-base64 = "0.23"
 minisign-verify = "0.3"
 muda = { version = "0.20", default-features = false }
 # The update checks' tests wait on tokio's paused clock, not the real one, and one runs on several

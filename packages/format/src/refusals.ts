@@ -54,6 +54,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   [
     'packages/editor/src/image-size.ts',
+    'IMAGE_ATTRIBUTES',
+    'disable',
+    'the align commands are disabled, with this reason, for a pandoc image whose attribute block holds more than a size (#630)',
+  ],
+  [
+    'packages/editor/src/image-size.ts',
     'IMAGE_PARTS_PARAGRAPH',
     'widen',
     'a refusal of a lane that came with main: the paragraph is written as a replacement of its block (format §3.12)',
@@ -922,6 +928,18 @@ export const REFUSALS: readonly RefusalEntry[] = [
   [
     'plugins/agents/src/ask/index.ts',
     'error.message',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
+  ],
+  [
+    'plugins/agents/src/alt-text/index.ts',
+    'RAW',
+    'widen',
+    'a refusal the inventory counted by its constant, or a message of the same kind: written as a replacement of its unit (format §3.12)',
+  ],
+  [
+    'plugins/agents/src/alt-text/index.ts',
+    'NO_IMAGE',
     'info',
     'a notice that tells, or shows an error that has its own tier',
   ],

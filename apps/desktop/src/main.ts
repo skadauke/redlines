@@ -10,6 +10,8 @@ import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
   blockedMessage,
+  createAltDescriber,
+  createAltText,
   createAsk,
   createLiveLines,
   createMacAgents,
@@ -17,9 +19,10 @@ import {
   defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
-import { codeLanguages } from '@redlines/code';
+import { codeFileHighlight, codeLanguages } from '@redlines/code';
 import {
   createEditor,
+  PLAIN_ONLY_TRACKING,
   type Author,
   type EditorTyping,
   type EditorUiState,
@@ -41,6 +44,7 @@ import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
+import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
 import { createImageWatch } from './image-watch.ts';
@@ -63,6 +67,9 @@ import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
+import { createShortcutBook, shortcutEntries } from './shortcut-book.ts';
+import { publishShortcutEntries } from './shortcuts-published.ts';
+import { displayKey } from './shortcuts.ts';
 import { placeBack, readingPlace, topRoom, type ReadingPlace } from './reading-place.ts';
 import {
   authorFrom,
@@ -268,6 +275,12 @@ function dragFile(): void {
   });
 }
 
+// Every command's key, with the person's own over its own (shortcuts.ts): the editor's keys, the
+// menu bar and the browser's key handling all ask it. A change is kept in the settings.
+const shortcutBook = createShortcutBook(settings.shortcuts, (shortcuts) => {
+  settings = { ...settings, shortcuts: updateSettings({ shortcuts }).shortcuts };
+});
+
 // Crashes (#692): an error CodeMirror catches goes to the watch, which is made below, once there
 // is a document to take the shape of.
 let crashes: CrashWatch | null = null;
@@ -277,6 +290,7 @@ const untrackedAnswers = createUntrackedAnswers();
 
 const editor = createEditor(element('#editor'), {
   doc: '',
+  commandKeys: shortcutBook.commandKeys,
   onError: (error) => crashes?.caught(error),
   author,
   // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
@@ -639,7 +653,27 @@ const focusEditor = () => {
   if (!editor.view.dom.contains(document.activeElement)) editor.focus();
 };
 
+/** The file whose name the editor is colored by, with the extension that does it. */
+let coloredAs: { path: string; remove: () => void } | null = null;
+
+/**
+ * Colors a text or code file as its name says (`codeFileHighlight`), and takes the colors off when
+ * another file, or a Markdown one, takes its place or its name changes.
+ */
+function colorFile(path: string | null): void {
+  const wanted = path !== null && documentKind(path) === 'plain-only' ? path : null;
+  if (coloredAs?.path === wanted) return;
+  coloredAs?.remove();
+  coloredAs = wanted
+    ? {
+        path: wanted,
+        remove: editor.addExtension(codeFileHighlight(wanted, editor.getDoc().length)),
+      }
+    : null;
+}
+
 function showDocument(state: DocumentState): void {
+  colorFile(state.path);
   if (controller.generation !== shownGeneration) {
     shownGeneration = controller.generation;
     // Another document took this one's place: the old one's runs have nothing to act on, and its
@@ -693,6 +727,7 @@ const sidebar = createSidebar(app, {
     }
   },
   isRunLive: () => runs.isLive(),
+  showPlainOnly: () => settings.showPlainOnlyFiles,
   onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
   onClose: () => {
     changeSettings({ sidebarOpen: false });
@@ -767,6 +802,7 @@ const runs = createRuns({
   author,
   document: {
     path: () => controller.state.path,
+    plainOnly: () => editor.getUiState().kind === 'plain-only',
     generation: () => controller.generation,
     read: () => editor.getDoc(),
     parsed: () => editor.getParsed(),
@@ -877,6 +913,59 @@ const ask = createAsk(editor, {
     }),
 });
 
+// Alt Text (#553): the Image menu's Alt Text… opens a bubble by the image, with a field for the
+// description. It writes nothing until Save, and then as any edit (tracked with Track Changes on).
+createAltText(editor, {
+  notice: (message) => notice.flash(message),
+  generation: () => controller.generation,
+  // "Describe with <agent>": the agent is shown the one picture and nothing else (agent.ts).
+  describer: createAltDescriber({
+    agents,
+    author,
+    document: { path: () => controller.state.path, generation: () => controller.generation },
+    readImage: readImageForAgent,
+  }),
+});
+
+/** The most bytes of a picture an agent is shown, as the app's own command holds it to. */
+const AGENT_IMAGE_BYTES = 3_670_016;
+
+/**
+ * The picture `src` of the document, as the bytes an agent is shown (Alt Text, #553): only a local
+ * image inside the document's project folder (`localImagePath`), read by the app, which holds it to
+ * the folders its sidebars show, to PNG, JPEG, GIF and WebP, and to 3.5 MB (`image_for_agent`). A plain
+ * page in development reads it from its own memory, with the same limits.
+ */
+async function readImageForAgent(src: string): Promise<{ mimeType: string; data: string }> {
+  const document = imageDocument;
+  const root = imageFolder;
+  const path = document && root !== null ? localImagePath(src, document, root) : null;
+  if (path === null) throw new Error('Only an image in this document’s folder can be described.');
+  if (isTauri) {
+    try {
+      return await invoke<{ mimeType: string; data: string }>('image_for_agent', { path });
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
+    }
+  }
+  const url = host.imageUrl(path);
+  if (url === null) throw new Error('The image file isn’t there.');
+  const response = await fetch(url).catch(() => null);
+  if (!response?.ok) throw new Error('The image file isn’t there.');
+  const blob = await response.blob();
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(blob.type)) {
+    throw new Error('Only PNG, JPEG, GIF and WebP pictures can be described.');
+  }
+  if (blob.size > AGENT_IMAGE_BYTES)
+    throw new Error('That image is larger than 3.5 MB, which is too big to describe.');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+  }
+  return { mimeType: blob.type, data: btoa(binary) };
+}
+
 /**
  * Opens Preferences on the Agents pane, where an agent is updated or signed in: what a failed
  * run's line offers when the agent is too old or signed out. The window can't update or sign in an
@@ -914,6 +1003,8 @@ async function restoreAfterCrash(): Promise<void> {
 }
 
 const toggleTracking = () => {
+  // A text or code file has no Track Changes: its menu item and key are disabled; this says why.
+  if (editor.getUiState().kind === 'plain-only') return notice.flash(PLAIN_ONLY_TRACKING);
   const on = !editor.getUiState().tracking;
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
   editor.setTracking(on);
@@ -951,11 +1042,16 @@ const changeSettings = (change: Partial<Settings>) => {
  */
 function toolbarCommands(): AppCommand[] {
   const ui = () => editor.getUiState();
+  // The key the person's book gives a row now (none: null), as the palette draws it.
+  const keyFor = (row: string, fixed: string) => {
+    const key = shortcutBook.keyOf(row);
+    return key ? displayKey(key) : shortcutBook.entries().length ? undefined : fixed;
+  };
   return [
     {
       id: 'app.tracking',
       title: 'Track Changes',
-      keys: '⇧⌘E',
+      keys: keyFor('Review/Track Changes', '⇧⌘E'),
       synonyms: ['suggest', 'suggesting', 'redline'],
       control: {
         kind: 'switch',
@@ -999,35 +1095,35 @@ function toolbarCommands(): AppCommand[] {
     {
       id: 'app.clean',
       title: 'Show Clean View',
-      keys: '⌥⌘1',
+      keys: keyFor('View/Clean', '⌥⌘1'),
       synonyms: ['preview', 'read'],
       run: () => editor.showView('clean'),
     },
     {
       id: 'app.redlines',
       title: 'Show Redlines View',
-      keys: '⌥⌘2',
+      keys: keyFor('View/Redlines', '⌥⌘2'),
       synonyms: ['changes', 'markup'],
       run: () => editor.showView('redlines'),
     },
     {
       id: 'app.raw',
       title: 'Show Raw View',
-      keys: '⌥⌘3',
+      keys: keyFor('View/Plain', '⌥⌘3'),
       synonyms: ['markdown', 'source'],
       run: () => editor.showView('raw'),
     },
     {
       id: 'app.simple',
       title: 'Simple Look',
-      keys: '⌥⌘4',
+      keys: keyFor('View/Simple Look', '⌥⌘4'),
       synonyms: ['plain', 'quiet'],
       run: () => editor.switchLook(),
     },
     {
       id: 'app.preferences',
       title: 'Open Preferences',
-      keys: '⌘,',
+      keys: keyFor('Redlines/Preferences…', '⌘,'),
       synonyms: ['settings', 'options'],
       run: () => commands.openPreferences(),
     },
@@ -1108,6 +1204,7 @@ function renameDocument(): void {
 installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
+  keyOf: (id) => shortcutBook.keyOf(id),
   toggleToolbar: () => toolbar.toggle(),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
@@ -1134,6 +1231,9 @@ const titleBar = createTitleBar(element('#titlebar'), {
     savedAt: controller.savedAt,
   }),
 });
+
+// A key changed here or in Preferences: the title bar's hints and menus show it (#551).
+shortcutBook.subscribe(() => titleBar.keysChanged());
 
 // The toolbar is at the bottom of the window from the start when the person wants it there.
 toolbar.setAtBottom(settings.toolbarAtBottom);
@@ -1295,6 +1395,9 @@ activatePlugins(editor, {}, DESKTOP_PLUGINS, {
 
 // The menus show the commands registered by now: plugins register theirs above this line.
 const menuModel = appMenuModel(commands, editor.commands, { browser: !isTauri });
+shortcutBook.setEntries(shortcutEntries(menuModel));
+// The Shortcuts pane of Preferences lists them, and has no menu bar of its own to read them from.
+publishShortcutEntries(shortcutBook.entries());
 const checkDrawnCommands = drawnCommandsCheck(editor.commands);
 
 let nativeMenu: NativeMenu | null = null;
@@ -1347,6 +1450,7 @@ function render(): void {
     name: doc.name,
     dirty: doc.dirty,
     fileDraggable: doc.path !== null && canDragFile,
+    plainOnly: ui.kind === 'plain-only',
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
@@ -1355,6 +1459,7 @@ function render(): void {
     toolbarShown: toolbar.isOpen(),
   });
   menuState = {
+    plainOnly: ui.kind === 'plain-only',
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
@@ -1447,7 +1552,8 @@ if (isTauri) {
   // The zoom rows were disabled until now.
   render();
   // ⌘+ typed as "+" reaches Zoom In through the page: the menu bar's keys have no plus key.
-  if (/Macintosh/.test(navigator.userAgent)) installPlusKeys(menuModel, () => menuState);
+  if (/Macintosh/.test(navigator.userAgent))
+    installPlusKeys(menuModel, () => menuState, shortcutBook);
   // A file the app gives this window, from its command line, the system (`open -a Redlines
   // plan.md`) or a drop on a window, opens in place of the empty document. Should the window have
   // been used by the time it opens, it takes a window of its own. The app gives documents alone.
@@ -1482,10 +1588,10 @@ if (isTauri) {
   // After a crash: the edits the window had, put back, with a card that says so (#693).
   void restoreAfterCrash();
   windows?.ready();
-  nativeMenu = await createNativeMenu(menuModel).catch((error: unknown) => {
+  nativeMenu = await createNativeMenu(menuModel, shortcutBook).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
-    installShortcuts(menuModel);
+    installShortcuts(menuModel, shortcutBook);
     return null;
   });
   if (nativeMenu) {
@@ -1497,12 +1603,16 @@ if (isTauri) {
   reportIconRotation(settings.rotateIcon);
   updates?.setAutomatic(settings.checkForUpdates);
 } else {
-  installShortcuts(menuModel);
+  installShortcuts(menuModel, shortcutBook);
   await controller.open('sample.md');
   // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
     exposeForJourneys(editor, controller, {
+      openFile: async (path, text) => {
+        await host.write(path, text);
+        await controller.open(path);
+      },
       // The menu bar is the app's, and a page has none: a journey chooses a row through this, which
       // runs it only while the menu would have it enabled.
       menuRow: (text) => {
@@ -1525,9 +1635,12 @@ if (isTauri) {
 // Preferences are a window of their own. Their changes arrive here as they are made, and so do
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
+  const plainOnlyListed = settings.showPlainOnlyFiles;
   settings = keepWindowOwn(settings, changed);
+  shortcutBook.load(settings.shortcuts);
   review.setShowResolved(settings.showResolved);
   wordCount.setVisible(settings.showWordCount);
+  if (settings.showPlainOnlyFiles !== plainOnlyListed) void sidebar.refresh();
   toolbar.setAtBottom(settings.toolbarAtBottom);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));

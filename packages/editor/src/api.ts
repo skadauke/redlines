@@ -17,6 +17,16 @@ import type { Handle, MarkRange, Parsed, Range, Twin, TwinKind } from '@redlines
 export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
 
 /**
+ * What a file is, from its extension (the host decides): Markdown has three views, Track Changes
+ * and a ledger; a Plain-only file (text or code) is text in Plain and nothing else: no marks are
+ * read or written, and the commands that make them are disabled with their reason.
+ */
+export type DocumentKind = 'markdown' | 'plain-only';
+
+/** The dialect of a Markdown file (format §9.1): GitHub's, or pandoc's in `.qmd` and `.Rmd`. */
+export type MarkdownDialect = 'gfm' | 'pandoc';
+
+/**
  * The views a View menu lists (design §5.3): Clean, Redlines and Plain. Redlines is the view in
  * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
  */
@@ -39,6 +49,8 @@ export interface Author {
 
 /** What the host's controls need to show. */
 export interface EditorUiState {
+  /** What the document is: a Plain-only document has no other view and no Track Changes. */
+  kind: DocumentKind;
   view: ViewMode;
   /** The look of Redlines chosen last, with a click on a change bar or `switchLook`, which an automatic switch shows. */
   markupView: MarkupView;
@@ -105,8 +117,13 @@ export interface EditorCommand {
    * draws items from the registry follows it.
    */
   title: string | ((state: EditorState) => string);
-  /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
+  /**
+   * CodeMirror notation, such as 'Mod-b'. The core binds it. In the registry's list it is the key
+   * the command has now, which the person may have changed (`CommandKeys`).
+   */
   shortcut?: string;
+  /** Only in the registry's list, and only on a command whose key was changed: the key it came with, or "" for none. */
+  defaultShortcut?: string;
   /** Where a host with menus shows it. */
   menu?: 'file' | 'edit' | 'insert' | 'format' | 'paragraph' | 'table' | 'view' | 'review';
   /** Items with different groups get a separator between them. */
@@ -150,6 +167,14 @@ export interface EditorCommand {
    * silent (hardening.md: a key that does nothing and says nothing is a bug).
    */
   disabledReason?(state: EditorState): string | undefined;
+}
+
+/** The person's own keys for the registry's commands. */
+export interface CommandKeys {
+  /** The key the command has now in CodeMirror's notation, or undefined for none; `fallback` is its own. */
+  keyOf(id: string, fallback: string | undefined): string | undefined;
+  /** Calls `listener` when a key changes. Returns a function that stops it. */
+  subscribe(listener: () => void): () => void;
 }
 
 export interface CommandRegistry {
@@ -206,6 +231,10 @@ export interface ImageSpot {
 export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
+  /** What the file is; default 'markdown'. `setDoc` takes the next file's. */
+  kind?: DocumentKind;
+  /** The Markdown dialect of the file, which decides how an image's size is written; default 'gfm'. */
+  dialect?: MarkdownDialect;
   author: Author;
   /**
    * Default: the view the ledger says (`view`, format §5.6), else the markup view when the
@@ -340,6 +369,8 @@ export interface EditorOptions {
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+  /** The person's own keys for the commands (`CommandKeys`); the commands' own until given. */
+  commandKeys?: CommandKeys;
   /** Called with an error that CodeMirror caught in an extension, which it logs otherwise. */
   onError?: (error: unknown) => void;
   /**
@@ -398,7 +429,12 @@ export interface Editor {
    * the view the ledger says (`view: clean`, `view: redlines` or `view: simple`, format §5.6), or
    * else the markup view; and tracking on when the file asks for it (`tracking: everyone`).
    */
-  setDoc(doc: string): void;
+  setDoc(doc: string, kind?: DocumentKind, dialect?: MarkdownDialect): void;
+  /**
+   * Changes what the open document is, when its file's name changes (a rename, Save As): the
+   * document is read again as that kind, and its text stays as it is.
+   */
+  setKind(kind: DocumentKind, dialect?: MarkdownDialect): void;
   /**
    * Brings in a new version of the same file, such as one an agent changed on disk. Only the
    * lines that differ are replaced, each trimmed to the characters that differ, so the selection

@@ -8,7 +8,7 @@ import {
   reply,
   resolve,
 } from '@redlines/format';
-import { TOOL_DEFINITIONS, callTool } from './tools.ts';
+import { PLAIN_ONLY_ERROR, TOOL_DEFINITIONS, callTool } from './tools.ts';
 import { PLAN, fakeContext, fakeDocument } from './test-helpers.ts';
 import type { Calls } from './test-helpers.ts';
 
@@ -595,3 +595,48 @@ describe('str_replace after a bare list marker (#580)', () => {
 function replyChanges(text: string, id: string, by: string, body: string) {
   return reply(text, id, body, { author: { handle: by, name: by }, time: TIME });
 }
+
+describe('a Plain-only file', () => {
+  const plainContext = (doc = fakeDocument()) => ({
+    ...fakeContext(doc, undefined, 'k3x9'),
+    plainOnly: () => true,
+  });
+
+  it('refuses the tools that would mark it, and writes nothing', async () => {
+    const doc = fakeDocument();
+    const ctx = plainContext(doc);
+    const calls: [string, object][] = [
+      ['str_replace', { old_str: 'March', new_str: 'April' }],
+      ['comment', { quote: 'March', text: 'Why?' }],
+      ['reply', { text: 'Done.' }],
+    ];
+    for (const [name, args] of calls) {
+      const done = await callTool(ctx, name, args);
+      expect(done, name).toEqual({ text: PLAIN_ONLY_ERROR, isError: true });
+    }
+    expect(doc.writes).toBe(0);
+    expect(doc.text).toBe(PLAN);
+    expect(PLAIN_ONLY_ERROR).toBe(
+      "This is a plain text file, which can't hold tracked changes or comments.",
+    );
+  });
+
+  it('still reads it, and says its status', async () => {
+    const ctx = plainContext();
+    const seen = await callTool(ctx, 'view', {});
+    expect(seen.isError).toBe(false);
+    expect(seen.text).toContain('We will ship the importer in March.');
+    expect((await callTool(ctx, 'status', { text: 'Reading' })).isError).toBe(false);
+  });
+
+  it('leaves the document writable as plain text, and Markdown files unchanged', async () => {
+    const doc = fakeDocument();
+    await plainContext(doc).doc.write('a\n');
+    expect(doc.text).toBe('a\n');
+    const marked = fakeDocument();
+    const ctx = { ...fakeContext(marked), plainOnly: () => false };
+    const done = await callTool(ctx, 'str_replace', { old_str: 'March', new_str: 'April' });
+    expect(done.isError).toBe(false);
+    expect(marked.writes).toBe(1);
+  });
+});

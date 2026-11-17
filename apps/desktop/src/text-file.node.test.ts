@@ -8,7 +8,6 @@ import { mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEditor, type Editor } from '@redlines/editor';
-import { newestView, parse } from '@redlines/format';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DocumentController, type DocumentState } from './document.ts';
 import { BROWSER_IDENTITY, decodeText, FileExistsError, type Host } from './host.ts';
@@ -145,16 +144,30 @@ describe('a plain text file', () => {
     expect(state).toMatchObject({ path, name: 'notes.txt', dirty: false });
   });
 
-  it('takes a tracked change, which is written in the file as in any document', async () => {
+  it('takes no tracked change: Track Changes stays off, and typing is written as it is', async () => {
     const path = await open('plan.txt', 'Pack the bags.\n');
     editor.setTracking(true);
     typeAfter('Pack the bags', ' tonight');
     expect(await controller.save()).toBe(true);
-    const saved = await readFile(path, 'utf8');
-    const parsed = parse(saved);
-    expect(parsed.warnings).toEqual([]);
-    expect(parsed.marks.map((mark) => [mark.kind, mark.entry.by])).toEqual([['ins', 'ada']]);
-    expect(newestView(saved).text).toBe('Pack the bags tonight.\n');
+    expect(await readFile(path, 'utf8')).toBe('Pack the bags tonight.\n');
+  });
+
+  it('writes no ledger, even when tracking was asked for, and keeps one it holds as text', async () => {
+    const text = 'let a = 1;\n\n<!-- redlines\nv: 1\ntracking: everyone\n-->\n';
+    const path = await open('code.ts', text);
+    editor.setTracking(true, { inFile: true });
+    typeAfter('let a', 'a');
+    expect(await controller.save()).toBe(true);
+    expect(await readFile(path, 'utf8')).toBe(text.replace('let a', 'let aa'));
+  });
+
+  it('becomes Markdown, or text, as its name does when it is renamed', async () => {
+    await open('draft.md', 'Pack the bags.\n');
+    expect(editor.getUiState().kind).toBe('markdown');
+    expect(await controller.rename('draft.txt')).toBe(true);
+    expect(editor.getUiState()).toMatchObject({ kind: 'plain-only', view: 'raw' });
+    expect(await controller.rename('draft.md')).toBe(true);
+    expect(editor.getUiState().kind).toBe('markdown');
   });
 
   it('keeps its .txt when it is renamed to a name without one, with its bytes', async () => {

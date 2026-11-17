@@ -11,6 +11,8 @@ export interface JourneyHook {
   controller: DocumentController;
   /** A row of the menu bar by its text, or null: whether it is enabled, and a way to choose it. */
   menuRow(text: string): { enabled: boolean; run(): boolean } | null;
+  /** Saves `text` as the file `path` in the page's own folder, and opens it, as the sidebar would. */
+  openFile(path: string, text: string): Promise<void>;
   /** Whether the parse covers the middle of the viewport: the text there is styled, not plain. */
   parsedAtViewport(): boolean;
 }
@@ -24,7 +26,7 @@ declare global {
 export function exposeForJourneys(
   editor: Editor,
   controller: DocumentController,
-  menu: Pick<JourneyHook, 'menuRow'>,
+  menu: Pick<JourneyHook, 'menuRow' | 'openFile'>,
 ): void {
   const parsedAtViewport = () => {
     const { state, viewport } = editor.view;

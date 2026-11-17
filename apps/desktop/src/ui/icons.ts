@@ -49,6 +49,9 @@ const ICONS = {
   editor: '<path d="M5.2 2.5h5.6M5.2 13.5h5.6M8 2.5v11"/>',
   /** Preferences, Agents: a four-pointed spark. */
   agents: '<path d="M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5z"/>',
+  /** Preferences, Shortcuts: a keyboard. */
+  shortcuts:
+    '<rect x="1.8" y="4" width="12.4" height="8" rx="1.6"/><path d="M4.4 6.8h.01M6.8 6.8h.01M9.2 6.8h.01M11.6 6.8h.01M5 9.4h6" stroke-width="1.5"/>',
   /** Close or dismiss. */
   close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   /** A folder's disclosure arrow, pointing right while closed. */

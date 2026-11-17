@@ -8,6 +8,8 @@ import type { ToolLines } from '@redlines/plugin-api';
 export interface ToolAnswer {
   text: string;
   isError: boolean;
+  /** The picture an image content block carried (`view_image`), when there was one. */
+  image?: { mimeType: string; data: string };
 }
 
 /** The program's end of the line. */
@@ -40,13 +42,20 @@ export function toolClient(lines: ToolLines): FakeConnection {
         JSON.stringify({ jsonrpc: '2.0', id: id++, method: 'tools/call', params }),
       );
       const message = JSON.parse(answer ?? '{}') as {
-        result?: { content?: { text?: string }[]; isError?: boolean };
+        result?: {
+          content?: { type?: string; text?: string; data?: string; mimeType?: string }[];
+          isError?: boolean;
+        };
         error?: { message?: string };
       };
       if (message.error) return { text: message.error.message ?? '', isError: true };
+      const picture = message.result?.content?.find((block) => block.type === 'image');
       return {
         text: message.result?.content?.[0]?.text ?? '',
         isError: message.result?.isError === true,
+        ...(picture?.data !== undefined && picture.mimeType !== undefined
+          ? { image: { mimeType: picture.mimeType, data: picture.data } }
+          : {}),
       };
     },
   };

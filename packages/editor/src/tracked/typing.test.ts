@@ -535,7 +535,7 @@ describe('tracked typing', () => {
     }
     // Backspace in front of the text would take a space of the line's indentation: written as a
     // replacement of the item (format §3.12). Enter at the end of the item's last paragraph would
-    // start a line with a marker: written as a replacement too.
+    // start a line with a marker: composed of several edits, which stay refused (#808).
     expect(said).toEqual([
       'x at the start: changed',
       'Enter at the start: changed',

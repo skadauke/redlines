@@ -52,6 +52,9 @@ export function widenedAtOnce(
       to: view.map.fromSource(edit.to),
     }));
     const done = widen(text, made, ctx);
+    // Another person's pending mark in the old text keeps the refusal: some order of decisions
+    // would not read as the original (issue #808).
+    if (done.heldByOthers.length > 0) throw first;
     return { changes: done.changes, markIds: [done.id], extendedIds: [] };
   } catch (error) {
     if (error instanceof Untrackable || error instanceof EditError) return undefined;

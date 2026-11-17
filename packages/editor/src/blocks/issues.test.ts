@@ -146,8 +146,11 @@ describe('the linked issues', () => {
         doc: '- one⏎new<split>⏎  ‸two',
         others: 'bo',
         keys: ['Backspace'],
-        // Written as a replacement of the item with Track Changes on (format §3.12).
-        on: { newest: '- one⏎new⏎two' },
+        // Refused with Track Changes on, #119 open.
+        on: {
+          refusal:
+            "A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.",
+        },
       },
       {
         name: '#154: list keys under front matter closed by ...',
@@ -337,7 +340,11 @@ describe('the linked issues', () => {
         others: 'bo',
         keys: ['Delete'],
         off: { file: '- one<split>⏎  - ⏎- two', refusal: SELF_CHECK },
-        on: { newest: '- one⏎- two' },
+        on: {
+          file: '- one<split>⏎  - ⏎- two',
+          refusal:
+            "This edit would leave bo's line break right next to your deletion, and deciding one would change the other. Decide bo's line break first.",
+        },
       },
       {
         name: '#204: a character with a combining accent goes in two presses, as elsewhere',
