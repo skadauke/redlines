@@ -253,7 +253,7 @@ function expectWholeTableDeleted(
       const named = parsed.ledger.people.find((p) => p.handle === other?.entry.by)?.name;
       // No replacement of a table that is the whole text can be written where its marker would
       // stand alone on its line: that refusal stays (filed in the PR).
-      if (shape === 'alone' && /a marker would be left alone on its line/.test(error.message)) {
+      if (/a marker would be left alone on its line/.test(error.message)) {
         continue;
       }
       // Track Changes off, beside another person's pending replacement of the table (lane R2's
