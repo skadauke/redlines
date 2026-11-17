@@ -52,6 +52,7 @@ import {
   openerRange,
   parse,
   type Parsed,
+  type Person,
   type Range,
   rangeEdge,
   type TextChange,
@@ -83,6 +84,13 @@ import {
   type UntrackedWords,
 } from './ask.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
+import {
+  intentAnnotation,
+  newIntentId,
+  recording,
+  replaying,
+  type TypingIntent,
+} from './intent.ts';
 import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
@@ -579,6 +587,15 @@ interface Tracked {
   changes: ChangeSet;
   /** Where the caret goes, when the main edit made a change. */
   caret: number | null;
+  /** What the filter was given, for the intent recorded beside these changes. */
+  intent?: Omit<TypingIntent, 'id'>;
+}
+
+/** Who edits, when, and where the ids come from: what an intent is derived again with. */
+interface Replay {
+  author: Person | null;
+  time: string;
+  random: (n: number) => Uint8Array;
 }
 
 /**
@@ -597,8 +614,44 @@ function trackEdits(
   backward: boolean,
   grouped: boolean | string = false,
   widening: boolean | 'first' = false,
+  replay?: Replay,
 ): Tracked {
-  let ctx = contextFor(state);
+  const base: EditContext = replay
+    ? { author: replay.author as Person, time: replay.time, random: replay.random }
+    : contextFor(state);
+  // Every id the format draws is kept, so that the edit can be derived again with the same ones.
+  const drawing = recording(base.random);
+  const tracked = trackEditsWith(state, text, parsed, edits, backward, grouped, widening, {
+    ...base,
+    random: drawing.random,
+  });
+  return {
+    ...tracked,
+    intent: {
+      kind: 'typing',
+      tracking: true,
+      edits,
+      backward,
+      grouped,
+      widening,
+      author: base.author,
+      time: base.time,
+      drawn: drawing.drawn,
+    },
+  };
+}
+
+function trackEditsWith(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  backward: boolean,
+  grouped: boolean | string,
+  widening: boolean | 'first',
+  context: EditContext,
+): Tracked {
+  let ctx = context;
   // A group of its own for several edits, or the one a caller has made for them.
   if (typeof grouped === 'string') ctx = { ...ctx, group: grouped };
   else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
@@ -684,14 +737,62 @@ function untrackEdits(
   parsed: Parsed,
   edits: readonly Edit[],
   backward: boolean,
+  replay?: Replay,
 ): Tracked {
-  const { random } = state.facet(editSourceFacet);
+  const drawing = recording(replay ? replay.random : state.facet(editSourceFacet).random);
+  const { random } = drawing;
   // Who edits is not recorded; a refusal names their own changes "yours".
-  const editing = state.facet(authorFacet);
+  const editing = replay ? replay.author : state.facet(authorFacet);
   const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
-  return formatEdits(text, parsed, edits, backward, (doc, edit) =>
+  const made = formatEdits(text, parsed, edits, backward, (doc, edit) =>
     untrackedEdit(doc, edit, { random, author }),
   );
+  return {
+    ...made,
+    intent: {
+      kind: 'typing',
+      tracking: false,
+      edits,
+      backward,
+      grouped: false,
+      widening: false,
+      author: editing ?? null,
+      time: '',
+      drawn: drawing.drawn,
+    },
+  };
+}
+
+/**
+ * The changes an intent makes on `state`'s text, with the author, time and ids it was recorded
+ * with: what the tracking filter wrote for it, byte for byte, on the text it was made on. On other
+ * text they are the changes it would have made there, and the ids that are taken there are drawn
+ * past.
+ *
+ * @throws EditError when the format refuses the edits there.
+ */
+export function deriveIntent(state: EditorState, intent: TypingIntent): ChangeSet {
+  const replay: Replay = {
+    author: intent.author,
+    time: intent.time,
+    random: replaying(intent),
+  };
+  const text = state.doc.toString();
+  const parsed = state.field(parsedField);
+  return (
+    intent.tracking
+      ? trackEdits(
+          state,
+          text,
+          parsed,
+          intent.edits,
+          intent.backward,
+          intent.grouped,
+          intent.widening,
+          replay,
+        )
+      : untrackEdits(state, text, parsed, intent.edits, intent.backward, replay)
+  ).changes;
 }
 
 /**
@@ -763,6 +864,7 @@ function rewritten(
   changes: ChangeSet,
   caret: number | null,
   effects: readonly StateEffect<unknown>[] = [],
+  intent?: Omit<TypingIntent, 'id'>,
 ): TransactionSpec {
   // From the transaction's new document back to its start, and on to the rewritten one.
   const mapping = tr.changes.invertedDesc.composeDesc(changes.desc);
@@ -770,7 +872,10 @@ function rewritten(
     changes,
     selection: caret === null ? tr.newSelection.map(mapping) : EditorSelection.cursor(caret),
     effects: [...StateEffect.mapEffects(tr.effects, mapping), ...effects],
-    annotations: annotationsOf(tr),
+    annotations: [
+      ...annotationsOf(tr),
+      ...(intent ? [intentAnnotation.of({ ...intent, id: newIntentId() })] : []),
+    ],
     scrollIntoView: tr.scrollIntoView,
   };
 }
@@ -871,7 +976,7 @@ function trackedSpec(
     tr.annotation(holdViewAnnotation) !== true && suggests(start, start.doc, edits, tracked.changes)
       ? [setViewModeEffect.of(start.facet(markupViewFacet))]
       : [];
-  return rewritten(tr, tracked.changes, tracked.caret, toRedlines);
+  return rewritten(tr, tracked.changes, tracked.caret, toRedlines, tracked.intent);
 }
 
 /** An edit in front matter: made at once without tracking when the person answered already, and
@@ -1044,9 +1149,18 @@ function untrackedSpec(
   if (JSON.stringify(result.changes.toJSON()) === JSON.stringify(tr.changes.toJSON())) {
     // Marked so that the caret moves out of hidden text, which the edit can leave it in when it
     // brings markers together.
-    return [tr, { annotations: trackedEditAnnotation.of(true), sequential: true }];
+    return [
+      tr,
+      {
+        annotations: [
+          trackedEditAnnotation.of(true),
+          ...(result.intent ? [intentAnnotation.of({ ...result.intent, id: newIntentId() })] : []),
+        ],
+        sequential: true,
+      },
+    ];
   }
-  return rewritten(tr, result.changes, result.caret);
+  return rewritten(tr, result.changes, result.caret, [], result.intent);
 }
 
 /** Closers of marks and nothing else: what ends the body's text, in front of the hidden ledger. */

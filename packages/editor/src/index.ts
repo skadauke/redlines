@@ -250,7 +250,14 @@ export {
   viewModeField,
 } from './tracked/field.ts';
 export { baseTitle } from './commands.ts';
-export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
+export {
+  deriveIntent,
+  refusedEditEffect,
+  setTrackingEffect,
+  trackingField,
+} from './tracked/typing.ts';
+export { intentAnnotation, intentOf } from './tracked/intent.ts';
+export type { Intent, IntentEdit, TypingIntent } from './tracked/intent.ts';
 export {
   UNTRACKED_DETAILS,
   UNTRACKED_TITLE,
