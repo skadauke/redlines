@@ -204,6 +204,31 @@ describe('who leads, among tabs', () => {
     await b.leave();
   });
 
+  it('does not hang a join when the store fails, and does not lead after leaving mid-join', async () => {
+    const { tab, store } = world();
+    const failing = tab('tab-1');
+    store.bumpEpoch = () => Promise.reject(new Error('blocked'));
+    const joined = await failing.join(PATH);
+    expect(joined.leading).toBe(false);
+    expect(failing.leading).toBe(false);
+    await failing.leave();
+    // Leaving while the epoch is being stored: the tab never leads, and the lock is let go.
+    const other = world();
+    const slow = other.tab('tab-2');
+    const bump = other.store.bumpEpoch.bind(other.store);
+    other.store.bumpEpoch = async () => {
+      await wait(30);
+      return bump();
+    };
+    const joining = slow.join(PATH);
+    await slow.leave();
+    await joining;
+    expect(slow.leading).toBe(false);
+    const next = other.tab('tab-3');
+    expect((await next.join(PATH)).leading).toBe(true);
+    await next.leave();
+  });
+
   it('tells the leader that a tab has gone, and when it stops saying it is here', async () => {
     const { tab } = world();
     const a = tab('tab-1');

@@ -130,6 +130,11 @@ export class TabPorts implements SessionPorts {
     if (!granted) {
       // Who leads? Its next beat says; one the tab asks for is answered at once.
       await this.#untilHeard(400);
+      if (this.#leader === null) {
+        // Nobody answered: the silence is timed from now, and the lock is taken if it goes on.
+        this.#leader = '?';
+        this.#lastBeat = Date.now();
+      }
     }
     this.#timer = setInterval(() => this.#tick(), this.#beat);
     return {
@@ -199,6 +204,8 @@ export class TabPorts implements SessionPorts {
   // --- leading ----------------------------------------------------------------------------------
 
   #releaseLock: (() => void) | null = null;
+  /** Counts the grants of the lock; one that was lost or left no longer leads. */
+  #grant = 0;
   #claiming: Promise<boolean> | null = null;
 
   /** Asks for the lock. Resolves to whether it was granted at once. */
@@ -220,7 +227,11 @@ export class TabPorts implements SessionPorts {
           // Granted: it is answered once this tab leads, which takes a moment (the epoch is stored).
           return this.#lead(true, () => answer(true));
         })
-        .catch(() => this.#lost());
+        .catch(() => {
+          // Stolen, or the store failed: this tab leads no more, and `join` need not wait.
+          this.#lost();
+          answer(false);
+        });
     });
     return this.#claiming;
   }
@@ -228,7 +239,13 @@ export class TabPorts implements SessionPorts {
   /** The lock is this tab's: it leads, in a new epoch, until it lets go of it. */
   async #lead(granted: boolean, led?: () => void): Promise<void> {
     if (!granted || this.#left) return;
+    const grant = ++this.#grant;
     const epoch = await this.#env.store.bumpEpoch();
+    // Left, or the lock was stolen, while the epoch was stored: it is not this tab's to lead.
+    if (this.#left || grant !== this.#grant) {
+      led?.();
+      return;
+    }
     this.#epoch = epoch;
     this.#leading = true;
     this.#leader = this.label;
@@ -248,6 +265,7 @@ export class TabPorts implements SessionPorts {
 
   /** The lock was stolen: this tab leads no more. */
   #lost(): void {
+    this.#grant++;
     this.#leading = false;
   }
 
@@ -285,8 +303,10 @@ export class TabPorts implements SessionPorts {
         this.#lead(granted),
       );
     } catch {
-      // Stolen from this tab in turn.
+      // Stolen from this tab in turn, or the store failed: it is tried again after the next silence.
       this.#lost();
+      this.#leader = '?';
+      this.#lastBeat = Date.now();
     }
   }
 

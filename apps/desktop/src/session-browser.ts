@@ -6,11 +6,9 @@ import { TabPorts } from './session-tabs.ts';
 import type { TabChannel, TabLocks, TabMessage, TabStore } from './session-tabs.ts';
 import type { SessionPorts } from './session.ts';
 
-/** A name that is safe to use for a channel, a lock and a database, from a document's path. */
+/** A name for a channel and a database from a document's path: the path itself, so two never share one. */
 function nameFor(path: string): string {
-  let hash = 0xcbf29ce4;
-  for (let i = 0; i < path.length; i++) hash = Math.imul(hash ^ path.charCodeAt(i), 0x01000193);
-  return (hash >>> 0).toString(16);
+  return encodeURIComponent(path);
 }
 
 function channelFor(path: string): TabChannel {
@@ -118,6 +116,10 @@ export function browserSessionPorts(path: string): SessionPorts {
   // The page going away is the tab leaving: its lock is released by the browser, and the others
   // are told at once rather than by silence.
   addEventListener('pagehide', () => void ports.leave());
+  // A page the browser brings back from its cache has left: it starts again, as a new tab.
+  addEventListener('pageshow', (event) => {
+    if (event.persisted) location.reload();
+  });
   // Debug only (the journeys): a tab's page can be frozen, as a browser freezes one that hangs.
   if (import.meta.env.DEV) Object.assign(window, { __redlinesTab: ports });
   return ports;
