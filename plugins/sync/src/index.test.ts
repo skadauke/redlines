@@ -200,6 +200,28 @@ describe('syncEditor', () => {
   }, 60_000);
 });
 
+describe('edits that are no typing', () => {
+  it('places Bo’s agent edit on Ada’s newer text, and keeps what Ada typed', async () => {
+    const { hub, ada, bo } = await session();
+    await settle(ada.binding, bo.binding);
+    type(ada.editor, 'First', ' ADA');
+    const base = bo.editor.getDoc();
+    bo.editor.applyAgentEdit(
+      base.replace('Second paragraph', 'Second AGENT paragraph'),
+      { group: 'g', agent: 'claude' },
+      base,
+    );
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(parse(text).warnings).toEqual([]);
+    expect(text).toContain('ADA');
+    expect(text).toContain('Second AGENT paragraph');
+    expect([...ada.notices, ...bo.notices]).toEqual([]);
+  });
+});
+
 describe('a person who works alone', () => {
   it('writes the same file in a session of one window as with none, byte for byte', async () => {
     const edits = (editor: Editor) => {
@@ -406,5 +428,62 @@ describe('undo in two windows', () => {
     expect(hub.authority.text).not.toContain('ONE');
     expect(ada.said).toEqual([]);
     expect(bo.editor.view.state.doc.toString()).toBe(hub.authority.text);
+  });
+
+  it('places two Undos in a row over another window’s ledger write', async () => {
+    const { hub, ada, bo } = await session();
+    type(bo.editor, 'Second', ' KEEP');
+    await settle(ada.binding, bo.binding);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    type(bo.editor, 'Third', ' BO');
+    await settle(ada.binding, bo.binding);
+    type(ada.editor, 'First', ' ADA');
+    bo.editor.undo();
+    bo.editor.undo();
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(text).toContain(' ADA');
+    expect(text).not.toContain(' KEEP');
+    expect(text).not.toContain(' BO');
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('keeps an Undo of a lone tracked mark over another window’s ledger write', async () => {
+    const { hub, ada, bo } = await session();
+    type(bo.editor, 'Third', ' BO');
+    await settle(ada.binding, bo.binding);
+    type(ada.editor, 'First', ' ADA');
+    bo.editor.undo();
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(text).toContain(' ADA');
+    expect(text).not.toContain(' BO');
+    expect(parse(text).warnings).toEqual([]);
+    expect(Object.keys(parse(text).ledger.marks)).toHaveLength(1);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('keeps an Undo over another window’s ledger write, and takes nothing back', async () => {
+    const { hub, ada, bo } = await session();
+    type(bo.editor, 'Second', ' KEEP');
+    await settle(ada.binding, bo.binding);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    type(bo.editor, 'Third', ' BO');
+    await settle(ada.binding, bo.binding);
+    // Ada writes the ledger while Bo's Undo, which removes a mark's entry, is still on its way.
+    type(ada.editor, 'First', ' ADA');
+    bo.editor.undo();
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(text).toContain(' KEEP');
+    expect(text).toContain(' ADA');
+    expect(text).not.toContain(' BO');
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
   });
 });

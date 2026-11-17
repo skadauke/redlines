@@ -179,6 +179,7 @@ pub fn run_key() -> String {
 
 /// Sends `message` into the session `session_key` and follows the run until the agent's answer.
 /// When `stop` is set the run is aborted at the Gateway and this ends with `Cancelled`.
+#[cfg(test)]
 pub fn ask(
     socket: &mut Socket,
     config: &Config,
@@ -186,6 +187,20 @@ pub fn ask(
     message: &str,
     key: &str,
     stop: &AtomicBool,
+) -> Result<Outcome, String> {
+    ask_seen(socket, config, session_key, message, key, stop, &|_| {})
+}
+
+/// `ask`, telling `seen` the session key the Gateway reports on the run's events (the key it
+/// filed the session under, which for a bare key names its default agent).
+pub fn ask_seen(
+    socket: &mut Socket,
+    config: &Config,
+    session_key: &str,
+    message: &str,
+    key: &str,
+    stop: &AtomicBool,
+    seen: &dyn Fn(&str),
 ) -> Result<Outcome, String> {
     let timing = config.timing;
     let ended_text = |ended: Ended| match ended {
@@ -208,7 +223,13 @@ pub fn ask(
         match socket.read() {
             Ok(Message::Text(text)) => {
                 last_heard = Instant::now();
-                match protocol::parse(text.as_str()) {
+                let incoming = protocol::parse(text.as_str());
+                if let Incoming::Chat(event) = &incoming
+                    && event.run_id == key
+                {
+                    seen(&event.session_key);
+                }
+                match incoming {
                     Incoming::Response {
                         id,
                         ok: false,
@@ -521,6 +542,40 @@ mod tests {
         assert_eq!(
             ask(&mut socket, &gateway.config, SESSION, "Hi", key, &stop).unwrap(),
             Outcome::Done("Hello, world".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_session_key_the_gateway_reports_is_told_to_the_one_who_asked() {
+        let key = "run-3";
+        let gateway = fake(None, move |socket, frames| {
+            read(socket, frames).expect("chat.send");
+            let mut event = chat(key, json!({"state": "delta", "deltaText": "Hi"}));
+            event["payload"]["sessionKey"] = json!("agent:moby:redlines-0123456789abcdef");
+            say(socket, event);
+            say(
+                socket,
+                chat(key, json!({"state": "final", "message": {"content": []}})),
+            );
+        });
+        let stop = AtomicBool::new(false);
+        let (mut socket, _) = connect_operator(&gateway.config, &token("t"), &stop).unwrap();
+        let told = Mutex::new(Vec::<String>::new());
+        let outcome = ask_seen(
+            &mut socket,
+            &gateway.config,
+            SESSION,
+            "Hi",
+            key,
+            &stop,
+            &|reported| {
+                told.lock().unwrap().push(reported.to_owned());
+            },
+        );
+        assert_eq!(outcome.unwrap(), Outcome::Done("Hi".to_owned()));
+        assert_eq!(
+            told.lock().unwrap().first().map(String::as_str),
+            Some("agent:moby:redlines-0123456789abcdef")
         );
     }
 

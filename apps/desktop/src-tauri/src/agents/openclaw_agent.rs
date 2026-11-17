@@ -24,8 +24,10 @@ use super::openclaw_tools::{Registration, RunTools};
 use super::process::ThreadRun;
 
 /// Sends a message into a session and gives the agent's answer: the session's key, the text, and
-/// the flag that says stop. It blocks until the run ends.
-pub type Talk = Arc<dyn Fn(&str, &str, &AtomicBool) -> Result<Outcome, String> + Send + Sync>;
+/// the flag that says stop, and what to tell of the session key the Gateway reports for the run.
+/// It blocks until the run ends.
+pub type Talk =
+    Arc<dyn Fn(&str, &str, &AtomicBool, &dyn Fn(&str)) -> Result<Outcome, String> + Send + Sync>;
 
 /// The session id this answers `session/new` with: the window only echoes it back.
 const SESSION: &str = "gateway";
@@ -191,7 +193,9 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
                         // A panic in the talk is a failure of the prompt, not a run that never ends.
                         let outcome =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                talk(&session, &text, cancel)
+                                talk(&session, &text, cancel, &|reported| {
+                                    tools.adopt(&session, reported);
+                                })
                             }))
                             .unwrap_or_else(|_| Err("The chat failed unexpectedly.".to_owned()));
                         let _ = done_in.send((id, outcome));
@@ -311,7 +315,7 @@ mod tests {
         let runs = Runs::default();
         let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
         let log = Arc::clone(&seen);
-        let talk: Talk = Arc::new(move |session, text, _| {
+        let talk: Talk = Arc::new(move |session, text, _, _| {
             log.lock()
                 .unwrap()
                 .push((session.to_owned(), text.to_owned()));
@@ -377,7 +381,7 @@ mod tests {
         });
         let runs = Runs::default();
         let tools = Arc::new(RunTools::default());
-        let talk: Talk = Arc::new(|_, _, stop| {
+        let talk: Talk = Arc::new(|_, _, stop, _| {
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -455,7 +459,7 @@ mod tests {
         });
         let runs = Runs::default();
         let tools = Arc::new(RunTools::default());
-        let talk: Talk = Arc::new(|_, _, _| Ok(Outcome::Done("Done.".to_owned())));
+        let talk: Talk = Arc::new(|_, _, _, _| Ok(Outcome::Done("Done.".to_owned())));
         let heard: Heard = Arc::default();
         let sink = Arc::clone(&heard);
         let (started, input) = runs
@@ -504,7 +508,7 @@ mod tests {
         let folder = TempFolder::new("gw-tools");
         let runs = Runs::default();
         let tools = Arc::new(RunTools::default());
-        let talk: Talk = Arc::new(|_, _, _| panic!("no session, no message"));
+        let talk: Talk = Arc::new(|_, _, _, _| panic!("no session, no message"));
         let heard: Heard = Arc::default();
         let sink = Arc::clone(&heard);
         let (_, input) = runs
@@ -532,7 +536,7 @@ mod tests {
     fn a_failure_is_an_error_in_the_gateways_words() {
         let folder = TempFolder::new("gw-run");
         let runs = Runs::default();
-        let talk: Talk = Arc::new(|_, _, _| Err("No model is signed in.".to_owned()));
+        let talk: Talk = Arc::new(|_, _, _, _| Err("No model is signed in.".to_owned()));
         let (input, heard, _) = start(&runs, folder.path(), talk);
         open(&input, &heard);
         input
@@ -550,7 +554,7 @@ mod tests {
     fn cancel_and_stop_both_reach_the_run_and_it_ends() {
         let folder = TempFolder::new("gw-run");
         let runs = Runs::default();
-        let talk: Talk = Arc::new(|_, _, stop| {
+        let talk: Talk = Arc::new(|_, _, stop, _| {
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -591,7 +595,7 @@ mod tests {
     fn what_it_does_not_do_is_refused_and_a_prompt_before_a_session_is_an_error() {
         let folder = TempFolder::new("gw-run");
         let runs = Runs::default();
-        let talk: Talk = Arc::new(|_, _, _| panic!("no session, no message"));
+        let talk: Talk = Arc::new(|_, _, _, _| panic!("no session, no message"));
         let (input, heard, _) = start(&runs, folder.path(), talk);
         input
             .send(&input_of(

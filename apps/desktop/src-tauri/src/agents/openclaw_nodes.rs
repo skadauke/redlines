@@ -31,7 +31,7 @@ use super::node::{
     Config, Credential, Event, Identity, Running, Status, Timing, TokenStore, ToolHost, start,
 };
 use super::openclaw_agent::Talk;
-use super::openclaw_chat::{Outcome, ask, connect_operator, run_key};
+use super::openclaw_chat::{Outcome, ask_seen, connect_operator, run_key};
 use super::openclaw_protocol as protocol;
 use super::openclaw_tools::RunTools;
 
@@ -248,33 +248,36 @@ pub fn chat_for(app: &AppHandle, handle: &str) -> Option<(Bridge, Talk)> {
     let seed = store.device_key(handle).ok()?;
     let gateway = target(&connection.url, None).ok()?;
     let (owner, name) = (app.clone(), handle.to_owned());
-    let talk: Talk = Arc::new(move |session: &str, text: &str, stop: &AtomicBool| {
-        let config = Config {
-            target: gateway.clone(),
-            identity: Identity::from_seed(seed.expose()).ok_or("The device key is damaged.")?,
-            display_name: format!("Redlines on {}", this_mac()),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            timing: Timing::default(),
-        };
-        let credential =
-            Credential::Token(Secret::new(token.expose()).map_err(|_| "The token is damaged.")?);
-        let (mut socket, issued) =
-            connect_operator(&config, &credential, stop).map_err(|error| error.message())?;
-        // A Gateway that rotates the device's token says so in the answer to connect.
-        if let Some(fresh) = issued
-            && fresh.expose() != token.expose()
-        {
-            let _ = owner
-                .state::<Connections>()
-                .keep(&name, Kind::OperatorToken, &fresh);
-        }
-        let outcome = ask(&mut socket, &config, session, text, &run_key(), stop);
-        let _ = socket.close(None);
-        if matches!(outcome, Ok(Outcome::Done(_))) {
-            let _ = owner.state::<Connections>().used(&name, super::now());
-        }
-        outcome
-    });
+    let talk: Talk = Arc::new(
+        move |session: &str, text: &str, stop: &AtomicBool, seen: &dyn Fn(&str)| {
+            let config = Config {
+                target: gateway.clone(),
+                identity: Identity::from_seed(seed.expose()).ok_or("The device key is damaged.")?,
+                display_name: format!("Redlines on {}", this_mac()),
+                version: env!("CARGO_PKG_VERSION").to_owned(),
+                timing: Timing::default(),
+            };
+            let credential = Credential::Token(
+                Secret::new(token.expose()).map_err(|_| "The token is damaged.")?,
+            );
+            let (mut socket, issued) =
+                connect_operator(&config, &credential, stop).map_err(|error| error.message())?;
+            // A Gateway that rotates the device's token says so in the answer to connect.
+            if let Some(fresh) = issued
+                && fresh.expose() != token.expose()
+            {
+                let _ = owner
+                    .state::<Connections>()
+                    .keep(&name, Kind::OperatorToken, &fresh);
+            }
+            let outcome = ask_seen(&mut socket, &config, session, text, &run_key(), stop, seen);
+            let _ = socket.close(None);
+            if matches!(outcome, Ok(Outcome::Done(_))) {
+                let _ = owner.state::<Connections>().used(&name, super::now());
+            }
+            outcome
+        },
+    );
     Some((
         Bridge {
             agent: connection.agent,

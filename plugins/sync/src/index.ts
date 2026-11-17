@@ -12,6 +12,7 @@ import type { Credential, Peer } from '@redlines/collab';
 import { anchorIntent, intentOf, rederiveIntent, remoteStep } from '@redlines/editor';
 import type { Editor, Intent } from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
+import { placeLedgerWrite } from './ledger.ts';
 import { ensureStyle, peersShown, presenceExtension, showPeers } from './presence.ts';
 import type { PeerView } from './presence.ts';
 import type { Remote } from '@redlines/collab';
@@ -24,6 +25,8 @@ export type { SyncState } from '@redlines/collab';
 /** What is kept with each edit made here. */
 export interface EditNote {
   intent: Intent | undefined;
+  /** The edit as made, on the text it started from (`Pending.start`), to place its ledger write. */
+  made?: ChangeSet;
 }
 
 export interface SyncOptions {
@@ -181,7 +184,7 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
       let local = false;
       for (const tr of update.transactions) {
         if (!tr.docChanged || tr.annotation(received)) continue;
-        replica.local(tr.changes, tr.startState.doc, { intent: intentOf(tr) });
+        replica.local(tr.changes, tr.startState.doc, { intent: intentOf(tr), made: tr.changes });
         local = true;
       }
       if (local) {
@@ -258,25 +261,50 @@ function rederive(
     filter: false,
   }).state;
   const kept: Pending<EditNote>[] = [];
+  // The pending edits were mapped over each other as the session first wrote them. When one is
+  // written anew, or taken back, the ones after it no longer fit the text that follows it: `old`
+  // is the text the chain still thinks it is on, and `shift` carries its next edit to the text
+  // that is really there.
+  let old: Text = confirmed;
+  for (const edit of pending.slice(0, drop)) {
+    if (edit.changes.length === old.length) old = edit.changes.apply(old);
+  }
+  const shiftTo = (from: Text, to: Text): ChangeSet | null => {
+    const change = between(from, to);
+    return change ? ChangeSet.of(change, from.length) : null;
+  };
+  let shift: ChangeSet | null = shiftTo(old, state.doc);
   for (const edit of pending.slice(drop)) {
     const { intent } = edit.note;
+    const fits = edit.changes.length === old.length;
+    const mapped = fits && shift ? edit.changes.map(shift) : edit.changes;
     let changes: ChangeSet | null = null;
     if (intent?.kind === 'typing') {
       const placed = rederiveIntent(state, anchorIntent(edit.start.toString(), intent));
       if (placed.ok) {
         changes = placed.changes;
         notices.push(...placed.notices);
+      } else if (intent.exact && edit.changes.length === state.doc.length) {
+        // The text's own changes (Undo, an agent's edit) that can't be placed by their source: as
+        // the session mapped them over what others changed, which never takes them back.
+        changes = edit.changes;
       } else {
         notices.push(`An edit of yours was taken back: ${placed.reason}`);
       }
-    } else if (edit.changes.length === state.doc.length) {
-      changes = edit.changes;
+    } else if (fits && mapped.length === state.doc.length) {
+      // Mapped over what others did, but its ledger write is made again on the newest ledger.
+      changes = edit.note.made
+        ? (placeLedgerWrite(state.doc, mapped, edit.start, edit.note.made) ?? mapped)
+        : mapped;
     } else {
       notices.push('A change of yours could not be placed after what others changed.');
     }
-    if (!changes || changes.empty) continue;
-    kept.push({ changes, start: state.doc, note: edit.note });
-    state = state.update({ changes, filter: false }).state;
+    if (fits) old = edit.changes.apply(old);
+    if (changes && !changes.empty) {
+      kept.push({ changes, start: state.doc, note: { ...edit.note, made: changes } });
+      state = state.update({ changes, filter: false }).state;
+    }
+    if (fits) shift = shiftTo(old, state.doc);
   }
   return { pending: kept, notices: [...new Set(notices)] };
 }

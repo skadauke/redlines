@@ -111,6 +111,9 @@ importers:
         specifier: ^2.7.1
         version: 2.7.1
     devDependencies:
+      '@codemirror/language':
+        specifier: ^6.13.1
+        version: 6.13.1
       '@tauri-apps/cli':
         specifier: ^2.12.3
         version: 2.12.3
@@ -259,6 +262,12 @@ importers:
 
   packages/collab-sim:
     dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../editor
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
@@ -271,6 +280,9 @@ importers:
       '@codemirror/commands':
         specifier: ^6.11.1
         version: 6.11.1
+      '@codemirror/lang-html':
+        specifier: ^6.4.12
+        version: 6.4.12
       '@codemirror/lang-markdown':
         specifier: ^6.5.2
         version: 6.5.2

@@ -17,7 +17,7 @@ import { assertLedgerVisible, keepsLedger, setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { bodyStart, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
-import { scan } from './scan.ts';
+import { scan, scanAfter } from './scan.ts';
 import { assertPointHolds } from './table-align.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
@@ -499,10 +499,16 @@ function withPlacement(
 ): TextChange[] {
   // What is read in the body, with the ledger that is going to be written: a comment is only a
   // mark once its thread is there. A ledger that is kept is the one in the text.
-  const read = (body: string) =>
-    parse(keepLedger ? body : applyChanges(body, setLedger(body, normalizeLedger(body, ledger))));
+  const read = (body: string) => {
+    if (keepLedger) return parse(body);
+    const written = setLedger(body, normalizeLedger(body, ledger));
+    const next = applyChanges(body, written);
+    scanAfter(body, next, written);
+    return parse(next);
+  };
   let result = changes;
   let current = applyChanges(text, result);
+  scanAfter(text, current, result);
   if (strict && leavesPhantomCarrier(text, changes, current, before)) {
     throw new EditError(
       "A change can't be made here: a marker would be left alone on its line, and the line break after it would be read as part of it.",
@@ -520,6 +526,7 @@ function withPlacement(
     seen ??= new Set([fingerprint(current)]);
     result = spliceRepairs(text, result, current, repairs);
     current = applyChanges(text, result);
+    scanAfter(text, current, result);
     const print = fingerprint(current);
     if (seen.has(print)) throw new EditError(UNPLACED, 'no-legal-placement');
     seen.add(print);

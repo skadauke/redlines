@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   UNTRUSTED_NOTE,
+  acceptAll,
   addComment,
   applyChanges,
   parse,
@@ -638,5 +639,15 @@ describe('a Plain-only file', () => {
     const done = await callTool(ctx, 'str_replace', { old_str: 'March', new_str: 'April' });
     expect(done.isError).toBe(false);
     expect(marked.writes).toBe(1);
+  });
+});
+
+describe('str_replace of all the text of a bold', () => {
+  it('takes the delimiters too, so that accepting leaves no `****`', async () => {
+    const doc = fakeDocument('# Plan\n\nShip **now** please.\n');
+    const ctx = fakeContext(doc);
+    const result = await callTool(ctx, 'str_replace', { old_str: 'now', new_str: '' });
+    expect(result.isError).toBe(false);
+    expect(applyChanges(doc.text, acceptAll(doc.text))).not.toContain('*');
   });
 });
