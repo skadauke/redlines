@@ -509,8 +509,8 @@ What was shrunk, to run in the time there was: **30 sessions per cell** (the ear
 never offline, and two cells with long offline periods (`hot/long` and `typical/long`: 3
 replicas, 30 intents each, offline 70% of the time for 15–30 s of a 42 s session, where the
 earlier simulations had 2–8 s). A cell's rows for the other workloads at the same replica count
-share a network, so their reorder, latency and bytes columns are the same by construction.
-Percentages from 30 sessions move by seven points for one session; read the corruption columns
+share a network schedule (the same seeds), and the reorder, latency and bytes columns come out the same for them. The arms are paired on seed and schedule only: a link draws its randomness per message, and the arms send different numbers of messages, so their networks differ after the first send that differs.
+Percentages from 30 sessions move by 3.3 points for one session; read the corruption columns
 as "the same", not as differences.
 
 ### Convergence and corruption
@@ -527,13 +527,13 @@ as "the same", not as differences.
 | hot, long offline | 30 | 10.0% / 3.3% (0) | 13.3% / 0.0% (0) | 10.0% / 0.0% (0) |
 | typical, long offline | 30 | 13.3% / 20.0% (0) | 13.3% / 16.7% (0) | 13.3% / 16.7% (0) |
 
-- **Convergence held: no replica of 270 sessions (90 per arm) ended with a different text**, long
+- **Convergence held: no replica of 810 sessions (270 per arm) ended with a different text**, long
   offline periods included. It holds for the same reason as before: the text is a function of the
   set of intents, and Yjs delivers a set (and, in Y.Array order, one order, which every replica
   that has the same updates has too).
 - **Corruption is the plain log's, from the same causes** (`render` and `misattributed`). Yjs
   neither adds a cause nor removes one; the differences above are within the noise of 30 sessions.
-- **Ordering by Y.Array rather than by Lamport time is no worse for safety**, and Yjs arrays are
+- **Ordering by Y.Array rather than by Lamport time showed no difference in safety that 30 sessions can resolve** (in `hot, long offline`, intents gone in the final order rose from 4.8% to 6.4%, which is a few intents), and Yjs arrays are
   deterministic once the same updates are known. But the order is chosen by Yjs's conflict rule
   (concurrent pushes at the same position are ordered by client id), not by anything about the
   intents, so an intent from a long-offline replica can land in the middle of everyone else's.
@@ -555,8 +555,7 @@ as "the same", not as differences.
 | typical, long offline | 88.3%; 2.0% / 0.2% | 88.6%; 2.0% / 0.3% | 88.3%; 2.1% / 0.2% |
 
 - **Reordering is the same as the plain log's**, as it has to be: it is a property of concurrent
-  intents, not of the log. Y.Array order reorders a little less often with short outages (14.2%
-  against 17.0%) and re-derives about the same number each time (3.8 against 4.1).
+  intents, not of the log. Y.Array order reordered 14.2% of merges against 17.0% with short outages, and re-derived about the same number each time (3.8 against 4.1); at 30 sessions that is within noise.
 - **After long offline periods the picture is the replay's, made worse: nothing about Yjs helps.**
   A third of merges rewrite history; in Y.Array order fewer do (21.9%) but each re-derives more
   (22.4 intents), and the share of a person's intents that were seen and are gone in the final
@@ -590,9 +589,11 @@ Growth (`yjs-growth.ts`, intents of the simulator's workloads, repeated), the lo
 | 100,000 | 29.5 MB | 23.8 MB | 23.8 MB | 3.4 s |
 
 - **About 20% fewer bytes on the wire and in the document**, since Yjs encodes the intents' JSON
-  compactly and sends each update once per link (the flood still sends duplicates: 477 per
-  session never offline). A Yjs state vector is 4–21 bytes, so the reconnect handshake is
-  nearly free where the plain log's exchange lists what it has.
+  compactly (the plain arm's ops also carry a Lamport time, which accounts for some of it). The flood still
+  re-sends what it receives: 477 duplicate updates per session never offline, so most of the
+  messages are duplicates; a real provider would not flood. The sync step's state vector is 4–21
+  bytes in the growth runs; the plain arm's sync request is charged a flat 12 bytes in the
+  simulator, so the two handshakes were not compared.
 - **Growth is linear, at about 240 bytes an intent**, both ways. A Yjs array of whole-intent
   objects has no overhead worth the name. Yjs's own benefits for text (run-length encoding of
   consecutive characters) do not apply here, since every intent is a separate element.
@@ -604,12 +605,13 @@ Growth (`yjs-growth.ts`, intents of the simulator's workloads, repeated), the lo
 
 ### Offline and reconnect
 
-- **Held-back updates were never left over** (0 replicas of 90 sessions, in every cell): Yjs
+- **Held-back updates were never left over** (0 replicas at the end, in the three cells that count it: `hot, never offline` and the two long-offline cells, 90 sessions of the Y.Array arm; it checks only updates waiting for missing structs): Yjs
   holds an update until the ones before it from the same replica arrive, and the sync step brings
   them.
-- **A long offline period cost the same as the plain log's** in latency and reordering, as above,
-  and **Yjs's one real help was bytes**: 115 KB against 149 KB, with 284 messages against 498,
-  because a reconnect is one update, not a replay of intents one by one.
+- **A long offline period cost the same as the plain log's** in latency and reordering, as above.
+  Yjs sent fewer bytes (115 KB against 149 KB), by about the same share as with no outage (21%),
+  so the saving is the encoding; the fall in messages (284 against 498) is the batching of a
+  reconnect into one update.
 
 ### Checkpoints: would a settled point compact a Yjs log?
 
@@ -624,9 +626,9 @@ at that point, store it as the new first text, and delete the prefix of intents.
   proof of what the prefix was cannot be a Yjs snapshot; it would be the derived text, hashed,
   carried in the intents (a `Checkpoint { text hash, up to id }` intent).
 - **A late intent does not break deletion**: a replica that pushed after the last intent of a
-  prefix, while another replica deleted the prefix, ended with the same array at both (the
-  deleted prefix gone, the late intent kept). Pushes anchor to a neighbour that may be gone, and
-  Yjs resolved it.
+  prefix, while another replica deleted the prefix, ended with the same array at both in the one case tried (the
+  deleted prefix gone, the late intent kept; with the last intent of the prefix kept, that one
+  stays before it). Other positions of a late intent were not tried.
 - **What Yjs doesn't give is the agreement.** Which replicas are "known", whether one has
   acknowledged a point, and whether an intent that sorts before the checkpoint may still arrive
   from a replica that was offline when it was made: Yjs's merge puts such an intent where its
@@ -649,19 +651,18 @@ at that point, store it as the new first text, and delete the prefix of intents.
 3. What it costs: a new dependency (its size in a bundle was not measured here) in a core that is held to a size budget; an order
    chosen by Yjs's conflict rule, not by the intents (Lamport order has to be kept on top, if the
    order should mean anything, and then Yjs adds nothing to the order); no snapshot with
-   compaction; and every intent opaque to Yjs, so no Yjs feature (awareness, undo) knows about
-   them.
+   compaction; and every intent opaque to Yjs, so Yjs's own tools for text (its undo manager, for example) would not know their meaning.
 4. Long offline periods stay the hard case with or without it, and need a decision of their own:
    an intent that was made against a text long gone is, by §4.7, a copy that should be merged
    as a divergent copy, not replayed.
 
 So: **if** the no-host design is chosen, use `Y.Array` as a transport and persistence layer for
 intents, keep the order by Lamport time and replica (the control arm, which matched the plain
-log in every number), and treat checkpoints as an application feature with `gc` on. **If** an
+log within the noise of 30 sessions), and treat checkpoints as an application feature with `gc` on. **If** an
 authority (§4) is chosen, this is moot. It should not be decided by the log: decide the
 architecture first.
 
-Limits: 30 sessions per cell, so differences under about ten points are noise; the growth
+Limits: Yjs client ids are fixed (1000 plus the replica's index) in the harness, where real ones are random, so the order of concurrent pushes would vary from session to session; the compaction figures (26 KB, 2.4 MB, 18 bytes) come from `yjs-growth.ts`, which has no assertions; 30 sessions per cell, so differences under about ten points are noise; the growth
 experiment repeats the simulator's intents, not a real corpus; the heap readings are rough;
 and, as with the plain replay, no outside edit takes part.
 
