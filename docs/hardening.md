@@ -283,7 +283,7 @@ for #107). Widening over other people's marks is not done: the guard keeps the r
   holds is made untracked without a question, where typing refuses (#863).
 - With `REDLINES_FUZZ=400`, a whole-table deletion beside a pending move or comment can still end
   with "a marker would be left alone on its line" (the random table test names it; #863).
-- A join onto a setext heading inside a list or quote is still refused (`SETEXT_JOIN`): the block's
+- A join onto a setext heading inside a list or quote is still refused (`SETEXT_JOIN`, tiered `widen` in `refusals.ts`, so it is a gap, not a policy): the block's
   replacement does not read right there yet (#813). The caret after a widened join onto a setext
   heading is one character off in rare numbered joins.
 - A widened table cell format leaves the selection in the old text (`hidden-caret`, skipped in

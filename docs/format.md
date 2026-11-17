@@ -3285,7 +3285,8 @@ is **widened** (this section), or **asked** about and made untracked (§3.13), o
 **disabled** with a hint, or, only where every write would leave the file wrong or the request has no
 meaning, the refusal is **kept**. The kept ones are an unreadable ledger, a file that ends inside code or a
 comment that is never closed, new text that holds Redlines markup, an unknown id, and an agent's text
-that matches nothing or several places.
+that matches nothing or several places, and, under the guard below, an edit whose unit holds another
+person's pending mark.
 
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
 bullet outside), a list, a code block or a table. The edit is written as the replacement of the

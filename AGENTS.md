@@ -202,8 +202,8 @@ repo root.
   cancelled; a scheduled one is skipped when a finished full run, scheduled or dispatched (not
   cancelled), already tested main's head, meaning nothing has merged since. The workflow **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the
   skill's files, which a test checks. The Epic's final sweep runs everything.
-- **The Mac jobs are on** (the Epic #537 sweep turned them back on): the Quick Look job and the
-  journeys run as described below, on pull requests and on main. To run them for a branch by hand:
+- **The Mac jobs are on** (the Epic #537 sweep turned them back on, in #900): the Quick Look job and
+  the journeys run as described below. To run them for a branch by hand:
   `gh workflow run ci.yml --ref main -f macos=true` (the full run with Quick Look and the
   journeys), or `gh workflow run journeys.yml --ref <branch>`.
 - `journeys.yml`: the journeys, on a macOS runner (WebKit there is the app's engine, and the
