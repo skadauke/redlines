@@ -110,8 +110,10 @@ impl Nodes {
             .drain()
             .map(|(_, entry)| entry)
             .collect();
+        // The app is quitting: each is told to stop and none is waited for, so that a connection
+        // still waiting for a computer to answer doesn't hold the quit up.
         for entry in all {
-            entry.running.stop();
+            entry.running.signal();
         }
     }
 
@@ -138,7 +140,6 @@ impl Nodes {
         };
         let seed = store.device_key(handle)?;
         let identity = Identity::from_seed(seed.expose()).ok_or("The device key is damaged.")?;
-        self.stop(handle);
         let status = Arc::new(Mutex::new(Status::Connecting));
         let (shown, owner, name) = (Arc::clone(&status), app.clone(), handle.to_owned());
         let running = start(
@@ -164,7 +165,12 @@ impl Nodes {
                 }
             }),
         );
-        lock(&self.running).insert(handle.to_owned(), Entry { running, status });
+        // One node for a handle: whatever was running for it is stopped as the new one goes in, under
+        // the one lock, so two connects at once leave one.
+        let replaced = lock(&self.running).insert(handle.to_owned(), Entry { running, status });
+        if let Some(old) = replaced {
+            old.running.stop();
+        }
         Ok(())
     }
 }

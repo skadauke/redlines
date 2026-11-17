@@ -463,4 +463,84 @@ describe('the setup sheet', () => {
     await tick(80);
     expect(status.mock.calls.length).toBe(seen);
   });
+
+  it('Copy prompt leaves the code the person pasted where it is', async () => {
+    const w = world();
+    const root = open(w, {
+      start: { step: 'prompt', url: 'ws://127.0.0.1:18789', where: 'this-mac' },
+    });
+    await tick();
+    fill(root, 'Your agent’s name', 'Moby');
+    const field = fill(root, 'Setup code', CODE);
+    click(root, 'Copy prompt');
+    await tick();
+    expect(root.querySelector<HTMLInputElement>('.rl-oc-secret')).toBe(field);
+    expect(field.value).toBe(CODE);
+    expect(text(root)).toContain('Copied');
+  });
+
+  it('a sheet cancelled while the question is up leaves no connection and no node behind', async () => {
+    const w = world();
+    let allow: (value: unknown) => void = () => {};
+    w.deps.connections.add = (connection) => {
+      w.added.push(connection);
+      return new Promise((resolve) => {
+        allow = resolve;
+      });
+    };
+    const root = open(w, {
+      start: { step: 'prompt', url: 'ws://127.0.0.1:18789', where: 'this-mac' },
+    });
+    await tick();
+    fill(root, 'Your agent’s name', 'Moby');
+    fill(root, 'Setup code', CODE);
+    click(root, 'Connect');
+    await tick();
+    // The person closes the sheet, the pane's way, while the question waits.
+    sheet?.dispose();
+    allow([]);
+    await tick();
+    expect(w.removed).toEqual(['moby-ada']);
+    expect(w.connected).toEqual([]);
+    expect(root.isConnected).toBe(false);
+  });
+
+  it('Cancel on the prompt screen closes the sheet, and takes away a connection it began', async () => {
+    const w = world();
+    w.deps.node.connect = () => Promise.reject(new Error('The Gateway isn’t reachable.'));
+    const root = open(w, {
+      start: { step: 'prompt', url: 'ws://127.0.0.1:18789', where: 'this-mac' },
+    });
+    await tick();
+    fill(root, 'Your agent’s name', 'Moby');
+    fill(root, 'Setup code', CODE);
+    click(root, 'Connect');
+    await tick();
+    expect(text(root)).toContain('The Gateway isn’t reachable.');
+    click(root, 'Cancel');
+    await tick();
+    expect(w.removed).toEqual(['moby-ada']);
+    expect(closed).toBe(1);
+  });
+
+  it('a finished sheet leaves its connection, and a failed one is not asked about again', async () => {
+    const w = world();
+    w.node.current = { state: 'failed', why: 'code-used' };
+    const status = vi.spyOn(w.deps.node, 'status');
+    open(w, { start: { step: 'approve', agent: 'Moby' } });
+    await tick(120);
+    expect(status.mock.calls.length).toBe(1);
+    sheet?.dispose();
+    await tick();
+    // It never reached a test: what it began is undone.
+    expect(w.removed).toEqual(['moby-ada']);
+    // A sheet that reached the test keeps what it made.
+    const kept = world();
+    kept.node.current = { state: 'connected', tools: 6 };
+    const root = open(kept, { start: { step: 'approve', agent: 'Moby' } });
+    await tick(80);
+    click(root, 'Finish');
+    await tick();
+    expect(kept.removed).toEqual([]);
+  });
 });

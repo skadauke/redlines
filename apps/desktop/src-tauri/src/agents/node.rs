@@ -538,6 +538,13 @@ impl Running {
     }
 }
 
+impl Running {
+    /// Tells the connection to end, and doesn't wait for it: for the app quitting.
+    pub fn signal(self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
 impl Drop for Running {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);

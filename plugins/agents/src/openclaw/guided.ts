@@ -307,10 +307,12 @@ export function renderGuided(deps: GuidedDeps, options: GuidedOptions): HTMLElem
         ),
       );
       if (!alive()) return;
+      const before = JSON.stringify([list, [...statuses]]);
       statuses = new Map(asked);
       list = next;
       options.changed?.(next);
-      draw();
+      // Drawn again only when something changed: a card the person is using keeps its focus.
+      if (JSON.stringify([list, [...statuses]]) !== before || cards.childElementCount === 0) draw();
     } catch (error) {
       if (alive()) say(error);
     }
@@ -320,8 +322,11 @@ export function renderGuided(deps: GuidedDeps, options: GuidedOptions): HTMLElem
   const every = deps.poll?.node ?? 3000;
   const timer = setInterval(
     () => {
-      if (!alive()) clearInterval(timer);
-      else if (list.length > 0) void refresh();
+      if (!alive()) {
+        clearInterval(timer);
+        // The pane is gone: a sheet not finished goes with it, and what it began is undone.
+        sheet?.dispose();
+      } else if (list.length > 0) void refresh();
     },
     Math.max(every, 1000),
   );

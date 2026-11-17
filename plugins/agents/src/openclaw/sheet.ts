@@ -159,6 +159,7 @@ function row(options: {
     root.tabIndex = 0;
     root.setAttribute('role', 'radio');
     root.setAttribute('aria-checked', String(options.selected === true));
+    root.setAttribute('aria-label', options.title);
     const pick = options.onPick;
     root.addEventListener('click', pick);
     root.addEventListener('keydown', (event) => {
@@ -206,6 +207,10 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
   let testing:
     { answered: boolean; usedTools: boolean; line: string } | 'running' | 'failed' | null = null;
   let probingConnect = false;
+  /** The connection has been made and shown to work, or the sheet was finished: it stays. */
+  let settled = false;
+  /** Refreshes the prompt's text, which this Mac's name changes. */
+  let refreshPrompt: (() => void) | null = null;
   let copied: string | null = null;
   let alive = true;
   const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -223,7 +228,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
     (name) => {
       if (!live()) return;
       mac = name;
-      if (step === 'prompt') draw();
+      if (step === 'prompt') refreshPrompt?.();
     },
     () => {},
   );
@@ -364,6 +369,10 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
       selected: where === 'other',
       onPick: () => choose('other'),
     });
+    const choices = el('div', 'rl-oc-choices');
+    choices.setAttribute('role', 'radiogroup');
+    choices.setAttribute('aria-label', 'Where your agent runs');
+    choices.append(mine, other);
     return [
       el('h1', undefined, 'Add an OpenClaw agent'),
       el(
@@ -371,9 +380,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         'rl-oc-sub',
         'Your agent writes in your documents as tracked changes, in its own name. You decide which folders it may touch.',
       ),
-      el('div', 'rl-oc-list'),
-      mine,
-      other,
+      choices,
       el(
         'p',
         'rl-oc-small rl-oc-gap',
@@ -673,6 +680,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         : '';
       connect.disabled = !trimmed || Boolean(clash) || secret.value.trim() === '' || probingConnect;
     };
+    refreshPrompt = refresh;
     name.addEventListener('input', () => {
       agentName = name.value;
       refresh();
@@ -702,6 +710,8 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
           created = true;
           handle = made;
           options.onChanged();
+          // Cancelled while the question was up: what it just made goes again.
+          if (!alive) return void undo(made);
         }
         if (usingToken) {
           await deps.connections.useToken(made, code);
@@ -720,6 +730,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         return;
       }
       probingConnect = false;
+      if (!alive) return void undo(made);
       if (!live()) return;
       node = { state: 'connecting' };
       pairingSince = null;
@@ -730,30 +741,28 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
     nodes.push(name, writes);
     nodes.push(pre);
     const copyRow = el('div', 'rl-oc-between');
+    const copyButton = button('Copy prompt', () => {
+      if (!agentName.trim()) {
+        problem = 'Give your agent a name first: the prompt uses it.';
+        draw();
+        return;
+      }
+      // The button changes its own label: drawing the screen again would empty the code's field.
+      void deps.copy(pre.textContent ?? '').then(
+        () => {
+          copyButton.textContent = 'Copied';
+          later(() => {
+            copyButton.textContent = 'Copy prompt';
+          }, 1500);
+        },
+        () => {
+          copyButton.textContent = 'Couldn’t copy';
+        },
+      );
+    });
     copyRow.append(
       el('span', 'rl-oc-small', 'Nothing changes until your agent does it.'),
-      button(copied === 'prompt' ? 'Copied' : 'Copy prompt', () => {
-        if (!agentName.trim()) {
-          problem = 'Give your agent a name first: the prompt uses it.';
-          draw();
-          return;
-        }
-        void deps.copy(pre.textContent ?? '').then(
-          () => {
-            copied = 'prompt';
-            problem = null;
-            if (live()) draw();
-            later(() => {
-              copied = null;
-              draw();
-            }, 1500);
-          },
-          () => {
-            problem = 'Redlines couldn’t copy that.';
-            if (live()) draw();
-          },
-        );
-      }),
+      copyButton,
     );
     nodes.push(copyRow);
 
@@ -810,6 +819,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
     nodes.push(
       foot(
         alt,
+        button('Cancel', () => void cancel()),
         button('Back', () => go(where === 'this-mac' ? 'start' : 'computer')),
         connect,
       ),
@@ -827,14 +837,19 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
     void deps.node.status(asked).then(
       (status) => {
         if (!live() || step !== 'approve') return;
+        const changed = JSON.stringify(status) !== JSON.stringify(node);
         node = status;
         if (status?.state === 'pairing' && pairingSince === null) pairingSince = Date.now();
         if (status?.state === 'connected') {
+          settled = true;
           step = 'test';
           draw();
           return;
         }
-        draw();
+        // Drawn again when it changed, and each second while it waits, for "Asked 40 seconds ago".
+        if (changed || status?.state === 'pairing') draw();
+        // A connection that failed stays failed: nothing more to look at.
+        if (status?.state === 'failed') return;
         later(pollNode, deps.poll?.node ?? 1000);
       },
       () => later(pollNode, deps.poll?.node ?? 1000),
@@ -851,9 +866,12 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
       pairingSince = null;
       step = 'approve';
       draw();
-    } catch {
+    } catch (error) {
+      const said = error instanceof Error ? error.message : String(error);
       step = 'prompt';
-      problem = 'Redlines needs a new setup code for this.';
+      problem = /no setup code or token/i.test(said)
+        ? 'Redlines needs a new setup code for this.'
+        : said;
       draw();
     }
   }
@@ -924,14 +942,15 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
     return nodes;
   }
 
-  async function cancel(): Promise<void> {
-    if (handle) {
-      await deps.node.stop(handle).catch(() => {});
-      if (created) {
-        await deps.connections.remove(handle).catch(() => {});
-        options.onChanged();
-      }
-    }
+  /** Takes a connection that was not finished away again: stops it, and removes its record. */
+  async function undo(made: string): Promise<void> {
+    await deps.node.stop(made).catch(() => {});
+    await deps.connections.remove(made).catch(() => {});
+    options.onChanged();
+  }
+
+  /** Cancel: the sheet goes, and taking it down undoes what it began (`dispose`). */
+  function cancel(): void {
     close();
   }
 
@@ -1024,6 +1043,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
   }
 
   function finish(): void {
+    settled = true;
     options.onChanged();
     close();
   }
@@ -1042,6 +1062,8 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
   }
 
   function dispose(): void {
+    // A sheet taken down before the connection reached its test leaves no half-made agent.
+    if (alive && created && !settled && handle) void undo(handle);
     alive = false;
     for (const timer of timers) clearTimeout(timer);
     timers.clear();
@@ -1052,7 +1074,10 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
     if (!live()) return;
     const hadFocus = body.contains(document.activeElement);
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const keep = focused?.getAttribute('aria-label') ?? null;
+    // What had the focus, by its label or its words: the screen is drawn again, new elements.
+    const keep = focused
+      ? (focused.getAttribute('aria-label') ?? `${focused.tagName}:${focused.textContent ?? ''}`)
+      : null;
     let content: HTMLElement[];
     switch (step) {
       case 'start':
@@ -1077,7 +1102,13 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
     body.replaceChildren(...content);
     body.dataset['step'] = step;
     if (hadFocus && keep) {
-      body.querySelector<HTMLElement>(`[aria-label="${keep.replace(/"/g, '\\"')}"]`)?.focus();
+      const again = [
+        ...body.querySelectorAll<HTMLElement>('button, input, [role="radio"], summary'),
+      ].find(
+        (node) =>
+          (node.getAttribute('aria-label') ?? `${node.tagName}:${node.textContent ?? ''}`) === keep,
+      );
+      again?.focus();
     }
     enter();
   }

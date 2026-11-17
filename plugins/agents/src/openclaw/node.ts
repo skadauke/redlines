@@ -17,6 +17,12 @@ export type NodeStatus =
       message?: string;
     };
 
+/** What a Gateway said, cut to a length that fits under Details: it is untrusted text. */
+function cut(text: string | undefined): string | null {
+  if (!text) return null;
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
+
 /** The failure card that a failed connection shows, with what to show under Details. */
 export function failureOf(status: NodeStatus): { id: FailureId; detail: string | null } | null {
   if (status.state !== 'failed') return null;
@@ -33,9 +39,9 @@ export function failureOf(status: NodeStatus): { id: FailureId; detail: string |
         detail: status.protocol ? `The Gateway speaks protocol ${status.protocol}.` : null,
       };
     case 'tools-refused':
-      return { id: 'tools-unavailable', detail: status.message || null };
+      return { id: 'tools-unavailable', detail: cut(status.message) };
     case 'other':
-      return { id: 'connection-failed', detail: status.message || null };
+      return { id: 'connection-failed', detail: cut(status.message) };
   }
 }
 

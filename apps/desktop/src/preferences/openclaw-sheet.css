@@ -85,7 +85,8 @@
   background: var(--rl-on, var(--rl-ink-2));
 }
 
-.rl-oc-list {
+.rl-oc-list,
+.rl-oc-choices {
   display: contents;
 }
 
