@@ -3,7 +3,7 @@
 // text as the views show it, a mark found by its id, and the payload as a file of its own, so that a
 // decision in it is made by the code that decides in a file.
 
-import { eolOf, inEol } from './changes.ts';
+import { eolOf, restoredPayload } from './changes.ts';
 import type { Eol } from './changes.ts';
 import { CONTAINER_PREFIX } from './blocks.ts';
 import { serializeLedger } from './ledger-write.ts';
@@ -146,7 +146,7 @@ export function payloadAt(
 /** The text a segment's payload restores when the mark is rejected, in the file's line breaks:
  * the old text, with the marks it holds live again (format §3.12). */
 export function restoredText(segment: Segment, eol: Eol): string {
-  return inEol(segment.payload ?? '', eol);
+  return restoredPayload(segment.payload ?? '', eol);
 }
 
 /** What the original view brings back for a segment of a deletion or a substitution: the old text
@@ -164,7 +164,7 @@ export function originalText(
   const old = site
     ? originalOfPayload(payload, ledgerForSite(parsed, site), prefixBefore(text, segment.open.from))
     : payload;
-  return inEol(old, eol);
+  return restoredPayload(old, eol);
 }
 
 /** Every mark that payloads hold, with the chain of payloads it is in, outermost first. */
