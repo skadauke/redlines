@@ -514,6 +514,7 @@ pub fn run() {
             agents::relay::relay_answer,
             #[cfg(unix)]
             agents::relay::relay_close,
+            agents::gateway::gateway_probe,
             agents::tailscale::tailscale_download,
             agents::tailscale::tailscale_open_app,
             agents::tailscale::tailscale_status

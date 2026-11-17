@@ -63,3 +63,7 @@ export type {
   TailscaleStatus,
   TailscaleView,
 } from './openclaw/tailscale.ts';
+export { failure, FAILURE_IDS } from './openclaw/failures.ts';
+export type { Failure, FailureAction, FailureId, Subject } from './openclaw/failures.ts';
+export { gatewayView } from './openclaw/gateway.ts';
+export type { GatewayProbe, GatewayView } from './openclaw/gateway.ts';

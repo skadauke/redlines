@@ -16,6 +16,7 @@ mod acp;
 mod acp_gate;
 mod acp_runs;
 mod allowed;
+pub mod gateway;
 mod latest;
 mod log;
 mod process;
