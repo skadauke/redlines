@@ -636,6 +636,38 @@ describe('spelling suggestions', () => {
     expect(editor.view.state.doc.toString()).toBe('Hello wrold there');
   });
 
+  it('ignores the word, as written, on Ignore Spelling, between the guesses and Learn Spelling', async () => {
+    const ignore = vi.fn();
+    const { editor } = mount('Hello Wrold there', {
+      spelling: spelling(['World'], { learn: vi.fn(), ignore }),
+    });
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    rightClick(editor);
+    await settle();
+    expect(words().map((word) => word.textContent)).toEqual([
+      'World',
+      'Ignore Spelling',
+      'Learn Spelling',
+    ]);
+    words()
+      .find((word) => word.textContent === 'Ignore Spelling')
+      ?.click();
+    // The case is kept, and the text is left alone.
+    expect(ignore).toHaveBeenCalledWith('Wrold');
+    expect(editor.view.state.doc.toString()).toBe('Hello Wrold there');
+    expect(panelOf()?.hidden).toBe(true);
+  });
+
+  it('offers no Ignore Spelling where the host has no ignore list', async () => {
+    const { editor } = mount('Hello wrold there', {
+      spelling: spelling(['world'], { learn: vi.fn() }),
+    });
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    rightClick(editor);
+    await settle();
+    expect(words().map((word) => word.textContent)).toEqual(['world', 'Learn Spelling']);
+  });
+
   it('offers no Learn Spelling where the host has no dictionary to add to', async () => {
     const { editor } = mount('Hello wrold there', { spelling: spelling(['world']) });
     vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);

@@ -293,6 +293,7 @@ export const TOOLBAR_STYLE = `
   cursor: default;
 }
 .rl-toolbar-suggestion { font-weight: 700; }
+.rl-toolbar-ignore,
 .rl-toolbar-learn { color: var(--rl-ink-2); }
 .rl-toolbar-word:enabled:hover,
 .rl-toolbar-word:focus-visible {

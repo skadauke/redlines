@@ -80,6 +80,7 @@
     "allow-set-appearance",
     "allow-set-zoom",
     "allow-show-images",
+    "allow-spelling-ignore",
     "allow-spelling-learn",
     "allow-spelling-suggestions",
     "allow-start-file-drag",

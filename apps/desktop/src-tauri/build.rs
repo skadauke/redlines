@@ -111,6 +111,7 @@ const COMMANDS: &[&str] = &[
     "tailscale_download",
     "tailscale_open_app",
     "tailscale_status",
+    "spelling_ignore",
     "spelling_learn",
     "spelling_suggestions",
     "start_file_drag",

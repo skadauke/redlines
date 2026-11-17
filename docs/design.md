@@ -137,8 +137,9 @@ otherwise.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
   the Mac, spell checking and autocorrection while typing, text replacements, smart quotes,
   dictation and input methods. A right-click opens the toolbar (below) in place of the
-  system's context menu, with the spelling suggestions of a misspelled word at its top and Learn
-  Spelling; ⇧ with the right-click shows the system's own menu, which has Look Up, Services and
+  system's context menu, with the spelling suggestions of a misspelled word at its top, Ignore
+  Spelling (the word, as written, goes on the checker's ignore list for this window's document and
+  is forgotten when it closes, #505) and Learn Spelling; ⇧ with the right-click shows the system's own menu, which has Look Up, Services and
   Writing Tools. A correction is part of your typing, as in
   Word: with Track Changes on, the word you just typed is your own pending insertion, so correcting
   it changes the insertion's text, and no other change appears. Only the part of a correction that

@@ -15,6 +15,11 @@ export interface ToolbarSpelling {
   suggest(word: string, before: string): Promise<readonly string[] | null>;
   /** Adds `word` to the person's dictionary. Without it, Learn Spelling is not offered. */
   learn?(word: string): Promise<void> | void;
+  /**
+   * Ignores `word`, as written, in this document only: the checker stops finding it misspelled
+   * until the document is closed. Without it, Ignore Spelling is not offered.
+   */
+  ignore?(word: string): Promise<void> | void;
 }
 
 /** How long the toolbar waits for the suggestions before it opens without them. */

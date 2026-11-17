@@ -8,7 +8,7 @@ export interface SystemSpellingOptions {
   /** Whether Preferences have spell check on: when they don't, nothing is underlined or offered. */
   enabled(): boolean;
   /**
-   * Called after a word was added to the dictionary: WebKit underlines misspellings as it checks,
+   * Called after a word was added to the dictionary, or ignored: WebKit underlines misspellings as it checks,
    * and checks again where it is asked to, so the page is asked.
    */
   learned(): void;
@@ -22,6 +22,10 @@ export function systemSpelling(options: SystemSpellingOptions): ToolbarSpelling 
       invoke<string[] | null>('spelling_suggestions', { word, before }).catch(() => null),
     learn: async (word) => {
       await invoke('spelling_learn', { word });
+      options.learned();
+    },
+    ignore: async (word) => {
+      await invoke('spelling_ignore', { word });
       options.learned();
     },
   };

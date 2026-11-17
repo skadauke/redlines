@@ -333,6 +333,11 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
       choose();
       if (held) void Promise.resolve(options.spelling?.learn?.(held.rows.word)).catch(() => {});
     },
+    ignore() {
+      const held = spelling;
+      choose();
+      if (held) void Promise.resolve(options.spelling?.ignore?.(held.rows.word)).catch(() => {});
+    },
     hint,
   };
 
@@ -567,6 +572,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     word,
     suggestions,
     canLearn: options.spelling?.learn !== undefined,
+    canIgnore: options.spelling?.ignore !== undefined,
   });
 
   async function openContext(x: number, y: number, fromKeyboard: boolean): Promise<void> {

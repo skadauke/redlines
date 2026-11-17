@@ -16,6 +16,8 @@ export interface SpellingRows {
   suggestions: readonly string[];
   /** Whether the word can be learned: the host has a dictionary to add it to. */
   canLearn: boolean;
+  /** Whether the word can be ignored in this document: the host's checker has an ignore list. */
+  canIgnore: boolean;
 }
 
 export interface PanelHandlers {
@@ -25,6 +27,8 @@ export interface PanelHandlers {
   pick(suggestion: string): void;
   /** Learn Spelling was chosen. */
   learn(): void;
+  /** Ignore Spelling was chosen. */
+  ignore(): void;
   /** The pointer, or the keyboard, came to an item (with it) or left them all (null). */
   hint(button: HTMLElement | null): void;
 }
@@ -144,6 +148,8 @@ function spellingBlock(rows: SpellingRows, handlers: PanelHandlers): HTMLElement
   for (const suggestion of rows.suggestions) {
     block.append(row('rl-toolbar-suggestion', suggestion, () => handlers.pick(suggestion)));
   }
+  if (rows.canIgnore)
+    block.append(row('rl-toolbar-ignore', 'Ignore Spelling', () => handlers.ignore()));
   if (rows.canLearn)
     block.append(row('rl-toolbar-learn', 'Learn Spelling', () => handlers.learn()));
   return block;

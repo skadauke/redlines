@@ -20,8 +20,11 @@
 //! A right-click on a misspelled word opens the formatting palette, not WebKit's menu, whose
 //! suggestions the palette has to show itself: `spelling_suggestions` asks `NSSpellChecker` for the
 //! word's guesses, and `spelling_learn` adds a word to the person's dictionary, as the menu's Learn
-//! Spelling does. (Ignore Spelling is not offered: it belongs to WebKit's own spell document for
-//! the page, which can't be reached from here.)
+//! Spelling does. `spelling_ignore` is Ignore Spelling: the word goes on the checker's ignore list
+//! for the window's own spell document (one per window, `Tags`), as written, so `Teh` and `teh` are
+//! two words, and it is forgotten when the window closes. WebKit's own spell document for the page
+//! can't be reached from here, so WebKit's underline of the word stays; what the right-click
+//! offers, which asks with the window's tag, no longer finds it misspelled.
 
 // The query and the choice are the same everywhere and tested everywhere, but only the Mac's
 // checker uses them: elsewhere the command answers nothing.
@@ -290,6 +293,23 @@ pub fn spelling_learn(word: String) {
     let _ = word;
 }
 
+/// Ignores `word` in this window's document, for as long as it is open: the menu's Ignore Spelling.
+/// Only a word is ignored, as written (the case is kept).
+#[tauri::command]
+pub fn spelling_ignore(window: tauri::WebviewWindow, word: String) {
+    ignore_in(window.label(), &word);
+}
+
+/// `spelling_ignore` for the window labelled `window`, whose spell document it uses.
+fn ignore_in(window: &str, word: &str) {
+    #[cfg(target_os = "macos")]
+    if is_word(word) {
+        macos::ignore(word, macos::tag_of(window));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window, word);
+}
+
 /// Registers the switch as on. First thing in `run`, before the app is built: WebKit reads it once,
 /// no later than the first web view, and the first window opens in `setup`.
 pub fn register_defaults() {
@@ -416,6 +436,12 @@ mod macos {
     /// Adds the word to the person's dictionary.
     pub fn learn(word: &str) {
         NSSpellChecker::sharedSpellChecker().learnWord(&NSString::from_str(word));
+    }
+
+    /// Puts the word on the ignore list of the window's spell document.
+    pub fn ignore(word: &str, tag: isize) {
+        NSSpellChecker::sharedSpellChecker()
+            .ignoreWord_inSpellDocumentWithTag(&NSString::from_str(word), tag);
     }
 
     /// Adds the defaults to the registration domain, which keeps what was registered there before.

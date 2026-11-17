@@ -431,6 +431,7 @@ pub fn run() {
             crash::crash_simulate,
             spelling::correct_word,
             spelling::spelling_suggestions,
+            spelling::spelling_ignore,
             spelling::spelling_learn,
             edit_menu::undo_in_field,
             edit_menu::paste_in_field,
