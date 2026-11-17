@@ -3,7 +3,7 @@
 // changes of the file and where the caret goes. This file has inserting rows; the others join it.
 
 import { assertPointsRead } from './align-point.ts';
-import { bodyStart, lineEnd, lineStart, nextLineStart } from './blocks.ts';
+import { lineEnd } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
 import { rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -61,6 +61,7 @@ import {
   arrangeRows,
   deletedRowText,
   joinPoints,
+  plainRange,
   removeDeletionLines,
   rewrittenRows,
   rowMarker,
@@ -407,9 +408,17 @@ export function originalRowText(text: string, parsed: Parsed, row: TableRowRead)
     ),
   );
   if (!marked && !row.insertion) return rowTextOf(text, row);
-  const view = originalView(text);
+  const view = originalViewOf(text);
   const from = view.map.fromSource(row.from);
   return view.text.slice(from, lineEnd(view.text, from));
+}
+
+/** The original view of `text`, built once for all the rows of an operation on it (#273): the last
+ * one is kept, since an operation reads many rows of one text and then moves on. */
+let lastOriginal: { text: string; view: ReturnType<typeof originalView> } | undefined;
+function originalViewOf(text: string): ReturnType<typeof originalView> {
+  if (lastOriginal?.text !== text) lastOriginal = { text, view: originalView(text) };
+  return lastOriginal.view;
 }
 
 /** The twin of a half of a move, in the table: the deletion of an inserted row, or the row. */
@@ -749,36 +758,6 @@ function commentsToPoints(
   throw new EditError(commentHasNoPlace(parsed, points[0]?.by ?? ''), 'no-legal-placement');
 }
 
-/** Whether the line that starts at `start` is blank. */
-const blankLine = (text: string, start: number): boolean =>
-  /^[ \t]*$/.test(text.slice(start, lineEnd(text, start)));
-
-/**
- * What a table's removal takes out as text, with Track Changes off: the table and the blank lines
- * after it, up to the line of what follows, or when nothing follows, the table and the break before it
- * (so that the neighbors stay as far apart as they were).
- */
-function plainRange(text: string, parsed: Parsed, table: TableRead): { from: number; to: number } {
-  const stop = parsed.ledgerRange?.from ?? text.length;
-  const first = bodyStart(text);
-  const start = lineStart(text, table.from);
-  // A line of text right above the table (a table can start in a paragraph's next line) is kept apart
-  // from what follows by the blank line after the table, which then stays.
-  const apart = start <= first || blankLine(text, lineStart(text, start - 1));
-  let after = nextLineStart(text, table.to);
-  if (!apart && after < stop) return { from: table.from, to: after };
-  while (after < stop && blankLine(text, after)) after = nextLineStart(text, after);
-  if (after < stop) return { from: table.from, to: after };
-  let above = start;
-  while (above > first) {
-    const line = lineStart(text, above - 1);
-    above = line;
-    if (blankLine(text, line)) continue;
-    return { from: lineEnd(text, line), to: table.to };
-  }
-  return { from: table.from, to: table.to };
-}
-
 /** Where the caret goes after a table is gone: at the start of the text that follows it, or at the end
  * of the text before it when none follows. `from` is where the table started in `before`. */
 function caretAfterTable(before: string, from: number, after: string): number {
@@ -915,6 +894,12 @@ function deleteTable(
 /** The operation at the grain it was made, refused where its rules say so (`tableEdit` widens). */
 export function fineTableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
   const parsed = parse(text);
+  // A table in the new text of a pending replacement takes no mark of its own there (a decision of
+  // the replacement would hide it): the operation is written into the replacement's new text, as a
+  // replacement of the table does (`tableEdit` widens what is refused here).
+  if (op.kind !== 'deleteTable' && inReplacementText(text, op)) {
+    throw new EditError(IN_REPLACEMENT, 'no-legal-placement');
+  }
   const table = tableOf(text, parsed, op);
   if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, ctx);
   if (op.kind === 'fillCells') return fillCells(text, parsed, table, op, ctx);
@@ -1647,6 +1632,8 @@ function relocatedPatch(text: string, table: TableRead, index: number): TextChan
   const marker = rowMarker(text, table.rows[index] as TableRowRead);
   return marker ? [{ ...marker, insert: '' }] : [];
 }
+
+const IN_REPLACEMENT = 'A mark of its own cannot stand in the new text of a pending replacement.';
 
 /**
  * A tracked table operation. Where the rules refuse it because of another person's pending changes

@@ -152,6 +152,7 @@ export async function openWindow(doc: string): Promise<Window> {
     exists: (path) => Promise.resolve(files.has(path)),
     reveal: () => Promise.resolve(),
     print: () => Promise.resolve(),
+    exportWord: () => Promise.resolve(null),
     saveAs: () => Promise.resolve(null),
     watch: (path, onChange) => {
       watchers.set(path, onChange);
