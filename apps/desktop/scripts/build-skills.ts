@@ -151,8 +151,10 @@ export const PLUGIN = 'integrations/claude-code/.claude-plugin/plugin.json';
  * the skill changes and not otherwise (a plugin without one updates with every commit). That holds
  * while the skill is all the plugin has: a plugin that gets a hook or an MCP configuration must
  * bump its version for those too, and `skills.node.test.ts` fails until this rule says how.
- * (Someone who installs the plugin and also copies the skill may see it listed twice: the
- * plugin's is `redlines:redlines`. Not verified.)
+ * (Someone who installs the plugin and also copies the skill sees it listed twice, as `redlines`
+ * and `redlines:redlines`: Claude Code's documentation says both load, since a plugin's skills are
+ * namespaced. The app installs only the copy and never the plugin, and the Claude Code row in
+ * Preferences › Agents says so; #927.)
  */
 export function pluginManifest(version: number): string {
   const manifest = {
