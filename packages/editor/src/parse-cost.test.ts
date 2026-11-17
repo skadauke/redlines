@@ -4,6 +4,7 @@
 import { deleteCharBackward } from '@codemirror/commands';
 import { forceParsing } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ViewMode } from './api.ts';
 import { createEditor, type Editor } from './index.ts';
 import { idFor } from './test-documents.ts';
 
@@ -40,10 +41,10 @@ function documentOf(bytes: number): string {
 }
 
 /** Milliseconds to parse a document to its end in steps of 10 KB, as the background parse does. */
-function parseAll(doc: string): number {
+function parseAll(doc: string, view: ViewMode = 'redlines'): number {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc, author, view: 'redlines' });
+  const editor = createEditor(parent, { doc, author, view });
   open.push(editor);
   const chunk = 10_000;
   const started = performance.now();
@@ -53,22 +54,32 @@ function parseAll(doc: string): number {
   return performance.now() - started;
 }
 
-describe('parsing a long document to its end', () => {
-  it('costs time linear in its length', () => {
-    const small = documentOf(150_000);
-    const large = documentOf(600_000);
-    parseAll(small); // warm up
-    // The best of two runs each, so that a busy machine doesn't decide it.
-    const a = Math.min(parseAll(small), parseAll(small));
-    const b = Math.min(parseAll(large), parseAll(large));
-    console.log(
-      `parse cost: ${small.length} -> ${a.toFixed(0)} ms, ${large.length} -> ${b.toFixed(0)} ms`,
+// Every look has its own decorations over the parse: the Raw look's highlighting and the clean
+// looks' preview, tracked changes and tables (#696). Redlines runs always; the others are timing
+// tests, which run with REDLINES_COST (a busy machine can't time them).
+describe.each<ViewMode>(['redlines', 'clean', 'raw'])(
+  'parsing a long document to its end in %s',
+  (view) => {
+    it.skipIf(view !== 'redlines' && !process.env['REDLINES_COST'])(
+      'costs time linear in its length',
+      () => {
+        const small = documentOf(150_000);
+        const large = documentOf(600_000);
+        parseAll(small, view); // warm up
+        // The best of two runs each, so that a busy machine doesn't decide it.
+        const a = Math.min(parseAll(small, view), parseAll(small, view));
+        const b = Math.min(parseAll(large, view), parseAll(large, view));
+        console.log(
+          `parse cost (${view}): ${small.length} -> ${a.toFixed(0)} ms, ${large.length} -> ${b.toFixed(0)} ms`,
+        );
+        // Four times the text: linear is 4x; quadratic is 16x.
+        // Before the restyling was incremental it was 12 to 16.
+        expect(b / a).toBeLessThan(8.5);
+      },
+      120_000,
     );
-    // Four times the text: linear is 4x; quadratic is 16x.
-    // Before the restyling was incremental it was 12 to 16.
-    expect(b / a).toBeLessThan(8.5);
-  }, 120_000);
-});
+  },
+);
 
 /** A document of about `bytes` bytes with an insertion in each paragraph, and its ledger. */
 function markedDocument(bytes: number): string {
