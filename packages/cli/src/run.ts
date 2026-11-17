@@ -194,9 +194,15 @@ async function importDocx(rest: string[], io: CliIo): Promise<number> {
   // The pictures go beside the Markdown, where its links name them (`media/image1.png`), and
   // never over a file that is there.
   const folder = target.includes('/') ? target.slice(0, target.lastIndexOf('/') + 1) : '';
+  if (Object.keys(media).length > 0 && !io.writeBytes) {
+    throw new EditError('This copy of redlines cannot write the pictures of a file.');
+  }
   const pictures = Object.entries(media).filter(
     ([name]) => /^media\/[^/\\]+$/.test(name) && name !== 'media/..',
   );
+  if (pictures.length < Object.keys(media).length) {
+    notes.push('Some pictures have names redlines does not write, and were left out.');
+  }
   for (const [name] of pictures) {
     if (
       await io.realpath(folder + name).then(

@@ -1,7 +1,7 @@
 import { exportDocx } from '@redlines/word';
 import { describe, expect, it, vi } from 'vitest';
 import type { NotificationOptions } from './ui/notifications.ts';
-import { importMessage, openWord } from './word-import.ts';
+import { importMessage, openWord, relink } from './word-import.ts';
 
 const noFiles = {
   saveAs: () => Promise.reject(new Error('not saved here')),
@@ -136,5 +136,18 @@ describe('Open .docx', () => {
     const { text, kept } = importMessage('a.docx', ['One.', 'Two.', 'Three.', 'Four.'], 1);
     expect(kept).toBe(true);
     expect(text).toBe('Opened “a.docx” as a new document. One. Two. Three. And 2 more.');
+  });
+});
+
+describe('relink', () => {
+  it('rewrites every picture link in one pass, so a renamed file is not matched again', () => {
+    const links = new Map<string, string | null>([
+      ['media/image1.png', 'media/image2.png'],
+      ['media/image2.png', 'media/image3.png'],
+      ['media/gone.png', null],
+    ]);
+    expect(
+      relink('![a](media/image1.png) ![b](media/image2.png) x![c](media/gone.png)y', links),
+    ).toBe('![a](media/image2.png) ![b](media/image3.png) xy');
   });
 });
