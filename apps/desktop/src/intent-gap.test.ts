@@ -70,6 +70,16 @@ let x = 1;
 Some <!--ins k3x9-->added<!--/k3x9--> and <!--del w2rf gone--> and <!--sub p7qd new-->old<!--/p7qd--> words.
 
 Last paragraph here.
+
+<!-- redlines
+version: 1
+people:
+  ada: {name: Ada}
+marks:
+  k3x9: {by: ada, at: 2026-11-17T10:00Z}
+  w2rf: {by: ada, at: 2026-11-17T10:00Z}
+  p7qd: {by: ada, at: 2026-11-17T10:00Z}
+-->
 `;
 
 function key(editor: Editor, name: string, mods: Partial<KeyboardEventInit> = {}) {
@@ -88,12 +98,13 @@ const PLAIN = new Set([
   'recordTracking',
   'recordView',
   'applyAgentEdit',
+  'applyAgentEdit with a base',
   'reloadDoc',
 ]);
 
 type Driver = [name: string, run: (editor: Editor) => void];
 
-function drivers(editor: Editor, tracking: boolean): Driver[] {
+function drivers(editor: Editor): Driver[] {
   const out: Driver[] = [];
   // Every command of the registry. The find bar's own are left to its box, which they focus.
   for (const c of editor.commands.list()) {
@@ -205,11 +216,17 @@ function drivers(editor: Editor, tracking: boolean): Driver[] {
   out.push([
     'recordTracking',
     (e) => {
-      e.setTracking(!tracking, { inFile: true });
+      e.setTracking(true, { inFile: true });
       e.recordTracking();
     },
   ]);
-  out.push(['recordView', (e) => e.recordView()]);
+  out.push([
+    'recordView',
+    (e) => {
+      e.setViewMode('clean');
+      e.recordView();
+    },
+  ]);
   out.push(['setImageAlt', (e) => setImageAlt(e.view, 'new alt')]);
   out.push(['setImageSrc', (e) => setImageSrc(e.view, 'new.png')]);
   out.push([
@@ -288,7 +305,7 @@ describe.each([true, false])('every write, Track Changes %s', (tracking) => {
       places.push([m.index, m[0].length], [m.index + 1, 0]);
     }
 
-    for (const [name, run] of drivers(editor, tracking)) {
+    for (const [name, run] of drivers(editor)) {
       current = name;
       for (const [pos, len] of places) {
         editor.setDoc(DOC);
@@ -305,6 +322,14 @@ describe.each([true, false])('every write, Track Changes %s', (tracking) => {
     }
 
     expect([...missing].map(([name, event]) => `${name} (${event})`)).toEqual([]);
+
+    // Each plain write did write: a driver that quietly stopped changing the document would
+    // leave nothing here to check.
+    for (const name of PLAIN)
+      expect(
+        plain.some((p) => p.name === name),
+        name,
+      ).toBe(true);
 
     // The plain writes derive again, on the text they were made on, the document they made.
     const wrong = plain

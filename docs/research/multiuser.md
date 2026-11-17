@@ -238,11 +238,14 @@ reload, the file's own settings and Accept All and Stop Tracking on a sample doc
 Changes on and off, and fails when one dispatches a document change with no intent. What is, in the
 end, plain text changes takes a typing intent with `exact` set (`plainIntent`): the changes as made,
 who made them, written as they are on the text they were made on, and placed among the words on
-newer text like any typing edit. Undo and Redo, an agent's whole-text edit, `recordTracking` and
-`recordView`, a reload from disk and Accept All and Stop Tracking use it. An agent's edit made on a
-base also keeps its own record, which a session places again as a push (`rebaseAgentEdit`).
+newer text where the same source, with its neighbours, still stands, and never among the visible words, which would leave markers behind. Undo and Redo, an agent's whole-text edit, `recordTracking` and
+`recordView`, a reload from disk and Accept All and Stop Tracking use it. Where a session can't place
+one by its source, it keeps it as the session mapped it over what others changed, and never takes it
+back.
 
-Still open, and not refusals by the new paths: a window places a typing intent among the words of
+Still open, and not refusals by the new paths: an Undo that takes away a mark's ledger entry while
+another window writes the ledger is turned away by the authority as not fitting its text (found with
+the sync test; it happens with no intent too, and is §4.3's ledger entries); and a window places a typing intent among the words of
 newer text, and the other kinds (format, table, steps, move, widened paste) as they are when the text
 under them is the same, or else not at all. Placing those on newer text, anchored the way typing is,
 is what is left before the session has no path that takes an edit back.
