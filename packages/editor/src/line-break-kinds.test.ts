@@ -131,3 +131,33 @@ describe.each(MIXED)('%s (#924)', (_, file) => {
     expect(editor.getDoc()).toBe(file);
   });
 });
+
+describe('many deletions at once (#1057)', () => {
+  // Eight or more deletions with room between them are written together, as a column of cells is.
+  it.each([
+    ['an LF in a CRLF file', '\r\n', '\n'],
+    ['a CRLF in an LF file', '\n', '\r\n'],
+  ])('names the kind of a break that one of them takes out: %s', (_, eol, other) => {
+    const lines = Array.from({ length: 10 }, (_, i) => `line ${i} here`);
+    const file = lines.map((line, i) => line + (i === 3 ? other : eol)).join('');
+    const lf = file.replace(/\r\n?/g, '\n');
+    const ranges: [number, number][] = [];
+    for (let i = 0; i < 10; i++) {
+      const at = lf.indexOf(`line ${i} here`);
+      // Line 3's range runs from its end across the break into line 4.
+      ranges.push(i === 3 ? [at + 10, at + 15] : [at + 1, at + 4]);
+    }
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc: file, author, tracking: true });
+    open.push(editor);
+    editor.view.dispatch({
+      changes: ranges.filter((_, i) => i !== 4).map(([from, to]) => ({ from, to })),
+      userEvent: 'delete.selection',
+    });
+    const saved = editor.getDoc();
+    expect(saved).toContain('<!--del');
+    expect(parse(saved).warnings).toEqual([]);
+    expect(applyChanges(saved, rejectAll(saved))).toBe(file);
+  });
+});
