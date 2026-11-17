@@ -418,7 +418,7 @@ function decide(
   action: Action,
 ): TextChange[] {
   const changes = decideTiers(text, parsed, marks, action);
-  if (action !== 'accept' || changes.length === 0 || marks.some(isRowMove)) return changes;
+  if (action !== 'accept' || changes.length === 0) return changes;
   if (!parsed.marks.some((mark) => isRowMove(mark) && mark.kind === 'ins')) return changes;
   return resyncMoves(text, changes);
 }

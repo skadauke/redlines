@@ -4,7 +4,7 @@
 // place, is written again by the accept, so that no decision is refused.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, reject, rejectAll } from './decide.ts';
+import { accept, acceptMarks, reject, rejectAll } from './decide.ts';
 import { parse } from './parse.ts';
 import { tableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
@@ -105,5 +105,40 @@ describe('accepting typing in a pending moved row (#475)', () => {
     for (const id of idsWhere(accepted, true)) {
       expect(trim(applyChanges(accepted, reject(accepted, id)))).toBe(WANTED);
     }
+  });
+
+  it('writes the kept copy again when the same call accepts another move', () => {
+    const base = file('| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |');
+    const once = move(base, { kind: 'moveRows', rows: [1], to: 0 });
+    const both = applyChanges(
+      once,
+      tableEdit(
+        once,
+        {
+          kind: 'moveRows',
+          rows: [3],
+          to: 0,
+          table: readTables(once, parse(once))[0]?.from ?? 0,
+        },
+        context(ada, ['p5qm', 'p6rn', 'p7st']),
+      ).changes,
+    );
+    const spot = both.indexOf(' 1 | 2') + 2;
+    const typed = typeAt(both, spot, spot, 'q');
+    // The typing's own move is the one that is not decided: it is the other row's copy that goes.
+    const typing = first(idsWhere(typed, false));
+    const other = parse(typed).marks.find(
+      (m) => m.kind === 'ins' && m.entry.move !== undefined && m.id === 'p5qm',
+    );
+    expect(other).toBeDefined();
+    const accepted = applyChanges(typed, acceptMarks(typed, [typing, 'p5qm']));
+    const left = idsWhere(accepted, true);
+    expect(left).toHaveLength(2);
+    for (const id of left) {
+      const text = trim(applyChanges(accepted, reject(accepted, id)));
+      expect(text).toContain('| 1q | 2 |');
+    }
+    expectEveryOrderAlike('two moves', typed, exactly);
+    expectNoDecisionRefused('two moves', typed);
   });
 });
