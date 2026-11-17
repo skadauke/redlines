@@ -16,6 +16,7 @@ import {
   acceptAll,
   applyChanges,
   decodePayload,
+  plainPayload,
   encodePayload,
   newestView,
   originalView,
@@ -326,10 +327,10 @@ export function shorten(text: string): string {
       }
       if (!kind || !id) return all;
       if (kind === 'split') return '<split>';
-      if (kind === 'del') return `<del ${decodePayload(payload ?? '')}>`;
+      if (kind === 'del') return `<del ${plainPayload(decodePayload(payload ?? ''))}>`;
       kinds.set(id, kind);
       if (kind === 'ins') return '<ins>';
-      if (kind === 'sub') return `<sub ${decodePayload(payload ?? '')}>`;
+      if (kind === 'sub') return `<sub ${plainPayload(decodePayload(payload ?? ''))}>`;
       return `<fmt ${payload ?? ''}>`;
     },
   );
@@ -822,6 +823,17 @@ function decided(text: string, id: string, how: 'a' | 'r'): string | undefined {
   }
 }
 
+/** The ids of the marks of a file that are decided (not comments and highlights), once each. */
+function marksOf(text: string): string[] {
+  return [
+    ...new Set(
+      parse(text)
+        .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
+        .map((mark) => mark.id),
+    ),
+  ];
+}
+
 /** The most marks whose every order of decisions is walked. */
 const DECISION_LIMIT = 6;
 
@@ -870,6 +882,15 @@ function sampleDecisions(
   const decide = (order: readonly string[], how: (id: string) => 'a' | 'r'): string | undefined => {
     let text = file;
     const present = (id: string) => parse(text).marks.some((mark) => mark.id === id);
+    // The marks that a decision frees (those in the old text of a replacement that is decided) are
+    // decided too, after the ones that were there, with the same choice: an order of decisions
+    // ends only when no mark is left (#808).
+    const known = new Set(order);
+    const freed = () => {
+      const found = marksOf(text).filter((id) => !known.has(id));
+      for (const id of found) known.add(id);
+      return found;
+    };
     let pending = order.filter(present);
     for (let progress = true; pending.length > 0 && progress;) {
       progress = false;
@@ -881,6 +902,7 @@ function sampleDecisions(
         else {
           text = next;
           progress = true;
+          later.push(...freed());
         }
       }
       pending = later.filter(present);
@@ -943,13 +965,6 @@ export const sampledDecisions = Object.assign(sampleDecisions, { decide: decided
  * can be made on.
  */
 export function decisionProblems(file: string): string[] {
-  const marksOf = (text: string) => [
-    ...new Set(
-      parse(text)
-        .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
-        .map((mark) => mark.id),
-    ),
-  ];
   const all = marksOf(file);
   if (all.length === 0) return [];
   // A long file with many marks (a widened replacement holds the marks in its old text) is sampled:

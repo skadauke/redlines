@@ -244,13 +244,26 @@ early, must stay on one line, and must not let other tools act on what it contai
 - A reader decodes left to right, after turning CRLF and CR into LF. The escapes are `\\`, `\n`,
   `\-`, `\xHH`, `\|`, `\{` and `\%`. Any other backslash is literal, so Markdown escapes such as
   `\*` are kept as written. When a payload goes back into the text, as when a deletion is
-  rejected, its line breaks are written as the file writes them.
+  rejected, its line breaks are written as the rule on line breaks below says.
 - The file writes line breaks as its body has them: CRLF when the body has a CRLF, and when it has
   none, as the ledger's lines end, which were written while the body still had its CRLFs, as when
   the last of them are deleted; LF in a file with neither. The body is the file without the ledger
   and its blank line (§5.1), so adding the ledger never changes this. Typed text and the ledger
-  take the same line breaks. A payload's line break of another kind, as in a file with mixed line
-  breaks, comes back in the file's.
+  take the same line breaks. A new ledger takes the line break that the file had before the edit
+  that makes it, so that a change that takes the file's last CRLF out of the body leaves the
+  ledger, and with it the file, CRLF.
+- **A line break keeps its own kind.** Rejecting a change gives the old text back byte for byte, so
+  an LF in a CRLF file comes back as an LF, a CRLF in an LF file as a CRLF, and a CR alone as a CR.
+  In a payload, `\n` is a line break of the file's kind, as it always was, so a file of one kind
+  needs nothing more, and every file written before reads the same. A break of the other kind is
+  written as the kind it is: `\x0d\n` for a CRLF, `\x0d` for a CR alone, and `\x0a` for an LF in a
+  file whose line breaks are CRLF. A CRLF right after a CR alone is always `\x0d\n`, so that
+  `\x0d` and `\n` never read as one CRLF. A reader gives these back as they are, and the plain `\n`
+  in the file's kind as it is when the payload goes back. The file's kind is the one the rule
+  above says, taken before the edit that writes the payload: a change that takes the last CRLF of
+  the body out of it still leaves the file CRLF, so the `\n`s of its payloads still mean CRLF. Only
+  a tool that gives the body a CRLF where it had none, or takes the ledger away, changes what the
+  `\n`s of changes already written mean; a break that is written with its own kind never changes.
 - All 271,452 non-empty strings of up to five characters over a 12-character alphabet of the
   characters above round-trip.
 - The ledger uses the same escapes, except that a value may span lines (§5.5).
@@ -3281,10 +3294,10 @@ a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format 
 and so have the lists (`edits-widen.ts`, `widen-scope.ts`: a typed, pasted or key edit and a format
 or block change in a list item, which `trackedEdits` and `trackedFormat` write as a replacement of
 the item or the list when no fine form reads alike in every order, and keep their refusal when
-the unit's old text would hold another person's pending change: some order of decisions would not
-read as the original, #808), and so have the blocks (the same two, in a paragraph, a heading or a
-quote) and code (a typed, pasted or key edit in a fenced or indented block, display math or raw
-text, and a key that moves the lines under an item that leaves its list, with the same guard).
+another person's mark ends at the unit's edge, #107), and so have the blocks (the same two, in a
+paragraph, a heading or a quote) and code (a typed, pasted or key edit in a fenced or indented
+block, display math or raw text, and a key that moves the lines under an item that leaves its
+list, with the same guard).
 Until a writer calls it, it still refuses, in the words of its own section.
 
 Every place that refuses has one of four tiers (`refusals.ts`, which a test holds to it): the edit
@@ -3314,12 +3327,14 @@ new text of someone else's substitution, the unit is a unit of that new text, wr
 the old text of the second is the new text of the first, and the first's marks stand around it.
 Accepting the first leaves the second pending; rejecting the first takes the second with it.
 
-**The old text holds other people's marks.** In a table's cells the old text may hold another
-person's pending marks. Elsewhere, with Track Changes on, a replacement whose old text would hold another
-person's pending change, or next to whose edge another person's mark ends (a split's break right in
-front of the unit, an insertion right after it), is **not written** and the refusal stands: some
-order of decisions would not read as the original (#808, #107; `heldByOthers` of `widen`). The
-rest of this paragraph is what is written. Marks in a payload are written in the payload's
+**The old text holds other people's marks.** The old text of a replacement may hold another
+person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every
+order of accepting and rejecting the replacement and the marks in it reads alike (#808). The one
+refusal that stays is for a mark of theirs that ends at the unit's edge without being in it, as a
+split's break right in front of the unit or an insertion right after it (`touchingOthers` of
+`widen`): it is decided with the block next to it, the replacement would not read as the original
+in some order (#107), and the edit is not written. A change that holds the unit in its new text is
+no neighbour: the unit is written inside it. The rest of this paragraph is what is written. Marks in a payload are written in the payload's
 encoding (§2.5): `<!--ins k3x9-->` is `<!-\-ins k3x9-\->`. A decoded payload's marker is a mark
 when its id has a ledger entry (a thread, for a comment) and stands nowhere else in the file, its
 opener and closer are in the same payload, and payloads nest at most three deep
@@ -3602,10 +3617,18 @@ front matter in R Markdown and Quarto.
   is: the ledger is written again in place, and removing the ledger leaves that text after the
   body. A change that another tool makes there stays there, and has its entry in the ledger in
   front of it, the file's last.
-- Documents joined by Quarto includes or knitr child documents can contain several ledgers. A
-  marker belongs to the first ledger after it. The editor always writes one. (Not done yet, #144:
-  the library reads every marker against the last ledger in the file, so marks in front of an
-  earlier ledger show with no author or time.)
+- Documents joined by Quarto includes or knitr child documents can contain several ledgers, one
+  for each part. A marker reads the first ledger after it, and a marker after the last ledger
+  reads the last, so each part keeps its authors and times. A mark's entry, and a comment's
+  thread, are read from that ledger only: an entry that stands in a ledger in front of its
+  marker is not read for it, and the mark shows with no author or time, as one with no entry
+  does (§2.4). The settings (`tracking`, `view`, `history`) and the keys of a later version are
+  the last ledger's, and people are everyone that any ledger lists, the last ledger's entry for a
+  handle first. Redlines writes a new change's entry into the first ledger after its marker, a
+  person new to that ledger with it, and leaves the other ledgers as they are, so that the parts
+  can be split apart again and each is the file it was. A ledger left with no mark, comment or
+  setting by a decision goes with its blank line, as the only ledger of a file does. The views
+  (§8) show none of them. The editor always writes one ledger when it starts a file's.
 - The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
   (§2.1).
 - A `<!--` with no `-->` of its own, anywhere in the text, opens a comment that runs to the first
