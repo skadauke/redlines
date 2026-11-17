@@ -106,6 +106,7 @@ import { createNotice } from './ui/notice.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
 import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
+import { tooBroadNotice } from './project-notice.ts';
 import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
 import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
@@ -921,7 +922,8 @@ async function showImages(path: string | null): Promise<void> {
     const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
     // Another file may have opened meanwhile.
     if (!allowed || doc?.path !== path) return;
-    imageFolder = root.tooBroad ? dirname(path) : root.folder;
+    // The home folder and what is above it is no project: its images are not loaded (#451).
+    imageFolder = root.tooBroad ? null : root.folder;
     editor.refreshImages();
     imageWatch.settle();
   } catch (error) {
@@ -938,7 +940,11 @@ async function showInSidebar(path: string | null): Promise<void> {
     return { folder: dirname(path), isRepo: false, tooBroad: false };
   });
   // Another file may have opened meanwhile.
-  if (doc?.path === path) sidebar.setDocument({ path, root });
+  if (doc?.path !== path) return;
+  sidebar.setDocument({ path, root });
+  // The home folder, or a folder above it, is no project (#451): say why there is no folder.
+  const notice = tooBroadNotice(root);
+  if (notice) notifications.show(notice);
 }
 
 /** Opens the document at `path` in the editor, in place of the one it shows. */
