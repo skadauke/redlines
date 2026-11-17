@@ -5,7 +5,8 @@
 
 import { withDialect } from './dialect.ts';
 import { closerRange, openerRange } from './blocks.ts';
-import { awayFromIncludes } from './include.ts';
+import { aroundFences } from './div-ends.ts';
+import { awayFromIncludes, type AroundInclude } from './include.ts';
 import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, markerRanges, visibleText, workingLedger } from './edit-support.ts';
@@ -71,10 +72,16 @@ export function addComment(
     assertRange(text, range);
     const parsed = parse(text);
     const markers = markerRanges(parsed);
-    let placed = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
-    placed = pastPendingRowMarks(text, parsed, markers, placed);
-    // No marker on the line of a Quarto include: the comment goes around it (include.ts).
-    const around = awayFromIncludes(text, placed);
+    // An end on a `:::` fence goes to the whole div, or into its body (div-ends.ts); an end on the
+    // line of a Quarto include goes around it (include.ts).
+    const fenced = aroundFences(text, range);
+    let around: AroundInclude;
+    if (fenced.whole) around = fenced.whole;
+    else {
+      let placed = anchorRange(text, parsed, markers, fenced.inner, COMMENT_WORDS);
+      placed = pastPendingRowMarks(text, parsed, markers, placed);
+      around = fenced.apply(awayFromIncludes(text, placed));
+    }
     const { from, to } = around;
     const point = from === to;
 
@@ -99,7 +106,11 @@ export function addComment(
       { from, to: from, insert: `<!--cmt ${id}-->${around.openerLine ? eol : ''}` },
     ];
     if (!point) {
-      anchors.push({ from: to, to, insert: `${around.closerLine ? eol : ''}<!--/${id}-->` });
+      anchors.push({
+        from: to,
+        to,
+        insert: `${around.closerLine ? eol : ''}<!--/${id}-->`,
+      });
     }
     const changes = commitEdit(text, anchors, ledger, {
       parsed,
