@@ -97,6 +97,11 @@ export interface AskSession {
    * explains the selected text; after an answer an empty one asks nothing.
    */
   ask(question: string): void;
+  /**
+   * The follow-up field holds `text`, not yet sent: the picker follows who would answer it, and the
+   * models that agent lists (#837).
+   */
+  draft(text: string): void;
   /** Picks the model the next questions run, one the agent lists; undefined is its default. */
   setModel(model: string | undefined): void;
   /** The answer to the first-run question: read the folder, just this document, or not at all. */
@@ -189,6 +194,8 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
 
   /** The agent the choice is about, to draw it again when the model is picked. */
   let lastAgent: AgentInfo | null = null;
+  /** The agents as last listed, for the picker to follow a draft without asking the host again. */
+  let known: readonly AgentInfo[] = [];
 
   const set = (next: Partial<AskState>) => {
     if (closed) return;
@@ -322,6 +329,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     let started = false;
     try {
       const agents = await deps.agents.list();
+      known = agents;
       if (mine !== epoch) return;
       // An agent with no toolbox (an OpenClaw agent) has no `view` to read the selection with: it
       // is sent the document and the thread of a comment, and answers there. Ask never picks one,
@@ -364,7 +372,8 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
         reach,
         abort,
         generation,
-        withoutMentions(question, agents, mentionedAgents(question, agents)),
+        // Only the first named agent answers: another name stays in the question, as a word in it.
+        withoutMentions(question, agents, mentionedAgents(question, agents).slice(0, 1)),
         () => {
           started = true;
         },
@@ -496,6 +505,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
   void deps.agents
     .list()
     .then((agents) => {
+      known = agents;
       if (closed || lastAgent) return;
       const first = pick(
         agents.filter((other) => other.toolbox !== false),
@@ -517,6 +527,19 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
       // stray Return in the empty follow-up field asks nothing.
       if (state.turns.length > 0 && question.trim() === '') return;
       void turn(question);
+    },
+    draft(text) {
+      if (closed || state.pending !== null || known.length === 0) return;
+      const agent = pick(
+        known.filter((other) => other.toolbox !== false),
+        text,
+      );
+      if (!agent) return;
+      lastAgent = agent;
+      const was = state.choice;
+      const next = choiceOf(agent);
+      if (was && was.agent.id === next.agent.id && was.model === next.model) return;
+      set({ choice: next });
     },
     setModel(model) {
       if (closed) return;
