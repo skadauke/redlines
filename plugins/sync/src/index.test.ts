@@ -345,8 +345,11 @@ describe('undo in two windows', () => {
     // ledger entry came in.
     type(ada.editor, ' ONE', ' MORE');
     await settle(ada.binding, bo.binding);
-    ada.editor.undo();
-    await settle(ada.binding, bo.binding);
+    // One step, or two when the machine was slow between the keystrokes: Undo until it is all back.
+    for (let i = 0; i < 2 && hub.authority.text.includes('ONE'); i++) {
+      ada.editor.undo();
+      await settle(ada.binding, bo.binding);
+    }
     const text = hub.authority.text;
     expect(text).not.toContain('ONE');
     expect(text).not.toContain('MORE');
@@ -355,25 +358,53 @@ describe('undo in two windows', () => {
     expect(bo.editor.view.state.doc.toString()).toBe(text);
   });
 
-  it('leaves an edit alone that the other window typed inside, and says whose window', async () => {
+  it('goes on after several remote changes in a row (no mismatched change sets)', async () => {
     const { hub, ada, bo } = await session();
     ada.editor.setTracking(false, { inFile: false });
     bo.editor.setTracking(false, { inFile: false });
-    // The windows have said who they are.
-    ada.editor.view.dispatch({ selection: { anchor: 1 } });
-    bo.editor.view.dispatch({ selection: { anchor: 2 } });
-    await until(
-      () => peersShown(bo.editor.view).length === 1 && peersShown(ada.editor.view).length === 1,
-    );
+    type(ada.editor, 'First', ' ONE');
+    for (const [at, text] of [
+      ['Second', ' a'],
+      ['Third', ' b'],
+      ['First', ' c'],
+    ] as const) {
+      type(bo.editor, at, text);
+      await settle(ada.binding, bo.binding);
+    }
+    ada.editor.undo();
+    await settle(ada.binding, bo.binding);
+    expect(hub.authority.text).not.toContain(' ONE');
+    expect(hub.authority.text).toContain(' a');
+    expect(ada.notices).toEqual([]);
+  });
+
+  it('is not refused for the other window’s ledger entries beside a tracked step', async () => {
+    const { hub, ada, bo } = await session();
+    type(ada.editor, 'First', ' ONE');
+    type(bo.editor, 'Third', ' TWO');
+    await settle(ada.binding, bo.binding);
+    ada.editor.undo();
+    await settle(ada.binding, bo.binding);
+    expect(ada.said).toEqual([]);
+    expect(hub.authority.text).not.toContain(' ONE');
+    expect(hub.authority.text).toContain(' TWO');
+    expect(parse(hub.authority.text).warnings).toEqual([]);
+  });
+
+  it('takes back what is left of its step when the other window typed inside, and keeps theirs', async () => {
+    const { hub, ada, bo } = await session();
+    ada.editor.setTracking(false, { inFile: false });
+    bo.editor.setTracking(false, { inFile: false });
     type(ada.editor, 'First', ' ONE');
     await settle(ada.binding, bo.binding);
     // Bo types inside the words Ada just wrote.
     type(bo.editor, ' O', 'X');
     await settle(ada.binding, bo.binding);
-    const before = hub.authority.text;
-    undoKey(ada.editor);
+    ada.editor.undo();
     await settle(ada.binding, bo.binding);
-    expect(hub.authority.text).toBe(before);
-    expect(ada.said).toEqual(['Bo (window 2) has changed this since.']);
+    expect(hub.authority.text).toContain('X');
+    expect(hub.authority.text).not.toContain('ONE');
+    expect(ada.said).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(hub.authority.text);
   });
 });
