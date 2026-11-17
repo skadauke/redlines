@@ -257,6 +257,30 @@ export interface PastedPicture {
   type: string;
   /** The extension to save it with. */
   extension: string;
+  /**
+   * Set on a picture whose bytes are not in the HTML but at this address, to be fetched by the host
+   * (`isFetchablePicture`); its `bytes` are empty until then.
+   */
+  url?: string;
+}
+
+/**
+ * Whether a picture's address is one the host fetches for a paste: Google Docs' pictures, `https`
+ * on Google's image servers. The host holds the same list (`remote_image.rs`) and refuses any other.
+ */
+export function isFetchablePicture(src: string): boolean {
+  try {
+    const url = new URL(src.trim());
+    return (
+      url.protocol === 'https:' &&
+      url.username === '' &&
+      url.password === '' &&
+      url.port === '' &&
+      /^lh\d+(-[a-z]{1,4})*\.googleusercontent\.com$/.test(url.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** What a paste's pictures need of the host, gathered while the HTML is read. */
@@ -267,6 +291,8 @@ export interface PictureSink {
   unreadable: number;
   /** How many pictures stay linked to a web address. */
   linked: number;
+  /** Whether the host fetches pictures by address, so that Google Docs' are saved, not linked. */
+  fetch?: boolean;
   /** The images already read, by element, with the address each is written with. */
   read: Map<Element, string>;
 }
@@ -350,6 +376,16 @@ function collect(node: Node, format: Format, runs: Run[]): void {
         const picture = pictureOfDataUri(given);
         if (picture) src = pictureLink(sink.pictures.push(picture) - 1);
         else sink.unreadable++;
+      } else if (sink.fetch && isFetchablePicture(src)) {
+        // Fetched by the host when the paste is made; the address stays the link if that fails.
+        src = pictureLink(
+          sink.pictures.push({
+            bytes: new Uint8Array(0),
+            type: '',
+            extension: '',
+            url: src.trim(),
+          }) - 1,
+        );
       } else if (/^https?:/i.test(src.trim())) sink.linked++;
       sink.read.set(node, src);
     }
@@ -637,7 +673,7 @@ function emitItems(items: Item[]): string {
 }
 
 /** An address as it may stand in a link: nothing in it can end the link or start markup. */
-function encodeUrl(url: string): string {
+export function encodeUrl(url: string): string {
   const bytes = new TextEncoder();
   // eslint-disable-next-line no-control-regex -- control characters are exactly what is encoded
   return url.replace(/[\s<>()\\"`\u0000-\u001f\u007f]/g, (c) =>

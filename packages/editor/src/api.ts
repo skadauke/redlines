@@ -373,6 +373,18 @@ export interface EditorOptions {
    */
   onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
   /**
+   * Called for each picture of a pasted page that is at a web address the host fetches (Google
+   * Docs' pictures), with that address. Resolves to the picture's bytes, which are then saved
+   * through `onImageFiles` like any pasted picture, or null when it can't be fetched: the picture
+   * then stays linked to its address, and the person is told. Default: none, and such pictures stay
+   * linked.
+   */
+  onFetchImage?: (url: string) => Promise<{
+    bytes: Uint8Array<ArrayBuffer>;
+    type: string;
+    extension: string;
+  } | null>;
+  /**
    * Called when an image file of the project is dragged into the document from the sidebar
    * (`PROJECT_IMAGE_TYPE` in the drag's data, holding the file's path), with that path. Returns the
    * path to write for it, relative to the document as `ImageSpot.insert` takes it, or null when it
