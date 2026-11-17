@@ -41,6 +41,11 @@ describe('pickerEntries', () => {
     expect(names()).toEqual(['Claude', 'Bo Chen', 'Claude for Bo', 'Cy Young']);
   });
 
+  it('lists only the agents for a question to an agent (Ask, #384)', () => {
+    const only = pickerEntries(parsed, 'ada', agents, '', null, true).map((entry) => entry.name);
+    expect(only).toEqual(['Claude']);
+  });
+
   it('lists someone else’s agent like a person, named Claude for Bo', () => {
     const entry = pickerEntries(parsed, 'ada', agents, '').find((e) => e.for);
     expect(entry).toMatchObject({ name: 'Claude', for: 'Bo', insert: '@claude-bo ' });

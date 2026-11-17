@@ -42,6 +42,7 @@ export function pickerEntries(
   agents: readonly AgentInfo[],
   query: string,
   met?: readonly MetPerson[] | null,
+  agentsOnly = false,
 ): PickerEntry[] {
   const wanted = query.trim().toLowerCase();
   const people = parsed.ledger.people;
@@ -77,6 +78,8 @@ export function pickerEntries(
       insert: `@${agent.name} `,
     }));
 
+  // An @ of a person means nothing in a question to an agent (Ask, #384).
+  if (agentsOnly) return entries;
   const own = new Set(mine.map(ownHandle));
   const listed = people
     .filter(
@@ -118,6 +121,8 @@ export interface PickerDeps {
   me: Handle;
   /** The agents the host lists, asked for each time the picker opens. */
   agents(): readonly AgentInfo[];
+  /** List only the agents, as a question to an agent does (Ask). */
+  agentsOnly?: boolean;
 }
 
 const STYLE_ID = 'rl-picker-style';
@@ -256,6 +261,7 @@ export function attachPicker(field: HTMLTextAreaElement, deps: PickerDeps): () =
       agentsNow,
       mention.query,
       deps.getMet?.(),
+      deps.agentsOnly === true,
     );
     if (!found.length) return close();
     entries = found;
