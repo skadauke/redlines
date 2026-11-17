@@ -4610,9 +4610,13 @@ function selfCheck(
   // there are: text that lands on another line than the one it was typed on reads otherwise, with
   // the same letters (#111).
   const lines = edited.every((edit) => !/[\r\n]/.test(view.text.slice(edit.from, edit.to)));
+  // Digits count too where no edit takes a line break away, so that a lost line break between lines
+  // that hold only numbers is seen (#418); not the number of a list item, which a deletion of a
+  // block's text takes with its prefix.
   const letters = (s: string) =>
     s
       .replace(/\r\n?/g, '\n')
+      .replace(lines ? /^[ \t>]*\d{1,9}[.)](?=[ \t]|$)/gm : /^$/g, '')
       .replace(lines ? /[^\p{L}\p{N}\n]+/gu : /[^\p{L}]+/gu, '')
       .replace(/\n+/g, '\n')
       .replace(/^\n|\n$/g, '');
