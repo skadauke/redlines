@@ -250,6 +250,15 @@ function toolStatus(name: string, input: unknown): string | null {
  * Unknown events and lines that aren't JSON are ignored, and never throw.
  */
 export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | null {
+  const events = parseClaudeEvents(line, state);
+  return Array.isArray(events) ? (events[0] ?? null) : events;
+}
+
+/** Like `parseClaudeLine`, with every event of a line: a message can have several refused reads. */
+export function parseClaudeEvents(
+  line: string,
+  state: ClaudeState,
+): AgentEvent | AgentEvent[] | null {
   state.retry = false;
   let event: unknown;
   try {
@@ -288,15 +297,18 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
       delete state.failure;
       const message = event.message;
       const content = isRecord(message) && Array.isArray(message.content) ? message.content : [];
+      // A model that makes several reads at once can have more than one refused: each is news.
+      const refused: AgentEvent[] = [];
       for (const block of content) {
         if (!isRecord(block) || block.type !== 'tool_result' || block.is_error !== true) continue;
         const path = state.reads.get(String(block.tool_use_id));
         if (path === undefined || state.reach === undefined) continue;
         // A read inside what the agent may read that was refused is news, and says why if it can.
         const blocked = blockedRead(path, resultText(block.content), state.reach);
-        if (blocked) return { type: 'status', text: blockedStatus(blocked), blocked };
+        if (blocked) refused.push({ type: 'status', text: blockedStatus(blocked), blocked });
       }
-      return null;
+      if (refused.length === 0) return null;
+      return refused.length === 1 ? (refused[0] ?? null) : refused;
     }
     case 'assistant': {
       const failure = failureFor(event.error, 'ok');
@@ -408,7 +420,7 @@ export function createClaudeProvider(
           ...(version === undefined ? {} : { version }),
           args: ({ request: asked }) => Promise.resolve(claudeArgs(asked, tools)),
           newState: () => newClaudeState(reachOf(request), request.web === true),
-          parse: parseClaudeLine,
+          parse: parseClaudeEvents,
           held: (state) => state.retry,
           failure: (state) => state.failure,
           // Signing in again is Preferences' to offer; a usage limit or a network error isn't.

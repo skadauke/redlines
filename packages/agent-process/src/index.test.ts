@@ -200,6 +200,33 @@ describe('runAgent, and a failure Preferences can put right', () => {
     expect(seen.at(-1)).toEqual({ type: 'error', message: signedOut, setup: true });
   });
 
+  it('passes on every event of a line, in order, and ends on a final one', async () => {
+    const many: RunSpec<{ last?: string }> = {
+      ...marking,
+      parse: (line) =>
+        line === 'two'
+          ? [
+              { type: 'status', text: 'one' },
+              { type: 'status', text: 'two' },
+            ]
+          : line === 'end'
+            ? [
+                { type: 'status', text: 'last' },
+                { type: 'done' },
+                { type: 'status', text: 'never' },
+              ]
+            : null,
+    };
+    const seen = await run(printing(['two', 'end']), many);
+    expect(seen.map((event) => (event.type === 'status' ? event.text : event.type))).toEqual([
+      'started',
+      'one',
+      'two',
+      'last',
+      'done',
+    ]);
+  });
+
   it('marks the failure a stream ended on, and no other', async () => {
     expect((await run(printing(['quiet']))).at(-1)).toEqual({
       type: 'error',
