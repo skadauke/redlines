@@ -881,6 +881,26 @@ function coversTable(table: TableRead, change: Range): boolean {
 }
 
 /**
+ * Where the text below a table starts: `stop`, where the text ends (the ledger's start); `right`, the
+ * line right under the table and the closers of marks that end with it (on lines of their own below
+ * it); and `after`, the first line with text from there on (`stop` or more when there is none).
+ */
+function belowTable(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+): { stop: number; right: number; after: number } {
+  const stop = parsed.ledgerRange?.from ?? text.length;
+  let end = tableExtent(text, table).to;
+  const closers = closersBelow(text, end);
+  if (closers !== -1) end = lineEnd(text, closers);
+  const right = nextLineStart(text, end);
+  let after = right;
+  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  return { stop, right, after };
+}
+
+/**
  * Where a point comment of a table that is deleted whole may stand, in the order to try them (format
  * §3.7, rule 6): at the start of the text of the block after the table, past its prefix (`- `, `> `,
  * `## `), then at the end of the text of the block before it. Either may be missing, and neither is
@@ -888,13 +908,7 @@ function coversTable(table: TableRead, change: Range): boolean {
  */
 export function pointPlaces(text: string, parsed: Parsed, table: TableRead): number[] {
   const places: number[] = [];
-  const stop = parsed.ledgerRange?.from ?? text.length;
-  // Past the closers of marks that end with the table, which stand on a line of their own below it.
-  let end = tableExtent(text, table).to;
-  const closers = closersBelow(text, end);
-  if (closers !== -1) end = lineEnd(text, closers);
-  let after = nextLineStart(text, end);
-  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  const { stop, after } = belowTable(text, parsed, table);
   if (after < stop) {
     const line = text.slice(after, lineEnd(text, after));
     const heading = /^#{1,6}[ \t]+/.exec(line.slice(prefixLength(line)))?.[0].length ?? 0;
@@ -914,8 +928,8 @@ export function pointPlaces(text: string, parsed: Parsed, table: TableRead): num
   return places;
 }
 
-/** A line that opens a code fence, after at most three spaces. */
-const FENCE_OPEN = /^ {0,3}(?:`{3,}|~{3,})/;
+/** A line that opens a code fence, after at most three spaces, or after a list item's marker. */
+const FENCE_OPEN = /^ {0,3}(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(`{3,}|~{3,})/;
 
 /** A line that ends a code fence or is a rule, in a quote or an item or not. */
 const FENCE_CLOSE_OR_RULE =
@@ -923,8 +937,10 @@ const FENCE_CLOSE_OR_RULE =
 
 /** What stands next to a table, as far as deleting it whole with Track Changes on can tell (rule 6). */
 export interface TableNeighbours {
-  /** The block after the table is a fenced code block. */
+  /** The block after the table is a fenced code block (in a list item or not). */
   fenceAfter: boolean;
+  /** That fence never closes: no line after it closes it before the ledger. */
+  fenceUnclosed: boolean;
   /** Nothing follows the table but blank lines, up to the ledger. */
   endsText: boolean;
   /** The nearest line with text above the table closes a code fence, or is a rule. */
@@ -947,31 +963,57 @@ const HTML_OPENS =
 
 /** What stands next to `table`. */
 export function neighboursOf(text: string, parsed: Parsed, table: TableRead): TableNeighbours {
-  const stop = parsed.ledgerRange?.from ?? text.length;
-  let end = tableExtent(text, table).to;
-  const closers = closersBelow(text, end);
-  if (closers !== -1) end = lineEnd(text, closers);
-  let after = nextLineStart(text, end);
-  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  const { stop, after, right } = belowTable(text, parsed, table);
   const next = after < stop ? text.slice(after, lineEnd(text, after)) : null;
-  const right = nextLineStart(text, end);
   const directBelow =
     right < stop && !blankAt(text, right) ? text.slice(right, lineEnd(text, right)) : null;
   // The nearest line with text above the table, and whether it is the line right above.
   const first = bodyStart(text);
-  let above: { line: string; directly: boolean } | null = null;
+  let above: { line: string; directly: boolean; at: number } | null = null;
   let line = lineStart(text, table.from);
   for (let directly = true; line > first && above === null; directly = false) {
     line = lineStart(text, line - 1);
-    if (!blankAt(text, line)) above = { line: text.slice(line, lineEnd(text, line)), directly };
+    if (!blankAt(text, line)) {
+      above = { line: text.slice(line, lineEnd(text, line)), directly, at: line };
+    }
+  }
+  // Indented as code: a run of indented lines that a blank line, or the start of the text, comes before
+  // (an indented line under a paragraph's line continues the paragraph, it is no code).
+  let codeAbove = false;
+  if (above !== null && indentOf(above.line) >= 4) {
+    let start = above.at;
+    while (start > first) {
+      const before = lineStart(text, start - 1);
+      if (blankAt(text, before)) break;
+      if (indentOf(text.slice(before, lineEnd(text, before))) < 4) break;
+      start = before;
+    }
+    codeAbove = start <= first || blankAt(text, lineStart(text, start - 1));
+  }
+  const fence = next === null ? null : FENCE_OPEN.exec(next);
+  let fenceUnclosed = false;
+  if (fence?.[1] && after < stop) {
+    const run = fence[1];
+    const close = new RegExp(
+      `^[ \\t>]*${run.charAt(0) === '`' ? '`' : '~'}{${run.length},}[ \\t]*$`,
+    );
+    fenceUnclosed = true;
+    for (let at = nextLineStart(text, after); at < stop; at = nextLineStart(text, at)) {
+      if (close.test(text.slice(at, lineEnd(text, at)))) {
+        fenceUnclosed = false;
+        break;
+      }
+    }
   }
   return {
-    fenceAfter: next !== null && FENCE_OPEN.test(next),
+    fenceAfter: fence !== null,
+    fenceUnclosed,
     endsText: next === null,
     fenceOrRuleAbove: above !== null && FENCE_CLOSE_OR_RULE.test(above.line),
-    indentedAbove: above !== null && indentOf(above.line) >= 4,
+    indentedAbove: codeAbove,
     underText: above?.directly === true,
-    indentedBelow: next !== null && indentOf(next) >= 4,
+    // Indented code needs a blank line before it: right under the table it is a row's lazy text.
+    indentedBelow: next !== null && after > right && indentOf(next) >= 4,
     htmlBelow: directBelow !== null && HTML_OPENS.test(directBelow),
     headingAbove: above?.directly === true && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(above.line),
   };
@@ -983,6 +1025,9 @@ export const NEXT_TO_WORDS = {
   /** A code fence follows the table: a marker in front of it would unread the fence. */
   codeAfter:
     "This table can't be deleted with Track Changes on while a code block follows it with no text between. Put a paragraph between them first, or turn off Track Changes.",
+  /** A code fence follows the table and never closes: the fix is the fence's, not a paragraph. */
+  codeAfterUnclosed:
+    "This table can't be deleted with Track Changes on while a code block that is never closed follows it. Close the code block first, or turn off Track Changes.",
   /** The table ends the text, and what is before it is code or a rule, which no marker may end. */
   codeBefore:
     "This table can't be deleted with Track Changes on while it ends the text right after a code block or a rule. Put a paragraph between them first, or turn off Track Changes.",

@@ -1656,10 +1656,10 @@ describe('on random documents', { timeout: 600_000 }, () => {
       const end = at + typed.lastIndexOf('\n') + 1;
       // One Backspace at most: a second one in a row grows the deletion of another person's break
       // with the text after it, which is no longer read as that deletion (#109). And one text at
-      // most, and none in the text of a first edit that typed words: text typed at the start of a
-      // block of another insertion stacks the own-line openers of two insertions, whose carriers
-      // read otherwise once the other's markers go (#108).
-      const once = new Set<string>(/\S/.test(typed) ? ['text'] : []);
+      // most. Text typed at the start of a block of another insertion, which stacked the own-line
+      // openers of two insertions whose carriers read otherwise once the other's markers went, is
+      // widened now (#108).
+      const once = new Set<string>();
       const kind = (again: string) =>
         again === 'backspace' ? 'delete' : /\S| /.test(again.replace(/\n/g, '')) ? 'text' : 'break';
       for (let step = 1; step <= 1 + below(3); step++) {

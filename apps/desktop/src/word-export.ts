@@ -17,6 +17,11 @@ export interface WordExportParts {
   /** The document's file, if it has one. */
   path: string | null;
   show(options: NotificationOptions): void;
+  /**
+   * The bytes of the picture the document links at `src`, or undefined when the app may not read it
+   * (the host's rules: only a file inside the document's folder for pictures) or it isn't there.
+   */
+  images?: (src: string) => Promise<Uint8Array | undefined>;
   /** Whether Finder is there to show the file in (the app, not a tab). */
   canReveal: boolean;
 }
@@ -28,15 +33,20 @@ export function wordName(name: string): string {
 
 /** Exports the document; resolves to the saved file's name, or null when the person cancelled. */
 export async function exportToWord(parts: WordExportParts): Promise<string | null> {
-  const { exportDocx, exportReport } = await import('@redlines/word');
-  const bytes = await exportDocx(parts.text);
+  const { exportDocx } = await import('@redlines/word');
+  // What the export leaves out is what it says it left out: a picture it read is no longer missing.
+  const report: { kind: string; message: string }[] = [];
+  const bytes = await exportDocx(parts.text, {
+    report,
+    ...(parts.images ? { images: parts.images } : {}),
+  });
   const saved = await parts.host.exportWord(
     bytes,
     wordName(parts.name),
     parts.path ? dirname(parts.path) : null,
   );
   if (saved === null) return null;
-  const left = exportReport(parts.text).entries.map((entry) => entry.message);
+  const left = report.map((entry) => entry.message);
   parts.show({
     key: 'word-export',
     text: [`Exported to “${basename(saved)}”.`, ...left].join(' '),

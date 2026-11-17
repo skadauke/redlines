@@ -3,6 +3,7 @@
 // different cells of one table, read from the ordinary selection with no state of its own; drawn as
 // `.rl-sel` on exactly its cells.
 import { forceParsing } from '@codemirror/language';
+import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { cellsOfRect, rectOf, rectSelection, selectedCells, whole } from './cells.ts';
@@ -262,6 +263,45 @@ describe('the selection of a rectangle some rows lack cells of', () => {
       'table',
       10,
     ]);
+  });
+
+  // #644: whole rows whose first and last are both shorter than one between have no corner cells in the
+  // columns they span, and read as column 0 alone unless the selection says what it was made for.
+  it('is whole rows when both end rows are shorter than a row between them', () => {
+    const doc = `${HEAD}| 1 |\n| 2 | 3 | 4 |\n| 5 |`;
+    const rows = made(doc, [1, 0], [3, 3]);
+    expect([rows.rows, rows.cols, rows.kind]).toEqual([[1, 3], [0, 3], 'row']);
+    expect(rows.cells).toEqual(['1', '2', '3', '4', '5']);
+    // A selection that merely runs from the same cell to the same cell is column 0, as it was.
+    const editor = load(doc);
+    select(editor, start(editor, '1'), end(editor, '5'));
+    const column = rectOf(editor.view.state)!;
+    expect([column.rows, column.cols, whole(column)]).toEqual([[1, 3], [0, 0], null]);
+    // And once the selection moves, the flag is gone with it.
+    const table = tablesOf(editor.view.state)[0]!;
+    editor.view.dispatch({
+      selection: rectSelection(table, { row: 1, col: 0 }, { row: 3, col: 3 })!,
+    });
+    expect(whole(rectOf(editor.view.state)!)).toBe('row');
+    select(editor, start(editor, '1'), end(editor, '5'));
+    expect(whole(rectOf(editor.view.state)!)).toBeNull();
+  });
+
+  it('deletes those rows with ⌫⌫, not column 0 alone', () => {
+    const editor = load(`${HEAD}| 1 |\n| 2 | 3 | 4 |\n| 5 |\n| 6 |`);
+    const table = tablesOf(editor.view.state)[0]!;
+    editor.view.dispatch({
+      selection: rectSelection(table, { row: 1, col: 0 }, { row: 3, col: 3 })!,
+    });
+    for (let n = 0; n < 2; n++) {
+      forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+      runScopeHandlers(
+        editor.view,
+        new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }),
+        'editor',
+      );
+    }
+    expect(editor.getDoc()).toBe(`${HEAD}| 6 |`);
   });
 
   it('keeps the corners it was given where both are cells', () => {

@@ -218,6 +218,19 @@ describe('the checks the review asked for', () => {
     expect(sampledDecisions(file, marks, refusing).join(' ')).toMatch(/no decision can be made/);
   });
 
+  it('fails a decision that is refused in every state (#591)', () => {
+    const file =
+      'One <!--ins b2b2-->two<!--/b2b2--> <!--ins c3c3-->three<!--/c3c3-->.\n\n' +
+      '<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-11-01T10:00Z}\n' +
+      '  c3c3: {by: ada, at: 2026-11-01T10:00Z}\n-->\n';
+    expect(decisionProblems(file)).toEqual([]);
+    const noReject = (text: string, id: string, how: 'a' | 'r') =>
+      id === 'b2b2' && how === 'r' ? undefined : sampledDecisions.decide(text, id, how);
+    const found = decisionProblems(file, noReject).join(' ');
+    expect(found).toMatch(/rejecting b2b2 is refused in every state/);
+    expect(found).toMatch(/no order of decisions rejects every mark/);
+  });
+
   it('fails a skip that is no longer needed', () => {
     const result = runScript({
       name: 'stale',

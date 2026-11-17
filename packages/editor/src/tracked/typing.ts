@@ -67,6 +67,8 @@ import {
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
 import { dialectFacet } from '../dialect.ts';
+import { mixedFileText } from '../line-breaks.ts';
+import { FileView } from './file-view.ts';
 import { lineChanges } from '../diff.ts';
 import {
   annotationsOfTransaction,
@@ -710,33 +712,46 @@ function trackEditsWith(
   else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
   const together = widening === false ? deletedTogether(text, parsed, edits, ctx) : null;
   if (together) return together;
-  return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
-    // Text typed beside the hidden markers of a comment's or a highlight's range lands where
-    // format §4 says, whichever side of them the caret rests on; the format knows the place.
-    const write =
-      widening === 'first'
-        ? (at: string, change: TextChange, made: typeof ctx) =>
-            widenedFirstEdits(at, [change], made).changes
-        : widening
-          ? trackedEdit
-          : (at: string, change: TextChange, made: typeof ctx) => {
-              const fine = fineEdit(at, change, made);
-              // A fine write that micromark reads otherwise than the newest view is replaced by the
-              // write of the whole unit (#597, #601, #588); where no unit holds it, the fine write
-              // stays, as it was.
-              if (readsOtherAtBoundary(at, [change], fine)) {
-                try {
-                  return trackedEdit(at, change, made);
-                } catch {
-                  return fine;
+  return formatEdits(
+    text,
+    parsed,
+    edits,
+    backward,
+    (doc, edit, read) => {
+      // Text typed beside the hidden markers of a comment's or a highlight's range lands where
+      // format §4 says, whichever side of them the caret rests on; the format knows the place.
+      const write =
+        widening === 'first'
+          ? (at: string, change: TextChange, made: typeof ctx) =>
+              widenedFirstEdits(at, [change], made).changes
+          : widening
+            ? trackedEdit
+            : (at: string, change: TextChange, made: typeof ctx) => {
+                const fine = fineEdit(at, change, made);
+                // A fine write that micromark reads otherwise than the newest view is replaced by the
+                // write of the whole unit (#597, #601, #588); where no unit holds it, the fine write
+                // stays, as it was.
+                if (readsOtherAtBoundary(at, [change], fine)) {
+                  try {
+                    return trackedEdit(at, change, made);
+                  } catch {
+                    return fine;
+                  }
                 }
-              }
-              return fine;
-            };
-    if (edit.from !== edit.to) return write(doc, edit, ctx);
-    const at = rangeEdge(read, edit.from, edit.insert);
-    return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
-  });
+                return fine;
+              };
+      if (edit.from !== edit.to) return write(doc, edit, ctx);
+      const at = rangeEdge(read, edit.from, edit.insert);
+      return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
+    },
+    fileTextFor(state, text),
+  );
+}
+
+/** The file's text where it has line breaks of more than one kind and `text` is the document. */
+function fileTextFor(state: EditorState, text: string): string | null {
+  const file = mixedFileText(state);
+  return file !== null && text === state.doc.toString() ? file : null;
 }
 
 /** How many deletions are written together (below it, one at a time, as each is checked). */
@@ -797,8 +812,13 @@ function untrackEdits(
   // Who edits is not recorded; a refusal names their own changes "yours".
   const editing = replay ? replay.author : state.facet(authorFacet);
   const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
-  const made = formatEdits(text, parsed, edits, backward, (doc, edit) =>
-    untrackedEdit(doc, edit, { random, author, dialect: state.facet(dialectFacet) }),
+  const made = formatEdits(
+    text,
+    parsed,
+    edits,
+    backward,
+    (doc, edit) => untrackedEdit(doc, edit, { random, author, dialect: state.facet(dialectFacet) }),
+    fileTextFor(state, text),
   );
   return {
     ...made,
@@ -873,7 +893,13 @@ function formatEdits(
   edits: readonly Edit[],
   backward: boolean,
   make: (text: string, edit: TextChange, parsed: Parsed) => TextChange[],
+  file: string | null = null,
 ): Tracked {
+  // A file with line breaks of more than one kind is written on its own text, so that the format
+  // sees the kind of each break a change takes out (#924); what it writes comes back as the
+  // document's changes.
+  let view = file === null ? null : new FileView(file);
+  let fileParsed = view ? parse(view.text) : null;
   let changes = ChangeSet.empty(text.length);
   let caret: number | null = null;
   let before = parsed;
@@ -892,7 +918,15 @@ function formatEdits(
         'no-legal-placement',
       );
     }
-    const result = make(text, mapped, before);
+    let result: TextChange[];
+    let fileNext: string | null = null;
+    if (view && fileParsed) {
+      const made = make(view.text, view.changeToFile(mapped), fileParsed);
+      result = made.map((change) => view!.changeToDoc(change));
+      if (made.length) fileNext = applyChanges(view.text, made);
+    } else {
+      result = make(text, mapped, before);
+    }
     if (!result.length) continue;
     const step = ChangeSet.of(result, text.length);
     const next = applyChanges(text, result);
@@ -908,6 +942,10 @@ function formatEdits(
     changes = changes.compose(step);
     text = next;
     before = after;
+    if (view && fileNext !== null) {
+      fileParsed = parse(fileNext, fileParsed ?? undefined);
+      view = new FileView(fileNext);
+    }
   }
   return { changes, caret };
 }

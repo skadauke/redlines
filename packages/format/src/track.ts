@@ -4493,6 +4493,46 @@ const UNDERLINED_BULLET_IN_CODE =
 /** The line of an empty list item, in a view. */
 const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
 
+/**
+ * How many openers with a carrier stand on a line where text of a change comes first (a space that
+ * another person's insertion holds, as when it is typed at the start of the line after a paragraph
+ * break inside that insertion). Deciding the change that holds the space leaves the opener with a
+ * carrier or without one, so the line breaks that the carrier stands for are read in one order and
+ * not in another (#108).
+ */
+function carriedBehindText(text: string, parsed: Parsed): number {
+  let count = 0;
+  // White space in the text of a change, and no part of a carrier (which holds the prefix of its
+  // block's line).
+  const inside = (at: number) =>
+    parsed.marks.some((mark) =>
+      mark.segments.some(
+        (s) =>
+          s.content.from <= at &&
+          at < s.content.to &&
+          !(s.carrier && s.carrier.from <= at && at < s.carrier.to),
+      ),
+    ) &&
+    !parsed.marks.some((mark) =>
+      mark.segments.some((s) => s.carrier && s.carrier.from <= at && at < s.carrier.to),
+    );
+  for (const mark of parsed.marks) {
+    for (const segment of mark.segments) {
+      // Only the later segment of a change that another change's text parts.
+      if (!segment.carrier || segment === mark.segments[0]) continue;
+      const start = lineStart(text, segment.open.from);
+      if (!/[ \t]/.test(text.slice(start, segment.open.from))) continue;
+      for (let at = start; at < segment.open.from; at++) {
+        if ((text[at] === ' ' || text[at] === '\t') && inside(at)) {
+          count++;
+          break;
+        }
+      }
+    }
+  }
+  return count;
+}
+
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
@@ -4504,7 +4544,10 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
   const bare = /^([ \t>]*)\d{1,9}[.)]<!--\/[a-z0-9]+--> /gm;
   const wrote = (re: RegExp, text: string) =>
     [...text.matchAll(re)].filter((m) => isSiblingNumber(text, m.index, m[1]?.length ?? 0)).length;
-  if (wrote(bare, after) > wrote(bare, plan.text)) {
+  if (
+    wrote(bare, after) > wrote(bare, plan.text) ||
+    carriedBehindText(after, parsed) > carriedBehindText(plan.text, plan.parsed)
+  ) {
     throw new EditError(
       'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
       'no-legal-placement',

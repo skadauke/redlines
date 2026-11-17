@@ -251,7 +251,11 @@ class Mapper {
   constructor(model: DocxModel, options: ImportOptions) {
     this.model = model;
     this.options = options;
-    this.ctx = new Ctx(model, options.source?.ledger?.people ?? []);
+    this.ctx = new Ctx(
+      model,
+      options.source?.ledger?.people ?? [],
+      options.source?.ledger?.comments ?? [],
+    );
     this.writer = new InlineWriter(this.ctx);
   }
 
@@ -609,7 +613,19 @@ class Mapper {
       if (!block) continue;
       const text = source.markdown.slice(block.from, block.to);
       const sameType = (block.type === 'heading') === (chunk.kind === 'heading');
-      if (/<!--/.test(text) || !sameType || norm(text) !== norm(chunk.body)) continue;
+      // A picture the export couldn't embed was written as its description (`[Image: alt]`), so a
+      // block that holds one reads as that when it comes back, and is restored with its link.
+      const asExported = text.replace(
+        /!\[((?:[^\]\\]|\\.)*)\]\(\s*(<[^>]*>|[^)\s]*)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g,
+        (_, alt: string, src: string) => `[Image: ${alt || src || 'no description'}]`,
+      );
+      if (
+        /<!--/.test(text) ||
+        !sameType ||
+        (norm(text) !== norm(chunk.body) && norm(asExported) !== norm(chunk.body))
+      ) {
+        continue;
+      }
       const stripped = text.replace(/^\s*(?:#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+|>[ \t]?)/, '');
       chunk.restored = true;
       // The list marker or quote mark the paragraph stood after, as it was written.
