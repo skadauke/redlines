@@ -106,6 +106,26 @@ describe('keys right after a hard break’s backslash (#235)', () => {
     ]);
   });
 
+  it('a backslash in front of a hard break whose next line is the last word, ending in one (#913)', () => {
+    expectRows([
+      [
+        'a two path‸\\  \npath\\',
+        { insert: '\\' },
+        'a two path<!--sub m2bd \\  \\npath\\-->\\\\  \npath\\\n<!--/m2bd-->',
+      ],
+      [
+        'a two path‸\\  \npath\\\n',
+        { insert: '\\' },
+        'a two path<!--sub m2bd \\  \\npath\\\\\\n-->\\\\  \npath\\\n<!--/m2bd-->',
+      ],
+      [
+        '- a\n  a two path‸\\  \n  path\\',
+        { insert: '\\' },
+        '- a\n  a two path<!--sub m2bd \\  \\n  path\\-->\\\\  \n  path\\\n<!--/m2bd-->',
+      ],
+    ]);
+  });
+
   it('typing a backslash in front of a hard break’s own', () => {
     expectRows([['One‸\\\ntwo', { insert: '\\' }, 'One<!--sub m2bd \\-->\\\\<!--/m2bd-->\ntwo']]);
   });

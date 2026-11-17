@@ -57,10 +57,10 @@ export function widenedAtOnce(
       to: view.map.fromSource(edit.to),
     }));
     const done = widen(text, made, ctx);
-    // Another person's pending mark in the old text keeps the refusal: some order of decisions
-    // would not read as the original (issue #808).
-    // In a table's cell, they stay in the old text of the replacement, as for a table operation.
-    if (!cells && done.heldByOthers.length > 0) return undefined;
+    // Another person's pending marks in the old text stay in it, as in a table's cells: every order
+    // of decisions reads alike (format §3.12, #808). A mark of theirs that ends at the unit's edge
+    // does not read alike in every order (#107), and keeps the refusal.
+    if (!cells && done.touchingOthers.length > 0) return undefined;
     return { changes: done.changes, markIds: [done.id], extendedIds: [] };
   } catch (error) {
     if (error instanceof Untrackable || error instanceof EditError) return undefined;

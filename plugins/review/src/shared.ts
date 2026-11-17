@@ -20,6 +20,7 @@ import {
   suggestions,
   type TextChange,
   type Time,
+  plainPayload,
 } from '@redlines/format';
 
 /** The editor that the review interface works on, and the person using it. */
@@ -243,7 +244,8 @@ export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
   if (change.kind === 'fmt') {
     return { old: '', added: '', label: formatLabel(formatChange(parsed, change)) };
   }
-  const old = change.kind === 'del' || change.kind === 'sub' ? (change.payload ?? '') : '';
+  const old =
+    change.kind === 'del' || change.kind === 'sub' ? plainPayload(change.payload ?? '') : '';
   const added =
     change.kind === 'split' ? '\n' : change.kind === 'del' ? '' : insertedText(parsed, change);
   return { old, added };

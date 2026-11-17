@@ -169,6 +169,9 @@ pub struct Routed {
     to_tell: Vec<String>,
     /// The files that open in a window of their own.
     to_open: Vec<String>,
+    /// The windows that already hold a file that was opened again: they come forward, and the
+    /// file opens nowhere else, so that two windows never write the same file.
+    to_raise: Vec<String>,
 }
 
 /// The document windows, and what the app knows of them.
@@ -259,6 +262,15 @@ impl Registry {
             .any(|entry| entry.label == label && entry.path.as_deref() == Some(path))
     }
 
+    /// The window whose document is the file at `path`, as the windows last said, the frontmost
+    /// first.
+    fn holder(&self, path: &str) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|entry| entry.path.as_deref() == Some(path))
+            .map(|entry| entry.label.clone())
+    }
+
     /// Gives a window's document another file, as the window will say itself a moment later: a
     /// second rename must not find the first one's old path held.
     fn set_path(&mut self, label: &str, path: String) {
@@ -306,11 +318,32 @@ impl Registry {
     /// the window may not use opens nothing: the frontmost window tells the person.
     fn route(&mut self, files: Vec<OpenedFile>) -> Routed {
         let mut routed = Routed::default();
+        let held: Vec<(String, Option<String>)> = self
+            .entries
+            .iter()
+            .map(|entry| (entry.label.clone(), entry.path.clone()))
+            .collect();
         let Some(front) = self.entries.first_mut() else {
             return routed;
         };
         for file in files {
             if file.error.is_none() {
+                if let Some(label) = held
+                    .iter()
+                    .find(|(_, held)| held.as_deref() == Some(file.path.as_str()))
+                    .map(|(label, _)| label.clone())
+                {
+                    if !routed.to_raise.contains(&label) {
+                        routed.to_raise.push(label);
+                    }
+                    continue;
+                }
+                if routed.to_open.contains(&file.path)
+                    || front.files.iter().any(|taken| taken.path == file.path)
+                {
+                    // The same file twice in one batch opens one window.
+                    continue;
+                }
                 if !front.untouched() {
                     routed.to_open.push(file.path);
                     continue;
@@ -538,6 +571,9 @@ pub fn deliver(app: &AppHandle) {
     for label in routed.to_tell {
         tell_of_files(app, &label);
     }
+    for label in routed.to_raise {
+        bring_forward(app, &label);
+    }
     for path in routed.to_open {
         let start = WindowStart {
             path: Some(path.clone()),
@@ -555,6 +591,16 @@ pub fn deliver(app: &AppHandle) {
                 tell_of_files(app, &label);
             }
         }
+    }
+}
+
+/// Brings a window forward, minimized or not.
+fn bring_forward(app: &AppHandle, label: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        // Focus does nothing for a minimized window.
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
     }
 }
 
@@ -589,6 +635,14 @@ pub fn open_window(
     text: Option<String>,
 ) -> Result<String, String> {
     let start = WindowStart::new(path, line, text)?;
+    // A file that a window holds is not opened twice: that window comes forward.
+    if let Some(path) = start.path.as_deref() {
+        let holder = app.state::<Windows>().lock().holder(path);
+        if let Some(label) = holder {
+            bring_forward(&app, &label);
+            return Ok(label);
+        }
+    }
     open_document_window(&app, start)
         .map(|window| window.label().to_owned())
         .map_err(|error| format!("Can't open another window: {error}"))
@@ -1037,6 +1091,26 @@ mod tests {
         assert!(routed.to_tell.is_empty());
         assert_eq!(routed.to_open, ["/docs/plan.md"]);
         assert!(registry.take_files("main").is_empty());
+    }
+
+    #[test]
+    fn a_file_a_window_holds_brings_that_window_forward_and_opens_nothing() {
+        let mut registry = registry_of(&["main", "doc-2"]);
+        registry.report("doc-2", Some("/docs/plan.md".to_owned()), true);
+        let routed = registry.route(vec![allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_raise, ["doc-2"]);
+        assert!(routed.to_open.is_empty() && routed.to_tell.is_empty());
+        assert!(registry.take_files("main").is_empty());
+        assert_eq!(registry.holder("/docs/plan.md").as_deref(), Some("doc-2"));
+        assert_eq!(registry.holder("/docs/other.md"), None);
+    }
+
+    #[test]
+    fn the_same_file_twice_in_one_batch_opens_one_window() {
+        let mut registry = registry_of(&["main"]);
+        registry.report("main", Some("/docs/old.md".to_owned()), false);
+        let routed = registry.route(vec![allowed("/docs/plan.md"), allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_open, ["/docs/plan.md"]);
     }
 
     #[test]

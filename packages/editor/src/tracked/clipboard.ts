@@ -22,6 +22,7 @@ import {
   serializeLedger,
   type Thread,
   type WarningCode,
+  plainPayload,
 } from '@redlines/format';
 import { type FontStacks, destination, fontStack } from '../clipboard/copy-html.ts';
 import { documentHtml } from '../clipboard/document-html.ts';
@@ -151,7 +152,7 @@ function struckText(state: EditorState, ranges: readonly Range[]): string | null
     for (const mark of marks) {
       if (mark.kind !== 'del') continue;
       const open = mark.segments[0]?.open;
-      if (open && open.from < to && from < open.to) parts.push(mark.payload ?? '');
+      if (open && open.from < to && from < open.to) parts.push(plainPayload(mark.payload ?? ''));
     }
   }
   return parts.length ? parts.join(state.lineBreak) : null;
