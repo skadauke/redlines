@@ -769,24 +769,6 @@ function joinSplits(plan: Plan, items: Item[], ownSplits: readonly SplitUnit[]):
   return moved;
 }
 
-/**
- * The line break that a closer takes in front of it where the new text is a whole tag alone on its
- * line, at the start of a block: that is CommonMark's seventh kind of HTML block, which a closer
- * after it on the line would make a paragraph, though the newest view reads it as a block (§3.3).
- */
-function closerGap(plan: Plan, piece: Piece, typing: Typing): string {
-  if (typing.trail !== '' || !HTML_START_7.test(typing.inner)) return '';
-  const { text } = plan;
-  const start = lineStart(text, piece.from);
-  if (
-    text.slice(start, piece.from).trim() !== '' ||
-    text.slice(piece.to, lineEnd(text, piece.to)).trim() !== ''
-  )
-    return '';
-  if (start > 0 && text.slice(lineStart(text, start - 1), start).trim() !== '') return '';
-  return plan.eol + text.slice(start, piece.from);
-}
-
 /** A replacement that is one run of text with no marker in it. */
 function replaceOne(plan: Plan, piece: Piece, typing: Typing): TextChange {
   if (piece.container?.own) {
@@ -798,7 +780,7 @@ function replaceOne(plan: Plan, piece: Piece, typing: Typing): TextChange {
   return {
     from: piece.from,
     to: piece.to,
-    insert: `<!--sub ${id} ${old}-->${typing.inner}${closerGap(plan, piece, typing)}<!--/${id}-->${typing.trail}`,
+    insert: `<!--sub ${id} ${old}-->${typing.inner}<!--/${id}-->${typing.trail}`,
   };
 }
 
