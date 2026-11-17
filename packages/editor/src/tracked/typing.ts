@@ -513,7 +513,51 @@ function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: b
   const below = edit.insert.endsWith('\n') ? hiddenAt(next, offset) : undefined;
   const opensBlock =
     below !== undefined && (below.from === 0 || after.text[below.from - 1] === '\n');
-  const pos = positionAt(next, offset, opensBlock || !(edit.insert || backward) ? 1 : -1);
+  // The new text of a replacement that this edit made (format §3.12) starts after its opener: the
+  // text typed at its start is in it, not in front of it.
+  const hidden = hiddenAt(next, offset);
+  const startsNew =
+    hidden !== undefined &&
+    after.marks.some(
+      (mark) =>
+        mark.kind === 'sub' &&
+        before.ledger.marks[mark.id] === undefined &&
+        mark.segments.some((segment) => {
+          const from = openerRange(segment).from;
+          const line = after.text.slice(after.text.lastIndexOf('\n', from - 1) + 1, from);
+          return (
+            from === hidden.from &&
+            /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(?:\[[ xX]\][ \t]+)?$/.test(line)
+          );
+        }),
+    );
+  const pos = positionAt(
+    next,
+    offset,
+    opensBlock || startsNew || !(edit.insert || backward) ? 1 : -1,
+  );
+  const end = bodyEnd(after);
+  return end === null ? pos : Math.min(pos, end);
+}
+
+/**
+ * Where the caret at `head` goes after `changes`, a replacement of a unit that the format wrote
+ * (format §3.12): in the newest text, which keeps what stands after the caret, the same characters
+ * from its end, in the new text of the replacement and not in the old text it holds.
+ */
+export function caretKeptFromEnd(
+  state: EditorState,
+  changes: readonly TextChange[],
+  head: number,
+): number {
+  const text = state.doc.toString();
+  const before = parse(text);
+  const after = parse(applyChanges(text, changes));
+  const old = newestOf(before);
+  const next = newestOf(after);
+  const kept = old.text.length - newestOffset(old, head);
+  const offset = Math.max(0, Math.min(next.text.length, next.text.length - kept));
+  const pos = positionAt(next, offset, -1);
   const end = bodyEnd(after);
   return end === null ? pos : Math.min(pos, end);
 }
@@ -732,6 +776,8 @@ function trackedSpec(
       // No fine form: the unit that holds the edit is replaced, unless a key has another form to
       // try first.
       if (!(error instanceof EditError) || tr.annotation(probeAnnotation) === true) throw error;
+      // (Several edits are composed by position, which a replacement moves: they stay refused.)
+      if (edits.length > 1) throw error;
       tracked = track(true);
     }
   } catch (error) {

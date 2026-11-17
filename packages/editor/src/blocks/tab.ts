@@ -10,7 +10,7 @@
 
 import { type ChangeSpec, EditorSelection, type EditorState } from '@codemirror/state';
 import { EditError, type FormatOp } from '@redlines/format';
-import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
+import { blockFormatChanges, caretKeptFromEnd, trackingField } from '../tracked/typing.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
 import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
 import { type Item, itemsAround, type KeyEdit, nothing } from './edits.ts';
@@ -33,6 +33,8 @@ function itemOf(state: EditorState, block: Block, pos: number) {
 }
 
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
+const THEIR_SPLIT =
+  "Another person's pending change made this item. Accept or reject it before indenting or outdenting it.";
 const NOT_UNDER_TEXT = "An empty item can't go under a line of text. Type in the item first.";
 const NOT_ITEM = 'Only a list item can be indented or outdented.';
 const NO_PARENT =
@@ -64,15 +66,7 @@ function planned(
           mark.entry.by !== me &&
           mark.segments.some((g) => g.open.to === state.doc.line(item.line.number - 1).to),
       );
-  // Another person's split is theirs to decide: the edit goes through the tracked layer, which
-  // writes it as a replacement of the item or the list (format §3.12).
-  if (theirs)
-    return {
-      changes,
-      selection: EditorSelection.single(state.changes(changes).mapPos(head, 1)),
-      userEvent: 'indent',
-      caretAt: head,
-    };
+  if (theirs) return { ...nothing(state), userEvent: 'indent', refusal: THEIR_SPLIT };
   return {
     changes,
     selection: EditorSelection.single(state.changes(changes).mapPos(head, 1)),
@@ -162,6 +156,7 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
   const op: FormatOp = { kind: 'indent', by: outdent ? -1 : 1 };
   const range = { from: Math.min(first.at, from), to: Math.max(last.at, to) };
   let changes;
+  let widened = false;
   try {
     try {
       changes = blockFormatChanges(state, range, op);
@@ -169,6 +164,7 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
       // No fine form: the item or the list is replaced (format §3.12).
       if (!(error instanceof EditError)) throw error;
       changes = blockFormatChanges(state, range, op, true);
+      widened = true;
     }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
@@ -176,6 +172,15 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
   }
   if (!changes.length) return { ...nothing(state), userEvent: 'indent' };
   const kept = from === to ? { caretAt: head } : { range: { anchor, head } };
+  if (widened && from === to) {
+    // The caret stays in the new text of the replacement, not in the old text it holds.
+    return {
+      changes,
+      selection: EditorSelection.single(caretKeptFromEnd(state, changes, head)),
+      userEvent: 'indent',
+      final: true,
+    };
+  }
   return {
     changes,
     selection: EditorSelection.single(head),

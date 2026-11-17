@@ -7,12 +7,10 @@ import { createEditor, type Editor } from '../index.ts';
 // which a renderer would read as raw HTML (format §3.2). The editor must not write that.
 vi.mock('@redlines/format', async (importOriginal) => {
   const format = await importOriginal<typeof import('@redlines/format')>();
-  return {
-    ...format,
-    trackedEdit: (_text: string, edit: TextChange): TextChange[] => [
-      { from: edit.from, to: edit.to, insert: '\n<!--ins q4gt-->x<!--/q4gt-->' },
-    ],
-  };
+  const bad = (_text: string, edit: TextChange): TextChange[] => [
+    { from: edit.from, to: edit.to, insert: '\n<!--ins q4gt-->x<!--/q4gt-->' },
+  ];
+  return { ...format, trackedEdit: bad, fineEdit: bad };
 });
 
 const open: Editor[] = [];

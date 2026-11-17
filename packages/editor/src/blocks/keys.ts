@@ -11,7 +11,9 @@ import {
   type Extension,
   Prec,
   Text,
+  type Transaction,
 } from '@codemirror/state';
+import type { TextChange } from '@redlines/format';
 import { type Command, type EditorView, keymap } from '@codemirror/view';
 import {
   bodyEnd,
@@ -24,7 +26,12 @@ import {
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import { heldEditEffect, wasHeld } from '../tracked/ask.ts';
-import { probeAnnotation, refusedEditEffect, trackingField } from '../tracked/typing.ts';
+import {
+  caretKeptFromEnd,
+  probeAnnotation,
+  refusedEditEffect,
+  trackingField,
+} from '../tracked/typing.ts';
 import {
   type KeyEdit,
   inRoomParagraph,
@@ -125,9 +132,10 @@ const keyCaret = Prec.highest(
       const selection = visibleSelection(tr.state, EditorSelection.single(a, h));
       return [tr, { selection, sequential: true }];
     }
-    if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
-    else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
-    else if ('onLine' in caret) {
+    if ('at' in caret) pos = inReplaced(tr, caret.at) ?? tr.changes.mapPos(caret.at, 1);
+    else if ('before' in caret) {
+      pos = inReplaced(tr, caret.before) ?? tr.changes.mapPos(caret.before, -1);
+    } else if ('onLine' in caret) {
       const line = requestedLine(tr, {
         at: caret.onLine.at,
         assoc: -1,
@@ -160,6 +168,30 @@ const keyCaret = Prec.highest(
     return [tr, { selection: EditorSelection.cursor(shown), sequential: true }];
   }),
 );
+
+/**
+ * Where a caret that stood inside text that a replacement of its unit took in (format §3.12) goes:
+ * in the new text, at the same distance from its end, and not after the whole replacement. Null
+ * where no replacement holds the position.
+ */
+function inReplaced(tr: Transaction, at: number): number | null {
+  let held = false;
+  const edits: TextChange[] = [];
+  tr.changes.iterChanges((from, to, _a, _b, insert) => {
+    edits.push({ from, to, insert: insert.toString() });
+    // A replacement of a unit starts the unit's text: after the prefix of its line, nothing else.
+    const before = tr.startState.doc.sliceString(tr.startState.doc.lineAt(from).from, from);
+    if (
+      from < at &&
+      at < to &&
+      insert.toString().startsWith('<!--sub ') &&
+      /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(?:\[[ xX]\][ \t]+)?$/.test(before)
+    ) {
+      held = true;
+    }
+  });
+  return held ? caretKeptFromEnd(tr.startState, edits, at) : null;
+}
 
 /**
  * Dispatches a key's edit: one step to undo, apart from the typing around it, recorded by the

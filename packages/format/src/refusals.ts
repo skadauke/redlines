@@ -71,6 +71,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'Shift-Tab has nothing to take here, with Track Changes on or off: the four columns that make code stay (lane R5)',
   ],
   ['packages/editor/src/blocks/edits.ts', 'NEEDS_BLANK_AFTER_HARD_BREAK', 'widen', 'inventory #3'],
+  ['packages/editor/src/blocks/edits.ts', 'THEIR_SPLIT', 'widen', 'inventory #1'],
   ['packages/editor/src/blocks/edits.ts', 'NEEDS_BLANK_LINE', 'widen', 'inventory #2'],
   ['packages/editor/src/blocks/joins.ts', 'ABSORBED', 'widen', 'inventory #8'],
   ['packages/editor/src/blocks/joins.ts', 'BELOW_CHANGES', 'widen', 'inventory #7'],
@@ -112,6 +113,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   ['packages/editor/src/blocks/tab.ts', 'FIRST_ITEM', 'disable', 'inventory #14'],
   ['packages/editor/src/blocks/tab.ts', 'NOT_UNDER_TEXT', 'disable', 'inventory #15'],
+  ['packages/editor/src/blocks/tab.ts', 'THEIR_SPLIT', 'widen', 'inventory #1'],
   [
     'packages/editor/src/blocks/tab.ts',
     'error.message',

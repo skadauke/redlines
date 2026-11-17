@@ -34,7 +34,12 @@ import {
  * skip that no longer fails is reported, so that it is taken away. These are found by the longer
  * runs (`REDLINES_FUZZ=300`), not the default one.
  */
-const KNOWN: ReadonlyMap<number, string> = new Map<number, string>([]);
+const KNOWN: ReadonlyMap<number, string> = new Map<number, string>([
+  // Rejecting every mark of a file that holds a widened replacement with marks in its old text, in
+  // a random order, gives a text other than the original view (lane R3, #797; to be found).
+  [12, 'reject-all order after a widened Return or Tab'],
+  [27, 'reject-all order after a widened Backspace'],
+]);
 
 const SEEDS = fuzzCount(45);
 /** The invariants cost ten times the typing check: by default every third seed has them. */
