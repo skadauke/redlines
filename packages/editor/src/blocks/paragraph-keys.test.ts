@@ -292,8 +292,11 @@ describe('Return in a heading', () => {
         name: "in the middle, with another person's pending change to the heading",
         doc: `Para.⏎⏎<!--fmt q2hw was=p-->⏎⏎## Head ‸line<!--/q2hw-->⏎⏎Next.${ledger}`,
         off: { file: 'Para.⏎⏎<fmt was=p>⏎⏎## Head ⏎⏎## line</fmt>⏎⏎Next.' },
-        // Written as a replacement of the heading (format §3.12).
-        on: {},
+        on: {
+          file: 'Para.⏎⏎<fmt was=p>⏎⏎## Head line</fmt>⏎⏎Next.',
+          refusal: "Decide bo's change to this block first.",
+        },
+        skipOn: { 'take-back': 'The Return is refused, so Backspace has no Return to take back' },
       },
       {
         name: 'at the end of a setext heading',
