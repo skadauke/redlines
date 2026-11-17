@@ -127,7 +127,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   let open = false;
   /** The document's file, which is marked. */
   let current: string | null = null;
-  /** The folder at the top: the project's, or the document's own when the project is too broad. */
+  /** The folder at the top: the project's; none when the project is too broad (#451). */
   let shown: string | null = null;
   /** Folders opened in the list, kept across refreshes. */
   const expanded = new Set<string>();
@@ -186,7 +186,13 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   const draw = () => {
     if (shown === null) {
       label.textContent = '';
-      list.replaceChildren(message('Save the document to see its folder here.'));
+      list.replaceChildren(
+        message(
+          current === null
+            ? 'Save the document to see its folder here.'
+            : 'This file is in your home folder or above, so it opens on its own.',
+        ),
+      );
       return;
     }
     label.textContent = basename(shown) || 'Files';
@@ -305,8 +311,8 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
       // A file saved into a folder that was read before it was there: read the folder again.
       if (next !== null && next.path !== current) listings.delete(dirname(next.path));
       current = next?.path ?? null;
-      const folder =
-        next === null ? null : next.root.tooBroad ? dirname(next.path) : next.root.folder;
+      // The home folder, or a folder above it, is no project: the file opens on its own.
+      const folder = next === null || next.root.tooBroad ? null : next.root.folder;
       if (folder !== shown) {
         epoch++;
         shown = folder;
