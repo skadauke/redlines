@@ -7,6 +7,13 @@ import { scriptRows, type Script } from './script.ts';
 
 const rows: Script[] = [
   {
+    name: '#870: ⌥↓ then Tab on an item of two lines',
+    doc: '1. code note‸⏎   beta note⏎1. gamma code',
+    keys: ['Alt-ArrowDown', 'Tab'],
+    tc: true,
+    expect: {},
+  },
+  {
     name: '#871: ⌥↓ on a 2. line under text, a nested item below',
     doc: '1. plan code⏎⏎beta review note⏎2. ‸text text⏎   1. text note',
     keys: ['Alt-ArrowDown'],
