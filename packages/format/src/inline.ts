@@ -783,6 +783,14 @@ export function inspectPlace(
     }
   }
 
+  // An opener in front of a key that a letter stands against in the view (`delt@fig-x`: no key to
+  // pandoc), where the marker would make it one: the change starts in front of the word.
+  if (isPandoc() && around.before === undefined && /^@\w/.test(upcoming) && isWord(v[index - 1])) {
+    let back = index;
+    while (back > 0 && isWord(v[back - 1])) back--;
+    return { kind: 'construct', from: offsetAt(back), to: offsetAt(index) };
+  }
+
   // The trailing spaces of a hard break.
   // The line as the change leaves it: where `around` gives the text typed before a closer, the last
   // line of it is the head (spaces typed at a line's end are its trailing spaces, though they are

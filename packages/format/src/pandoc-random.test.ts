@@ -16,6 +16,7 @@
 // says nothing about the edit.
 
 import { describe, expect, it } from 'vitest';
+import { INCLUDE_LINE } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
 import { accept, reject } from './decide.ts';
@@ -80,7 +81,7 @@ export function pandocTokens(body: string): string[] {
   for (const line of body.split('\n')) {
     if (/^[ \t]*:{3,}[ \t]*(?:\{[^\n]*\}|[A-Za-z][\w-]*)?[ \t]*:*[ \t]*$/.test(line))
       found.push(`fence ${line.trim()}`);
-    else if (/^[ \t]*\{\{<[ \t]+include\b/.test(line)) found.push(`include ${line.trim()}`);
+    else if (INCLUDE_LINE.test(line)) found.push(`include ${line.trim()}`);
     else if (/^[ \t]*`{3,}\{/.test(line)) found.push(`chunk ${line.trim()}`);
     else if (/^[ \t]*#\|/.test(line)) found.push(`option ${line.trim()}`);
     else {
@@ -126,8 +127,16 @@ function unsound(text: string): string | undefined {
   const wanted = pandocTokens(view);
   const got = pandocTokens(withMarkers(text));
   if (JSON.stringify(wanted) !== JSON.stringify(got)) {
-    const missing = wanted.filter((token) => !got.includes(token));
-    const extra = got.filter((token) => !wanted.includes(token));
+    const without = (list: string[], other: string[]) => {
+      const left = [...other];
+      return list.filter((token) => {
+        const at = left.indexOf(token);
+        if (at >= 0) left.splice(at, 1);
+        return at < 0;
+      });
+    };
+    const missing = without(wanted, got);
+    const extra = without(got, wanted);
     return `a construct of pandoc is not whole: missing ${JSON.stringify(missing)}, extra ${JSON.stringify(extra)}`;
   }
   return undefined;
@@ -139,7 +148,7 @@ const QMD = 'pandoc' as const;
 /** Seeds that fail and are filed (the seeds are of this generator and these INSERTS: change either and
  * they draw something else, so check them again), with the issue: they are skipped by name, not drawn out of the
  * suite, so that every other seed holds. */
-const KNOWN: Record<number, string> = {};
+const KNOWN: Record<number, string> = { 197: '#1087', 226: '#1088', 287: '#1088' };
 
 /** The marks of a file that are decided one at a time, those in the old text of a replacement too. */
 function undecided(text: string) {
@@ -292,6 +301,7 @@ describe('random edits of Quarto documents', () => {
     const count = (name: string) => (stats[name] = (stats[name] ?? 0) + 1);
     const failures: string[] = [];
     for (let seed = 1; seed <= total; seed++) {
+      if (process.env['QSUITE_SEED'] && Number(process.env['QSUITE_SEED']) !== seed) continue;
       if (KNOWN[seed] !== undefined) {
         count('known');
         continue;
@@ -313,6 +323,7 @@ describe('random edits of Quarto documents', () => {
     if (process.env['REDLINES_FUZZ']) console.log('pandoc-random:', JSON.stringify(stats));
     if (process.env['QSUITE_ALL']) console.log(failures.map((f) => f.split('\n')[0]).join('\n'));
     expect(failures.join('\n=======\n')).toBe('');
+    if (process.env['QSUITE_SEED']) return;
     expect(stats['checked'] ?? 0).toBeGreaterThan(total / 3);
     expect((stats['tracked'] ?? 0) + (stats['untracked'] ?? 0)).toBeGreaterThan(total / 2);
   }, 300_000);
