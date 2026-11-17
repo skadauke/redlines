@@ -168,8 +168,15 @@ export function moveBlockEdits(
   text: string,
   run: BlockRun,
   gap: BlockGap,
-): { edits: TextChange[]; moved: Range } | undefined {
-  const plan = plansOf(text, run, gap)[0];
+): { edits: TextChange[]; moved: Range; verbatim?: true } | undefined {
+  const [plan] = plansOf(text, run, gap);
+  if (plan && plan.anchors > 0) {
+    // Every way takes out a comment's or a highlight's marker, which typed text can't put back, and
+    // the marker left alone would split a list that the move keeps whole (#1052): the text goes as
+    // the file has it, markers and all, as edits that are made as they are.
+    const own = plansOf(text, run, gap, true)[0];
+    if (own) return { edits: own.source, moved: own.moved, verbatim: true };
+  }
   return plan && { edits: plan.source, moved: plan.moved };
 }
 
@@ -182,6 +189,11 @@ interface Plan {
   moved: Range;
   /** The move brings two lists side by side (`joinsLists`): the fine write isn't sound (#871). */
   joins?: boolean;
+  /** How many comments and highlights have a marker in the text that the plan takes out. */
+  anchors: number;
+  /** The edits are the file's own text, markers and all, taken out and put in again: they can't go
+   * through the writers of typed text, which refuse markup. */
+  verbatim?: boolean;
 }
 
 /**
@@ -195,6 +207,7 @@ function build(
   b: number,
   g: number,
   behind: boolean,
+  verbatim = false,
 ): Plan | undefined {
   const { view, siblings, map } = read;
   const firstUnit = siblings[a];
@@ -226,14 +239,32 @@ function build(
     }
   }
   const byFrom = (x: TextChange, y: TextChange) => x.from - y.from;
+  const takenFrom = map.toSource(taken.from, 1);
+  const takenTo = map.toSource(taken.to, -1);
+  const anchors = parse(text).marks.filter(
+    (mark) =>
+      (mark.kind === 'cmt' || mark.kind === 'hl') &&
+      mark.segments.some(
+        (segment) => segment.open.from < takenTo && (segment.close ?? segment.open).to > takenFrom,
+      ),
+  ).length;
   const lead = place.insert.startsWith(chunk) ? 0 : breakOf.length;
+  let insert = place.insert;
+  const cut = { from: takenFrom, to: takenTo };
+  if (verbatim) {
+    const own = verbatimChunk(text, map, firstUnit.lineFrom, lastUnit.to, cut);
+    if (!own) return undefined;
+    insert = place.insert.startsWith(chunk) ? own + breakOf : breakOf + own;
+  }
   const removed = taken.to - taken.from;
   const start = place.at + lead - (place.at > taken.from ? removed : 0);
   return {
+    anchors,
+    ...(verbatim ? { verbatim } : {}),
     moved: { from: start, to: start + chunk.length },
     source: [
-      { from: map.toSource(taken.from, 1), to: map.toSource(taken.to, -1), insert: '' },
-      { from: landing, to: landing, insert: place.insert },
+      { from: cut.from, to: cut.to, insert: '' },
+      { from: landing, to: landing, insert },
     ].toSorted(byFrom),
     view: [
       { from: taken.from, to: taken.to, insert: '' },
@@ -243,11 +274,44 @@ function build(
 }
 
 /**
+ * The run's own text in the source, with its markers, to be taken out and put in again as it is: the
+ * source from the start of the first block's text to the end of the last, and the closers of marks
+ * that end it. Undefined when a mark reaches out of it, or lies in what the deletion `cut` takes
+ * besides it, which a verbatim move could not carry whole.
+ */
+function verbatimChunk(
+  text: string,
+  map: Read['map'],
+  viewFrom: number,
+  viewTo: number,
+  cut: Range,
+): string | undefined {
+  const from = map.toSource(viewFrom, 1);
+  let to = map.toSource(viewTo, -1);
+  for (let m = CLOSER.exec(text.slice(to)); m; m = CLOSER.exec(text.slice(to))) to += m[0].length;
+  if (cut.from > from || cut.to < to) return undefined;
+  for (const mark of parse(text).marks) {
+    for (const segment of mark.segments) {
+      const low = segment.open.from;
+      const high = segment.carrier?.to ?? segment.close?.to ?? segment.open.to;
+      const touches = low < cut.to && high > cut.from;
+      if (touches && !(low >= from && high <= to)) return undefined;
+    }
+  }
+  return text.slice(from, to);
+}
+
+/**
  * The ways to write the move of `run` to `gap`, the first preferred: the run itself moves, put in
  * above the sibling at the gap or after the one above it, then the same text again with the
  * siblings that it passes moving the other way, which reads as the same file.
  */
-function plansOf(text: string, run: BlockRun, gap: BlockGap): Plan[] {
+function plansOf(
+  text: string,
+  run: BlockRun,
+  gap: BlockGap,
+  verbatim = false,
+): Plan[] {
   const read = readRun(text, run.viewFrom, run.viewTo);
   const firstUnit = read?.siblings[read.first];
   const lastUnit = read?.siblings[read.last];
@@ -256,21 +320,22 @@ function plansOf(text: string, run: BlockRun, gap: BlockGap): Plan[] {
   const { first, last } = read;
   const g = gap.index;
   if (g >= first && g <= last + 1) return [];
-  const plans = [build(text, read, first, last, g, false), build(text, read, first, last, g, true)];
+  const plans = [
+    build(text, read, first, last, g, false, verbatim),
+    build(text, read, first, last, g, true, verbatim),
+  ];
   // The siblings that the run passes move the other way, to where the run was.
   plans.push(
     g < first
-      ? build(text, read, g, first - 1, last + 1, true)
-      : build(text, read, last + 1, g - 1, first, false),
+      ? build(text, read, g, first - 1, last + 1, true, verbatim)
+      : build(text, read, last + 1, g - 1, first, false, verbatim),
   );
   const [primary, ...others] = plans.filter((plan): plan is Plan => plan !== undefined);
   if (!primary) return [];
   const joins = joinsLists(read.siblings, first, last, g);
   // Every way reads as the same file, and the run the person moved is where the first puts it.
-  return [primary, ...others.map((plan) => ({ ...plan, moved: primary.moved }))].map((plan) => ({
-    ...plan,
-    joins,
-  }));
+  const all = [primary, ...others.map((plan) => ({ ...plan, moved: primary.moved }))];
+  return all.map((plan) => ({ ...plan, joins }));
 }
 
 /**

@@ -34,7 +34,7 @@ import {
   trackingField,
   untrackedWrite,
 } from '../tracked/typing.ts';
-import { recordedAs, type Unnamed } from '../tracked/intent.ts';
+import { plainIntent, recordedAs, type Unnamed } from '../tracked/intent.ts';
 import type { MoveIntent } from './move-intent.ts';
 import { writeMove } from './move-intent.ts';
 import type { TypingIntent } from '../tracked/intent.ts';
@@ -221,6 +221,12 @@ function plainMove(
 ): { changes: ChangeSet; moved: Range; intent: Unnamed<TypingIntent> } | undefined {
   const plan = moveBlockEdits(text, run, gap);
   if (!plan) return undefined;
+  if (plan.verbatim) {
+    // The file's own text with its markers, taken out and put in again: written as it is, never
+    // through the writers of typed text (they refuse markup).
+    const changes = ChangeSet.of(plan.edits, state.doc.length);
+    return { changes, moved: plan.moved, intent: plainIntent(state, changes) };
+  }
   const written = (forced ? untrackedWrite : authoredWrite)(
     state,
     text,
