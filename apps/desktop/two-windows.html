@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Two windows</title>
+    <!-- Debug only (journeys/tests/tabs.spec.ts): the page of the app twice, side by side, as two tabs
+         of one session. It is not built into the app: vite.config.ts lists the pages that are. The
+         second starts when the first leads, for a tab that joins needs a session to join. -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #8a8a8a;
+      }
+      body {
+        display: flex;
+        gap: 6px;
+      }
+      iframe {
+        flex: 1 1 0;
+        min-width: 0;
+        height: 100%;
+        border: 0;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe id="left" title="First window" src="/?session=host&tab=1"></iframe>
+    <iframe id="right" title="Second window"></iframe>
+    <script>
+      const left = document.getElementById('left');
+      const right = document.getElementById('right');
+      const timer = setInterval(() => {
+        try {
+          if (left.contentDocument?.documentElement.dataset.session === 'leading') {
+            clearInterval(timer);
+            right.src = '/?join=sample.md&tab=2';
+          }
+        } catch {
+          // Not loaded yet.
+        }
+      }, 50);
+    </script>
+  </body>
+</html>

@@ -1923,6 +1923,12 @@ one session on one Mac, with no network, no account and no invitation.
   is never undone by this one (§5.13): a tracked step is taken back by rejecting its own marks, and
   an untracked step that the other window changed since is left alone, with the name of the window
   that did.
+- **Tabs of a browser are windows too.** With no app to say who leads, the tabs of a document do it
+  with what a browser has: a Web Lock held by the leader, a BroadcastChannel between them, and
+  IndexedDB for the epoch and the log (`apps/desktop/src/session-tabs.ts`). The leader says it is
+  alive every second; a follower that hears nothing for five steals the lock (a page that hangs
+  keeps its lock), takes over from the log in a new epoch, and the old leader, when it runs again,
+  hosts no more and can no longer write the log.
 - **A person who works alone is untouched.** A document has no session until it is opened in a
   second window, and a session with one window left works as it did: the file is byte for byte what
   the editor writes.
