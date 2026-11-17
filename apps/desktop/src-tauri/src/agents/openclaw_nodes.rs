@@ -23,6 +23,7 @@ use super::gateway::target;
 use super::node::{
     Config, Credential, Event, Identity, Running, Status, Timing, TokenStore, ToolHost, start,
 };
+use super::openclaw_protocol as protocol;
 
 /// The six tools, as `tools/list` says them.
 const TOOLS: &str = include_str!("openclaw-tools.json");
@@ -132,7 +133,12 @@ impl Nodes {
             .ok_or("That connection isn’t there any more.")?;
         let gateway = target(&connection.url, None)?;
         let first = match setup_code {
-            Some(code) => Credential::SetupCode(code),
+            Some(code) => {
+                let token = protocol::bootstrap_token(code.expose())
+                    .and_then(|token| Secret::new(&token).ok())
+                    .ok_or("That setup code has no token in it. Ask for a new one.")?;
+                Credential::SetupCode(token)
+            }
             None => match store.secret(handle, Kind::NodeToken) {
                 Some(token) => Credential::Token(token),
                 None => return Err("There is no setup code or token to connect with.".to_owned()),
