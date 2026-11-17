@@ -568,6 +568,28 @@ describe('a comment in a row that moves (#371)', () => {
     }
   });
 
+  it('is widened too when two people comment on the first word of the same row with no pipe there (#295)', () => {
+    // Both openers are parked at the end of the row above, one beside the other.
+    for (const layout of ['no outer pipes', 'trailing pipes only']) {
+      const { lines } = LAYOUTS[layout] as (typeof LAYOUTS)[string];
+      const text = noted(file(lines.join('\n')), 3, [
+        { kind: 'start', by: ada, id: 'c9qf' },
+        { kind: 'start', by: bo, id: 'd4rs' },
+      ]);
+      const table = readTables(text, parse(text))[0]?.from ?? 0;
+      const op: TableOp = { kind: 'moveRows', table, rows: [2], to: 0 };
+      expect(() => fineTableEdit(text, op, context(claudeAda, ['k3x9'])), layout).toThrow(
+        'comment runs from one row of this table into the next.',
+      );
+      expectWidened(
+        layout,
+        text,
+        tableEdit(text, op, context(claudeAda, ['k3x9', 'w8nn', 'r2zd'])).changes,
+        'claude-ada',
+      );
+    }
+  });
+
   it('is widened to rows that are not pending, when a comment across rows is made beside a pending move', () => {
     // A comment that runs from one row into another, made while rows are moved and pending, has no
     // form that every decision of the move leaves: its ends are taken to rows that are not pending.

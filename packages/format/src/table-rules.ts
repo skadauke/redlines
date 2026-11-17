@@ -329,7 +329,8 @@ export function commentAcrossRows(
       // in, has no form that a move of rows carries (`parkedOnly`, #295): any other comment
       // travels with its rows, as a highlight across rows does.
       const rest = parsed.text.slice(open.to, table.rows[a]?.to ?? open.to);
-      if (parkedOnly && rest.trim() !== '') continue;
+      // (Other markers parked beside it are no text.)
+      if (parkedOnly && rest.replace(/<!--[^]*?-->/g, '').trim() !== '') continue;
       return { mark, name: nameOf(parsed, mark.entry.by) };
     }
   }
