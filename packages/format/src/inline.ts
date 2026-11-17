@@ -436,7 +436,11 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
           dest: { from: i + 2, to: end },
         });
       }
-    } else if (isPandoc() && w[i + 1] === '{' && /^\{[#.=][^{}\n]*\}/.test(w.slice(i + 1))) {
+    } else if (
+      isPandoc() &&
+      w[i + 1] === '{' &&
+      /^\{[#.][^{}\n]*\}/y.test(w.slice(i + 1, i + 200))
+    ) {
       // A span, `[text]{.mark}` (pandoc): a marker between the bracket and its attributes would
       // leave the text with no attributes.
       inside(i, i + 2, 'symbol');
@@ -747,6 +751,34 @@ export function inspectPlace(
         kind: 'construct',
         from: offsetAt(index),
         to: offsetAt(index + code.length - 1) + 1,
+      };
+    }
+  }
+
+  // A key that the text before the marker and the text after it make together (`@fig-x` typed in
+  // front of `42`: the view reads the key `fig-x42`, a marker between would end it at `x`): the
+  // closer takes the rest of the key into the change, as it takes a shortcode; an opener goes in
+  // front of the whole key (format §3.1, rule 9, #1074).
+  const head =
+    around.before !== undefined
+      ? around.before.slice(-80)
+      : v.slice(Math.max(0, index - 80), index);
+  if (isPandoc() && (upcoming.includes('@') || head.includes('@'))) {
+    for (const m of (head + upcoming).matchAll(REFERENCES)) {
+      if (m.index >= head.length || m.index + m[0].length <= head.length) continue;
+      if (m[0].startsWith('[')) continue;
+      // Text typed after a key goes outside it, as its own insertion (the key is as it was until the
+      // insertion is accepted): only a closer, or an opener over text the file has, widens.
+      if (around.before === undefined && around.after !== undefined) continue;
+      const rest = m.index + m[0].length - head.length;
+      if (around.before !== undefined) {
+        return { kind: 'construct', from: offsetAt(index), to: offsetAt(index + rest - 1) + 1 };
+      }
+      const back = head.length - m.index;
+      return {
+        kind: 'construct',
+        from: offsetAt(index - back),
+        to: offsetAt(index + rest - 1) + 1,
       };
     }
   }

@@ -9,6 +9,8 @@ import { addComment } from './comments.ts';
 import { addHighlight } from './highlights.ts';
 import { expectEveryOrderRead } from './oracle.ts';
 import { ada, bodyOf, context, file } from './test-helpers.ts';
+import { trackedEdits } from './track.ts';
+import { untrackedEdit } from './untracked.ts';
 import { newestView } from './views.ts';
 
 const QMD = { dialect: 'pandoc' } as const;
@@ -43,4 +45,30 @@ describe('a citation in the text and a span are whole in a .qmd', () => {
       });
     }
   }
+});
+
+describe('typed text that joins a key (#1074)', () => {
+  it('tracked: the change takes the rest of the key in, so no marker stands in it', () => {
+    const start = file('alpha 42 beta');
+    const done = trackedEdits(
+      start,
+      [{ from: 6, to: 6, insert: '@fig-x' }],
+      context(ada, ['k3x9'], QMD),
+    );
+    const after = applyChanges(start, done.changes);
+    expect(bodyOf(after)).not.toMatch(/@fig-x<!--/);
+    expect(newestView(after).text).toContain('@fig-x42');
+    expectEveryOrderRead('joined key', after);
+  });
+
+  it('untracked: next to another change, the edit says it can not be made', () => {
+    const start = file('Some <!--ins w8nn-->new<!--/w8nn-->text', { w8nn: 'bo' });
+    expect(() => untrackedEdit(start, { from: 5, to: 5, insert: '@fig-x' }, QMD)).toThrow(
+      /Track Changes/,
+    );
+    // In a .md the same text is plain.
+    expect(untrackedEdit(start, { from: 5, to: 5, insert: '@fig-x' }, {}).length).toBeGreaterThan(
+      0,
+    );
+  });
 });

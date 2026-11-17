@@ -99,7 +99,7 @@ export function pandocTokens(body: string): string[] {
     ['shortcode', /\{\{<[^\n]*?>\}\}/g],
     ['sub', /(?<![~\w])~[^\s~]+~(?!~)/g],
     ['sup', /\^[^\s^]+\^/g],
-    ['span', /\[[^\]\n]*\]\{[^}\n]*\}/g],
+    ['span', /\[[^\]\n]*\]\{[#.][^}\n]*\}/g],
   ];
   for (const [name, pattern] of patterns) {
     for (const match of body.matchAll(pattern)) {
@@ -136,9 +136,10 @@ function unsound(text: string): string | undefined {
 const people: Person[] = [ada, bo];
 const QMD = 'pandoc' as const;
 
-/** Seeds that fail and are filed, with the issue: they are skipped by name, not drawn out of the
+/** Seeds that fail and are filed (the seeds are of this generator and these INSERTS: change either and
+ * they draw something else, so check them again), with the issue: they are skipped by name, not drawn out of the
  * suite, so that every other seed holds. */
-const KNOWN: Record<number, string> = { 10: '#1074', 123: '#1074', 136: '#1074' };
+const KNOWN: Record<number, string> = {};
 
 /** The marks of a file that are decided one at a time, those in the old text of a replacement too. */
 function undecided(text: string) {
