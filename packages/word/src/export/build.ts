@@ -274,6 +274,46 @@ function oldParagraph(was: { type: string; indent?: number }): Record<string, un
   return {};
 }
 
+const BODY_FONT = 'Arial';
+const TEXT_COLOR = '222222';
+
+/** The styles of the file, written here so that Word and Docs don't fall back on their defaults:
+ * a plain face for the text, headings in the text's color sized by level, a quote with a bar. */
+function documentStyles() {
+  const sizes = [32, 28, 26, 24, 22, 22]; // half-points
+  const heading = (level: number) => ({
+    run: { font: BODY_FONT, size: sizes[level - 1], bold: true, color: TEXT_COLOR },
+    paragraph: { spacing: { before: level === 1 ? 360 : 280, after: 120 } },
+  });
+  return {
+    default: {
+      document: {
+        run: { font: BODY_FONT, size: 22, color: TEXT_COLOR },
+        paragraph: { spacing: { after: 120, line: 276 } },
+      },
+      heading1: heading(1),
+      heading2: heading(2),
+      heading3: heading(3),
+      heading4: heading(4),
+      heading5: heading(5),
+      heading6: heading(6),
+    },
+    paragraphStyles: [
+      {
+        id: 'Quote',
+        name: 'Quote',
+        basedOn: 'Normal',
+        quickFormat: true,
+        run: { italics: true, color: '555555' },
+        paragraph: {
+          indent: { left: INDENT },
+          border: { left: { style: BorderStyle.SINGLE, size: 12, color: 'BBBBBB', space: 8 } },
+        },
+      },
+    ],
+  };
+}
+
 export interface ExportOptions {
   /** The program that wrote the file, for its properties. */
   creator?: string;
@@ -699,6 +739,7 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
       }
     }
     if (leaf.quote > 0) {
+      shape.style = 'Quote';
       shape.border = { left: { style: BorderStyle.SINGLE, size: 12, color: 'BBBBBB', space: 8 } };
     }
     if (left > 0 && !shape.numbering) shape.indent = { left };
@@ -849,8 +890,8 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
     if (!found) continue;
     const open = (mark.segments[0] as Segment).open.from;
     const table = [...tableBlocks].reverse().find((block) => block.to <= open);
-    tableDeletionMarks.add(mark);
     if (!table) continue;
+    tableDeletionMarks.add(mark);
     facts.get(table)?.deletions.push({
       axis: found[1] as 'row' | 'col',
       position: Number(found[2]),
@@ -966,8 +1007,10 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
       const old = found.text.split('\n');
       extra++;
       const who = author(found.mark.entry.by);
+      // The old cells are the table with every pending change rejected: no inserted row has one.
+      let seen = 0;
       live.forEach((row, r) => {
-        const index = r === 0 ? 0 : r + 1;
+        const index = r === 0 ? 0 : about.rowIns[r] ? -1 : ++seen + 1;
         const cellText = (old[index] ?? '').trim();
         let cell = deletedCell(cellText, found.mark.entry.by, found.mark.entry.at);
         if (r === 0) {
@@ -1091,6 +1134,7 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
     creator: options.creator ?? 'Redlines',
     features: ledger.tracking === 'everyone' ? { trackRevisions: true } : undefined,
     compatibility: { version: 15 },
+    styles: documentStyles(),
     comments: { children: comments },
     numbering: {
       config: [

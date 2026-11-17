@@ -300,6 +300,18 @@ function wellFormed(xml: string): boolean {
   return stack.length === 0;
 }
 
+describe('styles', () => {
+  it('writes a quote as a quote style, never a list, and headings in the text color', async () => {
+    const { document, parts } = await xmlOf('> Quoted\n\n- [ ] task\n\n# Title\n');
+    expect(document).toContain('<w:pStyle w:val="Quote"/>');
+    expect(count(document, /<w:numPr>/g)).toBe(0);
+    const styles = partText(parts, 'word/styles.xml') ?? '';
+    expect(styles).toContain('w:styleId="Quote"');
+    expect(styles).toContain('Arial');
+    expect(styles).not.toMatch(/w:val="(?:2E74B5|365F91|2F5496)"/i);
+  });
+});
+
 describe('the sample', () => {
   it('is a Word file with every revision kind in it, well formed, with unique ids', async () => {
     const report: { kind: string; message: string }[] = [];
