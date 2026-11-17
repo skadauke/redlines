@@ -190,10 +190,14 @@ const STUCK_SHORTCODE =
 const ATTRIBUTES = /\{\{<[^\n]*?>\}\}|\{[#.][^{}\n]*\}/g;
 /**
  * Pandoc's superscript `^x^` (format §3.1, rule 9): no space inside. A marker inside would break
- * the pair, so it is atomic. Subscript `~x~` is not: GFM reads one tilde as strikethrough, which
- * takes marks, and a format change of it is written by the strikethrough's own rules.
+ * the pair, so it is atomic.
  */
 const SUPERSCRIPT = /(?<!\\)\^[^\s^\\]+(?<!\\)\^/g;
+/**
+ * Pandoc's subscript `~x~` (format §3.1, rule 9), held in a pandoc file only: there one tilde is a
+ * subscript, not GFM's strikethrough. No space inside, and not a `~~` pair.
+ */
+const SUBSCRIPT = /(?<![\\~])~[^\s~\\]+(?<!\\)~(?!~)/g;
 /**
  * A cross-reference or a citation of Quarto and pandoc (format §3.1, rule 9): `@fig-x`, `@sec-x`,
  * `@tbl-x`, `@eq-x` and the other kinds Quarto numbers, and a bracket of citations, `[@a; @b, p. 4]`
@@ -329,6 +333,7 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
   if (isPandoc()) {
     if (w.includes('@')) symbols.push(REFERENCES);
     if (w.includes('^')) symbols.push(SUPERSCRIPT);
+    if (w.includes('~')) symbols.push(SUBSCRIPT);
   }
   if (w.includes(':')) symbols.push(SHORTCODE);
   for (const re of symbols) {

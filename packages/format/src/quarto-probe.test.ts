@@ -104,6 +104,28 @@ describe('superscripts', () => {
   }
 });
 
+describe('subscripts', () => {
+  const START3 = file('H~2~O and x~i~ here.');
+  const cases3: [string, string, string, number, number][] = [
+    ['inside a subscript', '~2~', 'X', 2, 0],
+    ['delete a subscript', '~2~', '', 0, 3],
+  ];
+  for (const [label, find, insert, offset, length] of cases3) {
+    it(label, () => {
+      const at = newestView(START3).text.indexOf(find) + offset;
+      const changes = trackedEdits(
+        START3,
+        [{ from: at, to: at + length, insert }],
+        context(ada, IDS, QMD),
+      ).changes;
+      const after = applyChanges(START3, changes);
+      expect(bodyOf(after)).not.toMatch(/~[^\s~]*<!--(?!\/)/);
+      expectEveryOrderRead(label, after);
+      expectSound(label, after);
+    });
+  }
+});
+
 describe('typing next to a token', () => {
   // Text typed after a key goes outside it, as its own insertion: the file shows the key as it was
   // until the insertion is accepted, and every order of decisions reads alike.

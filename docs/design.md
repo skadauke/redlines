@@ -480,8 +480,9 @@ Redlines covers everything in the Markdown Guide's
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
   while the caret is in the title line. Two alerts one blank line apart are two boxes with the space
-  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are not drawn in the editor yet; the Quick Look preview draws a
-  `.callout-*` div as a quiet labelled box and any other div as its text.
+  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are drawn in the same box (the type is the class on the
+  opening fence); the Quick Look preview draws a `.callout-*` div as a quiet labelled box and any
+  other div as its text.
 - **Image size:** while the pointer is over an image or it is selected, a handle on its left edge and
   one on its right edge, standing just outside it (inside it, where the image is as wide as the
   column), resize it, with its aspect kept; an aligned image has no handle on the edge it is
