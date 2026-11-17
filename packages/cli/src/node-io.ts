@@ -75,7 +75,11 @@ export const nodeIo: CliIo = {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, bytes);
   },
-  readBytes: async (path) => new Uint8Array(await readFile(path)),
+  readBytes: async (path, max) => {
+    if (max !== undefined && (await stat(path)).size > max)
+      throw new Error('the file is too large');
+    return new Uint8Array(await readFile(path));
+  },
   async importDocx(bytes) {
     const { importDocx } = await import('@redlines/word');
     const result = importDocx(bytes);

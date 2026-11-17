@@ -208,7 +208,20 @@ fn read_stdin(ctx: Ctx<'_>) -> Result<String> {
 }
 
 /// The bytes of a file, as they are: a .docx or a picture.
-fn read_bytes<'js>(ctx: Ctx<'js>, path: String) -> Result<TypedArray<'js, u8>> {
+fn read_bytes<'js>(
+    ctx: Ctx<'js>,
+    path: String,
+    max: Opt<Option<f64>>,
+) -> Result<TypedArray<'js, u8>> {
+    // A file longer than `max` bytes (when given) is not read at all.
+    if let Some(Some(max)) = max.0 {
+        let length = fs::metadata(&path)
+            .map_err(|error| thrown(&ctx, &error))?
+            .len();
+        if length as f64 > max {
+            return Err(Exception::throw_message(&ctx, "the file is too large"));
+        }
+    }
     let bytes = fs::read(path).map_err(|error| thrown(&ctx, &error))?;
     TypedArray::new(ctx, bytes)
 }

@@ -90,7 +90,16 @@ export async function loadImage(
   src: string,
   source: ImageSource | undefined,
 ): Promise<LoadedImage | string> {
-  const data = src.startsWith('data:') ? dataUri(src) : await source?.(src);
+  let data: Uint8Array | undefined;
+  if (src.startsWith('data:')) data = dataUri(src);
+  else {
+    try {
+      data = await source?.(src);
+    } catch {
+      // The caller knew the file and could not read it (it is missing, or too large).
+      return 'it could not be read';
+    }
+  }
   if (!data)
     return src.startsWith('data:')
       ? 'its data address could not be read'

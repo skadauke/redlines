@@ -860,6 +860,19 @@ fn export_docx_takes_the_name_from_dash_o_and_refuses_the_file_itself() {
 }
 
 #[test]
+fn export_docx_never_replaces_a_docx_unless_dash_o_names_it() {
+    let folder = Folder::new();
+    let file = folder.file("plan.md", PLAIN);
+    let docx = folder.file("plan.docx", "mine");
+    let done = redlines(&file, "export-docx", &[]);
+    assert_eq!(done.code, Some(1), "{}", done.stderr);
+    assert!(done.stderr.contains("-o"), "{}", done.stderr);
+    assert_eq!(fs::read(&docx).unwrap(), b"mine");
+    works(&file, "export-docx", &["-o", docx.to_str().unwrap()]);
+    assert_eq!(&fs::read(&docx).unwrap()[..2], b"PK");
+}
+
+#[test]
 fn export_docx_embeds_a_picture_that_lies_beside_the_document() {
     let folder = Folder::new();
     fs::create_dir(folder.at("media")).unwrap();
