@@ -387,7 +387,10 @@ export function mixedFileText(state: EditorState, named = false): string | null 
     }
   }
   const text = textOf(state, state.doc, kept, state.field(parsedField, false)?.ledgerRange ?? null);
-  // A CR alone is left to the old way: the format reads a body of CRs as one with a ledger it
-  // can't read (format §5.1), and its payload is not this issue's.
-  return /\r(?!\n)/.test(text) ? null : text;
+  // A ledger that the format can't read, as one that a CR alone precedes (format §5.1; the editor
+  // wrote such ledgers before), is left to the old way: it is written again on the LF text.
+  if (/\r(?!\n)/.test(text) && text.includes('<!-- redlines')) {
+    if (parse(text).warnings.some((warning) => warning.code === 'bad-ledger')) return null;
+  }
+  return text;
 }
