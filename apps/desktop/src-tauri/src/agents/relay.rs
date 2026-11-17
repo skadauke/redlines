@@ -90,6 +90,8 @@ struct Relay {
 
 #[derive(Default)]
 struct RelayState {
+    /// The run at a Gateway whose tool calls this relay answers (`claim`), once one has said so.
+    claimed_by: Option<u32>,
     closing: bool,
     connection: Option<Connection>,
 }
@@ -258,6 +260,41 @@ impl Relays {
             .filter(|relay| relay.owner == owner)
             .filter_map(|relay| relay.socket.to_str().map(str::to_owned))
             .collect()
+    }
+
+    /// The relays of this window that the run `run` may name for its tool calls: those no other
+    /// run has claimed (`claim`).
+    pub fn sockets_for(&self, owner: &str, run: u32) -> Vec<String> {
+        self.open_relays()
+            .values()
+            .filter(|relay| relay.owner == owner)
+            .filter(|relay| relay.state().claimed_by.is_none_or(|by| by == run))
+            .filter_map(|relay| relay.socket.to_str().map(str::to_owned))
+            .collect()
+    }
+
+    /// Makes the relay at `socket` the one that answers the tool calls of the run `run` (a run at
+    /// a Gateway names it, `openclaw_tools.rs`): true if it is the window's, and neither claimed by
+    /// another run nor already in use by a program (a local agent's toolbox is connected to it).
+    /// So a run can't take over another run's line, whichever relay it names.
+    pub fn claim(&self, owner: &str, socket: &str, run: u32) -> bool {
+        let relay = self
+            .open_relays()
+            .values()
+            .find(|relay| relay.owner == owner && relay.socket.to_str() == Some(socket))
+            .cloned();
+        let Some(relay) = relay else {
+            return false;
+        };
+        let mut state = relay.state();
+        match state.claimed_by {
+            Some(by) => by == run,
+            None if state.connection.is_some() => false,
+            None => {
+                state.claimed_by = Some(run);
+                true
+            }
+        }
     }
 
     /// Closes the relays of a window that has closed.
