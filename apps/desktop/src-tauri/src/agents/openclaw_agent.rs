@@ -84,9 +84,12 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
             }
             if let Ok((id, outcome)) = done.try_recv() {
                 busy = false;
-                cancel.store(false, Ordering::Relaxed);
-                // One run is one prompt: the tools end with it, and a second prompt in this session
-                // would have none.
+                // A cancel that came as the prompt finished has ended the tools already.
+                let cancelled = cancel.swap(false, Ordering::Relaxed);
+                // A prompt that was answered keeps the run's tools for the next one: OpenClaw offers
+                // the node's tools to every run of a session, so a follow-up prompt in this run
+                // can edit too (the registration ends with the run). One that was cancelled or
+                // failed ends them at once, as below.
                 // The run is over at the Gateway when it said so (its final event, `aborted` or
                 // an error event): the thread's next run may have its tools. A run it never
                 // reported on may still be going, and its thread waits for a deadline instead.
@@ -94,7 +97,7 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
                     if let Some(held) = hold.take() {
                         held.leave();
                     }
-                } else {
+                } else if cancelled || !matches!(outcome, Ok(Outcome::Done(_))) {
                     hold = None;
                 }
                 match outcome {
@@ -156,7 +159,8 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk, tools: &Arc
                             // The relay the window opened for this run's tools, if it did: the
                             // gate has checked that it is the window's own.
                             if let Some(socket) = message["params"]["_meta"]["tools"].as_str() {
-                                match tools.register(session, socket) {
+                                // Stop is looked at while it waits, which can be some seconds.
+                                match tools.register(session, socket, &|| link.stopped()) {
                                     Ok(registered) => hold = Some(registered),
                                     Err(why) => {
                                         link.say(failure(&id, -32603, &why));
@@ -423,6 +427,76 @@ mod tests {
             .unwrap();
         wait_for(&heard, |l| l.iter().any(|m| m["id"] == 2));
         assert!(!tools.is_live(KEY), "cancel ends the tool access");
+    }
+
+    #[test]
+    fn a_follow_up_prompt_in_the_same_run_still_has_the_tools() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let folder = TempFolder::new("gw-follow");
+        let socket = folder.path().join("s");
+        let listener = UnixListener::bind(&socket).unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut writer = stream;
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                if message["method"] == "initialize" {
+                    let _ = writeln!(
+                        writer,
+                        "{}",
+                        json!({"jsonrpc": "2.0", "id": message["id"], "result": {}})
+                    );
+                }
+                line.clear();
+            }
+        });
+        let runs = Runs::default();
+        let tools = Arc::new(RunTools::default());
+        let talk: Talk = Arc::new(|_, _, _| Ok(Outcome::Done("Done.".to_owned())));
+        let heard: Heard = Arc::default();
+        let sink = Arc::clone(&heard);
+        let (started, input) = runs
+            .start_thread(
+                "main",
+                folder.path(),
+                &info(),
+                "OpenClaw Gateway",
+                move |message| sink.lock().unwrap().push(message),
+                {
+                    let tools = Arc::clone(&tools);
+                    move |lines, link| serve(lines, link, &talk, &tools)
+                },
+            )
+            .unwrap();
+        let send = |value: Value| input.send(&input_of(value)).unwrap();
+        send(json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}}));
+        send(
+            json!({"jsonrpc": "2.0", "id": 1, "method": "session/new", "params": {
+            "cwd": "/x", "mcpServers": [],
+            "_meta": {"sessionKey": KEY, "tools": socket.to_str().unwrap()}}}),
+        );
+        wait_for(&heard, |l| l.iter().any(|m| m["id"] == 1));
+        for id in [2, 3] {
+            send(
+                json!({"jsonrpc": "2.0", "id": id, "method": "session/prompt",
+                "params": {"sessionId": "gateway", "prompt": [{"type": "text", "text": "Hi"}]}}),
+            );
+            wait_for(&heard, |l| l.iter().any(|m| m["id"] == id));
+            assert!(
+                tools.is_live(KEY),
+                "after prompt {id} the tools are still there"
+            );
+        }
+        // They end with the run.
+        runs.stop("main", started.id).unwrap();
+        let until = Instant::now() + Duration::from_secs(10);
+        while tools.is_live(KEY) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!tools.is_live(KEY));
     }
 
     #[test]

@@ -109,6 +109,59 @@ describe('ghost columns', () => {
     expect(dom(editor).textContent).not.toContain('---');
   });
 
+  // The corners of the layout (#984): a deleted column's ghost over a cell that is its pipe alone, and a
+  // ghost past the last cell of a short row.
+  it('draws the empty cell that a ghost stands in front of when it has no padding, `||`', () => {
+    const tail = (col: number) => `\n<!--del g5nb col=${col} Count\\n-\\-\\-\\n3\\n7-->\n`;
+    const middle = `| Fruit || Price |\n| ----- | - | ----- |\n| Apples || x |\n${tail(2)}`;
+    const first = `|| Price |\n| - | ----- |\n|| 5 |\n${tail(1)}`;
+    for (const [doc, texts] of [
+      [
+        middle,
+        [
+          ['Fruit', 'Count', '', 'Price'],
+          ['Apples', '3', '', 'x'],
+        ],
+      ],
+      [
+        first,
+        [
+          ['Count', '', 'Price'],
+          ['3', '', '5'],
+        ],
+      ],
+    ] as const) {
+      LEDGERS[doc] = LEDGER(['g5nb']);
+      const editor = load('redlines', doc);
+      for (const [i, line] of lines(editor).entries()) {
+        const cells = cellsOf(line);
+        // One cell for each column, the empty one among them, and no filler in the cell after it.
+        expect(cells.map((c) => c.textContent?.replace(/\u200b/g, '').trim())).toEqual(texts[i]);
+        expect(cells.map((c) => c.dataset['vcol'])).toEqual(texts[i]?.map((_, n) => String(n)));
+      }
+    }
+  });
+
+  it('draws a ghost past the last cell of a short row among the cells the row lacks', () => {
+    const doc = [
+      '| Fruit | Price |',
+      '| ----- | ----- |',
+      '| Apples |',
+      '',
+      '<!--del g5nb col=3 Count\\n-\\-\\-\\n3-->',
+      '',
+    ].join('\n');
+    LEDGERS[doc] = LEDGER(['g5nb']);
+    const editor = load('redlines', doc);
+    const rows = lines(editor).map((line) => cellsOf(line));
+    expect(rows.map((cells) => cells.map((c) => c.dataset['vcol']))).toEqual([
+      ['0', '1', '2'],
+      ['0', '1', '2'],
+    ]);
+    expect(rows[1]?.[1]?.classList.contains('rl-tc-missing')).toBe(true);
+    expect(rows[1]?.[2]?.classList.contains('rl-ghost-col')).toBe(true);
+  });
+
   // A table with no pipe at an edge of its rows draws the ghost of the column that was there, in
   // every row, as one with the pipes does (#282): the first place has no pipe to stand in for, and
   // the last none after the cell.

@@ -15,10 +15,6 @@ import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { acceptAndStop, changesToAccept, trackingBack } from './accept-stop.ts';
 import {
-  accept as acceptChange,
-  acceptMarks,
-  reject as rejectChange,
-  rejectMarks,
   recordTracking as recordTrackingInFile,
   setView as viewInFile,
   type TextChange,
@@ -144,7 +140,12 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
+import { intentOf, recordedAs } from './tracked/intent.ts';
+import { guardDecision, seenOf, writeReview } from './tracked/review-intent.ts';
+import { DecidedLog, skippedMessage } from './tracked/decided.ts';
+import type { DecisionOutcome } from './tracked/decided.ts';
 import {
+  editSourceFacet,
   editingKeymap,
   refusedEditEffect,
   setTrackingEffect,
@@ -268,6 +269,21 @@ export {
 } from './tracked/typing.ts';
 export { editSourceFacet } from './tracked/typing.ts';
 export { intentAnnotation, intentOf, newIntentId, recordedAs } from './tracked/intent.ts';
+export {
+  deriveReview,
+  guardDecision,
+  markSignature,
+  seenOf,
+  writeReview,
+} from './tracked/review-intent.ts';
+export { DecidedLog, skippedMessage } from './tracked/decided.ts';
+export type { DecidedNote, DecisionOutcome } from './tracked/decided.ts';
+export type {
+  DerivedReview,
+  ReviewIntent,
+  ReviewOp,
+  ReviewRequest,
+} from './tracked/review-intent.ts';
 export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
 export { deriveTable, writeTable } from './table/intent.ts';
 export { deriveSteps } from './table/paste-intent.ts';
@@ -320,7 +336,8 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   a.redo === b.redo &&
   a.canUndo === b.canUndo &&
   a.canRedo === b.canRedo &&
-  a.canAcceptAll === b.canAcceptAll;
+  a.canAcceptAll === b.canAcceptAll &&
+  a.acceptAllCount === b.acceptAllCount;
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
@@ -341,6 +358,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let dialect: MarkdownDialect = options.dialect ?? 'gfm';
   let kind: DocumentKind = options.kind ?? 'markdown';
   let author = options.author;
+  /** Who decided which marks, for "Ada accepted this a moment ago" (tracked/decided.ts). */
+  const decided = new DecidedLog();
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
   const saveTracking = options.saveTracking ?? false;
@@ -532,6 +551,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
     const reasons = disabledReasons(commands.list(), state);
+    const acceptable = changesToAccept(state).length;
     return {
       kind: state.facet(plainOnlyFacet) ? 'plain-only' : 'markdown',
       view: state.field(viewModeField),
@@ -555,7 +575,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       redo: redoName(state),
       canUndo: undoHasSomething(state),
       canRedo: redoHasSomething(state),
-      canAcceptAll: changesToAccept(state).length > 0,
+      canAcceptAll: acceptable > 0,
+      acceptAllCount: acceptable,
     };
   };
   let reported = uiFor(initial);
@@ -565,8 +586,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // An undo or redo that would break the file doesn't happen, and says why (see history/guard.ts).
     dispatchTransactions: (transactions, view) => {
       const refused = transactions.map(refusedStep).find((reason) => reason !== null);
-      if (!refused) view.update(transactions);
-      else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
+      if (!refused) {
+        view.update(transactions);
+        noteDecisions(transactions, view);
+      } else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
     },
   });
   shownLook = lookOf(view.state);
@@ -580,6 +603,22 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     for (const handle of handles) asked.add(handle);
     options.onNewPeople(handles);
   }
+  /** Notes who decided what, from the decisions among `transactions`, whoever made them. */
+  function noteDecisions(transactions: readonly Transaction[], from: EditorView): void {
+    for (const tr of transactions) {
+      const intent = intentOf(tr);
+      if (intent?.kind !== 'review' || intent.op.op !== 'decide') continue;
+      // Only the marks it decided: those it was asked about that it left alone are not its own.
+      const before = new Set(tr.startState.field(parsedField).marks.map((mark) => mark.id));
+      const after = new Set(tr.state.field(parsedField).marks.map((mark) => mark.id));
+      for (const id of intent.op.ids) {
+        if (!before.has(id) || after.has(id)) continue;
+        decided.note(id, { by: intent.author.name, kind: intent.op.decision });
+      }
+    }
+    // A decision taken back by Undo puts its marks back, and nothing is said of them again.
+    decided.prune(from.state.field(parsedField));
+  }
   /** Tells the host when the view, tracking, the pending changes or a command's state changed. */
   function report(): void {
     const ui = uiFor(view.state);
@@ -587,14 +626,58 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     reported = ui;
     options.onUiState?.(ui);
   }
-  /** Applies a decision as one step to undo, apart from the typing around it. */
-  const decide = (changes: TextChange[], userEvent: string) => {
-    if (!changes.length) return;
+  /**
+   * Applies a decision as one step to undo, apart from the typing around it. `seen` is each
+   * mark's signature as the person saw it; without it, the marks as they are now. A mark that
+   * changed since, or is gone, is left alone and says why (the review guard, §4.4).
+   */
+  const decide = (
+    decision: 'accept' | 'reject',
+    id: string | readonly string[],
+    seen?: readonly string[],
+    bulk = false,
+  ): DecisionOutcome => {
+    const who = author;
+    const { random, now } = view.state.facet(editSourceFacet);
+    const ids = typeof id === 'string' ? [id] : id;
+    const text = view.state.doc.toString();
+    const time = `${now().toISOString().slice(0, 16)}Z`;
+    const op = {
+      op: 'decide' as const,
+      decision,
+      ids,
+      seen: seen ?? seenOf(text, ids),
+      ...(typeof id === 'string' && !bulk ? {} : { many: true as const }),
+      ...(bulk ? { bulk: true as const } : {}),
+    };
+    // Without what was seen, the marks are decided as they are, and the format refuses a missing one.
+    const guarded = seen ? guardDecision(text, op) : { apply: [...ids], skipped: [] };
+    const skipped = guarded.skipped.map((one) => ({
+      ...one,
+      message: skippedMessage(text, one, decided),
+    }));
+    if (guarded.apply.length === 0) return { applied: [], skipped };
+    const keep = guarded.apply.length === ids.length;
+    const made = writeReview(
+      text,
+      {
+        ...op,
+        ids: guarded.apply,
+        seen: keep ? op.seen : guarded.apply.map((one) => op.seen[ids.indexOf(one)] ?? ''),
+      },
+      { author: who, time, ...(random ? { random } : {}) },
+    );
+    if (!made.changes.length) return { applied: [], skipped };
     view.dispatch({
-      changes,
-      annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
-      userEvent,
+      changes: made.changes,
+      annotations: [
+        trackedEditAnnotation.of(true),
+        isolateHistory.of('full'),
+        recordedAs(made.intent),
+      ],
+      userEvent: decision,
     });
+    return { applied: guarded.apply, skipped };
   };
 
   /**
@@ -796,19 +879,27 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       tellNewPeople();
     },
     accept: (id) => {
-      const text = view.state.doc.toString();
-      decide(typeof id === 'string' ? acceptChange(text, id) : acceptMarks(text, id), 'accept');
+      decide('accept', id);
     },
     acceptAllAndStopTracking: () => {
-      const tr = acceptAndStop(view.state);
+      const { now } = view.state.facet(editSourceFacet);
+      const tr = acceptAndStop(view.state, {
+        author,
+        time: `${now().toISOString().slice(0, 16)}Z`,
+      });
       if (!tr) return false;
       view.dispatch(tr);
       if (saveTracking) trackingChosen = false;
       return true;
     },
     reject: (id) => {
-      const text = view.state.doc.toString();
-      decide(typeof id === 'string' ? rejectChange(text, id) : rejectMarks(text, id), 'reject');
+      decide('reject', id);
+    },
+    decideSeen: (decision, ids, seen, options) =>
+      decide(decision, ids, seen, options?.bulk === true),
+    seenOf: (ids) => seenOf(view.state.doc.toString(), ids),
+    noteDecided: (id, by, kind) => {
+      decided.note(id, { by, kind });
     },
     addExtension: (extension) => {
       const entry = { extension };

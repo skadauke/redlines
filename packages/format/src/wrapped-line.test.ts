@@ -21,6 +21,7 @@ import {
   ada,
   blockLeaves,
   claudeAda,
+  bo,
   bodyOf,
   expectEveryOrderAlike,
   file,
@@ -896,4 +897,26 @@ describe('deleting the text of each wrapped line of random documents', () => {
     expect(counts.taken, 'lines taken with their breaks').toBeGreaterThan(50);
     expect(counts.taken).toBeGreaterThan(counts.refused);
   }, 120_000);
+});
+
+describe('a wrapped line inside the new text of another person’s substitution (#988)', () => {
+  // Bo deletes the one-letter line `x`, in the new text of Ada's substitution (seed 1497 of the
+  // random suite of `track.test.ts`): the break in front of the line goes with it, so that no
+  // empty line parts the paragraph.
+  it('takes the break in front of the line, as in plain text', () => {
+    const text = file('beta <!--sub k3x9 old text-->42\nx\ncafé gamma<!--/k3x9-->', {
+      k3x9: 'ada',
+    });
+    const view = newestView(text);
+    const at = view.text.indexOf('x');
+    const result = trackedEdits(
+      text,
+      [{ from: view.map.toSource(at, 1), to: view.map.toSource(at + 1, -1), insert: '' }],
+      { author: bo, time: TIME, random: counting() },
+    );
+    const after = applyChanges(text, result.changes);
+    expect(viewText(after)).toBe('beta 42\ncafé gamma');
+    expect(originalView(after).text.replace(/\n+$/, '')).toBe('beta old text');
+    expectEveryOrderAlike('a line in a substitution', after);
+  });
 });

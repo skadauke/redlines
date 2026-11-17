@@ -9,6 +9,7 @@ import {
   invariantProblems,
   notation,
   runScript,
+  settle,
   type Script,
   scriptRows,
 } from './script.ts';
@@ -467,10 +468,12 @@ describe('a paste at every caret of a list', () => {
   const pastes = ['- a', '1. a⏎2. b', '- a⏎  - b⏎- c', '- [x] a'];
   for (const doc of docs) {
     for (const tc of [false, true]) {
-      it(`${doc}, Track Changes ${tc ? 'on' : 'off'}`, () => {
+      it(`${doc}, Track Changes ${tc ? 'on' : 'off'}`, async () => {
         const failures: string[] = [];
         for (let at = 0; at <= doc.length; at++) {
           if (doc[at - 1] === '⏎' && doc[at] === '⏎') continue;
+          // See `settle`: the editors of the scripts before are released only as the loop turns.
+          await settle();
           for (const paste of pastes) {
             const name = `${doc.slice(0, at)}‸${doc.slice(at)} <- ${paste} ${tc ? 'on' : 'off'}`;
             const script: Script = {
@@ -542,7 +545,7 @@ describe('a paste over every selection of a list', () => {
   for (const doc of docs) {
     for (const tc of [false, true]) {
       for (const part of ['edges', 'rest'] as const) {
-        it(`${doc}, Track Changes ${tc ? 'on' : 'off'}, ${part}`, () => {
+        it(`${doc}, Track Changes ${tc ? 'on' : 'off'}, ${part}`, async () => {
           const edges = edgeOffsets(doc);
           const next = seeded(doc.length * 7 + (tc ? 1 : 0));
           const failures: string[] = [];
@@ -553,6 +556,8 @@ describe('a paste over every selection of a list', () => {
               // One draw per selection, so the sample is the same every run.
               const drawn = next();
               if (part === 'rest' && !everything && drawn >= sampleRate) continue;
+              // See `settle`: the editors of the scripts before are released only as the loop turns.
+              await settle();
               for (const paste of pastes) {
                 const marked = `${doc.slice(0, from)}⟦${doc.slice(from, to)}⟧${doc.slice(to)}`;
                 const script: Script = {
