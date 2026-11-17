@@ -47,6 +47,23 @@ describe('Docs: more forms', () => {
       `<p><span style="font-family:'Roboto Mono',monospace;color:#1967d2">${t}</span></p>`;
     expect(htmlToMarkdown(line('a ```') + line('b'))).toBe('````\na ```\nb\n````');
   });
+  it('fences a single monospace paragraph', () => {
+    expect(
+      htmlToMarkdown('<p><span style="font-family:\'Courier New\',monospace">ls -la</span></p>'),
+    ).toBe('```\nls -la\n```');
+  });
+  it('keeps a blank line and a <br> inside one code block', () => {
+    const m = (t: string) => `<span style="font-family:'Roboto Mono',monospace">${t}</span>`;
+    expect(
+      htmlToMarkdown(`<p>${m('a')}</p><p>${m('<br>')}</p><p>${m('b<br>c')}</p><p>${m('<br>')}</p>`),
+    ).toBe('```\na\n\nb\nc\n```');
+  });
+  it('does not read a hanging indent, a list paragraph or a quoted paragraph as a quote', () => {
+    expect(htmlToMarkdown('<p style="margin-left:36pt;text-indent:-36pt">Smith 1999</p>')).toBe(
+      'Smith 1999',
+    );
+    expect(htmlToMarkdown('<ul><li><p style="margin-left:36pt">hi</p></li></ul>')).toBe('- hi');
+  });
   it('keeps one monospace run in a sentence as inline code', () => {
     expect(
       htmlToMarkdown(

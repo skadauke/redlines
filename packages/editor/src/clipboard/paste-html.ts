@@ -724,6 +724,14 @@ function points(value: string | undefined): number {
 function quoted(el: Element, tag: string): boolean {
   if (tag !== 'p') return false;
   if (/(?:^|\s)Mso(?:Intense)?Quote(?:\s|$)/.test(el.getAttribute('class') ?? '')) return true;
+  // A hanging indent (a bibliography), a table of contents, and a paragraph inside a list item or a
+  // quote are indented for another reason.
+  if (
+    points(css(el).get('text-indent')) < 0 ||
+    /(?:^|\s)MsoToc\d/.test(el.getAttribute('class') ?? '')
+  )
+    return false;
+  if (el.parentElement?.closest('li, blockquote')) return false;
   return points(css(el).get('margin-left')) >= 18;
 }
 
@@ -740,12 +748,36 @@ function codeLine(el: Element): boolean {
   );
 }
 
+/** A blank line of a code block: an empty paragraph set in a monospace font. */
+const blankCodeLine = (el: Element) =>
+  ['p', 'div'].includes(el.tagName.toLowerCase()) &&
+  !(el.textContent ?? '').replace(INVISIBLE, '').trim() &&
+  !el.querySelector('img') &&
+  monoStyled(el);
+
+/** Whether a line's own CSS sets a monospace font (not a `<code>` tag): a paragraph set as code. */
+const monoStyled = (el: Element) =>
+  !el.querySelector('code') &&
+  [el, ...Array.from(el.querySelectorAll('[style]'))].some((n) =>
+    MONOSPACE.test(css(n).get('font-family') ?? ''),
+  );
+
 /** The text of a line of code, as it is written. */
-const lineText = (el: Element) =>
-  (el.textContent ?? '')
+function lineText(el: Element): string {
+  let text = '';
+  const walk = (node: Node) => {
+    if (isText(node)) text += (node.nodeValue ?? '').replace(/\s*\n\s*/g, ' ');
+    else if (isElement(node)) {
+      if (node.tagName.toLowerCase() === 'br') text += '\n';
+      else node.childNodes.forEach(walk);
+    }
+  };
+  walk(el);
+  return text
     .replace(INVISIBLE, '')
     .replace(/\u00a0/g, ' ')
     .replace(/\s+$/, '');
+}
 
 /** Lines as a fenced block, its fence longer than any run of backticks in them. */
 function fenced(lines: string[]): string {
@@ -797,14 +829,21 @@ class Converter {
         // Consecutive lines of code (Docs sets each color apart) are one fenced block.
         const lines = [lineText(child)];
         let end = at;
+        let kept = 1;
         for (let next = at + 1; next < nodes.length; next++) {
           const sibling = nodes[next]!;
           if (isText(sibling) && !(sibling.nodeValue ?? '').trim()) continue;
-          if (!isElement(sibling) || !codeLine(sibling)) break;
-          lines.push(lineText(sibling));
-          end = next;
+          if (!isElement(sibling)) break;
+          if (codeLine(sibling)) {
+            lines.push(lineText(sibling));
+            kept = lines.length;
+            end = next;
+          } else if (blankCodeLine(sibling)) lines.push('');
+          else break;
         }
-        if (lines.length > 1 || /roboto mono/i.test(child.innerHTML.slice(0, 400))) {
+        // A blank line at the end of the block is not in it.
+        lines.length = kept;
+        if (lines.length > 1 || monoStyled(child)) {
           flush();
           out.push(fenced(lines));
           at = end;
