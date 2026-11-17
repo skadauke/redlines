@@ -249,13 +249,12 @@ its case; each is a bug. The list is what has been found, not a count of what is
   the underline of the text above it; the words typed on its blank lines (#143) are written the same
   way (#443).
 - The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
-  as a lazy line of the item's paragraph, where CommonMark reads a list: the first item taken out of
-  its list leaves that line as text, and the editor sees no change (#446; the keys of Return, Tab,
-  Shift-Tab and Backspace read such a line as the text it is since #600, format §3.2).
-- Outdenting an item (Shift-Tab, ⌘[) whose next item a pending change empties writes a file that
-  reads as a heading in some order of decisions: the format refuses a numbered sibling that would
-  become the item's first child, not an item with no text (#433; Backspace at a nested first item
-  waits for such a change since #292).
+  as a lazy line of the item's paragraph, where CommonMark reads a list. Backspace at the first
+  item of a list now reads the line below it as the file does (`ownLines` in `blocks/joins.ts`) and
+  writes the blank line that keeps it apart (#446); the keys of Return, Tab and Shift-Tab read such
+  a line as the text it is since #600 (format §3.2). Left: at the first line of the file with Track
+  Changes on the key still refuses, since the format has no place for the blank line next to the
+  marker's deletion (#291).
 - A deletion inside a blank line of a break that takes no line break, in a shape that the rule for a
   quote's blank lines does not know (the `>` of a blank line indented in a list item, in the break of
   a pending split, a quote that starts at the blank line), is written as the join of the two blocks;

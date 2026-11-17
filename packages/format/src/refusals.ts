@@ -461,6 +461,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/format/src/format-blocks.ts', 'AT_START', 'widen', 'inventory #37'],
   ['packages/format/src/format-blocks.ts', 'AT_START_OWN', 'widen', 'inventory #38'],
   ['packages/format/src/format-blocks.ts', 'BREAK_PENDING', 'widen', 'inventory #26'],
+  [
+    'packages/format/src/format-blocks.ts',
+    'EMPTIED_CHILD',
+    'alert',
+    'an item that a pending change empties would follow the outdented text as an underline in some orders of decisions (#433); decide the change first, as for a first prefix',
+  ],
   ['packages/format/src/format-blocks.ts', 'FIRST_ITEM', 'disable', 'inventory #14'],
   ['packages/format/src/format-blocks.ts', 'INDENTED', 'widen', 'inventory #32'],
   ['packages/format/src/format-blocks.ts', 'INSIDE', 'widen', 'inventory #23'],

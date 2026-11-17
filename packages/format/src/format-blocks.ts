@@ -35,9 +35,10 @@ import {
   typeOfWord,
 } from './callout.ts';
 import { closeOfDiv, readFenceLine, readFenceWas, rewriteFence, titleOf } from './callout-fence.ts';
-import { eolOf } from './changes.ts';
+import { eolOf, plainPayload } from './changes.ts';
 import { isPandoc } from './dialect.ts';
 import { EditError } from './errors.ts';
+import { decodePayload } from './payload.ts';
 import {
   encodeValue,
   isAlignOps,
@@ -92,6 +93,9 @@ const NO_PARENT = "This item can't be outdented: it isn't under another item.";
  * editor's Backspace says it in the same words (it reads the refusal, not its text). */
 export const NUMBERED_CHILD =
   "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.";
+/** Why an item can't be outdented: the item after it is empty in one reading of the file and not in another. */
+const EMPTIED_CHILD =
+  "This item can't be outdented while the item after it is changed: a pending change empties that item in some readings, and right under this text it would turn the text into a heading. Accept or reject that change first.";
 const QUOTE_TIGHT =
   "A list in a quote written with no space after the `>` can't be indented or outdented, because the lines would need a space the quote doesn't have. Add the space after each `>` first.";
 const TABS = "Lines indented with tabs can't be moved. Indent them with spaces first.";
@@ -130,6 +134,37 @@ const isHeading = (type: BlockType) => /^h[1-6]$/.test(type);
 
 /** A list item's marker and the spaces after it, then its box. */
 const ITEM = /^((?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$))(\[[ xX]\](?:[ \t]+|$))?/;
+
+/** The markers of changes and comments, as the newest view drops them (a deletion with its text). */
+const MARKERS = /<!--(?:\/[a-z0-9]+|(?:split|ins|del|sub|fmt|cmt|hl) [a-z0-9]+(?: [^]*?)?)-->/g;
+
+/** A line as the original view reads it: every change on it rejected; null where one line can't tell. */
+function originalLine(row: string): string | null {
+  const text = row
+    .replace(/<!--ins [a-z0-9]+-->[^]*?<!--\/[a-z0-9]+-->/g, '')
+    .replace(/<!--sub [a-z0-9]+ ([^]*?)-->[^]*?<!--\/[a-z0-9]+-->/g, (_all, payload: string) =>
+      plainPayload(decodePayload(payload)),
+    )
+    .replace(/<!--del [a-z0-9]+ ([^]*?)-->/g, (_all, payload: string) =>
+      plainPayload(decodePayload(payload)),
+    )
+    .replace(/<!--\/[a-z0-9]+-->|<!--(?:cmt|hl) [a-z0-9]+(?: [^]*?)?-->/g, '');
+  return /<!--(?:split|fmt) /.test(text) ? null : text;
+}
+
+/**
+ * Whether a line holding a marker is an item with no text in some readings of the file (as it is,
+ * the newest view, the original view) and an item with text in others: right under text it is an
+ * underline of a heading in the first and a list in the other (outdenting an item, #433).
+ */
+function readsOtherwise(row: string): boolean {
+  if (!/<!--/.test(row)) return false;
+  const original = originalLine(row);
+  const readings = [row, row.replace(MARKERS, ''), ...(original === null ? [] : [original])];
+  const empty = readings.map((r) => /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]*$/.test(r));
+  const item = readings.map((r) => ITEM.test(r.trimStart()));
+  return empty.some(Boolean) && item.some((is, i) => is && !empty[i]);
+}
 const HEADING = /^#{1,6}(?:[ \t]+|$)/;
 /** A line that would make the paragraph above it a setext heading. */
 const UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
@@ -1016,6 +1051,15 @@ function planIndent(
       })
     ) {
       throw refused(NUMBERED_CHILD);
+    }
+  }
+  if (by === -1) {
+    const next = nextLine(reader, last);
+    if (next !== undefined && quoteDepth(text, next) === depth) {
+      const after = unquoted(text, next);
+      if ((/^[ \t]*/.exec(after)?.[0].length ?? 0) === lead && readsOtherwise(after)) {
+        throw refused(EMPTIED_CHILD);
+      }
     }
   }
   assertPlace(reader, last);
