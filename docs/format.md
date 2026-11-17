@@ -3299,8 +3299,7 @@ person's pending mark.
 bare marker) or in indented code above a list line is read with micromark first. If the file would
 read differently than the newest view, the unit is replaced whole instead, together with the block
 after it where nothing else holds the edit, and an HTML block's or a bare marker's closer is written
-after a blank line (#597, #588, part of #601). The shape in #601 where another block's mark stands
-beside the edit is not covered.
+after a blank line (#597, #588, part of #601). The second shape in #601 is not covered.
 
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
 bullet outside), a list, a code block or a table. The edit is written as the replacement of the
