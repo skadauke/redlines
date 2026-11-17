@@ -5,6 +5,7 @@ import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
+import { trackedFormat } from './formatting.ts';
 import { tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
@@ -15,11 +16,13 @@ import {
   bo,
   blockLeaves,
   bodyOf,
+  claudeAda,
   context,
   exactly,
   expectEveryOrderAlike,
   expectInOrder,
   expectNoDecisionRefused,
+  expectPointHolds,
   file,
   thread,
 } from './test-helpers.ts';
@@ -644,5 +647,51 @@ describe('a pending format change in a moved or deleted row', () => {
     expect(trim(restored)).toContain('| Pears  | 5     |');
     expect(trim(restored)).not.toContain('**');
     expect(trim(originalView(deleted).text)).toBe(trim(restored));
+  });
+});
+
+describe('the mark of an alignment change after a closer that ends a header with no closing pipe (#970)', () => {
+  it('stands after the closer, where it ends the text of the cell', () => {
+    for (const body of ['| b\n| --\n| x y\n| b', '| b\r\n| --\r\n| x y\r\n| b']) {
+      const start = file(body);
+      const header = readTables(start, parse(start))[0]?.rows[0]?.cells[0];
+      const bold = applyChanges(
+        start,
+        trackedFormat(
+          start,
+          { from: header?.textFrom ?? 0, to: header?.textTo ?? 0 },
+          { kind: 'inline', format: 'bold', on: true },
+          context(claudeAda, IDS),
+        ).changes,
+      );
+      const table = readTables(bold, parse(bold))[0]?.from ?? 0;
+      const op: TableOp = { kind: 'align', table, cols: [0], align: 'center' };
+      const aligned = applyChanges(
+        bold,
+        tableEdit(bold, op, context(claudeAda, IDS.slice(1))).changes,
+      );
+      expect(trim(aligned).split(/\r?\n/)[0]).toMatch(/<!--\/k3x9--><!--fmt \w{4} align=[^>]*-->/);
+      expectPointHolds(body, aligned);
+      expectEveryOrderAlike(body, aligned, exactly);
+    }
+  });
+
+  it('stands after the closer of an insertion that ends in a space, past the space', () => {
+    const start = file('| b\n| --\n| x y\n| b');
+    const cell = readTables(start, parse(start))[0]?.rows[0]?.cells[0];
+    const at = cell?.textTo ?? 0;
+    const typed = applyChanges(
+      start,
+      trackedEdit(start, { from: at, to: at, insert: 'q ' }, context(ada, IDS)),
+    );
+    const table = readTables(typed, parse(typed))[0]?.from ?? 0;
+    const op: TableOp = { kind: 'align', table, cols: [0], align: 'center' };
+    const aligned = applyChanges(
+      typed,
+      tableEdit(typed, op, context(claudeAda, IDS.slice(1))).changes,
+    );
+    expect(trim(aligned).split(/\r?\n/)[0]).toMatch(/<!--\/k3x9--><!--fmt \w{4} align=[^>]*-->/);
+    expectPointHolds('space', aligned);
+    expectEveryOrderAlike('space', aligned, exactly);
   });
 });
