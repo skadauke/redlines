@@ -133,10 +133,10 @@ describe('the addresses that open (design §5.2)', () => {
     expect(openableAddress('www.')).toBeNull();
   });
 
-  it('opens a bare or angle-bracket email as mailto, as a copy writes it', () => {
-    expect(openableAddress('ada@example.org')).toBe('mailto:ada@example.org');
-    expect(openableAddress('ada@')).toBeNull();
-    expect(openableAddress('a@b@c')).toBeNull();
+  it('opens an email only as an explicit mailto: in a destination', () => {
+    expect(openableAddress('mailto:a@b.co')).toBe('mailto:a@b.co');
+    expect(openableAddress('logo@2x.png')).toBeNull();
+    expect(openableAddress('ada@example.org')).toBeNull();
   });
 
   it('encodes a space after the host, which a <...> destination may hold', () => {
@@ -260,7 +260,8 @@ describe('⌘-click on a link (design §5.2)', () => {
     const editor = load(
       [
         '[![build](badge.svg)](https://ci.example) and ada@example.org and <grace@example.org>',
-        'and [spaced](<https://example.org/a b>).',
+        'and [spaced](<https://example.org/a b>) and [file](logo@2x.png) and <a@b.co> and',
+        '[mail-me](mailto:a@b.co).',
         '',
       ].join('\n'),
       { openLink: open },
@@ -271,11 +272,17 @@ describe('⌘-click on a link (design §5.2)', () => {
     commandClick(linkNamed(editor, 'ada@example.org'));
     commandClick(linkNamed(editor, 'grace@example.org'));
     commandClick(linkNamed(editor, 'spaced'));
+    // A relative file is left to the editor: nothing opens.
+    commandClick(linkNamed(editor, 'file'));
+    commandClick(linkNamed(editor, 'a@b.co'));
+    commandClick(linkNamed(editor, 'mail-me'));
     expect(open.mock.calls.map(([url]) => url)).toEqual([
       'https://ci.example',
       'mailto:ada@example.org',
       'mailto:grace@example.org',
       'https://example.org/a%20b',
+      'mailto:a@b.co',
+      'mailto:a@b.co',
     ]);
   });
 

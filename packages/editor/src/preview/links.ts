@@ -23,7 +23,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
-import { bare, destination } from '../clipboard/copy-html.ts';
+import { destination } from '../clipboard/copy-html.ts';
 
 /** What an address has after its scheme: no white space or control character. */
 const REST = '[^\\s\\u0000-\\u001f\\u007f-\\u009f]+';
@@ -36,18 +36,23 @@ const AFTER_HOST = /^(https?:\/\/[^\s/?#]+)([/?#][^]*)?$/i;
 /**
  * The address to open for a link's destination, or null when it isn't one the page may open: only
  * `http`, `https` and `mailto`, with something after the scheme and no white space. A `www.` address
- * is the web's and a bare email the mail's, as a copy writes them (`https://`, `mailto:`: `bare` in
- * clipboard/copy-html.ts); a space in the path of an address, which a `<...>` destination may hold,
- * is written `%20`. Anything else, `javascript:`, `data:`, `file:`, another scheme, and a link to
- * another document, is null.
+ * is the web's, opened over `https` as a copy writes it; a space in the path of an address, which a
+ * `<...>` destination may hold, is written `%20`. Only an explicit `mailto:` is mail here: a bare
+ * email is mail only as an autolink (`mailed`), and `[x](logo@2x.png)` is a relative link.
+ * Anything else, `javascript:`, `data:`, `file:`, another scheme, and a link to another document,
+ * is null.
  */
 export function openableAddress(href: string): string | null {
   const written = href.trim();
-  // `www.` alone is no address, whatever `bare` makes of it.
-  let address = /^www\./i.test(written) && !WWW.test(written) ? written : bare(written);
+  const address = WWW.test(written) ? `https://${written}` : written;
   const parts = AFTER_HOST.exec(address);
-  if (parts) address = `${parts[1]}${(parts[2] ?? '').replaceAll(' ', '%20')}`;
-  return ADDRESS.test(address) ? address : null;
+  const spaced = parts ? `${parts[1]}${(parts[2] ?? '').replaceAll(' ', '%20')}` : address;
+  return ADDRESS.test(spaced) ? spaced : null;
+}
+
+/** An autolink's or bare address's destination, which is mail when it is an email (as a copy has it). */
+function mailed(address: string): string {
+  return /^[^\s@/:]+@[^\s@/:]+$/.test(address) ? `mailto:${address}` : address;
 }
 
 /** A reference label as definitions and uses agree on it. */
@@ -119,12 +124,12 @@ export function linkDestination(state: EditorState, pos: number): string | null 
     }
     if (node.name === 'Autolink') {
       const url = node.getChild('URL');
-      return url ? destination(state.sliceDoc(url.from, url.to)) : null;
+      return url ? mailed(destination(state.sliceDoc(url.from, url.to))) : null;
     }
     // The climb goes on, to a link around it if there is one.
     if (node.name === 'URL' && !bare && node.parent?.name !== 'Autolink') bare = node;
   }
-  return bare ? destination(state.sliceDoc(bare.from, bare.to)) : null;
+  return bare ? mailed(destination(state.sliceDoc(bare.from, bare.to))) : null;
 }
 
 /** A link under the pointer: the drawn element, where its text starts, and the address it opens. */

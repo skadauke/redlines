@@ -557,7 +557,7 @@ README-style snippets) holds the editor to it.
 address in the default browser (Ctrl-click off a Mac), and a pointer at rest on a link shows its
 address in a hint after the pause that the title bar's hints make; with ⌘ held, the pointer over a
 link is a pointer. Only `http`, `https` and `mailto` addresses open, and `www.` ones (opened over `https`, as a copy writes
-them) and bare emails (opened as `mailto:`), which GitHub's autolinks read as the web's and the mail's; a
+them) and emails written as autolinks (opened as `mailto:`; in `[x](logo@2x.png)` it is a relative link), which GitHub's autolinks read as the web's and the mail's; a
 space in the path of a `<...>` destination opens as `%20`, and an image that is a link's text opens it too: the limit of a copy, which turns `javascript:` and its kin into plain
 text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
 the address again before it runs the system's opener, and the website's demos open a new tab. A
