@@ -21,7 +21,7 @@ import {
 import { decodePayload, EditError, type FormatOp, OUTDENT_NUMBERED_CHILD } from '@redlines/format';
 import { onlyHidden } from '../tracked/decorations.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
-import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
+import { blockFormat, trackingField } from '../tracked/typing.ts';
 import {
   blankOf,
   continuation,
@@ -112,9 +112,9 @@ function formatted(
   stands?: string,
 ): KeyEdit | null {
   try {
-    const changes = blockFormatChanges(state, { from: at, to: at }, op);
+    const { changes, intent } = blockFormat(state, { from: at, to: at }, op);
     if (!changes.length) return null;
-    return { changes, selection: state.selection, userEvent, final: true };
+    return { changes, selection: state.selection, userEvent, final: true, intent };
   } catch (error) {
     if (error instanceof EditError) {
       if (stands !== undefined && error.message === stands) {
