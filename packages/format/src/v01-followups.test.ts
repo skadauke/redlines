@@ -40,10 +40,31 @@ describe("#11: the ledger's YAML (format §5.5)", () => {
     expect(parse(`Hello\n\n${written}`).ledger.extra).toEqual({ 'a\nb': '1' });
   });
 
-  it('reads a version that is not 1 with a warning, and writes the ledger as version 1', () => {
-    const read = parse(file('Hello').replace('version: 1', 'version: 7'));
-    expect(read.warnings.map((w) => w.message)).toEqual(['Unsupported ledger version 7']);
-    expect(serializeLedger(read.ledger)).toContain('\nversion: 1\n');
+  it('reads a version that is lower or not a number with a warning, and writes version 1', () => {
+    for (const bad of ['0', 'abc']) {
+      const read = parse(file('Hello').replace('version: 1', `version: ${bad}`));
+      expect(read.warnings.map((w) => w.message)).toEqual([`Unsupported ledger version ${bad}`]);
+      expect(serializeLedger(read.ledger)).toContain('\nversion: 1\n');
+    }
+  });
+
+  it("never downgrades a later version's number, keeps its fields, and warns once", () => {
+    const text = file('Hello')
+      .replace('version: 1', 'version: 7\nnew-setting: on')
+      .replace('  name:', '  shoe: 9\n  name:');
+    const read = parse(text);
+    expect(read.warnings).toHaveLength(1);
+    expect(read.warnings[0]?.message).toContain('version 7');
+    expect(read.ledger.extra).toMatchObject({ version: '7', 'new-setting': 'on' });
+    const written = serializeLedger(read.ledger);
+    expect(written).toContain('\nversion: 7\n');
+    expect(written).not.toContain('version: 1');
+    expect(written.match(/^version:/gm)).toHaveLength(1);
+    expect(written).toContain('new-setting: "on"');
+    // A second read of what was written warns the same once, and writes the same again.
+    const again = parse(`Hello\n\n${written}`);
+    expect(again.warnings).toHaveLength(1);
+    expect(serializeLedger(again.ledger)).toBe(written);
   });
 
   it.each([

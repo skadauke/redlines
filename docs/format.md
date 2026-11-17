@@ -3794,7 +3794,11 @@ frontmatter:
 | `frontmatter` | Pending changes to the YAML front matter (§3.8)                                                    |
 
 Defaults are never written. Unknown keys are kept and ignored, so later versions can add fields.
-A ledger whose `version` is not `1` is read with a warning, and the next write puts `version: 1`.
+A ledger whose `version` is a whole number above `1` was written by a later Redlines. It is never
+downgraded: it is read with one warning (not one for each field it has that this version doesn't
+know), its number and its unknown fields are kept as they were read, and every write puts the same
+`version` back. A `version` that is `0`, or not a number, is read with a warning, and the next write
+puts `version: 1`.
 
 ### 5.3 People
 
