@@ -86,7 +86,12 @@ function found(
       const header = t.rows[0];
       if (!header) return false;
       const a = view.map.fromSource(header.from);
-      return view.text.slice(Math.max(0, a - before.length), a) === before;
+      // The same number of columns, and the same words in front, or the start of the file.
+      return (
+        t.rows[0]!.cells.length === shape.cols.length &&
+        (before.length >= 3 || a < 3) &&
+        view.text.slice(Math.max(0, a - before.length), a) === before
+      );
     });
     if (there.length === 1) table = there[0];
   }
@@ -104,6 +109,11 @@ function indexOf<T>(
   if (old === undefined) return null;
   const hits = now.flatMap((item, j) => (same(item, old) ? [j] : []));
   if (!hits.length) return null;
+  const before = was.flatMap((item, j) => (same(item, old) ? [j] : []));
+  // Rows or columns that read alike (empty headers, say) can't be told apart by words: when their
+  // number changed, which one was meant isn't known, so none is chosen.
+  if (before.length > 1 && before.length !== hits.length) return null;
+  if (before.length > 1) return hits[before.indexOf(i)] ?? null;
   return hits.reduce((a, b) => (Math.abs(b - i) < Math.abs(a - i) ? b : a));
 }
 
@@ -127,7 +137,7 @@ function placer(was: Shape, now: { rows: RowKey[]; cols: string[] }) {
       if (j === null) lost();
       else out.push(j);
     }
-    return out.sort((a, b) => a - b);
+    return [...new Set(out)].sort((a, b) => a - b);
   };
   // A boundary: in front of item `b` of `count`, which is the end when `b` is past the last.
   const boundary = (b: number, count: number, map: (i: number) => number | null, size: number) => {
@@ -356,6 +366,14 @@ export function rederiveSteps(state: EditorState, origin: string, intent: StepsI
           ? rederiveTable(now, anchorTable(start, step))
           : rederiveIntent(now, anchorIntent(start, step));
       if (!done.ok) return done;
+      // A step of the table that was lost leaves the later ones with nothing to go on: the whole
+      // paste is not made, and that is said, not half of it.
+      if (step.kind === 'table' && done.changes.empty) {
+        return none(
+          state.doc.length,
+          'The table you pasted into was changed by someone else, so your paste was not made.',
+        );
+      }
       notices.push(...done.notices);
       total = total.compose(done.changes);
       now = now.update({ changes: done.changes, filter: false }).state;
