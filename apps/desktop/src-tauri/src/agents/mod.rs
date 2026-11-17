@@ -471,7 +471,7 @@ mod tests {
         let known = temp.join("known");
         std::fs::create_dir_all(&known).unwrap();
         let claude = known.join("claude");
-        std::fs::write(&claude, format!("#!/bin/sh\nexec {target} \"$@\"\n")).unwrap();
+        std::fs::write(&claude, format!("#!/bin/sh\nexec '{target}' \"$@\"\n")).unwrap();
         std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
         let environment = vec![(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))];
         let programs = Programs::new(
