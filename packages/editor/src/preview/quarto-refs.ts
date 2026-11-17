@@ -3,7 +3,9 @@
 // where the target exists in the file, and stay plain text where it doesn't. A press jumps to the
 // target. The source shows while the caret is on the token, as any syntax does. The file's labels
 // come from `{#fig-x}` attributes (images, tables, divs, headings, equations) and `#| label:` lines
-// of chunks, numbered in the order of the document; sections are numbered by their headings.
+// of chunks, numbered in the order of the document; sections are numbered by their headings, and
+// only where the file asks for it (`number-sections: true`), as Quarto does. A file is read once for
+// each text it has, and again only when its text changes.
 
 import {
   type EditorState,
@@ -29,8 +31,10 @@ const KINDS: Readonly<Record<string, string>> = {
 const TOKEN = /(?<![\w@])@((?:fig|tbl|eq|lst|sec)-[\w][\w:.-]*)(?<![:.-])/g;
 const ATTRIBUTE_ID = /\{[^}\n]*?#((?:fig|tbl|eq|lst|sec)-[\w][\w:.-]*)(?<![:.-])[^}\n]*\}/g;
 const CHUNK_LABEL = /^#\|\s*label:\s*((?:fig|tbl|eq|lst)-[\w][\w:.-]*)\s*$/;
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE = /^[ \t]*(`{3,}|~{3,})/;
 const HEADING = /^(#{1,6})[ \t]+\S/;
+const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
+const UNNUMBERED = /\{[^}]*(?:\.unnumbered|\s-)[^}]*\}[ \t]*$/;
 
 /** A target: its label's text, "Figure 2", and where it is in the document. */
 export interface Target {
@@ -38,33 +42,84 @@ export interface Target {
   pos: number;
 }
 
-/** The targets of a document by their label (`fig-plot`), the first of each label. */
-export function targetsOf(doc: Text): Map<string, Target> {
+/** A reference in the text: where it is, and the label it names. */
+interface Reference {
+  from: number;
+  to: number;
+  label: string;
+}
+
+interface Read {
+  targets: Map<string, Target>;
+  references: Reference[];
+}
+
+const kept = new WeakMap<Text, Read>();
+
+/** `text` with the HTML comments (the markers and the ledger) and inline code blanked, in its place. */
+function blanked(text: string, comment: { open: boolean }): string {
+  let out = '';
+  let at = 0;
+  while (at < text.length) {
+    if (comment.open) {
+      const end = text.indexOf('-->', at);
+      if (end < 0) {
+        out += ' '.repeat(text.length - at);
+        return out;
+      }
+      out += ' '.repeat(end + 3 - at);
+      at = end + 3;
+      comment.open = false;
+    } else {
+      const start = text.indexOf('<!--', at);
+      if (start < 0) {
+        out += text.slice(at);
+        break;
+      }
+      out += text.slice(at, start);
+      at = start;
+      comment.open = true;
+    }
+  }
+  return out.replace(/(`+)[^`]*?\1/g, (span) => ' '.repeat(span.length));
+}
+
+function read(doc: Text): Read {
+  const known = kept.get(doc);
+  if (known) return known;
   const targets = new Map<string, Target>();
+  const references: Reference[] = [];
   const counts: Record<string, number> = {};
   const levels = [0, 0, 0, 0, 0, 0];
+  const comment = { open: false };
   let code: string | null = null;
-  let front = false;
+  let numbered = false;
+  let n = 1;
+  if (doc.lines > 1 && /^---[ \t]*$/.test(doc.line(1).text)) {
+    for (let i = 2; i <= doc.lines; i++) {
+      const text = doc.line(i).text;
+      if (/^(?:---|\.\.\.)[ \t]*$/.test(text)) {
+        n = i + 1;
+        break;
+      }
+      if (/^number-sections:\s*true\b/.test(text)) numbered = true;
+    }
+    // Front matter that is never closed is not front matter.
+    if (n === 1) numbered = false;
+  }
   const add = (label: string, kind: string, pos: number, number: string) => {
     if (!targets.has(label)) targets.set(label, { text: `${KINDS[kind]} ${number}`, pos });
   };
   const next = (kind: string) => (counts[kind] = (counts[kind] ?? 0) + 1);
-  for (let n = 1; n <= doc.lines; n++) {
+  for (; n <= doc.lines; n++) {
     const line = doc.line(n);
-    const { text } = line;
-    if (n === 1 && /^---[ \t]*$/.test(text)) {
-      front = true;
-      continue;
-    }
-    if (front) {
-      if (/^(?:---|\.\.\.)[ \t]*$/.test(text)) front = false;
-      continue;
-    }
-    const fence = FENCE.exec(text);
+    const text = blanked(line.text, comment);
+    // A fence is read from the line as written: the inline code that `blanked` looks for would eat it.
+    const fence = FENCE.exec(line.text);
     if (code !== null) {
       if (fence?.[1] && fence[1][0] === code[0] && fence[1].length >= code.length) code = null;
       else {
-        const chunk = CHUNK_LABEL.exec(text);
+        const chunk = CHUNK_LABEL.exec(line.text);
         if (chunk?.[1]) {
           const kind = chunk[1].slice(0, chunk[1].indexOf('-'));
           add(chunk[1], kind, line.from, String(next(kind)));
@@ -76,10 +131,16 @@ export function targetsOf(doc: Text): Map<string, Target> {
       code = fence[1];
       continue;
     }
+    // A heading, by `#`s or by its underline; the underline's line is no heading of its own.
+    let depth = -1;
     const heading = HEADING.exec(text);
+    if (heading?.[1]) depth = heading[1].length - 1;
+    else if (text.trim() !== '' && n < doc.lines) {
+      const under = SETEXT.exec(doc.line(n + 1).text);
+      if (under?.[1]) depth = under[1].startsWith('=') ? 0 : 1;
+    }
     let sectionNumber = '';
-    if (heading?.[1] && !/\{[^}]*(?:\.unnumbered|\s-)[^}]*\}\s*$/.test(text)) {
-      const depth = heading[1].length - 1;
+    if (depth >= 0 && numbered && !UNNUMBERED.test(text)) {
       levels[depth] = (levels[depth] ?? 0) + 1;
       for (let i = depth + 1; i < levels.length; i++) levels[i] = 0;
       sectionNumber = levels.slice(0, depth + 1).join('.');
@@ -91,8 +152,21 @@ export function targetsOf(doc: Text): Map<string, Target> {
         if (sectionNumber !== '') add(label, kind, line.from, sectionNumber);
       } else add(label, kind, line.from, String(next(kind)));
     }
+    if (text.includes('@')) {
+      for (const found of text.matchAll(TOKEN)) {
+        const from = line.from + found.index;
+        references.push({ from, to: from + found[0].length, label: found[1] ?? '' });
+      }
+    }
   }
-  return targets;
+  const made = { targets, references };
+  kept.set(doc, made);
+  return made;
+}
+
+/** The targets of a document by their label (`fig-plot`), the first of each label. */
+export function targetsOf(doc: Text): Map<string, Target> {
+  return read(doc).targets;
 }
 
 class RefWidget extends WidgetType {
@@ -133,48 +207,18 @@ class RefWidget extends WidgetType {
 export function refDecorations(state: EditorState): DecorationSet {
   if (state.facet(dialectFacet) !== 'pandoc') return Decoration.none;
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
-  const { doc } = state;
-  if (!doc.sliceString(0).includes('@')) return Decoration.none;
+  const { targets, references } = read(state.doc);
+  if (targets.size === 0 || references.length === 0) return Decoration.none;
   const ledger = state.field(parsedField, false)?.ledgerRange;
-  const targets = targetsOf(doc);
-  if (targets.size === 0) return Decoration.none;
   const ranges: Range<Decoration>[] = [];
-  let code: string | null = null;
-  let front = false;
-  for (let n = 1; n <= doc.lines; n++) {
-    const line = doc.line(n);
-    const { text } = line;
-    if (n === 1 && /^---[ \t]*$/.test(text)) {
-      front = true;
-      continue;
-    }
-    if (front) {
-      if (/^(?:---|\.\.\.)[ \t]*$/.test(text)) front = false;
-      continue;
-    }
-    const fence = FENCE.exec(text);
-    if (code !== null) {
-      if (fence?.[1] && fence[1][0] === code[0] && fence[1].length >= code.length) code = null;
-      continue;
-    }
-    if (fence?.[1]) {
-      code = fence[1];
-      continue;
-    }
-    if (!text.includes('@')) continue;
-    if (ledger && line.from >= ledger.from) break;
-    // Inline code is text.
-    const masked = text.replace(/(`+)[^`]*?\1/g, (span) => ' '.repeat(span.length));
-    for (const found of masked.matchAll(TOKEN)) {
-      const target = targets.get(found[1] ?? '');
-      if (!target) continue;
-      const from = line.from + found.index;
-      const to = from + found[0].length;
-      if (state.selection.ranges.some((range) => range.from <= to && range.to >= from)) continue;
-      ranges.push(
-        Decoration.replace({ widget: new RefWidget(target.text, target.pos) }).range(from, to),
-      );
-    }
+  for (const { from, to, label } of references) {
+    const target = targets.get(label);
+    if (!target) continue;
+    if (ledger && from >= ledger.from) break;
+    if (state.selection.ranges.some((range) => range.from <= to && range.to >= from)) continue;
+    ranges.push(
+      Decoration.replace({ widget: new RefWidget(target.text, target.pos) }).range(from, to),
+    );
   }
   return Decoration.set(ranges, true);
 }

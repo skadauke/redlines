@@ -16,6 +16,10 @@ afterEach(() => {
 });
 
 const DOC = [
+  '---',
+  'number-sections: true',
+  '---',
+  '',
   '# Intro {#sec-intro}',
   '',
   '## Method {#sec-method}',
@@ -80,6 +84,29 @@ describe('the targets of a document', () => {
       'eq-sum': 'Equation 1',
       'fig-second': 'Figure 2',
     });
+  });
+});
+
+describe('what a document says of its targets', () => {
+  it('numbers sections only where the file asks, and reads setext headings', () => {
+    const plain = editorAt('# One {#sec-one}\n\nSee @sec-one.\n', 0);
+    expect(targetsOf(plain.view.state.doc).size).toBe(0);
+    const text =
+      '---\nnumber-sections: true\n---\n\nOne {#sec-one}\n===\n\nTwo {#sec-two}\n---\n\n# Three {#sec-three}\n';
+    const setext = editorAt(text, 0);
+    const found = targetsOf(setext.view.state.doc);
+    expect(found.get('sec-one')?.text).toBe('Section 1');
+    expect(found.get('sec-two')?.text).toBe('Section 1.1');
+    expect(found.get('sec-three')?.text).toBe('Section 2');
+  });
+
+  it('reads no target or reference in a marker or in code', () => {
+    const text =
+      'See <!--del k3x9 {#fig-gone} @fig-gone-->@fig-real and `{#fig-code}` @fig-code.\n\n![x](x.png){#fig-real}\n';
+    const editor = editorAt(text, text.length);
+    const found = targetsOf(editor.view.state.doc);
+    expect([...found.keys()]).toEqual(['fig-real']);
+    expect(chips(editor)).toEqual([['@fig-real', 'Figure 1']]);
   });
 });
 
