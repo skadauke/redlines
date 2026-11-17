@@ -16,6 +16,7 @@ import {
   spliceRepairs,
   workingLedger,
 } from './edit-support.ts';
+import { changesBetween } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { formatReader } from './format-reader.ts';
@@ -413,6 +414,43 @@ const isRowMove = (mark: MarkRange) => isRowMark(mark) && mark.entry.move !== un
  * pending in it decided already, which a decision over the same lines could not do together.
  */
 function decide(
+  text: string,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  action: Action,
+): TextChange[] {
+  try {
+    return decideOnce(text, parsed, marks, action);
+  } catch (error) {
+    // A replacement that gives its old text back with other people's marks in it, where those marks
+    // can't stand at the top level as they are (a deletion line with typed text after it): the
+    // decision is widened to the unit, and the marks in the old text are rejected with it (#936).
+    const inside = action === 'reject' ? marks.flatMap((mark) => payloadIdsOf(parsed, mark)) : [];
+    if (
+      !(error instanceof EditError) ||
+      error.code !== 'no-legal-placement' ||
+      inside.length === 0
+    ) {
+      throw error;
+    }
+    try {
+      let current = text;
+      for (const held of inside) {
+        const now = parse(current);
+        if (!findInPayload(now, held)) continue;
+        current = applyChanges(current, decideById(current, now, held, 'reject'));
+      }
+      const now = parse(current);
+      const left = marks.flatMap((mark) => now.marks.filter((m) => m.id === mark.id));
+      current = applyChanges(current, decideOnce(current, now, left, action));
+      return changesBetween(text, current);
+    } catch {
+      throw error;
+    }
+  }
+}
+
+function decideOnce(
   text: string,
   parsed: Parsed,
   marks: readonly MarkRange[],
