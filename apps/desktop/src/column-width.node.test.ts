@@ -39,9 +39,11 @@ function minWidths(text: string): string[] {
     // A rule for something inside the column (`.cm-content .x`) is not the column's own.
     const own = (selector ?? '')
       .split(',')
-      .some((one) => /(^|[\s'"`])\.cm-content\s*(['"`:]|$)/.test(one.trim()));
+      .some((one) => /(^|[\s'"`])\.cm-content\s*(['"`:.[>+~]|$)/.test(one.trim()));
     if (!own) continue;
-    for (const [, value] of (body ?? '').matchAll(/(?:min-width|minWidth)\s*:\s*([^;,}\n]+)/g)) {
+    for (const [, value] of (body ?? '').matchAll(
+      /(?:min-width|minWidth|min-inline-size|minInlineSize)\s*:\s*([^;,}\n]+)/g,
+    )) {
       found.push((value ?? '').trim().replace(/^['"`]|['"`]$/g, ''));
     }
   }
@@ -53,7 +55,7 @@ describe('the column keeps no minimum width', () => {
     const all = sources().flatMap((file) =>
       minWidths(readFileSync(new URL(file, repo), 'utf8')).map((value) => `${file}: ${value}`),
     );
-    expect(all.filter((line) => !/: 0(px)?$/.test(line))).toEqual([]);
+    expect(all.filter((line) => !/: 0(px|em|rem|%)?( !important)?$/.test(line))).toEqual([]);
   });
 
   it('finds the rule it looks for (the reader reads the editor theme)', () => {

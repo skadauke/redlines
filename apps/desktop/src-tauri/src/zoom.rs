@@ -349,7 +349,9 @@ mod tests {
         let literal = &literal[..literal.find(']').expect("its end")];
         let theirs: Vec<f64> = literal
             .split(',')
-            .map(|rung| rung.trim().parse().expect("a number"))
+            .map(str::trim)
+            .filter(|rung| !rung.is_empty())
+            .map(|rung| rung.parse().expect("a number"))
             .collect();
         assert_eq!(theirs, LADDER);
         assert!(is_rung(1.25));
