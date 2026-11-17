@@ -127,9 +127,32 @@ function copiedText(text: string, state: EditorState): string {
   // Text from elsewhere than the selection, such as a dragged widget, is read on its own.
   if (written !== text) return plainText(text);
   const { text: shown, map } = newestView(state.doc.toString());
-  return ranges
+  const newestText = ranges
     .map(({ from, to }) => shown.slice(map.fromSource(from), map.fromSource(to)))
     .join(state.lineBreak);
+  // A selection of nothing but pending deleted text copies what is seen: the struck text, as plain
+  // text, with no marks (#35). Clean shows no deletion, and copies nothing.
+  if (newestText === '' && state.field(viewModeField) !== 'clean') {
+    return struckText(state, ranges) ?? newestText;
+  }
+  return newestText;
+}
+
+/**
+ * The old text of the pending deletions that `ranges` hold, in order, as plain text; null when they
+ * hold none.
+ */
+function struckText(state: EditorState, ranges: readonly Range[]): string | null {
+  const { marks } = parse(state.doc.toString());
+  const parts: string[] = [];
+  for (const { from, to } of ranges) {
+    for (const mark of marks) {
+      if (mark.kind !== 'del') continue;
+      const open = mark.segments[0]?.open;
+      if (open && open.from < to && from < open.to) parts.push(mark.payload ?? '');
+    }
+  }
+  return parts.length ? parts.join(state.lineBreak) : null;
 }
 
 const raw = (state: EditorState) => state.field(viewModeField) === 'raw';
