@@ -34,27 +34,31 @@ function body(file: string): string {
  * marks accepted against the newest view, all rejected against the original, and the structural
  * warnings of the parse.
  */
-export function readProblems(file: string): Set<string> {
-  const found = new Set<string>();
+export function readProblems(file: string): Map<string, string> {
+  const found = new Map<string, string>();
   const newest = newestView(file).text;
-  if (read(body(file)) !== read(newest)) found.add('render');
+  if (read(body(file)) !== read(newest)) found.set('render', read(body(file)));
   const decided = (changes: () => ReturnType<typeof acceptAll>, view: string, name: string) => {
     try {
-      if (read(body(applyChanges(file, changes()))) !== read(view)) found.add(name);
+      const got = read(body(applyChanges(file, changes())));
+      if (got !== read(view)) found.set(name, got);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
-      found.add(name);
+      found.set(name, 'refused');
     }
   };
   decided(() => acceptAll(file), newest, 'accepted');
   decided(() => rejectAll(file), originalView(file).text, 'rejected');
-  for (const warning of parse(file).warnings) found.add(`warning:${warning.code}`);
+  for (const warning of parse(file).warnings)
+    found.set(`warning:${warning.code}:${warning.id ?? ''}`, '');
   return found;
 }
 
 /** Whether `after` reads wrongly in something that `before` read rightly. */
 export function readsWorse(before: string, after: string): boolean {
   const had = readProblems(before);
-  for (const problem of readProblems(after)) if (!had.has(problem)) return true;
+  // A problem the file had is the same one only where it reads the same.
+  for (const [problem, reading] of readProblems(after))
+    if (had.get(problem) !== reading) return true;
   return false;
 }
