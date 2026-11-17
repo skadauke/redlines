@@ -338,6 +338,12 @@ impl Registry {
                     }
                     continue;
                 }
+                if routed.to_open.contains(&file.path)
+                    || front.files.iter().any(|taken| taken.path == file.path)
+                {
+                    // The same file twice in one batch opens one window.
+                    continue;
+                }
                 if !front.untouched() {
                     routed.to_open.push(file.path);
                     continue;
@@ -1097,6 +1103,14 @@ mod tests {
         assert!(registry.take_files("main").is_empty());
         assert_eq!(registry.holder("/docs/plan.md").as_deref(), Some("doc-2"));
         assert_eq!(registry.holder("/docs/other.md"), None);
+    }
+
+    #[test]
+    fn the_same_file_twice_in_one_batch_opens_one_window() {
+        let mut registry = registry_of(&["main"]);
+        registry.report("main", Some("/docs/old.md".to_owned()), false);
+        let routed = registry.route(vec![allowed("/docs/plan.md"), allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_open, ["/docs/plan.md"]);
     }
 
     #[test]
