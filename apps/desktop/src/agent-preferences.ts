@@ -15,6 +15,7 @@ import {
   type SetupResult,
   type SkillInstalled,
   type SkillState,
+  type GatewayProbe,
   type TailscaleStatus,
 } from '@redlines/agents';
 import type { HostProcesses } from '@redlines/plugin-api';
@@ -117,6 +118,16 @@ export const tailscale = {
   status: () => invoke<TailscaleStatus>('tailscale_status'),
   openApp: () => invoke<void>('tailscale_open_app'),
   download: () => invoke<void>('tailscale_download'),
+};
+
+/**
+ * Whether an OpenClaw Gateway answers at an address, which the person typed or picked (agents/
+ * gateway.rs): the app opens its WebSocket, reads its greeting and closes, and sends nothing.
+ * `suffix` completes a bare computer name with the Tailscale network's name.
+ */
+export const gateway = {
+  probe: (address: string, suffix: string | null) =>
+    invoke<GatewayProbe>('gateway_probe', { address, suffix }),
 };
 
 /**

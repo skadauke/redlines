@@ -92,6 +92,7 @@ const COMMANDS: &[&str] = &[
     "show_images",
     "skill_install",
     "skill_status",
+    "gateway_probe",
     "tailscale_download",
     "tailscale_open_app",
     "tailscale_status",
