@@ -1110,3 +1110,67 @@ export function throughPipes(
     changes: changes.toSorted((a, b) => a.from - b.from || a.to - b.to),
   };
 }
+
+/**
+ * Whether a marker of a highlight or a comment placed at `at` is in a row that is inserted or
+ * moved and pending, or in front of its mark, where a decision of the row would take it away or
+ * hide the mark (`highlightAgainstRows`'s `hides`).
+ */
+export function inPendingRow(table: TableRead, text: string, at: number): boolean {
+  // Among the deleted rows kept under the table, a marker would hide a row's line.
+  const end = table.deletions.reduce(
+    (last, deletion) => Math.max(last, deletion.mark.segments[0]?.open.to ?? last),
+    table.to,
+  );
+  return (
+    (at > table.to && at <= end) ||
+    table.rows.some((row) => row.insertion !== null && row.from <= at && at <= row.to) ||
+    highlightAgainstRows(table, text, { from: at, to: at }) === 'hides'
+  );
+}
+
+/**
+ * The ranges that a highlight or a comment on `wanted` is widened to, for a table with a row
+ * inserted or moved and pending, smallest first: each end that is in a row is taken to the text of a
+ * row that is not pending, above for the start and below for the end, so that no decision of a row
+ * can take a marker away (format §3.12). An end outside the table stays where it is. The caller
+ * tries each, as the places of the markers may still fall in a pending row.
+ */
+export function rowWidenings(table: TableRead, text: string, wanted: Range): Range[] {
+  const rowOf = (at: number) => table.rows.findIndex((row) => row.from <= at && at <= row.to);
+  // The text of a row, between its outer pipes: where its first marker may start, and its last end.
+  const span = (index: number): Range => {
+    const row = table.rows[index] as TableRowRead;
+    const line = text.slice(row.from, row.to);
+    const first = line.search(/[^\s|]/);
+    const last = line.search(/[^\s|][\s|]*$/);
+    return { from: row.from + Math.max(first, 0), to: row.from + Math.max(last, 0) + 1 };
+  };
+  const a = rowOf(wanted.from);
+  const b = rowOf(wanted.to);
+  const froms = [wanted.from];
+  if (a !== -1) {
+    for (let i = a; i >= 0; i--) {
+      if (table.rows[i]?.insertion === null) froms.push(span(i).from);
+    }
+  }
+  const tos = [wanted.to];
+  if (b !== -1) {
+    for (let i = b; i < table.rows.length; i++) {
+      if (table.rows[i]?.insertion === null) tos.push(span(i).to);
+    }
+  }
+  // Last: past the table, to the line of text before it or after it, where its rows have no place.
+  if (a !== -1) {
+    const before = text.slice(0, table.from).replace(/\s+$/, '');
+    if (before !== '') froms.push(before.lastIndexOf('\n') + 1);
+  }
+  if (b !== -1) {
+    const after = /^(?:\s*<!--del [^\n]*-->)*\s*([^\n]+)/.exec(text.slice(table.to));
+    if (after?.[1] && !after[1].startsWith('<!-- redlines')) {
+      tos.push(table.to + after[0].length);
+    }
+  }
+  const pairs = froms.flatMap((from, i) => tos.map((to, j) => ({ from, to, size: i + j })));
+  return pairs.toSorted((x, y) => x.size - y.size).map(({ from, to }) => ({ from, to }));
+}

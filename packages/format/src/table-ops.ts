@@ -1674,6 +1674,35 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
   }
 }
 
+/**
+ * `tableEdit`, and where no tracked write holds the operation (the fine form is refused, and no
+ * unit holds a replacement of the table: an unclosed `<!--` in its header, say), the operation as
+ * Track Changes off writes it, marked `untracked`: the caller asks the person first (format §3.13).
+ *
+ * @throws EditError when the operation is refused as `tableEdit` does and the plain one is too.
+ */
+export function askedTableEdit(
+  text: string,
+  op: TableOp,
+  ctx: EditContext,
+): TableEdit & { untracked?: true } {
+  try {
+    return tableEdit(text, op, ctx);
+  } catch (error) {
+    if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
+    if (NO_MEANING.test(error.message)) throw error;
+    try {
+      return {
+        ...untrackedTableEdit(text, op, { author: ctx.author, random: ctx.random }),
+        untracked: true,
+      };
+    } catch (second) {
+      if (second instanceof EditError) throw error;
+      throw second;
+    }
+  }
+}
+
 const NO_MEANING =
   /^(Delete the table instead\.|The (rows|columns) are already there\.|The columns are already aligned that way\.|A table keeps at least one column\.|There is no such )/;
 

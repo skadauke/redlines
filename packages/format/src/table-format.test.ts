@@ -222,13 +222,20 @@ describe('a table without outer pipes', () => {
     ]);
   });
 
-  it('refuses a row that has no leading pipe, as before', () => {
-    expect(over(bare, [[1, 1]]).refusal).toBe(
-      'A row of a table needs a leading | to hold a format change.',
-    );
-    expect(over(bare, [[1, 0]]).refusal).toBe(
-      'A row of a table needs a leading | to hold a format change.',
-    );
+  it('is written as a replacement of the table, for a row that has no leading pipe', () => {
+    for (const cells of [
+      [[1, 1]],
+      [[1, 0]],
+      [[0, 0]],
+      [
+        [1, 0],
+        [2, 1],
+      ],
+    ] as const) {
+      expectWritten(`bare ${JSON.stringify(cells)}`, bare, cells);
+    }
+    // Beside another person's change in the table.
+    expectWritten('mixed header', mixed, [[0, 0]]);
   });
 });
 
