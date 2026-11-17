@@ -264,6 +264,10 @@ early, must stay on one line, and must not let other tools act on what it contai
   the body out of it still leaves the file CRLF, so the `\n`s of its payloads still mean CRLF. Only
   a tool that gives the body a CRLF where it had none, or takes the ledger away, changes what the
   `\n`s of changes already written mean; a break that is written with its own kind never changes.
+- **A U+FFFF in the text is written as it is.** A tool keeps `\x0a` (an LF in a CRLF file) apart from
+  a U+FFFF of the text by its own means; in the file the two never meet, because `\x0a` is an
+  escape and U+FFFF is the character. A file written before this rule has no raw U+FFFF in a
+  payload (its writer turned one into `\x0a`), so every such file reads as it did.
 - All 271,452 non-empty strings of up to five characters over a 12-character alphabet of the
   characters above round-trip.
 - The ledger uses the same escapes, except that a value may span lines (§5.5).
@@ -1040,6 +1044,11 @@ Report every ward the same way.
 - The callout stands between blank lines (or at the start of the body, or under a heading, a
   thematic break or a closing fence), so that the opener and the closer are blocks of their own.
   The attribute text is syntax, as an alert's type is: a change of it changes no words.
+- A callout that doesn't stand so (text on the line above it or right after it, or no line break
+  after its closing fence) is not refused: the change is written as a whole-block substitution,
+  the old callout struck above the new one, as for code (§3.12), and rejecting gives the old callout
+  back. Where even that can't be written (another person's pending change on the fence line), the
+  editor's menu disables the item and says why; no click is refused.
 - A title that comes from the first heading of the body is text, not an attribute: setting a title
   writes `title="…"`, which Quarto takes before the heading.
 
@@ -4322,6 +4331,14 @@ A file changes only when its content does.
   opener alone on the line before and its closer alone on the line after, each with its line
   break as syntax, as a block change's marks have theirs (§3.3); every view reads the file as it
   was, and deleting the thread gives the bytes back.
+- A comment or a highlight whose range starts or ends on a `:::` fence line is widened, not refused:
+  a range that reaches out of the div, or lies only on its fences, takes the whole div, with its
+  opener alone on the line before the opening fence and its closer alone on the line after the
+  closing fence (on the blank line there, where one follows, so that no line break is added); a
+  range inside the div with an end on a fence, or starting at the first column of the body, is
+  pulled in to the body, its opener alone on the line under the opening fence and its closer alone on
+  the line above the closing fence. Every view reads the file as it was, and deleting the threads
+  gives the bytes back in every order.
 - Fenced divs (`:::`, callouts, columns, tabsets) and cross-references. Pandoc takes a fence only
   when nothing else is on its line, and reads `@fig-x`, `@sec-x` and `[@a; @b]` as one key, so
   these are held in a file of the pandoc dialect (§9.1), where a marker never stands on a `:::`
