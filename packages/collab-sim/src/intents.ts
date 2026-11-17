@@ -5,6 +5,7 @@ import {
   EditError,
   accept,
   addComment,
+  emptiedFormats,
   newestView,
   parse,
   reject,
@@ -108,7 +109,10 @@ export interface Writers {
 }
 
 export const formatWriters: Writers = {
-  edits: (text, edits, ctx) => trackedEdits(text, edits, ctx).changes,
+  // A deletion that empties a format takes its delimiters too, as the editor's tracking filter
+  // makes it before the library sees it (#584): `trackedEdits` writes the edit it is given.
+  edits: (text, edits, ctx, how) =>
+    trackedEdits(text, how === 'delete' ? [...emptiedFormats(text, edits)] : edits, ctx).changes,
   format: (text, runs, op, ctx) =>
     (runs.length === 1 && runs[0]
       ? trackedFormat(text, runs[0], op, ctx)
