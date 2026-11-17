@@ -242,6 +242,12 @@ importers:
         specifier: workspace:*
         version: link:../format
 
+  packages/collab-sim:
+    dependencies:
+      '@redlines/format':
+        specifier: workspace:*
+        version: link:../format
+
   packages/editor:
     dependencies:
       '@codemirror/commands':
