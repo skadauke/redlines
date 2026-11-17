@@ -115,6 +115,17 @@ describe('documentHtml', () => {
     expect(html).not.toContain('onclick');
   });
 
+  it('keeps an image inside an HTML block, as the host resolves it', () => {
+    const html = documentHtml(
+      '<p align="center"><img src="a.png" alt="Pic" width="120"></p>\n',
+      'clean',
+      {
+        resolveImage: (path) => `asset://${path}`,
+      },
+    );
+    expect(html).toContain('<img src="asset://a.png" alt="Pic" width="120">');
+  });
+
   it('keeps a link as a link and its words as its text', () => {
     expect(documentHtml('See [the docs](https://example.org/d).')).toContain(
       '<a href="https://example.org/d">the docs</a>',

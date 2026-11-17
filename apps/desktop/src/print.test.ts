@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fillPrintPage,
   imagesLoaded,
+  keepHeadingsWithNext,
   PRINT_ID,
   plainPageHtml,
   printContainer,
@@ -60,6 +61,35 @@ describe('the print container', () => {
     expect(plainPageHtml('a < b && c')).toBe(
       '<div data-redlines><pre><code>a &lt; b &amp;&amp; c</code></pre></div>',
     );
+  });
+});
+
+describe('keepHeadingsWithNext', () => {
+  const page = (html: string) => {
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    keepHeadingsWithNext(root);
+    return root;
+  };
+
+  it('puts a heading and the paragraph after it in one box', () => {
+    const root = page('<p>a</p><h2>H</h2><p>b</p><p>c</p>');
+    expect(root.innerHTML).toBe('<p>a</p><div class="rl-keep"><h2>H</h2><p>b</p></div><p>c</p>');
+  });
+
+  it('gives a table’s head and first row to the box, and the rest to a table of its own', () => {
+    const root = page(
+      '<h2>T</h2><table><thead><tr><th>h</th></tr></thead><tbody><tr><td>1</td></tr><tr><td>2</td></tr></tbody></table>',
+    );
+    const box = root.querySelector('.rl-keep');
+    expect(box?.querySelectorAll('tr')).toHaveLength(2);
+    expect(root.querySelectorAll('table')).toHaveLength(2);
+    expect(root.querySelectorAll('tr')).toHaveLength(3);
+  });
+
+  it('leaves a heading followed by a heading, or by nothing, as it is', () => {
+    expect(page('<h1>A</h1><h2>B</h2>').innerHTML).toBe('<h1>A</h1><h2>B</h2>');
+    expect(page('<p>a</p><h2>B</h2>').innerHTML).toBe('<p>a</p><h2>B</h2>');
   });
 });
 

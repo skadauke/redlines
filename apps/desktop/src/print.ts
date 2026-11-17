@@ -55,6 +55,7 @@ export function imagesLoaded(root: ParentNode, timeout = IMAGE_WAIT_MS): Promise
 export async function fillPrintPage(html: string, doc: Document = document): Promise<() => void> {
   const container = printContainer(doc);
   container.innerHTML = html;
+  keepHeadingsWithNext(container);
   // A release only empties the page it filled: an older print's hold may let go later, under a
   // newer page that is being written to a PDF.
   const mine = String(++fills);
@@ -69,6 +70,39 @@ export async function fillPrintPage(html: string, doc: Document = document): Pro
 export function plainPageHtml(text: string): string {
   const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return `<div data-redlines><pre><code>${escaped}</code></pre></div>`;
+}
+
+/**
+ * Keeps each heading with the start of what follows it, which WebKit's own `break-after: avoid`
+ * does not (a heading is left alone at the foot of a page). The heading and the next block go in a
+ * box that is not split; a table gives its head and first row, and the rest follows as a table of
+ * its own, since a whole long table in the box would move to the next page and leave a gap.
+ */
+export function keepHeadingsWithNext(root: ParentNode): void {
+  for (const heading of Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'))) {
+    const next = heading.nextElementSibling;
+    if (!next || /^H[1-6]$/.test(next.tagName)) continue;
+    const wrap = heading.ownerDocument.createElement('div');
+    wrap.className = 'rl-keep';
+    heading.before(wrap);
+    wrap.append(heading);
+    if (next.tagName !== 'TABLE') {
+      wrap.append(next);
+      continue;
+    }
+    const start = next.cloneNode(false) as HTMLElement;
+    const head = next.querySelector('thead');
+    const body = next.querySelector('tbody');
+    if (head) start.append(head);
+    const first = body?.querySelector('tr');
+    if (first) {
+      const part = heading.ownerDocument.createElement('tbody');
+      part.append(first);
+      start.append(part);
+    }
+    wrap.append(start);
+    if (!body?.querySelector('tr')) next.remove();
+  }
 }
 
 export interface PrintParts {

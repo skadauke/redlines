@@ -189,32 +189,52 @@
     margin: 0.2em auto;
   }
 
-  /* A table fits the page: its cells wrap, its rows stay whole, its head repeats. */
-  #rl-print table {
-    border-collapse: collapse;
+  /*
+   * A table fits the page: its cells wrap, and its rows stay whole. WebKit's pagination splits the
+   * rows of a table, and ignores break-inside on them and a repeating head, so a table is drawn as
+   * blocks: each row a flex line of equal columns, which WebKit keeps whole. (Its header row is
+   * therefore on the first page only.)
+   */
+  #rl-print table,
+  #rl-print thead,
+  #rl-print tbody {
+    display: block;
     width: 100%;
-    table-layout: auto;
     max-width: 100%;
+  }
+
+  #rl-print table {
+    border-top: 1px solid #c7c7cc;
+    border-left: 1px solid #c7c7cc;
     font-size: 13.33px;
     line-height: 1.4;
   }
 
-  #rl-print thead {
-    display: table-header-group;
-  }
-
   #rl-print tr {
+    display: flex;
     break-inside: avoid;
     page-break-inside: avoid;
   }
 
+  /* A heading and the start of what it heads stay together (keepHeadingsWithNext, print.ts). */
+  #rl-print .rl-keep {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #rl-print .rl-keep table {
+    margin-bottom: 0;
+    border-bottom: 0;
+  }
+
   #rl-print th,
   #rl-print td {
-    border: 1px solid #c7c7cc;
+    flex: 1 1 0;
+    min-width: 0;
+    border-right: 1px solid #c7c7cc;
+    border-bottom: 1px solid #c7c7cc;
     padding: 0.3em 0.55em;
-    vertical-align: top;
     text-align: left;
-    min-width: 4.5em;
     overflow-wrap: anywhere;
     word-break: break-word;
   }
@@ -230,14 +250,6 @@
 
   #rl-print [style*='text-align:center'] {
     text-align: center;
-  }
-
-  /* A table does not start a page under its heading when it can be helped. */
-  #rl-print h1 + table,
-  #rl-print h2 + table,
-  #rl-print h3 + table,
-  #rl-print h4 + table {
-    break-before: avoid;
   }
 
   /* Footnotes, as notes in smaller type. */

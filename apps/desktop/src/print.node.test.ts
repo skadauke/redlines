@@ -22,9 +22,9 @@ describe('print.css', () => {
 
   it('keeps headings with what follows, rows and images whole, and wraps code and tables', () => {
     expect(print).toMatch(/h6\s*\{[^}]*break-after: avoid/);
-    expect(print).toMatch(/#rl-print tr\s*\{\s*break-inside: avoid/);
+    expect(print).toMatch(/#rl-print tr\s*\{\s*display: flex;\s*break-inside: avoid/);
     expect(print).toMatch(/#rl-print img\s*\{[^}]*max-width: 100%/);
     expect(print).toMatch(/#rl-print pre\s*\{[^}]*white-space: pre-wrap/);
-    expect(print).toMatch(/#rl-print table\s*\{[^}]*width: 100%/);
+    expect(print).toMatch(/#rl-print tbody\s*\{[^}]*width: 100%/);
   });
 });

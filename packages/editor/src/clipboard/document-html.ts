@@ -57,10 +57,10 @@ export function documentText(source: string, view: DocumentViewKind = 'clean'): 
   return end >= 0 ? text.slice(end) : text;
 }
 
-function drawnHtml(source: string): string | null {
+function drawnHtml(source: string, image: (written: string) => string | null): string | null {
   if (typeof document === 'undefined') return null;
   const holder = document.createElement('div');
-  holder.appendChild(renderHtml(source, document));
+  holder.appendChild(renderHtml(source, document, image));
   return holder.innerHTML;
 }
 
@@ -75,14 +75,15 @@ export function documentHtml(
   options: DocumentHtmlOptions = {},
 ): string {
   const resolve = options.resolveImage;
+  const imageUrl = (written: string): string | null => {
+    const found = sourceOf(written);
+    if (found.kind === 'remote' || found.kind === 'data') return found.url;
+    if (found.kind === 'local') return resolve?.(found.path) ?? null;
+    return null;
+  };
   const parts: DocumentParts = {
-    imageUrl: (written) => {
-      const found = sourceOf(written);
-      if (found.kind === 'remote' || found.kind === 'data') return found.url;
-      if (found.kind === 'local') return resolve?.(found.path) ?? null;
-      return null;
-    },
-    html: options.htmlBlocks === false ? undefined : drawnHtml,
+    imageUrl,
+    html: options.htmlBlocks === false ? undefined : (source) => drawnHtml(source, imageUrl),
   };
   return markdownToDocumentHtml(
     documentText(source, view),
