@@ -337,7 +337,6 @@ const rows: Script[] = [
     keys: [{ command: sized }],
     tc: true,
     expect: { original: 'One.⏎⏎![A cat](a.png)⏎⏎Two.' },
-    skip: { render: 'a lone <img> is an HTML block; the closer after it makes it a paragraph' },
   },
   {
     name: 'a size with Track Changes off is one plain change',
