@@ -1307,7 +1307,7 @@ alignment, nested lists, Word's list and quote styles, #842; Word's forms come f
 fixtures until real captures replace them), and copying out is built: the clipboard's HTML is `documentHtml` with its `office` option, for
 Word and Google Docs (inline styles, `<s>` for a strike, code colored, bordered cells with widths,
 a quote that reads without its rule, #874), and the selection's local pictures are embedded as
-`data:` addresses, sized to the column, where remote ones keep their address (#882). Nothing but
+`data:` addresses, sized to the column, where a remote one keeps its address unless the page can read it (#882). Nothing but
 tests has checked it in the real apps yet. `@redlines/word` (§6.3)
 writes a `.docx` from a Redlines file (tracked changes, comments, replies, tables, format changes,
 splits, joins, moves, images and task lists, with the data a round trip needs, #834, #847, #845),
