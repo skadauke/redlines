@@ -5,13 +5,13 @@
 // it is. What is written is the emoji itself (the autocomplete of the emoji plugin writes the
 // character); a shortcode already in a file is kept as written.
 //
-// GitHub shows a shortcode as written where a letter or a digit stands against its start, and the
-// preview does the same: `a:tent:` is text, and so is the one a marker would otherwise make an emoji
-// (format §3.1, rule 9).
+// GitHub shows a shortcode as an emoji only after white space or at the start of a text, and the
+// preview does the same: `a:tent:`, `(:tent:` and `.:tent:` are text, and so is the one a marker
+// would otherwise make an emoji (format §3.1, rule 9).
 
 import { Facet, type EditorState } from '@codemirror/state';
 import { Decoration, WidgetType } from '@codemirror/view';
-import { shortcodeAt } from '@redlines/format';
+import { shortcodeAt, startsEmoji } from '@redlines/format';
 import { tags } from '@lezer/highlight';
 import type { MarkdownConfig } from '@lezer/markdown';
 
@@ -42,8 +42,10 @@ export const emojiCodes: MarkdownConfig = {
         if (next !== 58 /* ':' */) return -1;
         const code = shortcodeAt(cx.slice(pos, pos + 80));
         if (code === null) return -1;
-        // A letter or a digit against its start: GitHub shows it as written.
-        if (pos > cx.offset && /[\p{L}\p{N}]/u.test(cx.slice(pos - 1, pos))) return -1;
+        // Anything but white space or the start of a text against its start (a letter, a digit,
+        // punctuation): GitHub shows it as written.
+        const from = Math.max(cx.offset, pos - 200);
+        if (!startsEmoji(cx.slice(from, pos), true)) return -1;
         return cx.addElement(cx.elt('Emoji', pos, pos + code.length));
       },
     },

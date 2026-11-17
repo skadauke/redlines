@@ -1182,19 +1182,21 @@ at the outer edge of a whole inline construct. A marker never goes:
    attributes; on `:::` lines (a fence line; a change there is a replacement of the div's
    paragraph, and a typed div is one insertion with no marker on a fence line, §9.4); before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
-   or a digit and an emoji shortcode; or inside `{{< >}}`, a cross-reference (`@fig-x`, `@sec-x`, and the other kinds Quarto numbers), a
+   a digit or punctuation and an emoji shortcode; or inside `{{< >}}`, a cross-reference (`@fig-x`, `@sec-x`, and the other kinds Quarto numbers), a
    citation bracket (`[@a; @b]`, `[-@a]`) or `(\#fig:x)`. Four of these are pandoc's alone and
    are held in a file of the pandoc dialect only (§9.1): `^x^`, `~x~`, the `:::` line, and the
    cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. GitHub shows a
-   shortcode as its emoji at the start of a text or after a space, and as written with a letter or
-   a digit before it (`a:tent:`); a marker between the two would leave it at the start of a text,
-   where it shows as the emoji. A change whose end would stand there, as when text is typed or a
-   word is replaced in front of a shortcode, takes the shortcode into the change, as a substitution
-   of it (`Camp <!--sub k3x9 :tent:-->x:tent:<!--/k3x9--> here`), which reads alike in every order
-   of decisions; a change whose start or edge would stand there, such as deleting the letter or
-   formatting the shortcode alone, is refused, in words that say so. The letter after a shortcode,
-   where GitHub shows the emoji too, is no place of this rule, and nor is punctuation before one
-   (not built, #388). The rule is held where a marker is placed: text that an author types or
+   shortcode as its emoji only at the start of a text or after white space, and as written after
+   anything else: a letter or a digit (`a:tent:`), punctuation (`(:tent:`, `.:tent:`) or another
+   shortcode. Redlines draws the same (#388), and a marker never changes which: between that
+   character and the shortcode it would leave the shortcode at the start of a text, where it shows
+   as the emoji in the file and as written in the newest view. A change whose end would stand there,
+   as when text is typed or a word is replaced in front of a shortcode, takes the shortcode into the
+   change, as a substitution of it (`Camp <!--sub k3x9 :tent:-->x:tent:<!--/k3x9--> here`), which
+   reads alike in every order of decisions; a change whose start or edge would stand there, such as
+   deleting the character or formatting the shortcode alone, is refused, in words that say so. The
+   letter after a shortcode, where GitHub shows the emoji too, is no place of this rule. A pair of
+   emphasis around a shortcode (`*:tent:*`) is a construct (above), and the markers stand outside it. The rule is held where a marker is placed: text that an author types or
    edits inside their own pending insertion keeps the markers it has.
 
 A change that would put a marker in one of these places is widened instead, so that the newest and

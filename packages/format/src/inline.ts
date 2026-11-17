@@ -7,7 +7,7 @@ import { isPandoc } from './dialect.ts';
 import { HTML_STARTS } from './block-read.ts';
 import { isOlderPunctuation, isPunctuation, runRole } from './flanking.ts';
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
-import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
+import { SHORTCODE_SOURCE, shortcodeAt, startsEmoji } from './shortcode.ts';
 import { isTableRowAt } from './table-rules.ts';
 import type { Range } from './types.ts';
 
@@ -189,7 +189,7 @@ const EMOJI = new RegExp(
 const MAY_BE_EMOJI = /[\ud800-\udfff]|\u200d|\ufe0f|\u20e3/;
 /** What a change is told that would leave a shortcode at the start of a text with a letter before it. */
 const STUCK_SHORTCODE =
-  'A marker between a letter and an emoji shortcode would make it show as an emoji. Select the shortcode along with the word.';
+  'A marker between a letter, a digit or punctuation and an emoji shortcode would make it show as an emoji. Select the shortcode along with the text before it.';
 const ATTRIBUTES = /\{\{<[^\n]*?>\}\}|\{[#.][^{}\n]*\}/g;
 /**
  * Pandoc's superscript `^x^` (format §3.1, rule 9): no space inside. A marker inside would break
@@ -725,16 +725,23 @@ export function inspectPlace(
     // The end is just after the construct's last character, not after the markers that follow it.
     return { kind: 'construct', from: offsetAt(widest.from), to: offsetAt(widest.to - 1) + 1 };
   }
-  // A shortcode that a letter or a digit stands against is no emoji to GitHub, which shows it only
-  // at the start of a text or after a space; a marker between the two would leave it at the start of
+  // A shortcode that anything but white space stands against is no emoji to GitHub, which shows it
+  // only at the start of a text or after white space; a marker between the two would leave it at the start of
   // a text, where it shows as the emoji (format §3.1, rule 9). What stands on each side of the marker
   // is what the change leaves there: `around`, or the text of the paragraph.
   const upcoming =
     around.after !== undefined ? around.after.slice(0, 80) : v.slice(index, index + 80);
   if (upcoming.startsWith(':')) {
-    const beforeMarker = around.before !== undefined ? around.before.slice(-1) : v[index - 1];
+    // The text in front of the marker, as the change leaves it; a line's own prefix (a quote's `>`)
+    // is no text of the paragraph, so a shortcode at the start of its first line starts a text.
+    const lead =
+      around.before !== undefined
+        ? around.before
+        : index - start <= prefixLength(lineText)
+          ? v.slice(0, start)
+          : v.slice(0, index);
     const code = shortcodeAt(upcoming);
-    if (code !== null && isWord(beforeMarker)) {
+    if (code !== null && !startsEmoji(lead)) {
       // A closer, which has the text of the change before it (`around.before`), takes the shortcode
       // into the change, as a closer inside any construct does: the shortcode is then in the old text
       // and the new, and no marker stands between it and the letter. An opener, or a format's edge,
