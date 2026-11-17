@@ -5329,14 +5329,15 @@ const SPLIT_IN_INDENT =
 
 /** Whether a split stands inside a change of an indent (`fmt … was=indent=…`): the blank line that
  * the split makes is spaced by which of the two is decided first (#605). */
-function splitsIndent(after: string): boolean {
-  if (!after.includes('indent=')) return false;
+function splitsIndent(after: string): number {
+  if (!after.includes('indent=')) return 0;
+  let n = 0;
   for (const open of after.matchAll(/<!--fmt (\w{4})\b[^>]*\bindent=[^>]*-->/g)) {
     const close = after.indexOf(`<!--/${open[1]}-->`, open.index);
     if (close < 0) continue;
-    if (after.slice(open.index, close).includes('<!--split')) return true;
+    if (after.slice(open.index, close).includes('<!--split')) n++;
   }
-  return false;
+  return n;
 }
 
 /** A change next to another mark, written as typed, reads otherwise in some order of decisions. */
@@ -5475,7 +5476,7 @@ function editsOnce(
   selfCheck(plan, edits, changes, views);
   if (changes.some((change) => change.insert.includes('<!--split'))) {
     if (splitsAlone(text, changes)) throw new EditError(SPLIT_ALONE, 'no-legal-placement');
-    if (splitsIndent(applyChanges(text, changes))) {
+    if (splitsIndent(applyChanges(text, changes)) > splitsIndent(text)) {
       throw new EditError(SPLIT_IN_INDENT, 'no-legal-placement');
     }
   }
