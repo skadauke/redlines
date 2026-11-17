@@ -35,7 +35,13 @@ import { markerRanges } from './markers.ts';
 import type { MarkerRange } from './markers.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
-import { readDelimiterRow, readLine, readRowCells, tablesOfText } from './table.ts';
+import {
+  readDelimiterRow,
+  readLine,
+  readRowCells,
+  tablesOfText,
+  trailingMarkersEnd,
+} from './table.ts';
 import type { TableAlign, TableRead } from './table.ts';
 import { columnChanges, deletedColCells } from './table-cols.ts';
 import type { ColItem, Grid } from './table-cols.ts';
@@ -332,7 +338,7 @@ const MARK_PLACE =
 function markPlace(text: string, parsed: Parsed, table: TableRead): number {
   const last = table.rows[0]?.cells.at(-1);
   if (!last) throw new EditError('There is no such column in this table.');
-  const at = last.textTo;
+  const at = trailingMarkersEnd(text, last.textTo);
   if (!placeReads(text, parsed, last.textFrom, at)) throw refused(MARK_PLACE);
   const original = originalView(text);
   const to = original.map.fromSource(at);
