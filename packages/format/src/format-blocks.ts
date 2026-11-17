@@ -141,9 +141,10 @@ const MARKERS = /<!--(?:\/[a-z0-9]+|(?:split|ins|del|sub|fmt|cmt|hl) [a-z0-9]+(?
 /** A line as the original view reads it: every change on it rejected; null where one line can't tell. */
 function originalLine(row: string): string | null {
   const text = row
-    .replace(/<!--ins [a-z0-9]+-->[^]*?<!--\/[a-z0-9]+-->/g, '')
-    .replace(/<!--sub [a-z0-9]+ ([^]*?)-->[^]*?<!--\/[a-z0-9]+-->/g, (_all, payload: string) =>
-      plainPayload(decodePayload(payload)),
+    .replace(/<!--ins ([a-z0-9]+)-->[^]*?<!--\/\1-->/g, '')
+    .replace(
+      /<!--sub ([a-z0-9]+) ([^]*?)-->[^]*?<!--\/\1-->/g,
+      (_all, _id: string, payload: string) => plainPayload(decodePayload(payload)),
     )
     .replace(/<!--del [a-z0-9]+ ([^]*?)-->/g, (_all, payload: string) =>
       plainPayload(decodePayload(payload)),
@@ -160,7 +161,8 @@ function originalLine(row: string): string | null {
 function readsOtherwise(row: string): boolean {
   if (!/<!--/.test(row)) return false;
   const original = originalLine(row);
-  const readings = [row, row.replace(MARKERS, ''), ...(original === null ? [] : [original])];
+  const noNotes = row.replace(/<!--(?:cmt|hl) [a-z0-9]+(?: [^]*?)?-->/g, '');
+  const readings = [noNotes, row.replace(MARKERS, ''), ...(original === null ? [] : [original])];
   const empty = readings.map((r) => /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]*$/.test(r));
   const item = readings.map((r) => ITEM.test(r.trimStart()));
   return empty.some(Boolean) && item.some((is, i) => is && !empty[i]);
