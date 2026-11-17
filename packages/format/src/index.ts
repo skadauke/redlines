@@ -66,6 +66,7 @@ export {
   ledgerEntries,
   ledgerMapOf,
   ledgerOfMap,
+  ledgerOps,
   setLedgerEntries,
   writeLedger,
 } from './ledger-map.ts';

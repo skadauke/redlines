@@ -12,6 +12,7 @@ import type { Credential, Peer } from '@redlines/collab';
 import { anchorIntent, intentOf, rederiveIntent, remoteStep } from '@redlines/editor';
 import type { Editor, Intent } from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
+import { placeLedgerWrite } from './ledger.ts';
 import { ensureStyle, peersShown, presenceExtension, showPeers } from './presence.ts';
 import type { PeerView } from './presence.ts';
 import type { Remote } from '@redlines/collab';
@@ -24,6 +25,8 @@ export type { SyncState } from '@redlines/collab';
 /** What is kept with each edit made here. */
 export interface EditNote {
   intent: Intent | undefined;
+  /** The edit as made, on the text it started from (`Pending.start`), to place its ledger write. */
+  made?: ChangeSet;
 }
 
 export interface SyncOptions {
@@ -181,7 +184,7 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
       let local = false;
       for (const tr of update.transactions) {
         if (!tr.docChanged || tr.annotation(received)) continue;
-        replica.local(tr.changes, tr.startState.doc, { intent: intentOf(tr) });
+        replica.local(tr.changes, tr.startState.doc, { intent: intentOf(tr), made: tr.changes });
         local = true;
       }
       if (local) {
@@ -270,12 +273,15 @@ function rederive(
         notices.push(`An edit of yours was taken back: ${placed.reason}`);
       }
     } else if (edit.changes.length === state.doc.length) {
-      changes = edit.changes;
+      // Mapped over what others did, but its ledger write is made again on the newest ledger.
+      changes = edit.note.made
+        ? (placeLedgerWrite(state.doc, edit.changes, edit.start, edit.note.made) ?? edit.changes)
+        : edit.changes;
     } else {
       notices.push('A change of yours could not be placed after what others changed.');
     }
     if (!changes || changes.empty) continue;
-    kept.push({ changes, start: state.doc, note: edit.note });
+    kept.push({ changes, start: state.doc, note: { ...edit.note, made: changes } });
     state = state.update({ changes, filter: false }).state;
   }
   return { pending: kept, notices: [...new Set(notices)] };
