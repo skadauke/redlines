@@ -88,9 +88,11 @@ const lineBreaks = StateField.define<RangeSet<LineBreak>>({
           filter: (from, to) => to - from === 1 && tr.newDoc.sliceString(from, to) === '\n',
         })
       : breaks;
+    const taken = new Set<number>();
+    for (let it = kept.iter(); it.value; it.next()) taken.add(it.from);
     const adds = added
       .flatMap((effect) => effect.value)
-      .filter(({ at }) => tr.newDoc.sliceString(at, at + 1) === '\n')
+      .filter(({ at }) => !taken.has(at) && tr.newDoc.sliceString(at, at + 1) === '\n')
       .sort((a, b) => a.at - b.at)
       .map(({ at, style }) => new LineBreak(style).range(at, at + 1));
     return adds.length ? kept.update({ add: adds }) : kept;
@@ -117,10 +119,11 @@ const lineBreaksBack = invertedEffects.of((tr) => {
     const file = tr.startState.field(fileField);
     return file ? [setFile.of(file), resetLineBreaks.of(before)] : [resetLineBreaks.of(before)];
   }
+  const hasAdded = tr.effects.some((effect) => effect.is(addLineBreakStyles));
   if (
     tr.docChanged &&
-    (before.size || tr.effects.some((effect) => effect.is(addLineBreakStyles))) &&
-    tr.state.field(lineBreaks).size !== before.size
+    (before.size || hasAdded) &&
+    (hasAdded || tr.state.field(lineBreaks).size !== before.size)
   ) {
     return [resetLineBreaks.of(before)];
   }
@@ -370,7 +373,19 @@ export function mixedFileText(state: EditorState, named = false): string | null 
   // For a decision (`named`), a file with one kind of line break reads the same in both, but one
   // whose payloads name a break's kind (`\x0a`) or whose format kind isn't its first break's does
   // not: the break a change took out is not in the record any more.
-  if (!kept || (!kept.size && !named)) return null;
+  if (!kept) return null;
+  if (!kept.size) {
+    const file = state.field(fileField, false);
+    // A file of one kind reads the same in both, unless a payload names a kind or the format's
+    // kind isn't the first break's.
+    if (
+      !named ||
+      !file ||
+      (file.formatBreak === file.lineBreak && !/\\x0[ad]/.test(state.doc.toString()))
+    ) {
+      return null;
+    }
+  }
   const text = textOf(state, state.doc, kept, state.field(parsedField, false)?.ledgerRange ?? null);
   // A CR alone is left to the old way: the format reads a body of CRs as one with a ledger it
   // can't read (format §5.1), and its payload is not this issue's.
