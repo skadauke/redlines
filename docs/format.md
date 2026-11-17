@@ -3235,7 +3235,9 @@ and the views read the replacements it writes, and the writers that refuse today
 a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format change in a cell),
 and so have the lists (`edits-widen.ts`, `widen-scope.ts`: a typed, pasted or key edit and a format
 or block change in a list item, which `trackedEdits` and `trackedFormat` write as a replacement of
-the item or the list when no fine form reads alike in every order); the blocks and code follow. Until a writer calls it, it still refuses, in the words of
+the item or the list when no fine form reads alike in every order, and keep their refusal when
+the unit's old text would hold another person's pending change: some order of decisions would not
+read as the original, #808); the blocks and code follow. Until a writer calls it, it still refuses, in the words of
 its own section.
 
 **The unit** is a paragraph, a heading, an alert, a definition, a list item (its content, with the
