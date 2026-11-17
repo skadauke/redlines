@@ -11,7 +11,9 @@ import {
   type Extension,
   Prec,
   Text,
+  type Transaction,
 } from '@codemirror/state';
+import type { TextChange } from '@redlines/format';
 import { type Command, type EditorView, keymap } from '@codemirror/view';
 import {
   bodyEnd,
@@ -25,6 +27,7 @@ import {
 import { visibleSelection } from '../tracked/decorations.ts';
 import { heldEditEffect, wasHeld } from '../tracked/ask.ts';
 import {
+  caretKeptFromEnd,
   probeAnnotation,
   refusedEditEffect,
   trackingField,
@@ -130,9 +133,10 @@ const keyCaret = Prec.highest(
       const selection = visibleSelection(tr.state, EditorSelection.single(a, h));
       return [tr, { selection, sequential: true }];
     }
-    if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
-    else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
-    else if ('onLine' in caret) {
+    if ('at' in caret) pos = inReplaced(tr, caret.at) ?? tr.changes.mapPos(caret.at, 1);
+    else if ('before' in caret) {
+      pos = inReplaced(tr, caret.before) ?? tr.changes.mapPos(caret.before, -1);
+    } else if ('onLine' in caret) {
       const line = requestedLine(tr, {
         at: caret.onLine.at,
         assoc: -1,
@@ -165,6 +169,21 @@ const keyCaret = Prec.highest(
     return [tr, { selection: EditorSelection.cursor(shown), sequential: true }];
   }),
 );
+
+/**
+ * Where a caret that stood inside text that a replacement of its unit took in (format §3.12) goes:
+ * in the new text, at the same distance from its end, and not after the whole replacement. Null
+ * where no replacement holds the position.
+ */
+function inReplaced(tr: Transaction, at: number): number | null {
+  let held = false;
+  const edits: TextChange[] = [];
+  tr.changes.iterChanges((from, to, _a, _b, insert) => {
+    edits.push({ from, to, insert: insert.toString() });
+    if (from < at && at < to && insert.toString().includes('<!--sub ')) held = true;
+  });
+  return held ? caretKeptFromEnd(tr.startState, edits, at) : null;
+}
 
 /**
  * Dispatches a key's edit: one step to undo, apart from the typing around it, recorded by the
