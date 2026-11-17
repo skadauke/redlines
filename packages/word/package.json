@@ -1,0 +1,24 @@
+{
+  "name": "@redlines/word",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Word (.docx) export and import for Redlines files: tracked changes and comments.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@redlines/format": "workspace:*",
+    "docx": "9.15.1",
+    "fflate": "0.8.3",
+    "micromark": "4.0.2",
+    "micromark-extension-gfm": "3.0.0"
+  },
+  "devDependencies": {
+    "micromark-util-types": "2.0.3"
+  }
+}

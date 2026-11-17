@@ -236,8 +236,7 @@ describe('the lines that the reading of list items is sure are items (format §2
         ).toBe(true);
       }
     }
-    // A quarter of a draw each, as the default 4,000 draws give 1,000 (#606: the count scales).
-    expect(sure).toBeGreaterThan(Math.floor(fuzzCount(4000) / 4));
+    expect(sure).toBeGreaterThan(1000);
   });
 });
 

@@ -19,6 +19,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
 | `packages/agent-process` | `@redlines/agent-process`: what the agent providers share               |
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
+| `packages/word`         | `@redlines/word`: Word (.docx) export (import and Google Docs to come); not in the editor bundle |
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
