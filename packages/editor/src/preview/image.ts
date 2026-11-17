@@ -159,6 +159,8 @@ class ImageWidget extends WidgetType {
   readonly path: string | null;
   /** The selection is this image (a click on it): it is drawn with an outline and its handles. */
   readonly selected: boolean;
+  /** The image is all of a link's text, which opens with the key that opens (design §5.2). */
+  readonly linked: boolean;
 
   constructor(
     alt: string,
@@ -168,10 +170,12 @@ class ImageWidget extends WidgetType {
     align: ImageAlign = 'center',
     path: string | null = null,
     selected = false,
+    linked = false,
   ) {
     super();
     this.path = path;
     this.selected = selected;
+    this.linked = linked;
     this.alt = alt;
     this.url = url;
     this.own = own;
@@ -187,7 +191,8 @@ class ImageWidget extends WidgetType {
       other.width === this.width &&
       other.align === this.align &&
       other.path === this.path &&
-      other.selected === this.selected
+      other.selected === this.selected &&
+      other.linked === this.linked
     );
   }
 
@@ -196,6 +201,8 @@ class ImageWidget extends WidgetType {
     wrap.className = this.own ? 'rl-image rl-image-own' : 'rl-image';
     if (this.own && this.align !== 'center') wrap.classList.add(`rl-image-${this.align}`);
     if (this.selected) wrap.classList.add('rl-image-selected');
+    // The link that holds the image is drawn on it: a mark has no text of its own to wrap.
+    if (this.linked) wrap.classList.add('rl-link');
     const showAlt = () => {
       wrap.className += ' rl-image-missing';
       wrap.replaceChildren(this.alt || 'image');
@@ -428,6 +435,14 @@ export function aloneInItsLine(state: EditorState, node: { from: number; to: num
   return around.replace(MARKER, '').trim() === '';
 }
 
+/** Whether an image node is inside a link that is drawn as one (it has a destination or a label). */
+function isLinked(node: SyntaxNode): boolean {
+  const link = node.parent;
+  return (
+    link?.name === 'Link' && (link.getChild('URL') !== null || link.getChild('LinkLabel') !== null)
+  );
+}
+
 /** The decoration that draws an image node, or null for one that stays source. */
 export function imageDecoration(state: EditorState, node: SyntaxNode): Decoration | null {
   const image = imageOfNode(state, node);
@@ -449,7 +464,16 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   );
   // The caret steps over the image as one unit (`imageAtom`), as over a hard break's spaces.
   return Decoration.replace({
-    widget: new ImageWidget(image.alt, url, own, image.width, image.align, path, selected),
+    widget: new ImageWidget(
+      image.alt,
+      url,
+      own,
+      image.width,
+      image.align,
+      path,
+      selected,
+      isLinked(node),
+    ),
     imageAtom: true,
   });
 }

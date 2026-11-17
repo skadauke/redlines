@@ -127,10 +127,26 @@ describe('the addresses that open (design §5.2)', () => {
     }
   });
 
-  it('treats www. as the web, as GitHub’s autolinks do', () => {
-    expect(openableAddress('www.example.org/x')).toBe('http://www.example.org/x');
-    expect(openableAddress('WWW.example.org')).toBe('http://WWW.example.org');
+  it('treats www. as the web over https, the scheme a copy writes for it too', () => {
+    expect(openableAddress('www.example.org/x')).toBe('https://www.example.org/x');
+    expect(openableAddress('WWW.example.org')).toBe('https://WWW.example.org');
     expect(openableAddress('www.')).toBeNull();
+  });
+
+  it('opens a bare or angle-bracket email as mailto, as a copy writes it', () => {
+    expect(openableAddress('ada@example.org')).toBe('mailto:ada@example.org');
+    expect(openableAddress('ada@')).toBeNull();
+    expect(openableAddress('a@b@c')).toBeNull();
+  });
+
+  it('encodes a space after the host, which a <...> destination may hold', () => {
+    expect(openableAddress('https://example.org/a b')).toBe('https://example.org/a%20b');
+    expect(openableAddress('www.example.org/a b?c=d e')).toBe(
+      'https://www.example.org/a%20b?c=d%20e',
+    );
+    // A space in the host is still no address, and no other white space is mended.
+    expect(openableAddress('https://exa mple.org/x')).toBeNull();
+    expect(openableAddress('https://example.org/a\tb')).toBeNull();
   });
 });
 
@@ -177,6 +193,18 @@ describe('the address of a link (design §5.2)', () => {
     expect(at(editor, 'code https')).toBeNull();
   });
 
+  it('is the link’s own for an image inside a link, and still nothing for an image alone', () => {
+    const editor = load(
+      '[![build](badge.svg)](https://ci.example) ![x](https://i.example/p.png) [![r](r.svg)][r]\n\n[r]: https://ref.example/z\n',
+    );
+    expect(at(editor, '![build')).toBe('https://ci.example');
+    expect(at(editor, 'build]')).toBe('https://ci.example');
+    expect(at(editor, 'badge.svg')).toBe('https://ci.example');
+    expect(at(editor, '![r]')).toBe('https://ref.example/z');
+    expect(at(editor, '![x]')).toBeNull();
+    expect(at(editor, 'https://i.example')).toBeNull();
+  });
+
   it('follows the reference whatever the case and the spacing of its label', () => {
     const editor = load('A [text][The  Label] here.\n\n[the label]: https://ref.example.org\n');
     expect(at(editor, 'text')).toBe('https://ref.example.org');
@@ -221,9 +249,33 @@ describe('⌘-click on a link (design §5.2)', () => {
     expect(open.mock.calls.map(([url]) => url)).toEqual([
       'https://auto.example.org/x',
       'https://bare.example.org/y',
-      'http://www.example.org',
+      'https://www.example.org',
       'https://ref.example.org/z',
       'mailto:ada@example.org',
+    ]);
+  });
+
+  it('opens an image link, a bare email and a link with a space in its <...> destination', () => {
+    const open = vi.fn<(address: string) => void>();
+    const editor = load(
+      [
+        '[![build](badge.svg)](https://ci.example) and ada@example.org and <grace@example.org>',
+        'and [spaced](<https://example.org/a b>).',
+        '',
+      ].join('\n'),
+      { openLink: open },
+    );
+    const badge = editor.view.dom.querySelector<HTMLElement>('.rl-image')!;
+    expect(badge.closest('.rl-link')).not.toBeNull();
+    commandClick(badge);
+    commandClick(linkNamed(editor, 'ada@example.org'));
+    commandClick(linkNamed(editor, 'grace@example.org'));
+    commandClick(linkNamed(editor, 'spaced'));
+    expect(open.mock.calls.map(([url]) => url)).toEqual([
+      'https://ci.example',
+      'mailto:ada@example.org',
+      'mailto:grace@example.org',
+      'https://example.org/a%20b',
     ]);
   });
 

@@ -86,7 +86,7 @@ export function destination(written: string): string {
 }
 
 /** The address of a link written bare, which a reader's app would add a scheme to. */
-function bare(address: string): string {
+export function bare(address: string): string {
   if (/^www\./i.test(address)) return `https://${address}`;
   if (/^[^\s@/:]+@[^\s@/:]+$/.test(address)) return `mailto:${address}`;
   return address;
