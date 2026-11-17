@@ -99,6 +99,11 @@ export interface Host {
    */
   saveAs(text: string, suggestedName: string, folder?: string | null): Promise<string | null>;
   /**
+   * Asks for a Word file (.docx) and reads its bytes; null when the dialog is cancelled. In the
+   * development page, a file picker.
+   */
+  openDocx(): Promise<{ name: string; bytes: Uint8Array } | null>;
+  /**
    * Asks where to save a Word file, starting from `suggestedName` in `folder` (as `saveAs` does),
    * and writes the bytes there. Resolves to the name it was saved as, or null when the dialog is
    * cancelled. In the development page the browser downloads it.
@@ -472,6 +477,15 @@ function createTauriHost(): Host {
       await write(path, text);
       return path;
     },
+    async openDocx() {
+      const path = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: 'Word document', extensions: ['docx'] }],
+      });
+      if (!path) return null;
+      return { name: basename(path), bytes: await readFile(path) };
+    },
     async exportWord(bytes, suggestedName, folder) {
       const defaultPath = await savePanelStart(suggestedName, folder);
       const path = await saveDialog({
@@ -691,6 +705,22 @@ function createBrowserHost(): Host {
       files.set(path, text);
       return Promise.resolve(path);
     },
+    openDocx: () =>
+      new Promise((resolve, reject) => {
+        // A tab has no open panel of the app's: the page's own file picker.
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.docx';
+        input.addEventListener('cancel', () => resolve(null));
+        input.addEventListener('change', () => {
+          const file = input.files?.[0];
+          if (!file) return resolve(null);
+          file
+            .arrayBuffer()
+            .then((buffer) => resolve({ name: file.name, bytes: new Uint8Array(buffer) }), reject);
+        });
+        input.click();
+      }),
     exportWord: (bytes, suggestedName) => {
       // A tab has no save panel: the browser downloads the file.
       const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: DOCX_TYPE }));

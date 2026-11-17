@@ -153,6 +153,7 @@ export async function openWindow(doc: string): Promise<Window> {
     reveal: () => Promise.resolve(),
     print: () => Promise.resolve(),
     exportWord: () => Promise.resolve(null),
+    openDocx: () => Promise.resolve(null),
     saveAs: () => Promise.resolve(null),
     watch: (path, onChange) => {
       watchers.set(path, onChange);

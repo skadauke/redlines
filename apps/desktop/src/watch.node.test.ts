@@ -71,6 +71,7 @@ function nodeHost(): Host {
   return {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
     exportWord: () => Promise.resolve(null),
+    openDocx: () => Promise.resolve(null),
     open: () => Promise.resolve(null),
     read: async (path) => decodeText(await readFile(path)),
     write: (path, text) => writeFile(path, text),

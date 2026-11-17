@@ -35,6 +35,10 @@ export interface CliIo {
   /** Writes a binary file. Absent where the command line can't make one (the app's program). */
   writeBytes?(path: string, bytes: Uint8Array): Promise<void>;
   /** The text as a .docx and what the file can't hold. Absent where `writeBytes` is. */
+  /** The bytes of a file. Absent where `importDocx` is. */
+  readBytes?(path: string): Promise<Uint8Array>;
+  /** A .docx as Markdown, with what could not be kept. Absent where `exportDocx` is. */
+  importDocx?(bytes: Uint8Array): Promise<{ markdown: string; notes: string[] }>;
   exportDocx?(text: string): Promise<{ bytes: Uint8Array; notes: string[] }>;
 }
 
@@ -42,6 +46,7 @@ const USAGE = `Usage: redlines <command> <file> [options]
 
 Commands:
   redlines export-docx <file> [-o <out.docx>]
+  redlines import-docx <file.docx> [-o <out.md>]
 ${Object.entries(COMMANDS)
   .map(([name, command]) => `  redlines ${name} ${command.usage}`)
   .join('\n')}
@@ -147,6 +152,47 @@ async function exportDocx(rest: string[], io: CliIo): Promise<number> {
   return 0;
 }
 
+/** `redlines import-docx <file.docx> [-o out.md]`: a Word or Google Docs file as a Redlines file,
+ * beside the .docx by default; never over a file that is there. */
+async function importDocx(rest: string[], io: CliIo): Promise<number> {
+  let file: string | undefined;
+  let out: string | undefined;
+  for (let arg = rest.shift(); arg !== undefined; arg = rest.shift()) {
+    if (arg === '-o' || arg === '--output') {
+      out = rest.shift();
+      if (out === undefined) throw new UsageError(`${arg} needs a value`);
+    } else if (arg.startsWith('-')) {
+      throw new UsageError(`Unknown option: ${arg}`);
+    } else if (file === undefined) {
+      file = arg;
+    } else {
+      throw new UsageError(`Unexpected argument: ${arg}`);
+    }
+  }
+  if (file === undefined) throw new UsageError('Missing <file>');
+  if (!io.importDocx || !io.readBytes) {
+    throw new EditError('import-docx is not in this copy of redlines. Use the one in a checkout.');
+  }
+  const bytes = await io.readBytes(file).catch(cannot('read', file));
+  const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.md';
+  if (target === file)
+    throw new EditError(`${file} is the file to import; give another name with -o.`);
+  const { markdown, notes } = await io.importDocx(bytes);
+  if (
+    out === undefined &&
+    (await io.readFile(target).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    throw new EditError(`${target} is there already; give another name with -o.`);
+  }
+  await io.writeFile(target, markdown).catch(cannot('write', target));
+  for (const note of notes) io.stderr(`${note}\n`);
+  io.stdout(`${target}\n`);
+  return 0;
+}
+
 /** Runs a command and returns its exit code: 0 when it worked, 1 when the edit or the file was
  * refused (the message is on stderr), and 2 when the command line was wrong. */
 export async function run(argv: string[], io: CliIo): Promise<number> {
@@ -158,6 +204,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
   try {
     if (name === undefined) throw new UsageError('Missing <command>');
     if (name === 'export-docx') return await exportDocx(rest, io);
+    if (name === 'import-docx') return await importDocx(rest, io);
     const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined;
     if (command === undefined) throw new UsageError(`Unknown command: ${name}`);
     const { file, args, flags } = parseArguments(command, rest);
