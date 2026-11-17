@@ -548,6 +548,17 @@ README-style snippets) holds the editor to it.
   Delete never join a paragraph into a tag line, nor the summary's line break away. Insert ›
   Collapsible Section writes the structure (open, with the summary's text selected), and wraps a
   selection of blocks with two insertions.
+- **HTML blocks drawn rendered** (#689). A top-level HTML block that opens with a tag GitHub keeps
+  and has no Markdown twin (a `<p align>`, a table with spans or a caption or no header row, a
+  figure, a `<dl>`, an `<h1 align>`) is drawn as GitHub draws it, with no frame at rest; on hover
+  it has an outline and an "HTML" label. A click selects it, the arrows step onto it and over it,
+  and Return, a double-click or the label open its source in place, in a code box headed "HTML
+  source" with a Done button; the caret leaving it, Escape or Done draws it again. A source over
+  60 lines opens in Plain at that spot. The source also shows, with no one asking, while the caret
+  or an end of a selection is inside the block, while the current match of Find is in it, and while
+  a pending change touches it (a change is seen and decided in its text, never drawn away). Edits
+  in the source are ordinary edits, tracked or not, written by the same rules as any text; none is
+  refused. An image in a rendered block is a small box with its alt text: nothing is loaded.
 - **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
   WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
   `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
