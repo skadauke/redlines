@@ -1304,13 +1304,18 @@ European keyboards, where Ctrl+Alt acts as AltGr.
 **What is built.** Pasting from the web, Word and Google Docs is built: Redlines' converter reads
 their clipboard HTML (Docs' indented paragraphs as quotes, monospace runs as one fenced block, table
 alignment, nested lists, Word's list and quote styles, #842; Word's forms come from hand-written
-fixtures until real captures replace them), and Copy as HTML is built. `@redlines/word` (§6.3)
+fixtures until real captures replace them), and copying out is built: the clipboard's HTML is `documentHtml` with its `office` option, for
+Word and Google Docs (inline styles, `<s>` for a strike, code colored, bordered cells with widths,
+a quote that reads without its rule, #874), and the selection's local pictures are embedded as
+`data:` addresses, sized to the column, where remote ones keep their address (#882). Nothing but
+tests has checked it in the real apps yet. `@redlines/word` (§6.3)
 writes a `.docx` from a Redlines file (tracked changes, comments, replies, tables, format changes,
 splits, joins, moves, images and task lists, with the data a round trip needs, #834, #847, #845),
 reads a `.docx` with its revisions and comments (#840) and maps the result to Markdown with its
 marks and ledger (#866), and has Google Docs' differences (#838). File › Export to Word… calls
-the writer (#841) and File › Open .docx… the reader (#881; pictures are carried into the images folder after a save panel, #885); Copy for Word
-and the full Word round trip are still to be wired in; File › Print and Export as PDF are built.
+the writer (#841) and File › Open .docx… the reader (#881; pictures are carried into the images folder after a save panel, #885); the full Word
+round trip is still to be wired in, and Copy for Word as a command of its own is not built (an
+ordinary copy writes the HTML that Word and Docs draw well); File › Print and Export as PDF are built.
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside

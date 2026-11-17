@@ -6,7 +6,9 @@ splits, joins, moves, images and task lists, #847; the round-trip carriers, #845
 (`importDocx`, see [the importer plan](import.md)) and normalizes Google Docs' export (#838).
 File › Export to Word… and `redlines export-docx` call the writer (#841), and File › Open .docx…
 (`redlines import-docx`) the importer (#881, with pictures, #885); Word and Google Docs also reach
-the editor through paste (#842).
+the editor through paste (#842). Copying out is built too: the clipboard's HTML is
+written for Word and Google Docs (#874), with local pictures embedded as bytes (#882); only tests
+have checked it in those apps.
 
 See also [How Word displays Track Changes in tricky cases](word-display.md),
 the [Word importer plan](import.md) and the [Word lab](../research/word.md).
