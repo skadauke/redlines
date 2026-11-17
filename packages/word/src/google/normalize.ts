@@ -11,7 +11,7 @@
 // - Comments are in `comments.xml`, their ids in a space of their own (an insertion and a comment
 //   can both be 0). Resolved comments and every reply are missing from the file.
 
-import { partText, setPartText } from '../shared/zip.ts';
+import { partText, readParts, setPartText, writeParts } from '../shared/zip.ts';
 import type { Parts } from '../shared/zip.ts';
 import type { ReportEntry } from '../shared/report.ts';
 
@@ -27,13 +27,14 @@ const RTL_OFF = /<w:rtl w:val="0"\/>/g;
 const FONT_NOISE = /<w:(?:rFonts|sz|szCs)\b[^>]*\/>/g;
 const HEADING_NOISE = /<w:(?:b|bCs)(?: w:val="(?:1|true)")?\/>/g;
 const NORMAL_STYLE = /<w:pStyle w:val="Normal"\/>/g;
-const EMPTY_PROPS = /<w:rPr><\/w:rPr>|<w:rPr\/>/g;
+// Not the `rPr` inside an `rPrChange`: empty there it means the old formatting was none.
+const EMPTY_PROPS = /(?<!<w:rPrChange\b[^>]*>)(?:<w:rPr><\/w:rPr>|<w:rPr\/>)/g;
 // A run with nothing in it: no text, break or reference, only (now empty) properties.
 const EMPTY_RUN = /<w:r><\/w:r>/g;
 
 function cleanParagraph(paragraph: string, heading: boolean): string {
   let out = paragraph
-    .replace(/<w:ins\b[\s\S]*?<\/w:ins>/g, (ins) => ins.replace(EMPTY_RPR_CHANGE, ''))
+    .replace(/<w:ins\b[^>]*[^/>]>[\s\S]*?<\/w:ins>/g, (ins) => ins.replace(EMPTY_RPR_CHANGE, ''))
     .replace(RSID_ATTRIBUTE, '')
     .replace(RTL_OFF, '')
     .replace(FONT_NOISE, '')
@@ -71,4 +72,15 @@ export function normalizeGoogleDocx(parts: Parts): { parts: Parts; notes: Report
     if (xml !== undefined) setPartText(out, name, cleanXml(xml));
   }
   return { parts: out, notes: DOCS_FILE_NOTES };
+}
+
+/** The same, from the bytes of a file to bytes, for a caller that reads bytes (`readDocx`). */
+export function normalizeGoogleBytes(bytes: Uint8Array): {
+  bytes: Uint8Array;
+  notes: ReportEntry[];
+} {
+  const found = normalizeGoogleDocx(readParts(bytes));
+  return found.notes.length === 0
+    ? { bytes, notes: [] }
+    : { bytes: writeParts(found.parts), notes: found.notes };
 }

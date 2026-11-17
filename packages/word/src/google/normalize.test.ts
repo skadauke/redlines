@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { partText, readParts } from '../shared/zip.ts';
-import { isGoogleDocx, normalizeGoogleDocx } from './normalize.ts';
+import { isGoogleDocx, normalizeGoogleBytes, normalizeGoogleDocx } from './normalize.ts';
 
 const FIXTURE = new URL('../../fixtures/docs-suggestions-and-comment.docx', import.meta.url);
 
@@ -36,6 +36,28 @@ describe('normalizeGoogleDocx', () => {
     const comments = partText(out, 'word/comments.xml') ?? '';
     expect(comments).not.toMatch(/Arial|w:sz/);
     expect(comments).toContain('Comment one zebra-study');
+  });
+
+  it('does the same from bytes to bytes', () => {
+    const bytes = new Uint8Array(readFileSync(FIXTURE));
+    const result = normalizeGoogleBytes(bytes);
+    expect(result.notes).toHaveLength(1);
+    expect(partText(readParts(result.bytes), 'word/document.xml')).not.toContain('rsid');
+  });
+
+  it('keeps the empty old properties of a real formatting change', () => {
+    expect(document).toMatch(/<w:rPrChange[^>]*w:id="5"[^>]*><w:rPr\/><\/w:rPrChange>/);
+  });
+
+  it('does not run on from a self-closing insertion mark', () => {
+    const xml =
+      '<w:document><w:p w:rsidR="00000000"><w:pPr><w:rPr><w:ins w:id="1" w:author="Ada"/></w:rPr></w:pPr>' +
+      '<w:r><w:rPr><w:b/><w:rPrChange w:id="2"><w:rPr/></w:rPrChange></w:rPr><w:t>x</w:t></w:r>' +
+      '<w:ins w:id="3"><w:r><w:rPr><w:rPrChange w:id="4"><w:rPr/></w:rPrChange></w:rPr><w:t>y</w:t></w:r></w:ins></w:p></w:document>';
+    const out = normalizeGoogleDocx({ 'word/document.xml': new TextEncoder().encode(xml) });
+    const text = partText(out.parts, 'word/document.xml') ?? '';
+    expect(text).toContain('w:id="2"');
+    expect(text).not.toContain('w:id="4"');
   });
 
   it('leaves a Word file as it is', () => {
