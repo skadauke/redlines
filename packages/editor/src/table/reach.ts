@@ -30,7 +30,14 @@ import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
 import { cellsOfRect, clearedCells, rectOf, rectSpec } from './cells.ts';
 import { composeOverCells } from './compose.ts';
-import { type Cell, endsBeforeNextCell, type Table, tablesField, tablesOf } from './model.ts';
+import {
+  type Cell,
+  endsBeforeNextCell,
+  shownCells,
+  type Table,
+  tablesField,
+  tablesOf,
+} from './model.ts';
 import { deleteTableSpec } from './ops.ts';
 
 /** What a selection reaches in the tables of a state. */
@@ -44,9 +51,6 @@ export interface Reach {
    * selection is deleted. */
   outside: { from: number; to: number }[];
 }
-
-const shown = (table: Table, cells: readonly Cell[]) =>
-  cells.filter((cell) => cell.col < table.columns);
 
 /** Whether the selection reaches a cell: it overlaps the cell's text, or includes an empty cell's
  * stop. */
@@ -70,7 +74,7 @@ export function reachOf(state: EditorState, range: SelectionRange): Reach | null
   if (only) {
     // Inside one cell: the text's own.
     const cell = only.rows
-      .flatMap((row) => shown(only, row.cells))
+      .flatMap((row) => shownCells(only, row.cells))
       .find((c) => c.textFrom <= from && to <= c.textTo);
     if (cell) return null;
   }
@@ -82,7 +86,7 @@ export function reachOf(state: EditorState, range: SelectionRange): Reach | null
       continue;
     }
     const rows = table.rows.filter((row) =>
-      shown(table, row.cells).some((c) => reaches(c, from, to)),
+      shownCells(table, row.cells).some((c) => reaches(c, from, to)),
     );
     const a = rows[0]?.index ?? 1;
     const b = rows.at(-1)?.index ?? 0;
@@ -142,7 +146,7 @@ export function reachChanges(
   const changes: { from: number; to: number; insert?: string }[] = [];
   for (const { table, rows } of reach.partial) {
     for (const row of table.rows.slice(rows[0], rows[1] + 1)) {
-      for (const cell of shown(table, row.cells)) {
+      for (const cell of shownCells(table, row.cells)) {
         if (cell.textFrom < cell.textTo) changes.push({ from: cell.textFrom, to: cell.textTo });
       }
     }
@@ -154,7 +158,7 @@ export function reachChanges(
   if (start) {
     const lastCell = start.table.rows.at(-1)?.cells.at(-1);
     const cell = start.table.rows
-      .flatMap((row) => shown(start.table, row.cells).map((c) => ({ c, row })))
+      .flatMap((row) => shownCells(start.table, row.cells).map((c) => ({ c, row })))
       .find(
         ({ c, row }) =>
           c.from <= range.from &&
@@ -316,7 +320,7 @@ function selectedCells(state: EditorState): DecorationSet {
   if (state.selection.ranges.length > 1 || range.empty) return Decoration.none;
   const marks: ReturnType<ReturnType<typeof Decoration.mark>['range']>[] = [];
   const mark = (table: Table, cells: readonly Cell[]) => {
-    for (const cell of shown(table, cells)) {
+    for (const cell of shownCells(table, cells)) {
       if (cell.to <= cell.from) continue;
       marks.push(
         Decoration.mark({ class: 'rl-sel', attributes: { 'data-col': String(cell.col) } }).range(

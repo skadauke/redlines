@@ -881,6 +881,26 @@ function coversTable(table: TableRead, change: Range): boolean {
 }
 
 /**
+ * Where the text below a table starts: `stop`, where the text ends (the ledger's start); `right`, the
+ * line right under the table and the closers of marks that end with it (on lines of their own below
+ * it); and `after`, the first line with text from there on (`stop` or more when there is none).
+ */
+function belowTable(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+): { stop: number; right: number; after: number } {
+  const stop = parsed.ledgerRange?.from ?? text.length;
+  let end = tableExtent(text, table).to;
+  const closers = closersBelow(text, end);
+  if (closers !== -1) end = lineEnd(text, closers);
+  const right = nextLineStart(text, end);
+  let after = right;
+  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  return { stop, right, after };
+}
+
+/**
  * Where a point comment of a table that is deleted whole may stand, in the order to try them (format
  * §3.7, rule 6): at the start of the text of the block after the table, past its prefix (`- `, `> `,
  * `## `), then at the end of the text of the block before it. Either may be missing, and neither is
@@ -888,13 +908,7 @@ function coversTable(table: TableRead, change: Range): boolean {
  */
 export function pointPlaces(text: string, parsed: Parsed, table: TableRead): number[] {
   const places: number[] = [];
-  const stop = parsed.ledgerRange?.from ?? text.length;
-  // Past the closers of marks that end with the table, which stand on a line of their own below it.
-  let end = tableExtent(text, table).to;
-  const closers = closersBelow(text, end);
-  if (closers !== -1) end = lineEnd(text, closers);
-  let after = nextLineStart(text, end);
-  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  const { stop, after } = belowTable(text, parsed, table);
   if (after < stop) {
     const line = text.slice(after, lineEnd(text, after));
     const heading = /^#{1,6}[ \t]+/.exec(line.slice(prefixLength(line)))?.[0].length ?? 0;
@@ -949,14 +963,8 @@ const HTML_OPENS =
 
 /** What stands next to `table`. */
 export function neighboursOf(text: string, parsed: Parsed, table: TableRead): TableNeighbours {
-  const stop = parsed.ledgerRange?.from ?? text.length;
-  let end = tableExtent(text, table).to;
-  const closers = closersBelow(text, end);
-  if (closers !== -1) end = lineEnd(text, closers);
-  let after = nextLineStart(text, end);
-  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  const { stop, after, right } = belowTable(text, parsed, table);
   const next = after < stop ? text.slice(after, lineEnd(text, after)) : null;
-  const right = nextLineStart(text, end);
   const directBelow =
     right < stop && !blankAt(text, right) ? text.slice(right, lineEnd(text, right)) : null;
   // The nearest line with text above the table, and whether it is the line right above.
@@ -986,7 +994,9 @@ export function neighboursOf(text: string, parsed: Parsed, table: TableRead): Ta
   let fenceUnclosed = false;
   if (fence?.[1] && after < stop) {
     const run = fence[1];
-    const close = new RegExp(`^[ \\t>]*${run.charAt(0) === '`' ? '`' : '~'}{${run.length},}[ \\t]*$`);
+    const close = new RegExp(
+      `^[ \\t>]*${run.charAt(0) === '`' ? '`' : '~'}{${run.length},}[ \\t]*$`,
+    );
     fenceUnclosed = true;
     for (let at = nextLineStart(text, after); at < stop; at = nextLineStart(text, at)) {
       if (close.test(text.slice(at, lineEnd(text, at)))) {

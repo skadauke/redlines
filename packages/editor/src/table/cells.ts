@@ -20,7 +20,15 @@ import { type EditorView } from '@codemirror/view';
 import { pastHidden } from '../tracked/decorations.ts';
 import { viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
-import { type Cell, type Row, type Table, cellAt, tablesField } from './model.ts';
+import {
+  type Cell,
+  type Row,
+  type Table,
+  cellAt,
+  cellAtCol,
+  shownCells,
+  tablesField,
+} from './model.ts';
 import { missingCaret, missingSpec } from './missing.ts';
 
 /** A cell of a table by its row (0 the header) and column. */
@@ -41,9 +49,6 @@ export interface Rect {
   head: CellRef;
 }
 
-const shown = (table: Table, row: Row): Cell[] =>
-  row.cells.filter((cell) => cell.col < table.columns);
-
 /** The cell GFM shows that holds `pos`, with its row: the last the row shows when `pos` is in a cell
  * it doesn't. Null outside a table, and where `pos` is not in the text of the cell. */
 function textCellAt(
@@ -53,7 +58,7 @@ function textCellAt(
   const found = cellAt(state, pos);
   if (!found) return null;
   const { table, row } = found;
-  const cell = found.cell.col < table.columns ? found.cell : shown(table, row).at(-1);
+  const cell = found.cell.col < table.columns ? found.cell : shownCells(table, row).at(-1);
   if (!cell || pos < cell.textFrom || pos > cell.textTo) return null;
   return { table, row, cell };
 }
@@ -117,7 +122,7 @@ export function rectOf(
 export function cellsOfRect(rect: Rect): Cell[] {
   const cells: Cell[] = [];
   for (const row of rect.table.rows.slice(rect.rows[0], rect.rows[1] + 1)) {
-    for (const cell of shown(rect.table, row)) {
+    for (const cell of shownCells(rect.table, row)) {
       if (cell.col >= rect.cols[0] && cell.col <= rect.cols[1]) cells.push(cell);
     }
   }
@@ -153,13 +158,15 @@ export function whole(rect: Rect): 'row' | 'column' | 'table' | null {
   // has no cell there to select), as a row is wide to its last cell.
   const tall =
     rect.rows[0] === 0 &&
-    table.rows.slice(rect.rows[1] + 1).every((row) => shown(table, row).length <= rect.cols[0]);
+    table.rows
+      .slice(rect.rows[1] + 1)
+      .every((row) => shownCells(table, row).length <= rect.cols[0]);
   // Wide: from the first column to the last cell of every row it covers (a short row ends early).
   const wide =
     rect.cols[0] === 0 &&
     table.rows
       .slice(rect.rows[0], rect.rows[1] + 1)
-      .every((row) => rect.cols[1] >= (shown(table, row).at(-1)?.col ?? 0));
+      .every((row) => rect.cols[1] >= (shownCells(table, row).at(-1)?.col ?? 0));
   if (tall && wide) return 'table';
   if (wide) return 'row';
   if (tall) return 'column';
@@ -170,7 +177,7 @@ export function whole(rect: Rect): 'row' | 'column' | 'table' | null {
 export function cellOfRef(table: Table, ref: CellRef): Cell | null {
   const row = table.rows[ref.row];
   if (!row) return null;
-  const cells = shown(table, row);
+  const cells = shownCells(table, row);
   return cells.find((cell) => cell.col === ref.col) ?? cells.at(-1) ?? null;
 }
 
@@ -185,7 +192,8 @@ const columnsOf = new WeakMap<EditorSelection, [number, number]>();
 
 /** The cell of a table at a row and column, when the row has it. */
 function cellAtRef(table: Table, row: number, col: number): Cell | undefined {
-  return table.rows[row]?.cells.find((cell) => cell.col === col && cell.col < table.columns);
+  const found = table.rows[row];
+  return found && cellAtCol(table, found, col);
 }
 
 /**
@@ -211,7 +219,7 @@ export function rectSelection(table: Table, from: CellRef, to: CellRef): EditorS
   let last = -1;
   let far = left;
   for (let row = top; row <= bottom; row++) {
-    const have = table.rows[row] ? shown(table, table.rows[row]!).length : 0;
+    const have = table.rows[row] ? shownCells(table, table.rows[row]!).length : 0;
     if (have <= left) continue;
     if (first === -1) first = row;
     last = row;
@@ -242,8 +250,8 @@ export function commentRangeOfRect(state: EditorState): { from: number; to: numb
   const rect = rectOf(state);
   if (!rect) return null;
   const rows = rect.table.rows.slice(rect.rows[0], rect.rows[1] + 1);
-  const first = rows[0] && shown(rect.table, rows[0]);
-  const last = rows.at(-1) && shown(rect.table, rows.at(-1)!);
+  const first = rows[0] && shownCells(rect.table, rows[0]);
+  const last = rows.at(-1) && shownCells(rect.table, rows.at(-1)!);
   if (!first || !last) return null;
   if (rows.length === 1) {
     const mine = cellsOfRect(rect);

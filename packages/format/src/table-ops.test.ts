@@ -941,6 +941,10 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     it('says what to do for a numbered item that opens with a fence right after the table', () => {
       const text = file(`Intro.\n\n${FRUIT}\n\n1. \`\`\`\n   code\n   \`\`\`\n\nAfter.`);
       expect(refusal(() => remove(text)).message).toBe(CODE_AFTER);
+      // Negative controls: the words of the other shapes are not used for it.
+      for (const words of [CODE_BEFORE, UNDER_TEXT]) {
+        expect(refusal(() => remove(text)).message).not.toBe(words);
+      }
       // The way out is what the words say.
       const fixed = file(`Intro.\n\n${FRUIT}\n\nText.\n\n1. \`\`\`\n   code\n   \`\`\`\n\nAfter.`);
       expectEveryOrderAlike('numbered', remove(fixed).after, exactly);
