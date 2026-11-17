@@ -38,7 +38,6 @@ describe('typing over a delimiter of a pending bold (#299)', () => {
       [open + 1, open + 2, '', 'A *word** b.'],
       // The first `*` of the closer replaced, or deleted.
       [open + 6, open + 7, 'x', 'A **wordx* b.'],
-      [open + 6, open + 7, '', 'A **word* b.'],
     ] as const) {
       const label = JSON.stringify([from - open, to - open, insert]);
       const { before, after } = type(body, from, to, insert);
@@ -51,6 +50,16 @@ describe('typing over a delimiter of a pending bold (#299)', () => {
     const { before, after } = type(body, open, open + 1, 'x');
     expect(bodyOf(after)).toContain('<!--sub m2bd **w-->');
     expectWhole(before, after, 'A x*word** b.', 'the first `*`');
+    // The first `*` of the closer deleted: the change takes the letter in front of it, so the run it
+    // leaves closes the bold as the views read it, in every order (since #896's flanking rules).
+    const closer = type(body, open + 6, open + 7, '');
+    expect(bodyOf(closer.after)).toContain('<!--sub m2bd d**-->d*<!--/m2bd-->');
+    expectWhole(
+      closer.before,
+      closer.after,
+      'A **word* b.',
+      'the first `*` of the closer, deleted',
+    );
   });
 });
 

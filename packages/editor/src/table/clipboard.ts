@@ -15,7 +15,7 @@ import {
   markdownToHtml,
 } from '../clipboard/copy-html.ts';
 import { type Rect, rectOf } from './cells.ts';
-import { type Cell, type Table } from './model.ts';
+import { type Cell, type Table, cellAtCol } from './model.ts';
 import { cellText } from './escape.ts';
 import { reachOf } from './reach.ts';
 import type { EmojiLookup } from '../preview/emoji.ts';
@@ -59,7 +59,7 @@ function matrix(
   return table.rows.slice(rows[0], rows[1] + 1).map((row) => {
     const out: string[] = [];
     for (let col = cols[0]; col <= cols[1]; col++) {
-      const cell: Cell | undefined = row.cells.find((c) => c.col === col && c.col < table.columns);
+      const cell: Cell | undefined = cellAtCol(table, row, col);
       out.push(cell ? textOf(cell.textFrom, cell.textTo) : '');
     }
     return out;

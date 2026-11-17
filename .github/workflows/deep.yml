@@ -1,0 +1,61 @@
+# The depth run (#586): every random suite and walk at a deeper draw count (`REDLINES_FUZZ`), one
+# job per suite, on GitHub's runners, since a shared Mac can't hold it. Started by hand:
+# `gh workflow run deep.yml --ref <branch>`, with `-f fuzz=300` (the default) and
+# `-f suites='path1 path2'` (the default is every test file that reads `REDLINES_FUZZ` or calls
+# `fuzzCount`). A dispatch needs this file on the default branch. Nothing here runs on a push or a
+# pull request.
+name: Deep
+
+on:
+  workflow_dispatch:
+    inputs:
+      fuzz:
+        description: 'REDLINES_FUZZ, the draw count'
+        default: '300'
+        required: false
+      suites:
+        description: 'Test files, space separated (default: every suite that reads REDLINES_FUZZ)'
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      suites: ${{ steps.list.outputs.suites }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        env:
+          SUITES: ${{ inputs.suites }}
+        run: |
+          if [ -z "$SUITES" ]; then
+            SUITES=$(grep -rlE 'REDLINES_FUZZ|fuzzCount' packages apps plugins \
+              --include='*.test.ts' --exclude-dir=node_modules | sort | tr '\n' ' ')
+          fi
+          echo "suites=$(printf '%s\n' $SUITES | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  deep:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
+    steps:
+      - uses: actions/checkout@v7
+      # The pnpm version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: ${{ matrix.suite }}
+        env:
+          REDLINES_FUZZ: ${{ inputs.fuzz }}
+        run: pnpm exec vitest run "${{ matrix.suite }}" --reporter=default --testTimeout=3600000 --hookTimeout=3600000

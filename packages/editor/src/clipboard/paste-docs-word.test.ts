@@ -122,6 +122,16 @@ describe('Word clipboard (hand-written from the documented forms)', () => {
     expect(htmlToMarkdown(wrap(li(1, 'A') + li(2, 'B')))).toBe('1. A\n2. B');
   });
 
+  it('reads Word’s legal numbering (1., 1.1., 1.2.1.) as a nested numbered list', () => {
+    const md = htmlToMarkdown(
+      readFileSync('packages/editor/src/clipboard/fixtures/word-legal-numbering.html', 'utf8'),
+    );
+    // Markdown numbers each level on its own: the labels 1.1. and 1.2.1. are not kept.
+    expect(md).toBe(
+      '1. Scope\n   1. Parties\n   2. Term\n      1. Renewal\n2. Payment\n   1. Invoices',
+    );
+  });
+
   it('reads headings, the quote style and a table with alignment', () => {
     const md = htmlToMarkdown(
       wrap(

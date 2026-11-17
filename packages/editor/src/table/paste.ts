@@ -40,7 +40,7 @@ import {
   untrackedWrite,
 } from '../tracked/typing.ts';
 import { cellOfRef, cellsOfRect, clearedCells, headCell, rectOf } from './cells.ts';
-import { type Cell, type Table, tablesField } from './model.ts';
+import { type Table, cellAtCol, tablesField } from './model.ts';
 import { planned } from './ops.ts';
 import { fillRows } from './paste-intent.ts';
 import { intentAnnotation, newIntentId } from '../tracked/intent.ts';
@@ -49,8 +49,6 @@ import type { TableIntent } from './intent.ts';
 import { type WidenedPasteIntent, writeWidenedPaste } from './widened-paste.ts';
 
 /** The cell of a row at a column, if the row has it. */
-const cellAtCol = (table: Table, row: Table['rows'][number], col: number): Cell | undefined =>
-  row.cells.find((cell) => cell.col === col && cell.col < table.columns);
 
 function refuse(view: EditorView, message: string): true {
   view.dispatch({ effects: refusedEditEffect.of(message) });

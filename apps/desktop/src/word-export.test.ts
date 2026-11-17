@@ -45,7 +45,28 @@ describe('Export to Word', () => {
   it('keeps the card, with what Word cannot hold, until it is read', async () => {
     const run = parts('![a](a.png)\n', '/notes/Plan.docx');
     await exportToWord(run.parts);
-    expect(run.shown[0]?.text).toContain('One image is not in the Word file.');
+    expect(run.shown[0]?.text).toContain('An image is written as its description');
     expect(run.shown[0]?.timeout).toBeUndefined();
+  });
+
+  it('embeds a picture the host reads, and says nothing of it', async () => {
+    const png = Uint8Array.from(
+      atob(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      ),
+      (c) => c.charCodeAt(0),
+    );
+    const run = parts('![a](img/a.png)\n\n![b](img/b.png)\n', '/notes/Plan.docx');
+    const asked: string[] = [];
+    await exportToWord({
+      ...run.parts,
+      images: (src) => {
+        asked.push(src);
+        return Promise.resolve(src === 'img/a.png' ? png : undefined);
+      },
+    });
+    expect(asked).toEqual(['img/a.png', 'img/b.png']);
+    expect(run.shown[0]?.text).toContain('img/b.png');
+    expect(run.shown[0]?.text).not.toContain('img/a.png');
   });
 });

@@ -97,6 +97,15 @@ describe('#110: a substitution whose new text starts with a line break', () => {
   });
 });
 
+describe('#108: a space at the start of the line after a paragraph break in another’s insertion', () => {
+  it('is written so that every order of decisions reads alike', () => {
+    const base = press(file('a-b 42 x'), 6, 6, 'new\n\nwords ', bo);
+    const start = at(base, 'words');
+    const after = press(base, start, start, ' ', ada);
+    held('a space before the words', base, after);
+  });
+});
+
 describe('#120: rare edits next to your own paragraph break', () => {
   it('writes text typed at once, with its line break, at the end of the line above the break', () => {
     const base = press(file('- one two'), 6, 6, '\n  \n  ', ada);

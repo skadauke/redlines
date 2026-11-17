@@ -79,6 +79,17 @@ export class People {
     return handle;
   }
 
+  /** A person the file already knew, by handle, counted among the people met (a thread's resolver
+   * may have written nothing Word kept). Undefined for a handle nobody knew. */
+  keep(handle: Handle): Handle | undefined {
+    const found = this.list.find((person) => person.handle === handle);
+    if (found) return found.handle;
+    const earlier = [...this.known.values()].find((person) => person.handle === handle);
+    if (!earlier) return undefined;
+    this.list.push(earlier);
+    return earlier.handle;
+  }
+
   /** The people met so far, in the order they were met. */
   people(): LedgerPerson[] {
     return this.list;
@@ -114,8 +125,17 @@ export class Ctx {
 
   readonly model: DocxModel;
 
-  constructor(model: DocxModel, known: readonly LedgerPerson[] = []) {
+  /** The threads the source file had resolved: Word keeps only that a thread is done, so who did it
+   * and when come from here, for a thread that is the same (author, time and text). */
+  private readonly resolvedBefore: readonly Thread[];
+
+  constructor(
+    model: DocxModel,
+    known: readonly LedgerPerson[] = [],
+    earlier: readonly Thread[] = [],
+  ) {
     this.model = model;
+    this.resolvedBefore = earlier.filter((thread) => thread.resolved !== undefined);
     this.people = new People(model, known);
     for (const entry of model.report) this.entries.push(entry);
     for (const thread of model.threads) {
@@ -220,7 +240,14 @@ export class Ctx {
       }),
       text: textOf(root),
     };
-    if (root.done) thread.resolved = { by: thread.by, at: thread.at };
+    if (root.done) {
+      thread.resolved = { by: thread.by, at: thread.at };
+      const before = this.resolvedBefore.find(
+        (found) => found.by === thread.by && found.at === thread.at && found.text === thread.text,
+      )?.resolved;
+      const by = before ? this.people.keep(before.by) : undefined;
+      if (before && by) thread.resolved = { by, at: before.at };
+    }
     return thread;
   }
 
