@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 
@@ -773,9 +773,48 @@ pub fn write_terminal_script(folder: &Path, agent: Agent, script: &str) -> io::R
     }
 }
 
+/// A script Terminal never ran stays in its folder; this long after it was written, it goes.
+const TERMINAL_SCRIPT_KEPT_FOR: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Deletes the `.command` files in `folder` written more than a day before `now`: the sign-in's
+/// script removes itself as it starts, so one left here is one Terminal failed to open. A link is
+/// never followed (`DirEntry::metadata` doesn't), and nothing else in the folder is touched.
+pub fn delete_old_terminal_scripts(folder: &Path, now: SystemTime) {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_none_or(|extension| extension != "command")
+        {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .ok()
+            .filter(|metadata| metadata.is_file())
+            .and_then(|metadata| {
+                let age = now.duration_since(metadata.modified().ok()?).ok()?;
+                Some(age > TERMINAL_SCRIPT_KEPT_FOR)
+            });
+        if old == Some(true) {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// macOS's `open`, by its path, as `PATH` could name another.
+pub const OPEN: &str = "/usr/bin/open";
+
 /// Opens a script in Terminal, which runs it in a window of its own.
 pub fn open_in_terminal(script: &Path) -> Result<(), String> {
-    let status = Command::new("open")
+    open_in_terminal_with(OPEN, script)
+}
+
+fn open_in_terminal_with(opener: &str, script: &Path) -> Result<(), String> {
+    let status = Command::new(opener)
         .args(["-a", "Terminal"])
         .arg(script)
         .status()
@@ -1541,5 +1580,57 @@ mod tests {
         }
         let mode = fs::metadata(&folder).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
+    fn a_script_terminal_never_ran_is_swept_after_a_day_and_nothing_else_is() {
+        let temp = TempFolder::new("setup-sweep");
+        let folder = temp.path();
+        let old = write_terminal_script(folder, Agent::Codex, "old\n").unwrap();
+        let fresh = write_terminal_script(folder, Agent::Claude, "fresh\n").unwrap();
+        let other = folder.join("notes.txt");
+        fs::write(&other, "not a script").unwrap();
+        // Two days on, the first is old; give the fresh one a later write time.
+        let now = SystemTime::now() + Duration::from_secs(2 * 24 * 60 * 60);
+        fs::File::options()
+            .write(true)
+            .open(&fresh)
+            .unwrap()
+            .set_modified(now - Duration::from_secs(60))
+            .unwrap();
+        delete_old_terminal_scripts(folder, now);
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert!(other.exists());
+        // A folder that isn't there is nothing to sweep.
+        delete_old_terminal_scripts(&folder.join("missing"), now);
+    }
+
+    #[test]
+    fn terminal_is_opened_with_the_script_and_a_failure_is_said() {
+        let temp = TempFolder::new("setup-open");
+        let log = temp.path().join("args");
+        let opener = temp.path().join("open");
+        fs::write(
+            &opener,
+            format!("#!/bin/sh\necho \"$@\" > '{}'\n", log.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&opener, fs::Permissions::from_mode(0o755)).unwrap();
+        let script = temp.path().join("sign-in.command");
+        open_in_terminal_with(opener.to_str().unwrap(), &script).unwrap();
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            format!("-a Terminal {}\n", script.display())
+        );
+        assert_eq!(
+            open_in_terminal_with("/usr/bin/false", &script).unwrap_err(),
+            "Couldn't open Terminal."
+        );
+        assert!(
+            open_in_terminal_with("/no/such/open", &script)
+                .unwrap_err()
+                .starts_with("Couldn't open Terminal: ")
+        );
     }
 }
