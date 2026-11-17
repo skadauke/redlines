@@ -452,18 +452,24 @@ async function pasteWithPicturesNow(
   const paths: (string | null)[] = [];
   // The pictures that stay linked to their address after all: fetched ones that failed.
   let stayed = 0;
+  const savedAt = new Map<string, string | null>();
   if (save) {
     for (const picture of found.pictures) {
       if (picture.url === undefined) {
         paths.push(await savePicture(save, picture));
         continue;
       }
-      let path: string | null = null;
-      try {
-        const fetched = fetchImage ? await fetchImage(picture.url) : null;
-        if (fetched) path = await savePicture(save, fetched);
-      } catch {
-        path = null;
+      // The same address twice in one paste is saved once.
+      const again = savedAt.get(picture.url);
+      let path: string | null = again === undefined ? null : again;
+      if (again === undefined) {
+        try {
+          const fetched = fetchImage ? await fetchImage(picture.url) : null;
+          if (fetched) path = await savePicture(save, fetched);
+        } catch {
+          path = null;
+        }
+        savedAt.set(picture.url, path);
       }
       if (path === null) stayed++;
       paths.push(path ?? picture.url);

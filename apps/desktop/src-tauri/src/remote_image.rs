@@ -172,7 +172,8 @@ impl Transport for Web {
     fn get(&self, url: &str) -> Boxed<'_, Result<Box<dyn Reply>, String>> {
         let url = url.to_string();
         Box::pin(async move {
-            // The same default provider the updater installs, for the same TLS.
+            // reqwest is built without a TLS provider (as the updater's is): install `ring`, as the
+            // updater does, unless one is installed already.
             if rustls::crypto::CryptoProvider::get_default().is_none() {
                 let _ = rustls::crypto::ring::default_provider().install_default();
             }
