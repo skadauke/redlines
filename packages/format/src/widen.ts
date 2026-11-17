@@ -816,7 +816,7 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
 export function atDelimiter(text: string, edits: readonly TextChange[]): boolean {
   const DELIMITER = /[*_~]/;
   return edits.some((edit) => {
-    let from = text.lastIndexOf('\n\n', edit.from);
+    let from = text.lastIndexOf('\n\n', Math.max(0, edit.from - 1));
     from = from < 0 ? 0 : from;
     let to = text.indexOf('\n\n', edit.to);
     to = to < 0 ? text.length : to;
@@ -834,7 +834,9 @@ export function atDelimiter(text: string, edits: readonly TextChange[]): boolean
 /**
  * Whether an edit that types or touches a delimiter run stands right against a pending split or
  * deletion (a block break, a word): deciding it reads the run in another place than the file shows
- * it, which only the replacement of the blocks that hold it keeps alike (#265).
+ * it, which only the replacement of the blocks that hold it keeps alike (#265). Not gated by
+ * micromark's reading of the file as written: it reads alike as written, and not after the break
+ * is decided.
  */
 export function delimiterBesideBreak(text: string, edits: readonly TextChange[]): boolean {
   const DELIMITER = /[*_~]/;
@@ -842,7 +844,7 @@ export function delimiterBesideBreak(text: string, edits: readonly TextChange[])
     const before = text.slice(Math.max(0, edit.from - 400), edit.from);
     const after = text.slice(edit.to, edit.to + 40);
     const beside =
-      /<!--(?:split|del) [^]*?-->\s*$/.test(before) || /^\s*<!--(?:split|del) /.test(after);
+      /<!--(?:split|del) [^>]*-->\s*$/.test(before) || /^\s*<!--(?:split|del) /.test(after);
     if (!beside) return false;
     const around = `${before.replace(/<!--[^]*?-->/g, '').slice(-1)}${after.replace(/<!--[^]*?-->/g, '').slice(0, 1)}`;
     return (
