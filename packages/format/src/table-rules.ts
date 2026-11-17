@@ -912,6 +912,10 @@ export interface TableNeighbours {
   headingAbove: boolean;
 }
 
+/** A line that opens an HTML comment or block (CommonMark's block tags), not an autolink or inline tag. */
+const HTML_OPENS =
+  /^ {0,3}<(?:!--|[?!]|\/?(?:address|article|aside|blockquote|body|center|details|dialog|div|dl|dt|dd|fieldset|figure|figcaption|footer|form|h[1-6]|header|hr|html|iframe|li|main|nav|ol|p|pre|script|section|style|summary|table|tbody|td|th|thead|tr|ul)(?:[ \t>]|\/>|$))/i;
+
 /** What stands next to `table`. */
 export function neighboursOf(text: string, parsed: Parsed, table: TableRead): TableNeighbours {
   const stop = parsed.ledgerRange?.from ?? text.length;
@@ -939,7 +943,7 @@ export function neighboursOf(text: string, parsed: Parsed, table: TableRead): Ta
     indentedAbove: above !== null && indentOf(above.line) >= 4,
     underText: above?.directly === true,
     indentedBelow: next !== null && indentOf(next) >= 4,
-    htmlBelow: directBelow !== null && /^[ \t]{0,3}</.test(directBelow),
+    htmlBelow: directBelow !== null && HTML_OPENS.test(directBelow),
     headingAbove: above?.directly === true && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(above.line),
   };
 }

@@ -893,6 +893,8 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
         expectEveryOrderAlike(fixed, done.after, exactly);
       }
       // Negative controls: the words are not used where the shape is not there.
+      const inline = file(`Intro.\n\n${FRUIT}\n<https://example.org> after.\n\nAfter.`);
+      expect(said(() => remove(inline))).not.toBe(HTML_BELOW);
       for (const body of [
         `Intro.\n\n    one\n\n${FRUIT}\n\nAfter.`,
         `Intro.\n\n${FRUIT}\n\n    two\n\nAfter.`,
