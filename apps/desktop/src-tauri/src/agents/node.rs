@@ -17,8 +17,10 @@
 //! Secrets are given to the connection as [`Secret`]s and leave it only in the one frame that
 //! carries them; nothing here logs or reports one.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -171,6 +173,9 @@ pub struct Timing {
     pub poll: Duration,
     /// How often an idle connection is pinged.
     pub ping_every: Duration,
+    /// How long a call may be waited on before the Gateway is told it failed. Each call has its
+    /// own, and none holds up another or the connection's pings.
+    pub call: Duration,
     pub pairing_retry: Duration,
     /// How long a request to approve this Mac lasts (the Gateway's own is five minutes).
     pub pairing_window: Duration,
@@ -184,6 +189,8 @@ impl Default for Timing {
             open: Duration::from_secs(10),
             poll: Duration::from_millis(250),
             ping_every: Duration::from_secs(25),
+            // A little over the most a call waits at the window (`CALL_TIMEOUT`).
+            call: Duration::from_secs(125),
             pairing_retry: Duration::from_secs(4),
             pairing_window: Duration::from_secs(5 * 60),
             backoff_start: Duration::from_secs(1),
@@ -348,11 +355,18 @@ fn answer_call(
     Ok((name, reply["result"].to_string()))
 }
 
+/// A call's answer, on its way from the thread that made it to the one that writes.
+struct Finished {
+    id: String,
+    node_id: String,
+    answered: Result<(String, String), String>,
+}
+
 /// One connection, from opening to its end.
 fn session(
     config: &Config,
     credential: &Credential,
-    host: &dyn ToolHost,
+    host: &Arc<dyn ToolHost>,
     emit: &mut dyn FnMut(Event),
     keep_token: &mut dyn FnMut(Secret),
     stop: &AtomicBool,
@@ -383,7 +397,7 @@ fn run(
     socket: &mut Socket,
     config: &Config,
     credential: &Credential,
-    host: &dyn ToolHost,
+    host: &Arc<dyn ToolHost>,
     emit: &mut dyn FnMut(Event),
     keep_token: &mut dyn FnMut(Secret),
     stop: &AtomicBool,
@@ -452,22 +466,76 @@ fn run(
     }
 
     // The tools.
-    let tools = tools_of(host);
-    let published: Vec<String> = tools
-        .iter()
-        .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
-        .collect();
+    let tools = tools_of(host.as_ref());
+    let published: Arc<Vec<String>> = Arc::new(
+        tools
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+            .collect(),
+    );
     if let Err(ended) = send(socket, protocol::plugin_tools_request("2", &tools)) {
         return ended;
     }
     emit(Event::Status(Status::Connected { tools: tools.len() }));
 
-    // Calls, until the end.
+    // Calls, until the end. A call is answered on a thread of its own, so that one that waits on
+    // the window (up to `timing.call`) holds back neither another call nor the pings; the answers
+    // come back here, the one thread that writes, each with the id of its own call, in the order
+    // they finish. A call still unanswered at its deadline is answered with an error, and the
+    // late answer, when it comes, is dropped.
+    let (finished_in, finished) = mpsc::channel::<Finished>();
+    let mut pending: HashMap<String, (String, Instant)> = HashMap::new();
+    let mut polling_fast = false;
     let mut last_heard = Instant::now();
     let mut last_ping = Instant::now();
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ended::Stopped;
+        }
+        while let Ok(done) = finished.try_recv() {
+            if pending.remove(&done.id).is_none() {
+                continue;
+            }
+            let frame = match &done.answered {
+                Ok((tool, result)) => {
+                    emit(Event::Called { tool: tool.clone() });
+                    protocol::invoke_result(&done.id, &done.node_id, Ok(result))
+                }
+                Err(message) => protocol::invoke_result(&done.id, &done.node_id, Err(message)),
+            };
+            if let Err(ended) = send(socket, frame) {
+                return ended;
+            }
+        }
+        let now = Instant::now();
+        let late: Vec<String> = pending
+            .iter()
+            .filter(|(_, (_, deadline))| *deadline <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in late {
+            if let Some((node_id, _)) = pending.remove(&id) {
+                let frame = protocol::invoke_result(
+                    &id,
+                    &node_id,
+                    Err("The document didn’t answer in time."),
+                );
+                if let Err(ended) = send(socket, frame) {
+                    return ended;
+                }
+            }
+        }
+        // While calls are out, an answer is looked for often; idle, the wait is the long one.
+        if pending.is_empty() == polling_fast {
+            polling_fast = !pending.is_empty();
+            set_poll(
+                socket,
+                if polling_fast {
+                    timing.poll.min(Duration::from_millis(20))
+                } else {
+                    timing.poll
+                },
+            );
         }
         match socket.read() {
             Ok(Message::Text(text)) => {
@@ -480,23 +548,32 @@ fn run(
                         params_json,
                         session_key,
                     } => {
-                        let answered = answer_call(
-                            host,
-                            &published,
-                            &command,
-                            &params_json,
-                            session_key.as_deref(),
+                        pending.insert(id.clone(), (node_id.clone(), Instant::now() + timing.call));
+                        let (host, published, done) = (
+                            Arc::clone(host),
+                            Arc::clone(&published),
+                            finished_in.clone(),
                         );
-                        let frame = match &answered {
-                            Ok((tool, result)) => {
-                                emit(Event::Called { tool: tool.clone() });
-                                protocol::invoke_result(&id, &node_id, Ok(result))
-                            }
-                            Err(message) => protocol::invoke_result(&id, &node_id, Err(message)),
-                        };
-                        if let Err(ended) = send(socket, frame) {
-                            return ended;
-                        }
+                        std::thread::spawn(move || {
+                            let answered =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    answer_call(
+                                        host.as_ref(),
+                                        &published,
+                                        &command,
+                                        &params_json,
+                                        session_key.as_deref(),
+                                    )
+                                }))
+                                .unwrap_or_else(|_| {
+                                    Err("The tool failed unexpectedly.".to_owned())
+                                });
+                            let _ = done.send(Finished {
+                                id,
+                                node_id,
+                                answered,
+                            });
+                        });
                     }
                     Incoming::Response {
                         id,
@@ -619,14 +696,7 @@ pub fn start(
                 }
                 emit(event);
             };
-            let ended = session(
-                &config,
-                &credential,
-                host.as_ref(),
-                &mut report,
-                &mut keep,
-                &flag,
-            );
+            let ended = session(&config, &credential, &host, &mut report, &mut keep, &flag);
             // A connection that held for a while starts the waits over; one that drops at once,
             // again and again, does not.
             if connected && began.elapsed() >= timing.backoff_max {
@@ -836,6 +906,13 @@ mod tests {
                 "tools/call" if request["params"]["name"] == "view" => json!({
                 "jsonrpc": "2.0", "id": 1,
                 "result": {"content": [{"type": "text", "text": "Hello, document."}], "isError": false}}),
+                // The slow one: a call that waits on a window.
+                "tools/call" if request["params"]["name"] == "comment" => {
+                    std::thread::sleep(Duration::from_millis(600));
+                    json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "result": {"content": [{"type": "text", "text": "Commented."}], "isError": false}})
+                }
                 _ => {
                     json!({"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "No such tool."}})
                 }
@@ -864,6 +941,7 @@ mod tests {
             open: Duration::from_secs(5),
             poll: Duration::from_millis(20),
             ping_every: Duration::from_secs(30),
+            call: Duration::from_secs(5),
             pairing_retry: Duration::from_millis(30),
             pairing_window: Duration::from_millis(400),
             backoff_start: Duration::from_millis(20),
@@ -879,6 +957,10 @@ mod tests {
 
     impl Run {
         fn start(fake: &Fake, first: Credential, token: Option<&str>) -> Run {
+            Run::start_with(fake, first, token, timing().call)
+        }
+
+        fn start_with(fake: &Fake, first: Credential, token: Option<&str>, call: Duration) -> Run {
             let events: Arc<Mutex<Vec<Event>>> = Arc::default();
             let kept = Arc::new(Mutex::new(token.map(str::to_owned)));
             let sink = Arc::clone(&events);
@@ -888,7 +970,7 @@ mod tests {
                     identity: Identity::from_seed(SEED).unwrap(),
                     display_name: "Redlines on Ada's MacBook".into(),
                     version: "0.2.0".into(),
-                    timing: timing(),
+                    timing: Timing { call, ..timing() },
                 },
                 first,
                 Arc::new(Tools),
@@ -1138,6 +1220,82 @@ mod tests {
             // One connection only: no retry of a refusal.
             gateway.thread.join().unwrap();
         }
+    }
+
+    #[test]
+    fn a_slow_call_holds_back_neither_a_fast_one_nor_the_pings() {
+        let order: Arc<Mutex<Vec<(String, u128)>>> = Arc::default();
+        let seen = Arc::clone(&order);
+        let gateway = fake(vec![Box::new(move |socket, frames| {
+            greet(socket, "n-9");
+            take_connect(socket, frames, "n-9");
+            hello(socket, None);
+            read_frame(socket, frames);
+            let began = Instant::now();
+            // The slow one first, then the fast one.
+            for (id, tool) in [("slow", "comment"), ("fast", "view")] {
+                text(
+                    socket,
+                    json!({"type": "event", "event": "node.invoke.request", "payload": {
+                    "id": id, "nodeId": "n", "command": "mcp.tools.call.v1",
+                    "paramsJSON": format!("{{\"server\":\"redlines\",\"tool\":\"{tool}\",\"arguments\":{{}}}}")}}),
+                );
+            }
+            for _ in 0..2 {
+                let result = read_frame(socket, frames).unwrap();
+                assert_eq!(result["params"]["ok"], true);
+                seen.lock().unwrap().push((
+                    result["params"]["id"].as_str().unwrap().to_owned(),
+                    began.elapsed().as_millis(),
+                ));
+            }
+            drain(socket, frames);
+        })]);
+        let mut run = Run::start(&gateway, Credential::Token(secret(TOKEN)), Some(TOKEN));
+        run.wait("both calls", |event| {
+            *event
+                == Event::Called {
+                    tool: "comment".into(),
+                }
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+        let order = order.lock().unwrap().clone();
+        let ids: Vec<&str> = order.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["fast", "slow"], "the fast call is answered first");
+        assert!(
+            order[0].1 < 400,
+            "and without waiting on the slow one: {order:?}"
+        );
+    }
+
+    #[test]
+    fn a_call_that_never_answers_is_answered_with_an_error_at_its_deadline() {
+        let gateway = fake(vec![Box::new(move |socket, frames| {
+            greet(socket, "n-10");
+            take_connect(socket, frames, "n-10");
+            hello(socket, None);
+            read_frame(socket, frames);
+            text(
+                socket,
+                json!({"type": "event", "event": "node.invoke.request", "payload": {
+                "id": "stuck", "nodeId": "n", "command": "mcp.tools.call.v1",
+                "paramsJSON": "{\"server\":\"redlines\",\"tool\":\"comment\",\"arguments\":{}}"}}),
+            );
+            let result = read_frame(socket, frames).unwrap();
+            assert_eq!(result["params"]["id"], "stuck");
+            assert_eq!(result["params"]["ok"], false);
+            drain(socket, frames);
+        })]);
+        let mut run = Run::start_with(
+            &gateway,
+            Credential::Token(secret(TOKEN)),
+            Some(TOKEN),
+            Duration::from_millis(100),
+        );
+        std::thread::sleep(Duration::from_millis(400));
+        run.stop();
+        gateway.thread.join().unwrap();
     }
 
     #[test]

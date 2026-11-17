@@ -620,10 +620,38 @@ between are refused (`a_late_call_of_an_aborted_run_never_reaches_the_threads_ne
 
 A run the Gateway never reported on (a dropped connection, or no `aborted` event within the grace)
 leaves its thread waiting for the full `SETTLE_TIMEOUT`; one that was reported on frees it at once.
-Known limits: a call waits on the window for up to 120 s inside the node's read loop; a gate check
-accepts any relay of the window, not only the run's own (a relay takes one connection, so it is a
-race); an edit in flight when Stop is pressed still lands; one run is one prompt, so a second
-prompt in a session has no tools.
+**Follow-ups of the bridge** (issue #976).
+- **Calls are answered off the read loop** (`node.rs`). Each `node.invoke.request` is answered on a
+  thread of its own, and the answer goes back to the one thread that writes, with its own call's id,
+  in the order the calls finish. Each call has its own deadline (`Timing::call`, 125 s, a little over
+  the window's 120 s), at which the Gateway is told it failed and a late answer is dropped. A slow
+  call so holds back neither another run's call nor the pings (`a_slow_call_holds_back_neither...`).
+  One run's own calls still go one at a time, in order, on its line.
+- **A run answers on its own relay.** The first run at a Gateway to name a relay of the window
+  claims it (`Relays::claim`, from `acp_send`, after the gate has passed the line); a relay another
+  run has claimed, or that a program is already connected to, is neither named nor taken, so a
+  `session/new` can't point a run's calls at another run's line. What remains: the window opens a
+  relay before its run starts, so the claim is the first run's to make, and a page that names an
+  unclaimed relay that a local agent's program has not yet connected to could take it. A page can
+  already do anything its own relays do, so this is not a door, only a mix-up that is now caught.
+  The node's call goes to the line registered for that run's session, as before.
+- **Stop ends a registration that is still waiting.** Registering waits for the thread's last run (up
+  to 8 s) and for the window's handshake (up to 20 s); it now looks every 50 ms at whether the run
+  was stopped, and gives up at once. An edit already in flight when Stop is pressed may still land:
+  the window had begun it, and Stop ends the run's tools, not the page's work in progress; the
+  agent is told the call was refused only if it hadn't been answered yet.
+- **A follow-up prompt in the same run keeps the tools.** OpenClaw offers the node's tools to every
+  run, resolved afresh from the connected nodes with that run's session key (`resolvePluginTools`
+  and the loop over `listConnectedNodePluginTools()` in `openclaw-plugin-tools-*.mjs`), so a second
+  `chat.send` in the session has them on the Gateway's side. The limit was Redlines': the
+  registration ended with the first prompt. It now ends with the run, or at once at a cancel or a
+  failure (`a_follow_up_prompt_in_the_same_run_still_has_the_tools`). A later run of the same thread
+  registers afresh, as before.
+
+**Checked live again** (`live_tools`, a throwaway Gateway, the stand-in model): a slow call (4 s)
+and a call of another run at the same time were answered fast first (0.5 s) and slow after (4.0 s);
+a second prompt in one session, under one registration, edited the document; Stop during a
+registration against a window that never answers ended it in 0.3 s; the earlier checks held.
 
 **Tool search on** (OpenClaw's default, `tools.toolSearch` unset): the six tools are deferred
 behind `tool_search`, `tool_describe` and `dispatch_action` as `mcp:redlines:<tool>`. The live
