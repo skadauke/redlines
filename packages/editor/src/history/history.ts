@@ -45,6 +45,7 @@ import {
 } from '@codemirror/state';
 import { EditorView, type KeyBinding } from '@codemirror/view';
 import { rejectMarks } from '@redlines/format';
+import { parsedField } from '../tracked/field.ts';
 import type { AgentStep } from '../api.ts';
 import type { StepLabel } from './names.ts';
 
@@ -75,6 +76,8 @@ export interface StepMeta {
   person: string | null;
   marks: readonly string[];
   touchedBy: string | null;
+  /** Whether another person typed inside the step's text, which rejecting its marks would take. */
+  tainted?: boolean;
 }
 
 const NO_META: StepMeta = { person: null, marks: [], touchedBy: null };
@@ -85,6 +88,12 @@ const NO_META: StepMeta = { person: null, marks: [], touchedBy: null };
  * other person's id, `name` as people read it.
  */
 export const remoteStep = Annotation.define<{ person: string; name: string }>();
+
+/**
+ * Comes with the notice that Undo leaves a step alone because someone changed its text: the step
+ * is dropped from the steps done, so the next Undo reaches the step below it.
+ */
+export const dropStaleEffect = StateEffect.define<null>();
 
 const fromHistory = Annotation.define<FromHistory>();
 
@@ -252,6 +261,7 @@ const historyField_ = StateField.define<HistoryState>({
     }
     const remote = tr.annotation(remoteStep);
     if (remote && !tr.changes.empty) return state.addRemote(tr.changes.desc, remote);
+    if (tr.effects.some((effect) => effect.is(dropStaleEffect))) return state.dropStale();
     const drop = tr.effects.find((effect) => effect.is(dropStepsEffect));
     if (drop) {
       // The text is as before those steps again: the steps below them need no mapping of it.
@@ -414,7 +424,7 @@ class HistEvent {
     this.meta = meta;
   }
 
-  withTouched(name: string): HistEvent {
+  withTouched(name: string, tainted: boolean): HistEvent {
     return new HistEvent(
       this.changes,
       this.effects,
@@ -423,7 +433,7 @@ class HistEvent {
       this.selectionsAfter,
       this.owner,
       this.label,
-      { ...this.meta, touchedBy: name },
+      { ...this.meta, touchedBy: name, tainted },
     );
   }
 
@@ -646,9 +656,28 @@ function touches(changes: ChangeSet, remote: ChangeDesc): boolean {
   return touched;
 }
 
+/** Whether `remote` inserts text strictly inside a range `changes` takes back. */
+function insertsInside(changes: ChangeSet, remote: ChangeDesc): boolean {
+  const own: number[] = [];
+  changes.iterChangedRanges((from, to) => own.push(from, to));
+  let inside = false;
+  remote.iterChangedRanges((from, to, _fromB, toB) => {
+    if (toB === _fromB) return;
+    for (let i = 0; i < own.length; i += 2) {
+      const a = own[i]!;
+      const b = own[i + 1]!;
+      if (from === to ? from > a && from < b : from < b && to > a) inside = true;
+    }
+  });
+  return inside;
+}
+
 /** The changes that take back a tracked step by rejecting its own marks, or null if they are gone. */
 function rejection(event: HistEvent, state: EditorState): ChangeSet | null {
-  if (!event.meta.marks.length) return null;
+  if (!event.meta.marks.length || event.meta.tainted) return null;
+  // All of its marks, or none: a step taken back in part can't be retried or redone as it was.
+  const present = new Set(state.field(parsedField, false)?.marks.map((mark) => mark.id));
+  if (event.meta.marks.some((id) => !present.has(id))) return null;
   try {
     const list = rejectMarks(state.doc.toString(), event.meta.marks);
     if (!list.length) return null;
@@ -852,6 +881,22 @@ class HistoryState {
     );
   }
 
+  /** Without the newest step, which Undo left alone: the steps below are mapped over it. */
+  dropStale(): HistoryState {
+    const last = this.done[this.done.length - 1];
+    if (!last?.changes || !last.meta.touchedBy) return this;
+    const forward = last.changes.invertedDesc;
+    const mapping = last.mapped ? last.mapped.composeDesc(forward) : forward;
+    return new HistoryState(
+      addMappingToBranch(this.done.slice(0, -1), mapping),
+      this.undone,
+      this.prevTime,
+      this.prevUserEvent,
+      true,
+      this.trimmed,
+    );
+  }
+
   /** Another person's change: the steps it touched, and then it is mapped away like any other. */
   addRemote(mapping: ChangeDesc, remote: { person: string; name: string }): HistoryState {
     const done = this.done.slice();
@@ -861,7 +906,7 @@ class HistoryState {
       if (!event.changes) continue;
       const { person, touchedBy } = event.meta;
       if (person && person !== remote.person && !touchedBy && touches(event.changes, m)) {
-        done[i] = event.withTouched(remote.name);
+        done[i] = event.withTouched(remote.name, insertsInside(event.changes, m));
       }
       // The change in the text from before this step.
       m = m.mapDesc(event.changes);

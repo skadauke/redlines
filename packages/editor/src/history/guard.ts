@@ -29,6 +29,7 @@ import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
 import { agentCaret } from './caret.ts';
 import {
+  dropStaleEffect,
   history,
   historyField,
   historyKeymap,
@@ -135,7 +136,9 @@ function sayingWhy(command: StateCommand, message: string): Command {
     // Per-person undo: the step is yours, but someone else has changed its text since.
     const stale = command === undo ? staleUndo(view.state) : null;
     if (stale) {
-      view.dispatch({ effects: refusedEditEffect.of(staleMessage(stale)) });
+      view.dispatch({
+        effects: [refusedEditEffect.of(staleMessage(stale)), dropStaleEffect.of(null)],
+      });
       return true;
     }
     const why = whyNot(view.state, message);

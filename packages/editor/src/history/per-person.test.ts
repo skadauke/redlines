@@ -77,15 +77,44 @@ describe('undo, per person', () => {
     expect(bodyOf(editor)).toBe('Hello! world\n');
   });
 
-  it('takes back a tracked step by rejecting its marks, though Bo typed inside', () => {
+  it('takes back a tracked step by rejecting its marks, though Bo edited elsewhere', () => {
     const { editor, said } = made('Hello world\n', true);
     type(editor, 5, 5, ' there');
     const text = editor.view.state.doc.toString();
+    // Bo deletes a letter inside the inserted text: it touches the step, adds nothing to it.
     const at = text.indexOf('there');
-    remote(editor, at + 2, at + 2, 'X');
+    remote(editor, at + 2, at + 3, '');
     expect(undoSayingWhy(editor.view)).toBe(true);
     expect(said).toEqual([]);
     expect(bodyOf(editor)).not.toContain('<!--ins');
+  });
+
+  it('does not take Bo’s typing inside a tracked step with it', () => {
+    const { editor, said } = made('Hello world\n', true);
+    type(editor, 5, 5, ' there');
+    const at = editor.view.state.doc.toString().indexOf('there');
+    remote(editor, at + 2, at + 2, 'X');
+    const before = editor.view.state.doc.toString();
+    undoSayingWhy(editor.view);
+    expect(editor.view.state.doc.toString()).toBe(before);
+    expect(said).toEqual([staleMessage('Bo')]);
+  });
+
+  it('goes past a step it leaves alone to the one below, at the next Undo', () => {
+    const { editor } = made('Hello world\n', false);
+    type(editor, 0, 0, 'A');
+    editor.view.dispatch({ effects: [] });
+    // Isolate the second step from the first.
+    editor.view.dispatch({
+      changes: { from: 12, to: 12, insert: 'ZZ' },
+      userEvent: 'input.type',
+      annotations: Transaction.time.of(Date.now() + 5000),
+    });
+    remote(editor, 13, 13, 'Q');
+    undoSayingWhy(editor.view);
+    expect(bodyOf(editor)).toBe('AHello worldZQZ\n');
+    undoSayingWhy(editor.view);
+    expect(bodyOf(editor)).toBe('Hello worldZQZ\n');
   });
 
   it('says who when a tracked step was decided by another person', () => {
