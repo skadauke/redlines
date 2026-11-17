@@ -7,7 +7,7 @@ import { EditError } from './errors.ts';
 import { idPositions, splitLedger } from './ledger-join.ts';
 import { findLedger, findLedgers, ledgerHidden, readSpan } from './ledger-read.ts';
 import type { LedgerSpan } from './ledger-read.ts';
-import { scan } from './scan.ts';
+import { scan, scanAfter } from './scan.ts';
 import type { Scan } from './scan.ts';
 import { encodePayload } from './payload.ts';
 import type {
@@ -317,7 +317,8 @@ export function setLedger(
   ];
   // At the end of a code block or a comment that is never closed, the ledger would be code or
   // comment text, and the next save would add another one.
-  if (!findLedger(applyChanges(text, added))) throw unclosedEnd();
+  const grown = applyChanges(text, added);
+  if (!findLedger(grown, scanAfter(text, grown, added))) throw unclosedEnd();
   return added;
 }
 
