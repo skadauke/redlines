@@ -4,6 +4,7 @@
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
 import { HTML_STARTS } from './block-read.ts';
+import { isOlderPunctuation, isPunctuation, runRole } from './flanking.ts';
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
 import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
 import { isTableRowAt } from './table-rules.ts';
@@ -35,6 +36,8 @@ export type Place =
 export interface Around {
   before?: string;
   after?: string;
+  /** Where markers of the file stand in `after`: the indices of the characters that one is in front of. */
+  afterMarks?: ReadonlySet<number>;
   /** The marker comes right after text that is written with it, so that it does not stand at the
    * start of its line, whatever the old text has there. */
   joined?: boolean;
@@ -437,7 +440,12 @@ function charsAfter(v: string, index: number): string[] {
  * a `_` that has a letter or digit on its other side, the same. `around` gives the text next to
  * the marker where it is not that of the paragraph.
  */
-function changesFlanking(v: string, index: number, around: Around): boolean {
+function changesFlanking(
+  v: string,
+  index: number,
+  around: Around,
+  marked: (i: number) => boolean,
+): boolean {
   const left =
     around.before !== undefined ? [...around.before].slice(-WINDOW) : charsBefore(v, index);
   const right =
@@ -445,17 +453,42 @@ function changesFlanking(v: string, index: number, around: Around): boolean {
   const last = left.at(-1);
   const first = right[0];
   if (isDelimiter(last) && last === first) return true;
+  // A run next to the marker reads the marker as punctuation: `<` after a run before it, `>` before
+  // a run after it. That changes what the run does when it can open and can't, or the other way
+  // round, or can do nothing and does (a space after `**` is no opener, a `<` there is: #265; `_`
+  // between letters is no closer, and next to a `<` it is). A run that can do something both ways,
+  // with a closer more or less, is no change, and neither is a `_` that stays a closer with a `|`
+  // after it (#490).
+  const does = (
+    char: string | undefined,
+    before: string | undefined,
+    after: string | undefined,
+  ): string[] =>
+    [isPunctuation, isOlderPunctuation].map((punctuation) => {
+      const role = runRole(char ?? '', before, after, punctuation);
+      return `${role.open}${role.open || role.close}`;
+    });
+  const differs = (was: string[], is: string[]) => was.some((one, i) => one !== is[i]);
   if (isDelimiter(last)) {
     let at = left.length - 1;
     while (at > 0 && left[at - 1] === last) at--;
-    const outer = at > 0 ? left[at - 1] : undefined;
-    if (last === '_' ? isWord(outer) : isWord(first) && isWord(outer)) return true;
+    const run = left.length - at;
+    // A marker that stands beyond the run reads as punctuation to it as well.
+    const outer =
+      around.before === undefined && marked(index - run) ? '>' : at > 0 ? left[at - 1] : undefined;
+    if (differs(does(last, outer, first), does(last, outer, '<'))) return true;
+    if (last !== '_' && isWord(first) && isWord(outer)) return true;
   }
   if (isDelimiter(first)) {
     let at = 0;
     while (at < right.length - 1 && right[at + 1] === first) at++;
-    const outer = right[at + 1];
-    if (first === '_' ? isWord(outer) : isWord(last) && isWord(outer)) return true;
+    const outer = (
+      around.after === undefined ? marked(index + at + 1) : around.afterMarks?.has(at + 1)
+    )
+      ? '<'
+      : right[at + 1];
+    if (differs(does(first, last, outer), does(first, '>', outer))) return true;
+    if (first !== '_' && isWord(last) && isWord(outer)) return true;
   }
   return false;
 }
@@ -698,7 +731,9 @@ export function inspectPlace(
       ),
     };
   }
-  if (changesFlanking(v, index, around)) return { kind: 'flank' };
+  // Whether a marker stands between the characters before and after `i` of the paragraph.
+  const marked = (i: number) => offsetAt(i) - (i === 0 ? range.from - 1 : offsetAt(i - 1)) > 1;
+  if (changesFlanking(v, index, around, marked)) return { kind: 'flank' };
 
   const kind = around.joined ? 'inline' : lineStartKind(text, position, hidden);
   if (kind === 'block') return { kind: 'block' };
