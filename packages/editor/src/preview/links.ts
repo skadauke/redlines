@@ -28,18 +28,31 @@ import { destination } from '../clipboard/copy-html.ts';
 /** What an address has after its scheme: no white space or control character. */
 const REST = '[^\\s\\u0000-\\u001f\\u007f-\\u009f]+';
 const ADDRESS = new RegExp(`^(?:https?://|mailto:)${REST}$`, 'i');
-const WWW = new RegExp(`^www\\.${REST}$`, 'i');
+/** A `www.` address has a host after its dot. */
+const WWW = /^www\.[^\s/?#]/i;
+/** A web address's start, through its host: a space after it is the path's, which `<...>` allows. */
+const AFTER_HOST = /^(https?:\/\/[^\s/?#]+)([/?#][^]*)?$/i;
 
 /**
  * The address to open for a link's destination, or null when it isn't one the page may open: only
- * `http`, `https` and `mailto`, with something after the scheme and no white space. A `www.`
- * address is the web's, as GitHub's autolinks make it (`http://`). Anything else, `javascript:`,
- * `data:`, `file:`, another scheme, and a link to another document, is null.
+ * `http`, `https` and `mailto`, with something after the scheme and no white space. A `www.` address
+ * is the web's, opened over `https` as a copy writes it; a space in the path of an address, which a
+ * `<...>` destination may hold, is written `%20`. Only an explicit `mailto:` is mail here: a bare
+ * email is mail only as an autolink (`mailed`), and `[x](logo@2x.png)` is a relative link.
+ * Anything else, `javascript:`, `data:`, `file:`, another scheme, and a link to another document,
+ * is null.
  */
 export function openableAddress(href: string): string | null {
-  const address = href.trim();
-  if (ADDRESS.test(address)) return address;
-  return WWW.test(address) ? `http://${address}` : null;
+  const written = href.trim();
+  const address = WWW.test(written) ? `https://${written}` : written;
+  const parts = AFTER_HOST.exec(address);
+  const spaced = parts ? `${parts[1]}${(parts[2] ?? '').replaceAll(' ', '%20')}` : address;
+  return ADDRESS.test(spaced) ? spaced : null;
+}
+
+/** An autolink's or bare address's destination, which is mail when it is an email (as a copy has it). */
+function mailed(address: string): string {
+  return /^[^\s@/:]+@[^\s@/:]+$/.test(address) ? `mailto:${address}` : address;
 }
 
 /** A reference label as definitions and uses agree on it. */
@@ -99,7 +112,10 @@ export function linkDestination(state: EditorState, pos: number): string | null 
     node;
     node = node.parent
   ) {
-    if (node.name === 'Image') return null;
+    // An image is no link of its own, and its address no bare one; a link around it is the link.
+    if (node.name === 'Image') {
+      bare = null;
+    }
     if (node.name === 'Link') {
       // A bracketed phrase with no destination, or a reference nothing defines, is text: an
       // address in it is a bare address.
@@ -108,12 +124,12 @@ export function linkDestination(state: EditorState, pos: number): string | null 
     }
     if (node.name === 'Autolink') {
       const url = node.getChild('URL');
-      return url ? destination(state.sliceDoc(url.from, url.to)) : null;
+      return url ? mailed(destination(state.sliceDoc(url.from, url.to))) : null;
     }
     // The climb goes on, to a link around it if there is one.
     if (node.name === 'URL' && !bare && node.parent?.name !== 'Autolink') bare = node;
   }
-  return bare ? destination(state.sliceDoc(bare.from, bare.to)) : null;
+  return bare ? mailed(destination(state.sliceDoc(bare.from, bare.to))) : null;
 }
 
 /** A link under the pointer: the drawn element, where its text starts, and the address it opens. */
