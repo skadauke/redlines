@@ -1,4 +1,5 @@
 // Provisional: these types follow docs/format.md and will change when the parser is written.
+import type { MarkdownDialect } from './dialect.ts';
 
 /** A UTC time with minute precision, `YYYY-MM-DDTHH:MMZ`, kept as a string. */
 export type Time = string;
@@ -267,4 +268,6 @@ export interface EditContext {
   note?: string;
   /** A group id for the new marks, decided together. */
   group?: string;
+  /** The dialect of the file (§9.1), from its name; GitHub's when absent. */
+  dialect?: MarkdownDialect;
 }

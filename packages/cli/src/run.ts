@@ -249,7 +249,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
       return 0;
     }
     await readTextOptions(io, command, flags);
-    const outcome = command.run(text, { args, flags, now: io.now() });
+    const outcome = command.run(text, { args, flags, now: io.now(), file });
     for (const note of outcome.notes ?? []) io.stderr(`${note}\n`);
     if (outcome.text !== undefined) await saveText(io, file, text, outcome.text);
     io.stdout(outcome.output);

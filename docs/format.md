@@ -1130,13 +1130,15 @@ at the outer edge of a whole inline construct. A marker never goes:
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
 9. inside pandoc's `^x^`, which a `.qmd` or `.Rmd` file may have and keeps as written (§9.1; a
-   change there is a replacement of the pair, in a file of any type, since the library reads them
-   alike; pandoc's `~x~` is not held, for GFM reads one tilde as strikethrough, which takes marks); after or inside `{…}`
+   change there is a replacement of the pair; pandoc's `~x~` is not held, for GFM reads one tilde
+   as strikethrough, which takes marks); after or inside `{…}`
    attributes; on `:::` lines (a fence line; a change there is a replacement of the div's
    paragraph, and a typed div is one insertion with no marker on a fence line, §9.4); before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
    or a digit and an emoji shortcode; or inside `{{< >}}`, a cross-reference (`@fig-x`, `@sec-x`, and the other kinds Quarto numbers), a
-   citation bracket (`[@a; @b]`, `[-@a]`) or `(\#fig:x)`. GitHub shows a
+   citation bracket (`[@a; @b]`, `[-@a]`) or `(\#fig:x)`. Three of these are pandoc's alone and
+   are held in a file of the pandoc dialect only (§9.1): `^x^`, the `:::` line, and the
+   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. GitHub shows a
    shortcode as its emoji at the start of a text or after a space, and as written with a letter or
    a digit before it (`a:tent:`); a marker between the two would leave it at the start of a text,
    where it shows as the emoji. A change whose end would stand there, as when text is typed or a
@@ -4227,9 +4229,14 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   ([research](research/syntax.md)), so a `.qmd` or `.Rmd` file rendered to Word through pandoc
   loses them; Redlines' own Word export keeps them (§10). A `~x~` or `^x^` that a `.qmd` or `.Rmd` file already has is kept as written:
   Redlines never writes either, never turns one into a tag, and doesn't read it as subscript or
-  superscript. The library has no file type, so it reads a single `~x~` as GFM does, as
-  strikethrough, and `^x^` as text: a format change or a marker may stand inside them, which pandoc
-  would read otherwise. Keeping markers out of them (§3.1, rule 9) is not built yet.
+  superscript. A single `~x~` is read as GFM does, as strikethrough, in both dialects.
+- **The dialect is a parameter of an edit.** The caller names it from the file's name
+  (`dialectOfName`: `qmd` and `rmd` are pandoc's, every other name GitHub's) in the edit's context
+  (`EditContext.dialect`, `UntrackedContext.dialect`), and it is GitHub's when left out. Rules that
+  only pandoc has are held in a pandoc file alone: no marker on a `:::` fence line, in an `@fig-x`
+  or `[@a; @b]` token, or in `^x^`, and a typed div is one insertion (rule 9, §9.4). The same text
+  in a `.md` file is text, which takes marks as any other. The library reads the file's text in both
+  alike, so the views, decisions and the ledger don't depend on the dialect.
 - Emoji are the character itself in every file type. Shortcodes (`:tent:`) don't render in pandoc,
   Quarto or VS Code, so Redlines never writes one: choosing an emoji after a colon writes the
   character. A shortcode that a file already has is kept as written, and is one character for a

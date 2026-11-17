@@ -7,6 +7,7 @@
 // Nothing calls this yet: the writers that refuse today will call it in their turn. It is the one
 // writer all of them share: they differ in why the fine form failed, not in what to write.
 
+import { isPandoc, withDialect } from './dialect.ts';
 import { scaffold, continuationPrefix, bodyStart, lineEnd, lineStart } from './blocks.ts';
 import { micromark } from 'micromark';
 import {
@@ -104,6 +105,10 @@ export interface Widened {
  * @throws Untrackable when no unit holds the edit; EditError when the ledger can't be read.
  */
 export function widen(text: string, edits: readonly TextChange[], ctx: EditContext): Widened {
+  return withDialect(ctx.dialect, () => widenIn(text, edits, ctx));
+}
+
+function widenIn(text: string, edits: readonly TextChange[], ctx: EditContext): Widened {
   const parsed = parse(text);
   const view = newestView(text);
   const sorted = edits.toSorted((a, b) => a.from - b.from || a.to - b.to);
@@ -600,8 +605,6 @@ const RISKY_LINES = [
   /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/,
   /^ {0,3}#{1,6}(?:[ \t].*)?#[ \t]*$/,
   /^ {0,3}\[[^\]]+\]:/,
-  // The fence of a pandoc div: nothing but the fence may be on its line (format §3.1, rule 9).
-  /^[ \t>]*:{3,}/,
   /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/,
 ];
 
@@ -620,6 +623,8 @@ function lastLineOf(text: string, prefix: string): string {
 
 function riskyEnd(text: string, prefix: string): boolean {
   const line = lastLineOf(text, prefix);
+  // The fence of a pandoc div: nothing but the fence may be on its line (format §3.1, rule 9).
+  if (isPandoc() && /^[ \t>]*:{3,}/.test(line)) return true;
   return RISKY_LINES.some((risky) => risky.test(line));
 }
 
