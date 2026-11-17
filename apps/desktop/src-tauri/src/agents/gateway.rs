@@ -207,6 +207,13 @@ fn no_route(error: &io::Error) -> bool {
     matches!(error.raw_os_error(), Some(51 | 65 | 101 | 113))
 }
 
+/// What a Gateway may send: messages of a few megabytes at most, not tungstenite's sixty-four.
+fn limits() -> tungstenite::protocol::WebSocketConfig {
+    tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(4 << 20))
+        .max_frame_size(Some(4 << 20))
+}
+
 /// Connects to a target and finishes the WebSocket handshake, every wait within `timeout`. The
 /// stream's timeouts stay set, so that a later read never waits forever.
 pub fn open(target: &Target, timeout: Duration) -> Result<Socket, OpenError> {
@@ -220,7 +227,12 @@ pub fn open(target: &Target, timeout: Duration) -> Result<Socket, OpenError> {
                 let _ = stream.set_read_timeout(Some(timeout));
                 let _ = stream.set_write_timeout(Some(timeout));
                 let _ = stream.set_nodelay(true);
-                return match tungstenite::client_tls(target.url.as_str(), stream) {
+                return match tungstenite::client_tls_with_config(
+                    target.url.as_str(),
+                    stream,
+                    Some(limits()),
+                    None,
+                ) {
                     Ok((socket, _)) => Ok(socket),
                     Err(HandshakeError::Interrupted(_)) => Err(OpenError::TimedOut),
                     Err(HandshakeError::Failure(tungstenite::Error::Io(error)))
