@@ -407,9 +407,17 @@ export function originalRowText(text: string, parsed: Parsed, row: TableRowRead)
     ),
   );
   if (!marked && !row.insertion) return rowTextOf(text, row);
-  const view = originalView(text);
+  const view = originalViewOf(text);
   const from = view.map.fromSource(row.from);
   return view.text.slice(from, lineEnd(view.text, from));
+}
+
+/** The original view of `text`, built once for all the rows of an operation on it (#273): the last
+ * one is kept, since an operation reads many rows of one text and then moves on. */
+let lastOriginal: { text: string; view: ReturnType<typeof originalView> } | undefined;
+function originalViewOf(text: string): ReturnType<typeof originalView> {
+  if (lastOriginal?.text !== text) lastOriginal = { text, view: originalView(text) };
+  return lastOriginal.view;
 }
 
 /** The twin of a half of a move, in the table: the deletion of an inserted row, or the row. */
