@@ -17,7 +17,6 @@ const body = [
 const text = file(body, Object.fromEntries(ids.map((id) => [id, 'ada'])));
 
 describe('the original text of the rows of a table in which every row holds a pending change', () => {
-
   // A timing test: it runs with REDLINES_COST set, as the other cost tests do.
   it.skipIf(!process.env['REDLINES_COST'])(
     'costs at most 10 times a parse, for all 300 rows',
