@@ -657,8 +657,9 @@ export function commitEdit(
 ): TextChange[] {
   let sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
   // A `<!--` that nothing closes covers the ledger and the marks after it: nothing is read, and
-  // a write would add a second ledger or none.
-  if (sorted.length > 0) assertLedgerVisible(text);
+  // a write of marks would add a second ledger or none. A plain edit writes no mark and no ledger.
+  if (sorted.length > 0 && (options.created !== undefined || options.removes === true))
+    assertLedgerVisible(text);
   const before = sorted.length > 0 ? (options.parsed ?? parse(text)) : undefined;
   const removing = options.removes === true;
   // A decision that gives back a code block that is never closed would leave the ledger inside it.
