@@ -34,7 +34,7 @@ We will ship the <!--ins k3x9-->new <!--/k3x9-->importer in <!--sub p7qd March--
 ${LEDGER}`;
 
 async function partsOf(text: string) {
-  const parts = readParts(await exportDocx(text));
+  const parts = readParts(await exportDocx(text, { carriers: false }));
   const document = partText(parts, 'word/document.xml') ?? '';
   const comments = partText(parts, 'word/comments.xml') ?? '';
   return { parts, document, comments, settings: partText(parts, 'word/settings.xml') ?? '' };

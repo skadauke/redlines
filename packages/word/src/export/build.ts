@@ -9,6 +9,8 @@
 import { parse } from '@redlines/format';
 import type { Ledger, MarkRange, Segment, Thread } from '@redlines/format';
 import {
+  BookmarkEnd,
+  BookmarkStart,
   BorderStyle,
   CommentRangeEnd,
   CommentRangeStart,
@@ -26,11 +28,15 @@ import {
   TableRow,
   TextRun,
   WidthType,
+  commentIdToParaId,
 } from 'docx';
 import type { FileChild, ICommentOptions, ParagraphChild } from 'docx';
+import { addCarriers, bookmarkName } from '../carriers/index.ts';
+import type { CommentCarrier, SourceBlock } from '../carriers/index.ts';
 import { wordDate } from '../shared/dates.ts';
 import { durableId, WordIds } from '../shared/ids.ts';
 import { authorsOf } from '../shared/people.ts';
+import { readParts, writeParts } from '../shared/zip.ts';
 import { markdownBlocks } from './blocks.ts';
 import type { Atom, Block, Fmt, Leaf } from './blocks.ts';
 
@@ -63,6 +69,12 @@ type Item =
   | { pos: number; order: 2; type: 'start'; thread: Thread }
   | { pos: number; order: 2; type: 'point'; thread: Thread }
   | { pos: number; order: 3; type: 'atom'; atom: Atom };
+
+/** The id of the block at an index of the file's blocks: `b1`, `b2`, … The bookmark's name is
+ * made from it, and the source part lists them. */
+function blockId(index: number): string {
+  return `b${index + 1}`;
+}
 
 const HEADINGS = [
   HeadingLevel.HEADING_1,
@@ -175,6 +187,9 @@ function runOptions(fmt: Fmt, text: string) {
 export interface ExportOptions {
   /** The program that wrote the file, for its properties. */
   creator?: string;
+  /** Whether to write the carriers of a round trip: the source part, the block bookmarks, the
+   * comments' durable ids and the revisions' UTC times. On unless `false`. */
+  carriers?: boolean;
 }
 
 /** A Redlines file as the bytes of a .docx. */
@@ -220,6 +235,7 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
   }
   const markById = new Map(parsed.marks.map((mark) => [mark.id, mark]));
   const comments: ICommentOptions[] = [];
+  const carried: CommentCarrier[] = [];
   const wordIds = new Map<string, number[]>();
   const items: Item[] = [];
   for (const thread of ledger.comments) {
@@ -236,6 +252,12 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
       resolved: thread.resolved ? true : undefined,
       durableId: durableId(thread.id),
     });
+    carried.push({
+      paraId: commentIdToParaId(root),
+      resolved: Boolean(thread.resolved),
+      durableId: durableId(thread.id),
+      dateUtc: wordDate(thread.at),
+    });
     thread.replies.forEach((reply, i) => {
       const replier = author(reply.by);
       comments.push({
@@ -246,6 +268,13 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
         children: commentParagraphs(reply.text),
         parentId: root,
         durableId: durableId(thread.id, reply.id),
+      });
+      carried.push({
+        paraId: commentIdToParaId(replyIds[i] as number),
+        parentParaId: commentIdToParaId(root),
+        resolved: Boolean(thread.resolved),
+        durableId: durableId(thread.id, reply.id),
+        dateUtc: wordDate(reply.at),
       });
     });
     let span = spans.get(thread.id);
@@ -372,7 +401,18 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
     return mine;
   };
 
-  const paragraphsFor = (leaf: Leaf, nextFrom: number): Paragraph[] => {
+  // The hidden bookmark that wraps a block, so that an import can tell which blocks Word left alone.
+  const bookmark = (index: number) => {
+    const id = ids.fresh();
+    const name = bookmarkName(blockId(index));
+    return {
+      start: new BookmarkStart(name, id) as unknown as ParagraphChild,
+      end: new BookmarkEnd(id) as unknown as ParagraphChild,
+    };
+  };
+
+  const paragraphsFor = (leaf: Leaf, nextFrom: number, index: number): Paragraph[] => {
+    const wrap = options.carriers === false ? null : bookmark(index);
     const own: Item[] = take(leaf.to, nextFrom);
     for (const atom of leaf.atoms) own.push({ pos: atom.from, order: 3, type: 'atom', atom });
     const mark = marksInserted(leaf);
@@ -409,7 +449,11 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
         : last && mark
           ? { insertion: revision(mark.by, mark.at) }
           : undefined;
-      return new Paragraph({ children: para.children, run, ...(i === 0 ? shape : {}) });
+      const children =
+        wrap && (i === 0 || last)
+          ? [...(i === 0 ? [wrap.start] : []), ...para.children, ...(last ? [wrap.end] : [])]
+          : para.children;
+      return new Paragraph({ children, run, ...(i === 0 ? shape : {}) });
     });
   };
 
@@ -428,7 +472,13 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
     });
   };
 
-  const tableFor = (block: Extract<Block, { type: 'table' }>, nextFrom: number): Table => {
+  const tableFor = (
+    block: Extract<Block, { type: 'table' }>,
+    nextFrom: number,
+    index: number,
+  ): Table => {
+    const wrap = options.carriers === false ? null : bookmark(index);
+    let started = false;
     const line = { style: BorderStyle.SINGLE, size: 4, color: '999999' };
     const cellCount = block.rows.reduce((most, row) => Math.max(most, row.cells.length), 1);
     const rows = block.rows.map((row, r) => {
@@ -451,9 +501,18 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
                   : atom,
             });
           }
+          const first = !started;
+          started = true;
+          const end = last && c === row.cells.length - 1;
           return new TableCell({
             children: [
-              new Paragraph({ children: childrenOf(own).flatMap((para) => para.children) }),
+              new Paragraph({
+                children: [
+                  ...(first && wrap ? [wrap.start] : []),
+                  ...childrenOf(own).flatMap((para) => para.children),
+                  ...(end && wrap ? [wrap.end] : []),
+                ],
+              }),
             ],
           });
         }),
@@ -479,8 +538,8 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
   blocks.forEach((block, i) => {
     const nextFrom = blocks[i + 1]?.from ?? Infinity;
     children.push(...deletedParagraphs(block.from));
-    if (block.type === 'table') children.push(tableFor(block, nextFrom));
-    else children.push(...paragraphsFor(block, nextFrom));
+    if (block.type === 'table') children.push(tableFor(block, nextFrom, i));
+    else children.push(...paragraphsFor(block, nextFrom, i));
   });
   if (children.length === 0)
     children.push(
@@ -523,5 +582,15 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
     },
     sections: [{ children }],
   });
-  return new Uint8Array(await Packer.toBuffer(document));
+  const bytes = new Uint8Array(await Packer.toBuffer(document));
+  if (options.carriers === false) return bytes;
+  const parts = readParts(bytes);
+  const sourceBlocks: SourceBlock[] = blocks.map((block, i) => ({
+    id: blockId(i),
+    type: block.type,
+    from: block.from,
+    to: block.to,
+  }));
+  addCarriers(parts, { markdown: text, ledger, blocks: sourceBlocks, comments: carried });
+  return writeParts(parts);
 }
