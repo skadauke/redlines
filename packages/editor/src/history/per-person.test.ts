@@ -396,6 +396,69 @@ describe('undo, per person', () => {
     expect(bodyOf(editor)).toContain('world');
   });
 
+  /** Ada replaces "world" with "moon" (a del mark and an ins mark); Bo types X inside "moon". */
+  const replaced = () => {
+    const made1 = made('Hello world\n', true);
+    const { editor } = made1;
+    type(editor, 6, 11, '');
+    const at = editor.view.state.doc.toString().indexOf('-->') + 3;
+    type(editor, at, at, 'moon');
+    const ix = editor.view.state.doc.toString().indexOf('moon') + 2;
+    remote(editor, ix, ix, 'X');
+    const marks = parsedOf(editor).marks;
+    return {
+      ...made1,
+      ids: (kind: string) => marks.filter((m) => m.kind === kind).map((m) => m.id),
+    };
+  };
+
+  it('takes back an accepted insertion Bo typed inside as your tracked deletion, rejecting the pending deletion (#967)', () => {
+    const { editor, said, ids } = replaced();
+    const text = editor.view.state.doc.toString();
+    editor.view.dispatch({
+      changes: acceptMarks(text, ids('ins')),
+      annotations: fromBo,
+      filter: false,
+    });
+    undoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+    const after = parsedOf(editor);
+    expect(after.marks.map((m) => [m.kind, m.entry.by]).sort()).toEqual([
+      ['del', 'ada'],
+      ['del', 'ada'],
+    ]);
+    expect(after.marks.map((m) => m.payload).sort()).toEqual(['mo', 'on']);
+    // "world" is back in the text, and X stays, plain.
+    expect(bodyOf(editor)).toContain('world');
+    expect(bodyOf(editor)).toContain('X');
+    expect(bodyOf(editor)).not.toMatch(/<!--del [a-z0-9]{4} world-->/);
+  });
+
+  it('with some marks still there and typed inside and others decided, writes the decided part as your own', () => {
+    const { editor, said, ids } = replaced();
+    const text = editor.view.state.doc.toString();
+    // Bo accepts the deletion only: "world" is gone for good, and "moon" still has his X inside.
+    editor.view.dispatch({
+      changes: acceptMarks(text, ids('del')),
+      annotations: fromBo,
+      filter: false,
+    });
+    expect(bodyOf(editor)).toBe(
+      'Hello <!--ins ' + ids('ins')[0] + '-->moXon<!--/' + ids('ins')[0] + '-->',
+    );
+    undoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+    const after = parsedOf(editor);
+    // Your text goes (plain, as a rejection is), "world" comes back as your tracked insertion, X stays.
+    expect(after.marks.map((m) => [m.kind, m.entry.by])).toEqual([['ins', 'ada']]);
+    expect(bodyOf(editor)).toContain('world');
+    expect(bodyOf(editor)).toContain('X');
+    expect(bodyOf(editor)).not.toContain('moon');
+    expect(bodyOf(editor)).not.toContain('mo');
+  });
+
   it('keeps what it knows of a step through the history’s JSON, and uses it after fromJSON', () => {
     const extensions = [
       history({

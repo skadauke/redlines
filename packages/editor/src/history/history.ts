@@ -87,6 +87,8 @@ export interface StepMeta {
   touchedBy: string | null;
   /** Whether another person typed inside the step's text, which rejecting its marks would take. */
   tainted?: boolean;
+  /** Which of its marks that was typed inside: rejecting the others takes nobody's typing. */
+  taintedIds?: readonly string[];
   /**
    * The text the step's tracked deletions took out (their payloads), where each stands in the text
    * after the step, while its mark is there.
@@ -490,7 +492,7 @@ class HistEvent {
     );
   }
 
-  withTouched(name: string, tainted: boolean): HistEvent {
+  withTouched(name: string, tainted: boolean, taintedIds?: readonly string[]): HistEvent {
     return new HistEvent(
       this.changes,
       this.effects,
@@ -499,7 +501,7 @@ class HistEvent {
       this.selectionsAfter,
       this.owner,
       this.label,
-      { ...this.meta, touchedBy: name, tainted },
+      { ...this.meta, touchedBy: name, tainted, taintedIds },
     );
   }
 
@@ -757,19 +759,22 @@ function insertsInside(changes: ChangeSet, remote: ChangeDesc): boolean {
  * marks would take with their own. A tracked insertion of another person splits a mark's segments
  * around itself, and is then no part of them.
  */
-function typedInsideMarks(ids: readonly string[], tr: Transaction): boolean {
+function typedInsideMarks(ids: readonly string[], tr: Transaction): string[] {
   const parsed = tr.state.field(parsedField, false);
-  if (!parsed) return true;
-  let inside = false;
-  const contents = parsed.marks
-    .filter((mark) => ids.includes(mark.id))
-    .flatMap((mark) => mark.segments.map((segment) => segment.content));
+  if (!parsed) return [...ids];
+  const inside = new Set<string>();
+  const marks = parsed.marks.filter((mark) => ids.includes(mark.id));
   tr.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
     // Markers alone (a tracked deletion's) are no text of theirs that rejecting would take.
     const words = tr.state.doc.sliceString(fromB, toB).replace(/<!--[\s\S]*?-->/g, '');
-    if (words && contents.some((c) => fromB >= c.from && toB <= c.to)) inside = true;
+    if (!words) return;
+    for (const mark of marks) {
+      if (mark.segments.some((seg) => fromB >= seg.content.from && toB <= seg.content.to)) {
+        inside.add(mark.id);
+      }
+    }
   });
-  return inside;
+  return [...inside];
 }
 
 /** The ledger notes of the marks that `after` has and `before` hasn't, or the other way. */
@@ -878,11 +883,15 @@ function takenBack(event: HistEvent, state: EditorState): ChangeSet | 'nothing' 
   const alive = new Set(parsed.marks.map((mark) => mark.id));
   const present = meta.marks.filter((id) => alive.has(id));
   if (present.length === meta.marks.length && !meta.tainted) return rejection(event, state);
+  // Typing inside a mark is only in the way of rejecting that mark: the others are rejected by id.
+  const typedIn = (id: string) => meta.taintedIds?.includes(id) ?? meta.tainted ?? false;
+  const clean = present.filter((id) => !typedIn(id));
+  const typedPresent = present.length > clean.length;
   const doc = state.doc.toString();
-  const rejecting = present.length > 0 && !meta.tainted;
+  const rejecting = clean.length > 0;
   let first: ChangeSet;
   try {
-    first = ChangeSet.of(rejecting ? rejectMarks(doc, present) : [], doc.length);
+    first = ChangeSet.of(rejecting ? rejectMarks(doc, clean) : [], doc.length);
   } catch {
     return null;
   }
@@ -892,7 +901,7 @@ function takenBack(event: HistEvent, state: EditorState): ChangeSet | 'nothing' 
   // put there a second time.
   const back = [
     ...(meta.reinstated ?? []),
-    ...(rejecting ? (meta.deleted ?? []).filter((entry) => alive.has(entry.id)) : []),
+    ...(rejecting ? (meta.deleted ?? []).filter((entry) => clean.includes(entry.id)) : []),
   ];
   for (const entry of back) {
     const twice = edits.find((edit) => edit.insert.includes(entry.text));
@@ -916,11 +925,31 @@ function takenBack(event: HistEvent, state: EditorState): ChangeSet | 'nothing' 
   if (!edits.length) {
     if (first.empty) return 'nothing';
     rest = ChangeSet.of([], text.length);
-  } else if (present.length < meta.marks.length && !(present.length && meta.tainted)) {
-    // What is left of the marks they decided is written as the person's own edit.
-    const written = writtenAsOwn(state.facet(historyConfig), state, text, edits);
+  } else if (present.length < meta.marks.length) {
+    // What is left of the marks they decided is written as the person's own edit. Your marks that
+    // are still there, with their typing inside, are taken away plain as a rejection is: the
+    // edits that only put text back are the decided part's.
+    const config = state.facet(historyConfig);
+    const own = typedPresent
+      ? edits.filter((edit) => edit.insert).map((edit) => ({ ...edit, to: edit.from }))
+      : edits;
+    const plain = typedPresent
+      ? edits.filter((edit) => edit.from !== edit.to).map((edit) => ({ ...edit, insert: '' }))
+      : [];
+    // The plain removals are made first, and the decided part is written on what is left, so that
+    // text put back doesn't join a mark of yours that is about to go.
+    const taken = ChangeSet.of(plain, text.length);
+    const left = applyChanges(text, plain);
+    const mapped = own.map((edit) => ({
+      from: taken.mapPos(edit.from, 1),
+      to: taken.mapPos(edit.to, 1),
+      insert: edit.insert,
+    }));
+    const written = mapped.length
+      ? writtenAsOwn(config, state, left, mapped)
+      : ChangeSet.of([], left.length);
     if (!written) return first.empty ? 'nothing' : first;
-    rest = written;
+    rest = taken.compose(written);
   } else {
     // Your own marks that are still there are taken away plain, as a rejection is.
     rest = ChangeSet.of(edits, text.length);
@@ -1016,7 +1045,7 @@ function decidedBy(event: HistEvent, tr: Transaction): HistEvent {
 function joinedDeleted(
   last: StepMeta,
   event: HistEvent,
-): Pick<StepMeta, 'deleted' | 'reinstated' | 'tainted' | 'entries' | 'ledgerStale'> {
+): Pick<StepMeta, 'deleted' | 'reinstated' | 'tainted' | 'taintedIds' | 'entries' | 'ledgerStale'> {
   const forward = event.changes!.invertedDesc;
   const moved = (list: readonly DeletedText[] | undefined) =>
     list?.map((entry) => ({ ...entry, at: forward.mapPos(entry.at, -1) }));
@@ -1024,6 +1053,7 @@ function joinedDeleted(
     deleted: [...(moved(last.deleted) ?? []), ...(event.meta.deleted ?? [])],
     reinstated: moved(last.reinstated),
     tainted: last.tainted,
+    taintedIds: last.taintedIds,
     entries: { ...last.entries, ...event.meta.entries },
     ledgerStale: last.ledgerStale || event.meta.ledgerStale,
   };
@@ -1226,14 +1256,16 @@ class HistoryState {
     for (let i = done.length - 1; i >= 0; i--) {
       const event = done[i]!;
       if (!event.changes) continue;
-      const { person, touchedBy, tainted } = event.meta;
+      const { person, touchedBy, tainted, taintedIds } = event.meta;
       if (person && person !== remote.person && touches(event.changes, m)) {
+        const typed = tr && event.meta.marks.length ? typedInsideMarks(event.meta.marks, tr) : [];
+        const ids = [...new Set([...(taintedIds ?? []), ...typed])];
         done[i] = event.withTouched(
           touchedBy ?? remote.name,
           (tainted ?? false) ||
-            (tr && event.meta.marks.length
-              ? typedInsideMarks(event.meta.marks, tr)
-              : insertsInside(event.changes, m)),
+            ids.length > 0 ||
+            (!(tr && event.meta.marks.length) && insertsInside(event.changes, m)),
+          ids,
         );
       }
       if (tr && done[i]!.meta.deleted?.length) done[i] = decidedBy(done[i]!, tr);
@@ -1321,7 +1353,9 @@ class HistoryState {
           })
         );
       }
-      const cleared = touched ? { ...event.meta, touchedBy: null, tainted: false } : event.meta;
+      const cleared = touched
+        ? { ...event.meta, touchedBy: null, tainted: false, taintedIds: [] }
+        : event.meta;
       // The marks this write adds or takes away, with their entries, for the way back.
       const noted = (made: ChangeSet): StepMeta => {
         const before = state.field(parsedField, false);
