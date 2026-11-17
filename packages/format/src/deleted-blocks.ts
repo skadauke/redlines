@@ -8,6 +8,7 @@
 // (the heading's underline is not a part of a break that goes, #372): this reads no blocks from it,
 // and a view draws it as the deletion of the text that it is.
 
+import { plainPayload } from './changes.ts';
 import { CONTAINER_PREFIX } from './blocks.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
@@ -348,7 +349,7 @@ export function deletedBlocks(
   const first = list[0];
   if (!first) return null;
   let payload = '';
-  for (const segment of list) payload += segment.payload ?? '';
+  for (const segment of list) payload += plainPayload(segment.payload ?? '');
   if (payload === '') return null;
   const lead = context.lead && CONTAINER_PREFIX.test(context.lead) ? context.lead : '';
   const lines = linesOf(payload);

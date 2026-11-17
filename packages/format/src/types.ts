@@ -232,6 +232,9 @@ export interface Parsed {
   ledger: Ledger;
   /** The ledger comment plus the blank line before it; null when the file has none. */
   ledgerRange: Range | null;
+  /** The ledgers in front of the last, each with its blank line, in a document joined from
+   * several files (format §5.1); empty in any other. */
+  earlierLedgers: Range[];
   warnings: Warning[];
   /** The payloads of marks in `marks` that hold marks of their own (format §3.12). */
   payloads: PayloadMarks[];

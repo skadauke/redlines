@@ -96,7 +96,7 @@ describe('#142: a line break typed after a file’s final line break, in a file 
     const before = file('Hello world.\r\n\r\nSecond line here.\n');
     const spot = at(before, 'here.\n', 6);
     const after = press(before, spot, spot, 'Z', ada);
-    expect(bodyOf(after)).toContain('<!--sub m2bd \\n-->\nZ<!--/m2bd-->');
+    expect(bodyOf(after)).toContain('<!--sub m2bd \\x0a-->\nZ<!--/m2bd-->');
     expectEveryOrderAlike('142', after, exactly);
     expectEveryOrderRead('142', after);
   });

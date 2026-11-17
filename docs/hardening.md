@@ -216,6 +216,10 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
 **Silent wrong writes, and changes that can't be decided, found so far.** Each is an open issue with
 its case; each is a bug. The list is what has been found, not a count of what is there.
 
+- The editor's document has LF line breaks only, and its record of a break's kind forgets a break
+  whose LF a tracked edit takes out, so in a file with mixed line breaks the editor writes that
+  break into the change as the file's own kind and rejecting gives it back in the file's kind. The
+  command line writes the break's own kind and gives it back exactly (format §2.5, #924).
 - A raw line break typed at the start of a bullet item's text under a line of text, or under the line
   of the item it is in, is written where the file reads the bullet as an item and the newest view as
   the underline of the text above it; the words typed on its blank lines (#143) are written the same

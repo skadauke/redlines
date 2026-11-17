@@ -2,7 +2,7 @@
 // out of one, the file's line breaks, and writing the ledger once the body has changed.
 
 import { assertPointsRead } from './align-point.ts';
-import { applyChanges } from './changes.ts';
+import { applyChanges, eolOf } from './changes.ts';
 import { EditError } from './errors.ts';
 import {
   htmlOpenAt,
@@ -24,7 +24,7 @@ import type { Views } from './views.ts';
 import type { Ledger, MarkKind, MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
 // The file's line breaks, which views need without the rest of this.
-export { eolOf, inEol } from './changes.ts';
+export { eolOf, inEol, plainPayload, restoredPayload } from './changes.ts';
 export type { Eol } from './changes.ts';
 
 // The markers of a file, which views and the reading of formats need without the rest of this.
@@ -724,7 +724,9 @@ export function commitEdit(
   let ledgerChanges: TextChange[] | EditError | undefined;
   if (!options.keepLedger) {
     try {
-      ledgerChanges = setLedger(after, normalizeLedger(after, ledger));
+      ledgerChanges = setLedger(after, normalizeLedger(after, ledger), {
+        eol: eolOf(text, before?.ledgerRange),
+      });
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
       ledgerChanges = error;
