@@ -3396,7 +3396,10 @@ the replacement, as rejecting them would. Comments and highlights are no changes
 payload, whoever's they are.
 
 - Rejecting the replacement writes the decoded payload, marks included, where the replacement was:
-  the file as it was before the edit, byte for byte but for the file's line breaks (§8).
+  the file as it was before the edit, byte for byte but for the file's line breaks (§8). Where the
+  marks in the old text can't stand at the top level as they are (a deletion line of a row, with text
+  typed after the replacement's end on its line), the rejection is widened to them: they are rejected
+  first, in the old text, and the decision is not refused (#936). The two spaces of a hard break typed at a line's end, where another person's mark starts the next line, are written this way: a substitution whose old text holds that mark.
 - Accepting it leaves the new text. The marks in the payload go with the old text, with their
   entries; a comment in it becomes a point comment at the start of the new text, as for a deleted
   block (§3.4, §3.7); a highlight goes.
