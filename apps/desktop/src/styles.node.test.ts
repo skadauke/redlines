@@ -106,7 +106,6 @@ describe('styles.css', () => {
   });
 
   it('lets the page scroll under a title bar with no background, and fades what passes under it', () => {
-    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
     const declared = (selector: string) =>
       all.find((rule) => rule.selector === selector)?.declarations ?? '';
     // The bar lies over the scroller, which reaches the top of the window: no color of its own,
@@ -160,7 +159,6 @@ describe('styles.css', () => {
   });
 
   it('draws the word count small and gray in the lower right, on a fade that takes no pointer', () => {
-    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
     const declared = (selector: string) =>
       all.find((rule) => rule.selector === selector)?.declarations ?? '';
     // The fade rises from the window's lower edge, in the page's color, as the title bar's falls from
