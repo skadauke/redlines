@@ -452,6 +452,15 @@ export function cellAt(
  * before no cell, whether a pipe closes the row or not: where its text reaches the end of its mark (the
  * closing pipe, or the end of a row with none), there is no next pipe.
  */
+/** The cells of a row that GFM shows: those in the table's columns (a cell past the delimiter row's
+ * columns is text GFM drops). `cells` may be a row's own or a part of them. */
+export const shownCells = (table: Table, row: Pick<Row, 'cells'> | readonly Cell[]): Cell[] =>
+  ('cells' in row ? row.cells : row).filter((cell) => cell.col < table.columns);
+
+/** The cell of a row at column `col`, when GFM shows the row has it. */
+export const cellAtCol = (table: Table, row: Pick<Row, 'cells'>, col: number): Cell | undefined =>
+  row.cells.find((cell) => cell.col === col && cell.col < table.columns);
+
 export const endsBeforeNextCell = (row: Row, cell: Cell): boolean =>
   cell.textTo === cell.to && row.cells.at(-1) !== cell;
 

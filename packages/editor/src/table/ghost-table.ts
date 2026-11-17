@@ -205,15 +205,19 @@ export function ghostTableDOM(table: GhostTable, mark: string, bar: string): HTM
   return root;
 }
 
-/** A press on a ghost table puts no caret there: the card the press opens is its only effect. */
-const ghostTablePress = EditorView.domEventHandlers({
-  mousedown(event) {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest('.rl-ghost-table')) return false;
-    event.preventDefault();
-    return true;
-  },
-});
+/** A press on what `selector` finds (a ghost row, a ghost table) puts no caret there: the card the
+ * press opens is its only effect. */
+export const ghostPress = (selector: string) =>
+  EditorView.domEventHandlers({
+    mousedown(event) {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest(selector)) return false;
+      event.preventDefault();
+      return true;
+    },
+  });
+
+const ghostTablePress = ghostPress('.rl-ghost-table');
 
 /**
  * The look of a ghost table, in the cells of the table's own look (`.rl-tc`, `.rl-th`: the header is

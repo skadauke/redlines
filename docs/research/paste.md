@@ -133,6 +133,14 @@ In order:
   - `|` is always escaped.
 - Column alignment follows the majority of the column's cells.
 
+### Word's lists
+
+Word's list paragraphs (`mso-list`, a marker span marked `Ignore`) read as a list at their level. Legal
+numbering (`1.`, `1.1.`, `1.2.1.`) reads as a nested numbered list, each level counting from the last
+part of its label. What is lost: the whole label. Markdown numbers each level by itself, so `1.2.1.`
+comes out as `1.` under `2.` under `1.`, and a list that skips a number keeps the number it had only
+at its start.
+
 ### Links, code and images
 
 - Links:
@@ -143,7 +151,13 @@ In order:
   highlight.js and others) and normalized (`python3` → `python`).
 - Images:
   - web images keep their URLs, or are copied into `./assets` (open decision 4);
-  - `data:` images are saved on first save;
+  - `data:` images (Word's: the bytes come in the HTML, labelled `image/png` even for a JPEG, so the
+    type is read from the bytes) are saved in the document's images folder through the host, as a
+    pasted screenshot is, and linked from the Markdown; one that can't be saved is left out and said
+    in a notice. Word's other copy of the picture, a `file:` address in its temporary folder, is
+    never read: the page's text could name any file;
+  - a Google Docs picture is an `https://` address of Google's (`googleusercontent.com`) that stays
+    linked, with a notice that it isn't saved: the app has no way to fetch it;
   - lazy-loaded placeholders are replaced with the real source;
   - undoing the paste deletes the files it created.
 

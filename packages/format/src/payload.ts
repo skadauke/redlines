@@ -81,7 +81,7 @@ export function encodePayloadText(s: string): string {
   // is most of a long payload, such as a whole block of code.
   let out = '';
   let copied = 0;
-  const special = /[\r\uffff\n`|\-{%\\]/g;
+  const special = /[\r\uffff\n`|\-{%\\\u2028\u2029]/g;
   for (let found = special.exec(s); found !== null; found = special.exec(s)) {
     const i = found.index;
     const c = s.charAt(i);
@@ -106,6 +106,11 @@ export function encodePayloadText(s: string): string {
       case '\n':
         out += '\\n';
         break;
+      case '\u2028':
+      case '\u2029':
+        // A YAML 1.1 reader (PyYAML) takes these two for line breaks inside a literal block.
+        out += c === '\u2028' ? '\\u2028' : '\\u2029';
+        break;
       case '`':
         out += '\\x60';
         break;
@@ -124,7 +129,13 @@ export function encodePayloadText(s: string): string {
       default:
         // A backslash, the one character left of `special`.
         out +=
-          ESCAPED_AFTER_BACKSLASH.has(s.charAt(i + 1)) || s.startsWith(LF_IN_CRLF, i + 1)
+          ESCAPED_AFTER_BACKSLASH.has(s.charAt(i + 1)) ||
+          s.startsWith(LF_IN_CRLF, i + 1) ||
+          // A U+2028 or U+2029 after it is written `\u2028` too.
+          s.charAt(i + 1) === '\u2028' ||
+          s.charAt(i + 1) === '\u2029' ||
+          s.startsWith('u2028', i + 1) ||
+          s.startsWith('u2029', i + 1)
             ? '\\\\'
             : '\\';
     }
@@ -133,7 +144,7 @@ export function encodePayloadText(s: string): string {
 }
 
 /** The escapes of `encodePayload`, and what each stands for. */
-const ESCAPE = /\\(?:n|[\\|{%-]|x[0-9a-fA-F]{2})|\uffff/g;
+const ESCAPE = /\\(?:n|[\\|{%-]|x[0-9a-fA-F]{2}|u202[89])|\uffff/g;
 
 /** Decodes a payload written by `encodePayload`. */
 export function decodePayload(written: string): string {
@@ -144,6 +155,7 @@ export function decodePayload(written: string): string {
     if (escape === '\uffff') return LITERAL_FFFF;
     const c = escape.charAt(1);
     if (c === 'n') return '\n';
+    if (c === 'u') return String.fromCharCode(parseInt(escape.slice(2), 16));
     if (c !== 'x') return c;
     const code = parseInt(escape.slice(2), 16);
     return code === 0x0a ? LF_IN_CRLF : String.fromCharCode(code);
