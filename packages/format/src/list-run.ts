@@ -26,6 +26,7 @@ import {
   splitEnd,
   touchingAbove,
 } from './blocks.ts';
+import { plainPayload } from './changes.ts';
 import type { ListState } from './blocks.ts';
 import type { DocView, MarkRange, Parsed, Range, Segment } from './types.ts';
 
@@ -120,14 +121,14 @@ export function listGoesOnEveryWay(
   // and a change at their start stands at the start of a line too.
   const breaks = (mark: MarkRange, segment: Segment) =>
     mark.kind === 'split' ||
-    (mark.kind !== 'ins' && (segment.payload ?? mark.payload ?? '').includes('\n')) ||
+    (mark.kind !== 'ins' && plainPayload(segment.payload ?? mark.payload ?? '').includes('\n')) ||
     (mark.kind !== 'del' && text.slice(segment.content.from, segment.content.to).includes('\n'));
   const brought = near
     .filter(({ mark, segment }) => mark.kind !== 'ins' && breaks(mark, segment))
     .map(({ shown: range }) => range.from);
   const regions: Region[] = [];
   for (const { mark, segment, shown: range } of near) {
-    const old = segment.payload ?? mark.payload ?? '';
+    const old = plainPayload(segment.payload ?? mark.payload ?? '');
     if (mark.kind === 'fmt') {
       // Another block's change of type: its lines with the syntax they had, from the original view.
       if (range.from < first || range.to > at) return false;
@@ -252,7 +253,7 @@ function keyOf(reading: Reading): string {
 function renumbers(text: string, mark: MarkRange): boolean {
   return mark.segments.every((segment) => {
     const now = text.slice(segment.content.from, segment.content.to);
-    const was = segment.payload ?? mark.payload ?? '';
+    const was = plainPayload(segment.payload ?? mark.payload ?? '');
     if (now.includes('<!--')) return false;
     let one = false;
     const numberless = (s: string) =>

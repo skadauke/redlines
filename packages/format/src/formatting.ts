@@ -24,6 +24,7 @@
 // pending while the others are tried: no decision of theirs can make it read otherwise. Nothing is
 // repaired when a decision is made later. A line that defines a link is not formatted.
 
+import { withDialect } from './dialect.ts';
 import {
   breakEnd,
   breakStart,
@@ -2240,13 +2241,15 @@ export function trackedFormat(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
-  const recorded = recordIds(ctx);
-  try {
-    return formatTracked(text, [range], op, recorded.ctx, LEAVING_MARKS_APART);
-  } catch (error) {
-    // Where the fine form has no place, it is a replacement of the unit that holds it.
-    return widenedCellFormat(text, [range], op, recorded.replay(), error);
-  }
+  return withDialect(ctx.dialect, () => {
+    const recorded = recordIds(ctx);
+    try {
+      return formatTracked(text, [range], op, recorded.ctx, LEAVING_MARKS_APART);
+    } catch (error) {
+      // Where the fine form has no place, it is a replacement of the unit that holds it.
+      return widenedCellFormat(text, [range], op, recorded.replay(), error);
+    }
+  });
 }
 
 /** `trackedFormat` as marks at the grain of the change only: what reads alike in every order, or
@@ -2257,7 +2260,7 @@ export function fineFormat(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
-  return formatTracked(text, [range], op, ctx, LEAVING_MARKS_APART);
+  return withDialect(ctx.dialect, () => formatTracked(text, [range], op, ctx, LEAVING_MARKS_APART));
 }
 
 /**
@@ -2277,12 +2280,14 @@ export function trackedFormatRanges(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits {
-  const recorded = recordIds(ctx);
-  try {
-    return formatTracked(text, ranges, op, recorded.ctx, LEAVING_MARKS_APART);
-  } catch (error) {
-    return widenedCellFormat(text, ranges, op, recorded.replay(), error);
-  }
+  return withDialect(ctx.dialect, () => {
+    const recorded = recordIds(ctx);
+    try {
+      return formatTracked(text, ranges, op, recorded.ctx, LEAVING_MARKS_APART);
+    } catch (error) {
+      return widenedCellFormat(text, ranges, op, recorded.replay(), error);
+    }
+  });
 }
 
 /** How a change is checked: with the marks apart from it left pending (format §2.6), or, with
@@ -2972,6 +2977,16 @@ export function untrackedFormat(
 
 /** `untrackedFormat`, checked as `checking` says. */
 function formatUntracked(
+  text: string,
+  range: Range,
+  op: FormatOp,
+  ctx: UntrackedContext,
+  checking: Checking,
+): TextChange[] {
+  return withDialect(ctx.dialect, () => formatUntrackedIn(text, range, op, ctx, checking));
+}
+
+function formatUntrackedIn(
   text: string,
   range: Range,
   op: FormatOp,

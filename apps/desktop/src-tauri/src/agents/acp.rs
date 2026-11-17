@@ -108,7 +108,7 @@ pub fn bridge_of(program: &str, args: &[String]) -> Result<Option<Bridge>, Strin
 
 /// Why a Gateway address can't be used, if it can't: `ws://` or `wss://`, a host with an optional
 /// port, and an optional plain path, and nothing that could carry a secret.
-fn gateway_url_problem(url: &str) -> Option<String> {
+pub(super) fn gateway_url_problem(url: &str) -> Option<String> {
     let bad = || {
         Some(
             "Give the Gateway's address as ws:// or wss:// and a host, such as \

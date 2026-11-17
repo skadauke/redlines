@@ -1,8 +1,9 @@
 # Connecting to an OpenClaw agent on another computer
 
-Status: research and design note, November 16, 2026. Nothing here is built. It is the design for
-next Epic's work, written from the vendors' own documentation; nothing was installed or run, and
-no machine, agent or configuration of anyone's was touched.
+Status: research and design note, November 16, 2026. Built since, November 17, in Epic #930 (lane
+OC), short of a live connection: see [First live test](#first-live-test). The design below is from
+the vendors' own documentation; nothing was installed or run, and no machine, agent or
+configuration of anyone's was touched.
 
 [agent-connections.md](agent-connections.md) asked how any agent should connect, and recommended a
 Redlines MCP endpoint on a loopback port plus a tunnel the person runs. For OpenClaw that is
@@ -418,3 +419,83 @@ and are marked in the text.
 - In this repository: design §8, in particular §8.6;
   [agent-connections.md](agent-connections.md); `apps/desktop/src-tauri/src/agents/acp.rs`,
   `acp_gate.rs`, `which.rs`; `packages/agent-tools`; issues #322 and #401
+
+## First live test
+
+What Epic #930 built, and what waits for a real Gateway. Nothing below has been done: each step
+installs something, opens a connection or touches his accounts, so each waits for Stephan's yes.
+
+**Built, and tested without a Gateway:** the Tailscale reading (fixture JSON), the address rules and
+the Gateway probe (a stub server), the connection record and its 0600 files, the node client
+(handshake, signature, pairing, tools, calls, retries) against a fake Gateway that checks the
+signature as a Gateway would, the prompts, the setup sheet with every failure card, and the
+agent's card.
+
+**Not built:** the tool bridge (which document a Gateway agent's call acts on, with the author fixed
+by the connection and the folders and level enforced), mentions through the connection (the
+operator client, per-thread sessions, the @ picker), and the sheet's practice-note test (the sheet
+finishes without it and says so).
+
+**Where the code guesses**, all in `apps/desktop/src-tauri/src/agents/openclaw_protocol.rs` (frames,
+the signed text, the refusals' words), `gateway.rs` (`is_challenge`) and `tailscale.rs` (the words
+of `Health`):
+
+1. The greeting, `connect.challenge` with a `nonce`.
+2. `connect`'s fields, the device id (SHA-256 of the key), the signed text (`v2|id|client|role|...`),
+   `auth.token` and `auth.bootstrapToken`, and `hello-ok` with `auth.deviceToken`.
+3. `node.pluginTools.update`, `node.invoke.request` and `node.invoke.result`.
+4. Which words and codes a Gateway uses for a pending approval, a used code, a bad token and a newer
+   protocol.
+5. Whether a used setup code is spent by a connection that ended in "pairing required" (the node
+   offers it again), and whether a Gateway takes a third party as a node at all.
+6. What Tailscale's `Health` says on a network that blocks it.
+
+### What the live test found
+
+Run November 17, 2026, against a throwaway `openclaw@2026.11.5` Gateway on loopback (own state
+directory, shared token, no model), with `live_gateway` in `node.rs`. What the Gateway accepted:
+the handshake, Redlines as a node (`client.id: node-host`, `mode: node`), a v2-signed device, a
+device token in `hello-ok`, six tools published, and a call routed to Redlines with
+`openclaw nodes invoke --command mcp.tools.call.v1`, which came back with the tool's answer.
+`system.run` is refused by the Gateway for a node ("reserved for shell execution").
+
+What differed from the guesses, now fixed:
+
+1. `client.id` is a closed list; a third party can't have its own. Redlines says `node-host`, and
+   is told apart by its display name and its device.
+2. A published tool is a closed object: `pluginId: "node-mcp"`, `parameters` (not `inputSchema`) and
+   `mcp: {server, tool}`, with `command: "mcp.tools.call.v1"`.
+3. A call's `paramsJSON` is `{server, tool, arguments}`, not `{name, arguments}`.
+4. A `hello-ok` answers protocol 4 to a node that offered 3, so it is no sign of a newer Gateway; a
+   Gateway that can't speak ours refuses `connect`.
+5. A setup code is base64url of `{url, bootstrapToken, expiresAtMs}`; only the token goes in
+   `auth.bootstrapToken`. Redlines now decodes it (a bare token still works).
+
+Refusals read live: a wrong token is told as a bad token, and a used setup code as a used code.
+
+**Not seen:** an approval wait. On loopback a shared token or a fresh setup code pairs the node
+silently, so "pairing required" (its words are in OpenClaw's source: `NOT_PAIRED`, "pairing
+required: ...", with `requestId`) waits for a Gateway reached from another machine. Nor was a call
+from a real agent seen: that needs a model, which the throwaway Gateway didn't have.
+
+**The steps Stephan would take, in this order, each with a throwaway Gateway** (as the first list in
+"Hands-on tests that need Stephan's OK" says: its own `OPENCLAW_STATE_DIR`, a spare loopback port,
+no model key, removed afterwards):
+
+1. Build and open the app (`pnpm tauri dev` in `apps/desktop`), open Preferences › Agents, and choose
+   Connect OpenClaw… › On this Mac. Nothing is contacted until a setup code is pasted.
+2. On the throwaway Gateway, `openclaw qr --setup-code-only`; paste the code in the sheet. Watch the
+   sheet's status and the Gateway's `openclaw devices list`: does a request appear, with a device id
+   that starts with the code the sheet shows? Approve it (`openclaw devices approve <id>`, then
+   `openclaw nodes approve <id>`). Does the sheet reach Test with six tools published
+   (`openclaw nodes`)? If it stops, Details has what the Gateway said: put it into
+   `openclaw_protocol.rs` and the tests that mirror it.
+3. Call a tool from the Gateway's agent: the app answers that it isn't connected to a document yet,
+   which shows the road works end to end. Check that a `system.run` is never approvable for it.
+4. Read-only look at Tailscale on his Mac: open Connect OpenClaw… › On another computer and read the
+   three checks; compare with `tailscale status --json` in Terminal.
+5. With Tailscale Serve on a second machine's throwaway Gateway, the whole road; then his real agent
+   once, with the prompt of step 4, to see what it does and whether it can scope the tools to one
+   agent.
+6. From a network that blocks Tailscale, the words `Health` gives.
+

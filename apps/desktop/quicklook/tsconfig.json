@@ -7,5 +7,5 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src", "rolldown.config.mjs"]
+  "include": ["src", "rolldown.config.mjs", "rolldown.thumbnail.config.mjs"]
 }

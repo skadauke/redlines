@@ -3,6 +3,7 @@
 // at. This is not a Markdown parser: it finds links, images, autolinks, entities, tags, escapes and
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
+import { isPandoc } from './dialect.ts';
 import { HTML_STARTS } from './block-read.ts';
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
 import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
@@ -51,6 +52,16 @@ const BLANK = /^[ \t>]*$/;
 
 /** The refusal of a marker on a line that is only Markdown syntax: a fence, a rule, a bullet. */
 export const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.';
+
+/**
+ * The refusal of a marker on a `:::` line, the fence of a pandoc div (format §3.1, rule 9): pandoc
+ * takes a fence only when nothing else is on its line. A writer widens it to the unit that holds the
+ * fence, which is the div or the paragraph its fence starts or ends (§3.12).
+ */
+export const DIV_FENCE = 'A marker can not stand on a :::\u00a0line, the fence of a div.';
+
+/** A line that is a fenced div's fence: three or more colons after the quote markers. */
+const DIV_FENCE_LINE = /^[ \t>]*:{3,}/;
 
 export function visible(
   text: string,
@@ -176,6 +187,20 @@ const MAY_BE_EMOJI = /[\ud800-\udfff]|\u200d|\ufe0f|\u20e3/;
 const STUCK_SHORTCODE =
   'A marker between a letter and an emoji shortcode would make it show as an emoji. Select the shortcode along with the word.';
 const ATTRIBUTES = /\{\{<[^\n]*?>\}\}|\{[#.][^{}\n]*\}/g;
+/**
+ * Pandoc's superscript `^x^` (format §3.1, rule 9): no space inside. A marker inside would break
+ * the pair, so it is atomic. Subscript `~x~` is not: GFM reads one tilde as strikethrough, which
+ * takes marks, and a format change of it is written by the strikethrough's own rules.
+ */
+const SUPERSCRIPT = /(?<!\\)\^[^\s^\\]+(?<!\\)\^/g;
+/**
+ * A cross-reference or a citation of Quarto and pandoc (format §3.1, rule 9): `@fig-x`, `@sec-x`,
+ * `@tbl-x`, `@eq-x` and the other kinds Quarto numbers, and a bracket of citations, `[@a; @b, p. 4]`
+ * or `[-@a]`. A marker inside changes the key, so each is atomic. The label's characters are
+ * pandoc's: letters, digits and `_`, with `:.#$%&+?<>~/-` inside, and not at its end.
+ */
+const REFERENCES =
+  /(?<![\w@])@(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
 /** The type of an alert at the start of a quote's line; the word is `ALERT_LINE`'s (callout.ts). */
 const ALERT = /^[ \t>]*\[![A-Za-z][A-Za-z0-9-]*\]/gm;
 
@@ -291,6 +316,10 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
   // A shortcode has a colon, and an emoji has a surrogate, a variation selector, a joiner or a
   // keycap: the keystroke's cost is the same for the text that has none.
   const symbols = [ENTITY, MATH, ATTRIBUTES];
+  if (isPandoc()) {
+    if (w.includes('@')) symbols.push(REFERENCES);
+    if (w.includes('^')) symbols.push(SUPERSCRIPT);
+  }
   if (w.includes(':')) symbols.push(SHORTCODE);
   for (const re of symbols) {
     for (const m of w.matchAll(re)) inside(m.index, m.index + m[0].length, 'symbol');
@@ -580,6 +609,9 @@ export function inspectPlace(
     /^[ \t>]*-[ \t]*$/.test(lineText) &&
     splitOnLine(text, hidden, position);
   // A row of a table whose cells are all dashes is a row, not the delimiter row (format §3.7).
+  if (isPandoc() && !around.joined && !ofSplit && DIV_FENCE_LINE.test(lineText)) {
+    return { kind: 'refuse', reason: DIV_FENCE };
+  }
   if (
     !around.joined &&
     !ofSplit &&
