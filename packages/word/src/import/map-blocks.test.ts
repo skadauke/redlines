@@ -421,3 +421,24 @@ describe('the report', () => {
     });
   });
 });
+
+describe('what the review found', () => {
+  it('writes a fence longer than any fence in the code', () => {
+    const code = (text: string) => para([run(text, { format: { code: true } })]);
+    const { file } = map([code('```js'), code('x'), code('```')]);
+    expect(file).toBe('````\n```js\nx\n```\n````\n');
+  });
+
+  it('drops the spaces that would make a paragraph indented code', () => {
+    const { file } = map([para([run('      deep')])]);
+    expect(file).toBe('deep\n');
+  });
+
+  it('guards the start of an inserted paragraph', () => {
+    const { accepted } = map([
+      para([run('One.')], { mark: { inserted: rev('Ada') } }),
+      para([ins('- not a list')]),
+    ]);
+    expect(accepted).toBe('One.\n\n\\- not a list\n');
+  });
+});

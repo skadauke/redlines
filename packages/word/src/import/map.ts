@@ -88,6 +88,44 @@ const OPENER =
   /^<!--(?:ins|del|sub|fmt|hl|cmt) [bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}(?: (?:(?!-->)[^\n])*)?-->/;
 const MARKER = /<!--(?:(?!-->)[\s\S])*-->/g;
 
+/** A fenced block whose fence is longer than any run of backticks that starts one of its lines. */
+/** The text of a block with nothing at the start of a line that would make another block. */
+function guarded(chunk: Chunk, text: string | undefined): string {
+  const body = text ?? '';
+  if (chunk.kind === 'heading') return body;
+  return guardLineStarts(body.replace(/^[ \t]+/, '')).replace(/\n/g, `\n${chunk.cont}`);
+}
+
+function fenced(lines: string[]): string {
+  const longest = Math.max(
+    0,
+    ...lines.flatMap((line) => (/^\s*(`+)/.exec(line)?.[1] ?? '').length),
+  );
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}\n${lines.join('\n')}\n${fence}`;
+}
+
+/** The ids of the comments that end somewhere in some blocks. */
+function commentEnds(blocks: Block[]): Set<number> {
+  const found = new Set<number>();
+  const inlines = (list: Inline[]) => {
+    for (const inline of list) {
+      if (inline.type === 'commentEnd') found.add(inline.id);
+      else if (inline.type === 'link') inlines(inline.children);
+    }
+  };
+  for (const block of blocks) {
+    if (block.type === 'paragraph') inlines(block.children);
+    else {
+      for (const row of block.rows)
+        for (const cell of row.cells) {
+          for (const id of commentEnds(cell.blocks)) found.add(id);
+        }
+    }
+  }
+  return found;
+}
+
 function keyOf(rev: Revision): string {
   return `${rev.author}|${rev.at}`;
 }
@@ -276,7 +314,7 @@ class Mapper {
           kind: 'raw',
           prefix: '',
           cont: '',
-          body: `\`\`\`\n${code.lines.join('\n')}\n\`\`\``,
+          body: fenced(code.lines),
           marked: false,
         });
         i = code.last;
@@ -537,7 +575,8 @@ class Mapper {
       }
       rows.push(cells);
     }
-    for (const thread of carried) thread.open = true;
+    const ending = commentEnds([table]);
+    for (const thread of carried) thread.open = !ending.has(thread.root.id);
     if (rows.length === 0) return '';
     const header = rows[0] ?? [];
     const pad = (cells: string[]) => Array.from({ length: width }, (_, i) => cells[i] ?? '');
@@ -555,20 +594,22 @@ class Mapper {
   private restore(): void {
     const source = this.options.source;
     if (!source) return;
-    const norm = (s: string) => s.replace(/[^\p{L}\p{N}]/gu, '');
+    // Words and punctuation, without the escapes, the emphasis marks and the block's own marker.
+    const norm = (s: string) =>
+      s
+        .replace(/\\(.)/g, '$1')
+        .replace(/^\s*(?:#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+|>[ \t]?)/, '')
+        .replace(/[*_~`]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
     for (const chunk of this.chunks) {
       if (!chunk.blockId || chunk.marked || chunk.markIns || chunk.markDel || chunk.was) continue;
       if (chunk.kind === 'table' || chunk.kind === 'raw') continue;
       const block = source.blocks.find((b) => b.id === chunk.blockId);
       if (!block) continue;
       const text = source.markdown.slice(block.from, block.to);
-      if (
-        /<!--/.test(text) ||
-        (norm(text) !== norm(chunk.prefix.replace(/[^\p{L}\p{N}]/gu, '') + chunk.body) &&
-          norm(text) !== norm(chunk.body))
-      ) {
-        continue;
-      }
+      const sameType = (block.type === 'heading') === (chunk.kind === 'heading');
+      if (/<!--/.test(text) || !sameType || norm(text) !== norm(chunk.body)) continue;
       const stripped = text.replace(/^\s*(?:#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+|>[ \t]?)/, '');
       chunk.restored = true;
       // The list marker or quote mark the paragraph stood after, as it was written.
@@ -581,10 +622,7 @@ class Mapper {
       ) {
         chunk.prefix = before;
       }
-      chunk.body =
-        chunk.kind === 'heading' || chunk.kind === 'item' || chunk.kind === 'quote'
-          ? stripped
-          : text;
+      chunk.body = chunk.kind === 'para' ? text : stripped;
     }
   }
 
@@ -607,7 +645,9 @@ class Mapper {
       rest = rest.slice(found[0].length);
     }
     const text =
-      kind === 'para' || kind === 'item' || kind === 'quote' ? guardLineStarts(rest) : rest;
+      kind === 'para' || kind === 'item' || kind === 'quote'
+        ? guardLineStarts(rest.replace(/^[ \t]+/, ''))
+        : rest;
     const joined = text.replace(/\n/g, `\n${cont}`);
     if (openers.length === 0 || kind === 'heading') {
       return `${prefix}${openers.join('')}${kind === 'heading' ? '' : ''}${kind === 'heading' ? joined : joined}`;
@@ -655,7 +695,7 @@ class Mapper {
             flushDel();
             del = { rev: cur.allDel, parts: [], move: cur.delMove ?? '' };
           }
-          del.parts.push(`${sep}${cur.prefix}${cur.old ?? ''}`);
+          del.parts.push(`${sep}${cur.prefix}${guarded(cur, cur.old)}`);
         } else {
           flushDel();
           let lead = out === '' ? '' : sep;
@@ -665,7 +705,7 @@ class Mapper {
           }
           const id = this.ctx.mark(cur.allDel);
           this.ctx.moveEnd(cur.delMove, 'from', id);
-          out += `${lead}<!--del ${id} ${payload(`${cur.prefix}${cur.old ?? ''}\n\n`)}-->`;
+          out += `${lead}<!--del ${id} ${payload(`${cur.prefix}${guarded(cur, cur.old)}\n\n`)}-->`;
           ownLine = true;
         }
         continue;
@@ -688,7 +728,7 @@ class Mapper {
             this.ctx.moveEnd(cur.insMove, 'to', ins.id);
             out += `<!--ins ${ins.id}-->`;
           }
-          out += `${sep}${cur.prefix}${cur.plain}`;
+          out += `${sep}${cur.prefix}${guarded(cur, cur.plain)}`;
           if (!(cur.markIns && next?.allIns && this.same(cur.markIns, next.allIns))) {
             out += `<!--/${ins.id}-->`;
             ins = null;
