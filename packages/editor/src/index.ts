@@ -298,6 +298,13 @@ export type { AgentIntent } from './tracked/agent-intent.ts';
 export { anchorChanges, rebaseAgentEdit } from './tracked/agent-rebase.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
+export {
+  anchorFormat,
+  anchorMove,
+  rederiveFormat,
+  rederiveMove,
+} from './tracked/rederive-other.ts';
+export type { AnchoredFormat, AnchoredMove } from './tracked/rederive-other.ts';
 export type { Intent, IntentEdit, StepsIntent, TypingIntent, Unnamed } from './tracked/intent.ts';
 export {
   UNTRACKED_DETAILS,

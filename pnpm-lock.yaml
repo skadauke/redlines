@@ -569,6 +569,10 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../../packages/format
+    devDependencies:
+      '@redlines/formatting':
+        specifier: workspace:*
+        version: link:../formatting
 
   plugins/tables:
     dependencies:

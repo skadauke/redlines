@@ -221,6 +221,19 @@ Every kind of command must produce an intent:
 Toggles carry their target ("bold", not "toggle bold"). That also gives Docs' results: bold and
 italic both apply, and the last heading level set wins.
 
+Placed on newer text today (`packages/editor/src/tracked/rederive*.ts`, called from the sync
+plugin's `rederive`):
+- **typing** (typing, deleting, replacing, tracked or not), among its visible words;
+- **format**: each range is anchored to its words and found again; a range someone typed inside is
+  widened to hold what they added, and one whose words are gone is left out, with "The text you
+  formatted was changed by someone else";
+- **move**: the run is found by its words, and the gap by the words of the blocks above and below
+  it, wherever they are by index; if either is gone nothing is moved, and the person is told.
+
+The other kinds (table, steps, widened paste) are kept only as the session mapped them, and are
+taken back with "A change of yours could not be placed after what others changed" when that fails
+(#1010).
+
 **Place, don't refuse.** When an intent derived again can't be placed exactly, it is placed as near
 as possible, and never dropped:
 - Text typed into a paragraph that someone deleted outright goes where the paragraph was, with
