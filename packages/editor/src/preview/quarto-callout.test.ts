@@ -80,6 +80,13 @@ describe('the divs of a document', () => {
     expect(found.map((c) => [c.type, c.title])).toEqual([['tip', 'From the heading']]);
   });
 
+  it('reads divs when the front matter is never closed, and skips an indented code fence', () => {
+    const open = editorAt('---\ntitle: x\n\n::: {.callout-note}\nBody\n:::\n', 0);
+    expect(calloutsOf(open.view.state.doc, divsOf(open.view.state.doc))).toHaveLength(1);
+    const listed = editorAt('- item\n\n    ```\n    ::: {.callout-note}\n    ```\n', 0);
+    expect(divsOf(listed.view.state.doc)).toHaveLength(0);
+  });
+
   it('closes the innermost div and counts depth', () => {
     const text = '::: {.callout-note}\n::: {.columns}\nx\n:::\ny\n:::\n';
     const editor = editorAt(text, 0);
@@ -111,6 +118,24 @@ describe('a callout in the preview', () => {
     const open = classes(editor);
     expect(open.get(editor.view.state.doc.line(4).from)).toContain('rl-callout');
     expect(open.get(editor.view.state.doc.line(6).from)).toContain('rl-callout-last');
+  });
+
+  it('forgets a fold when its fence is gone', () => {
+    const editor = editorAt(DOC, 0);
+    const fence = editor.view.state.doc.line(3);
+    const press = editor.view.contentDOM.querySelector<HTMLElement>('.rl-callout-fold');
+    expect(press).not.toBeNull();
+    press?.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+    // Open now. The whole div goes, and another callout is typed at the same place.
+    const end = editor.view.state.doc.line(7).to + 1;
+    editor.view.dispatch({ changes: { from: fence.from, to: end, insert: 'plain\n' } });
+    editor.view.dispatch({
+      changes: { from: fence.from, insert: '::: {.callout-tip collapse="true"}\nx\n:::\n' },
+    });
+    editor.view.dispatch({ selection: { anchor: 0 } });
+    const lines = classes(editor);
+    // The new callout is folded as it was written: its body line has no box.
+    expect(lines.has(editor.view.state.doc.line(4).from)).toBe(false);
   });
 
   it('shows the fence as source while the caret is on it', () => {

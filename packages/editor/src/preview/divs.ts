@@ -31,7 +31,9 @@ export interface QuartoCallout extends Div {
 
 const OPEN = /^( {0,3})(:{3,})[ \t]*(.*?)[ \t]*:*[ \t]*$/;
 const CLOSE = /^ {0,3}:{3,}[ \t]*$/;
-const CODE_FENCE = /^ {0,3}(`{3,}|~{3,})/;
+// A code fence may be indented, as in a list item.
+const CODE_FENCE = /^[ \t]*(`{3,}|~{3,})/;
+const MAY_MATTER = /^[ \t]*[`~:]/;
 
 /** The attributes of an opening fence: `{.class #id key="value"}`, or one bare class (`::: warning`). */
 export function readAttributes(text: string): {
@@ -56,23 +58,29 @@ export function readAttributes(text: string): {
   return { classes, attributes };
 }
 
+const kept = new WeakMap<Text, Div[]>();
+
+/** The line after the front matter that a document starts with, or 1 when it has none. */
+function bodyStart(doc: Text): number {
+  if (doc.lines < 2 || !/^---[ \t]*$/.test(doc.line(1).text)) return 1;
+  for (let n = 2; n <= doc.lines; n++) {
+    if (/^(?:---|\.\.\.)[ \t]*$/.test(doc.line(n).text)) return n + 1;
+  }
+  // Front matter that is never closed is not front matter.
+  return 1;
+}
+
 /** The divs of a document, in the order of their opening lines. */
 export function divsOf(doc: Text): Div[] {
+  const known = kept.get(doc);
+  if (known) return known;
   const divs: Div[] = [];
   const open: Div[] = [];
   let code: string | null = null;
-  let front = false;
   const last = doc.lines;
-  for (let n = 1; n <= last; n++) {
+  for (let n = bodyStart(doc); n <= last; n++) {
     const text = doc.line(n).text;
-    if (n === 1 && /^---[ \t]*$/.test(text)) {
-      front = true;
-      continue;
-    }
-    if (front) {
-      if (/^(?:---|\.\.\.)[ \t]*$/.test(text)) front = false;
-      continue;
-    }
+    if (!MAY_MATTER.test(text)) continue;
     const fence = CODE_FENCE.exec(text);
     if (code !== null) {
       if (
@@ -89,7 +97,6 @@ export function divsOf(doc: Text): Div[] {
       code = fence[1];
       continue;
     }
-    if (text.charCodeAt(0) !== 58 && !/^ {1,3}:/.test(text)) continue;
     if (CLOSE.test(text)) {
       const div = open.pop();
       if (div) div.close = n;
@@ -102,6 +109,7 @@ export function divsOf(doc: Text): Div[] {
     divs.push(div);
     open.push(div);
   }
+  kept.set(doc, divs);
   return divs;
 }
 

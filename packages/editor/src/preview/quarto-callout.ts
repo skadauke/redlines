@@ -28,7 +28,15 @@ const toggleFold = StateEffect.define<number>();
 const turned = StateField.define<readonly number[]>({
   create: () => [],
   update(value, tr) {
-    let next = tr.docChanged ? value.map((pos) => tr.changes.mapPos(pos, -1)) : value;
+    // A position that no longer holds an opening fence is dropped, so that it never marks another.
+    let next = tr.docChanged
+      ? value
+          .map((pos) => tr.changes.mapPos(pos, -1))
+          .filter((pos) => {
+            const line = tr.state.doc.lineAt(pos);
+            return line.from === pos && /^ {0,3}:{3,}/.test(line.text);
+          })
+      : value;
     for (const effect of tr.effects) {
       if (!effect.is(toggleFold)) continue;
       next = next.includes(effect.value)
