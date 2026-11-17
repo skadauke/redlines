@@ -1,7 +1,11 @@
 # Exporting Redlines to Word (.docx)
 
-Status: research and recommendation, 2026-10-13. Nothing here is implemented
-yet.
+Status: research and recommendation, 2026-10-13, and the exporter as built. `packages/word`
+(`@redlines/word`) writes a Word file with `exportDocx` (the core, #834; tables, format changes,
+splits, joins, moves, images and task lists, #847; the round-trip carriers, #845), reads one back
+(`importDocx`, see [the importer plan](import.md)) and normalizes Google Docs' export (#838).
+File › Export to Word… and `redlines export-docx` call the writer (#841); Open .docx… is not built
+yet, and Word and Google Docs reach the editor through paste (#842).
 
 See also [How Word displays Track Changes in tricky cases](word-display.md),
 the [Word importer plan](import.md) and the [Word lab](../research/word.md).
@@ -10,7 +14,7 @@ the [Word importer plan](import.md) and the [Word lab](../research/word.md).
 
 Build the exporter in TypeScript on [`docx`](https://github.com/dolanmiu/docx)
 (MIT, `npm i docx`, version 9.8 or later), as a new workspace package
-`packages/docx`. It walks the parsed Markdown tree plus the marks from
+`packages/word` (`@redlines/word`). It walks the parsed Markdown tree plus the marks from
 `@redlines/format` and emits `docx` objects directly. Do not use
 python-docx. Use pandoc as a test oracle, not as the exporter.
 
@@ -94,7 +98,7 @@ export a fixture, read it back with `pandoc --track-changes=all`, and compare.
 
 The [pandoc filter](../format.md#11-the-pandoc-filter) for R Markdown and
 Quarto uses the same writer, with the same limits. It serves the render
-pipeline; full-fidelity Word files come from `packages/docx`.
+pipeline; full-fidelity Word files come from `packages/word`.
 
 ### python-docx — no Track Changes
 
@@ -282,4 +286,8 @@ and `commentsIds.xml` for the durable ids written on export.
 - **`redlines export-docx <file.md> [-o out.docx]`** is the same, beside the file by default. It is
   in the Node command line (`pnpm redlines`); the program in the app, which runs the logic in QuickJS
   without Node, doesn't carry the writer, and says so.
-- Import will be File › Open .docx…, into a new unsaved document, with its report as a notification.
+- **File › Open .docx…** opens a Word or Google Docs file as a new, unsaved document (here while the
+  window is untouched, else in a new window). The import report is a notification, never a dialog.
+  Pictures are not carried yet, and the report says how many. In the development page it is a file picker.
+- **`redlines import-docx <file.docx> [-o out.md]`** writes the Markdown beside the file, and never over
+  a file that is there.

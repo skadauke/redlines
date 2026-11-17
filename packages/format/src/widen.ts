@@ -469,7 +469,8 @@ function tryRung(
   // line, where it is an HTML block of its own (#597).
   const html = HTML_LINE.test(lastLineOf(now, rung.prefix));
   // (a setext underline or a rule is a line of its own, which the closer cannot join)
-  const bare = endsInBare(now) && !/(?:^|\n)[ \t>]*(?:-{2,}|={2,})[ \t]*$/.test(now);
+  const bare =
+    endsInBare(now) && !/(?:^|\n)[ \t>]*(?:[-*+][ \t]+)*(?:-{2,}|={2,})[ \t]*$/.test(now);
   if (html && (rung.prefix !== '' || rung.kind === 'table')) return giveUp('html');
   const atomic =
     html ||
@@ -713,7 +714,15 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
       .slice(start, edit.from)
       .replace(/<!--[^]*?-->/g, '')
       .replace(/^[ \t]*(?:>[ \t]*)*/, '');
+    // A key typed into an empty line (a block start typed into an empty paragraph or item) is the
+    // typed-syntax code's, not this check's.
+    const typed =
+      edit.from === edit.to &&
+      edit.insert !== '' &&
+      !/[\n\t]/.test(edit.insert) &&
+      /^[ \t]*(?:<!--[^]*?-->[ \t]*)*(?:\r?\n|$)/.test(text.slice(edit.from));
     if (
+      !typed &&
       prefix !== '' &&
       SYNTAX_PREFIX.test(prefix) &&
       ((edit.insert.includes('\n') && (edit.from < edit.to || !/[ \t]$/.test(prefix))) ||
