@@ -84,11 +84,14 @@ describe('#110: a substitution whose new text starts with a line break', () => {
   it('reads alike in every order, whatever it brings after a split that has no break', () => {
     expectEveryOrderAlike(
       'the issue’s file',
-      file('<!--split dj4k--><!--del tsqq \n--><!--del tsqq *4--><!--ins vbh5-->\nx*4<!--/vbh5-->', {
-        dj4k: 'ada',
-        tsqq: 'bo',
-        vbh5: 'bo',
-      }),
+      file(
+        '<!--split dj4k--><!--del tsqq \n--><!--del tsqq *4--><!--ins vbh5-->\nx*4<!--/vbh5-->',
+        {
+          dj4k: 'ada',
+          tsqq: 'bo',
+          vbh5: 'bo',
+        },
+      ),
       exactly,
     );
   });
@@ -132,5 +135,19 @@ describe('#44: rare edits with Track Changes off', () => {
     expectEveryOrderAlike('Enter in front', front, exactly);
     const inside = edit(insertion, at(insertion, 'ab ', 1), at(insertion, 'ab ', 1), '\n');
     expectEveryOrderAlike('Enter inside', inside, exactly);
+  });
+});
+
+describe('#136: a break that would split a quote or end a paragraph in front of a fence-like line', () => {
+  it('widens Enter at the end of a quote’s lazy line', () => {
+    const base = file('> A long quote that\nwraps lazily.\n> q');
+    const p = at(base, '.\n> q', 1);
+    held('quote', base, press(base, p, p, '\n', ada));
+  });
+
+  it('widens Enter in front of a line that only looks like a fence', () => {
+    const base = file('para text\n```a`b`\nmore');
+    const p = at(base, 'text', 4);
+    held('fence', base, press(base, p, p, '\n', ada));
   });
 });
