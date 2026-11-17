@@ -512,6 +512,12 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     "This table can't be deleted with Track Changes on while it ends the text right after a code block or a rule. Put a paragraph between them first, or turn off Track Changes.";
   const UNDER_TEXT =
     "This table can't be deleted with Track Changes on while it starts right under the line above it, with no blank line between. Put a blank line between them first, or turn off Track Changes.";
+  const HTML_BELOW =
+    "This table can't be deleted with Track Changes on while an HTML comment or block follows it with no blank line between. Put a blank line between them first, or turn off Track Changes.";
+  const CODE_BETWEEN =
+    "This table can't be deleted with Track Changes on while indented code stands both above and below it. Put a paragraph between the table and one of the code blocks first, or turn off Track Changes.";
+  const UNDER_HEADING =
+    "This table can't be deleted with Track Changes on while it starts right under a heading that has closing #s or attributes. Put a blank line between them first, or turn off Track Changes.";
   const said = (run: () => unknown) => {
     try {
       run();
@@ -837,7 +843,7 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
 
     it('refuses a table next to a heading with closing #s or attributes in the words of any edit there', () => {
       // (format §3.7, rule 6: such a heading takes no change at its end, so no marker can be written
-      // after it. The words are the ordinary ones, which say less than the others do.)
+      // after it. Right under the heading the words say what to do; otherwise they are the ordinary ones.)
       const WORDS = "A heading's closing #s and attributes take no change.";
       for (const head of ['## Head ##', '## Head {#intro}']) {
         for (const [shape, body] of [
@@ -853,8 +859,10 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
           const text = file(body);
           expect(readTables(text, parse(text)), label).toHaveLength(1);
           const error = refusal(() => remove(text));
-          expect(error.message, label).toBe(WORDS);
-          for (const words of [CODE_AFTER, CODE_BEFORE, UNDER_TEXT]) {
+          expect(error.message, label).toBe(
+            shape.startsWith('right under') ? UNDER_HEADING : WORDS,
+          );
+          for (const words of [CODE_AFTER, CODE_BEFORE, UNDER_TEXT, HTML_BELOW, CODE_BETWEEN]) {
             expect(error.message, label).not.toBe(words);
           }
           // Track Changes off takes the table as text, as it does anywhere.
@@ -867,6 +875,30 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
           expect(shown(done.after), fixed).toHaveLength(0);
           expectEveryOrderAlike(fixed, done.after, exactly);
         }
+      }
+    });
+
+    it('says what to do for an HTML block right under the table, and for code above and below it', () => {
+      const html = file(`Intro.\n\n${FRUIT}\n<!-- note -->\n\nAfter.`);
+      expect(refusal(() => remove(html)).message).toBe(HTML_BELOW);
+      const between = file(`Intro.\n\n    one\n\n${FRUIT}\n\n    two\n\nAfter.`);
+      expect(refusal(() => remove(between)).message).toBe(CODE_BETWEEN);
+      // The ways out are what the words say.
+      for (const fixed of [
+        `Intro.\n\n${FRUIT}\n\n<!-- note -->\n\nAfter.`,
+        `Intro.\n\n    one\n\nText.\n\n${FRUIT}\n\n    two\n\nAfter.`,
+      ]) {
+        const done = remove(file(fixed));
+        expect(shown(done.after), fixed).toHaveLength(0);
+        expectEveryOrderAlike(fixed, done.after, exactly);
+      }
+      // Negative controls: the words are not used where the shape is not there.
+      for (const body of [
+        `Intro.\n\n    one\n\n${FRUIT}\n\nAfter.`,
+        `Intro.\n\n${FRUIT}\n\n    two\n\nAfter.`,
+      ]) {
+        const done = remove(file(body));
+        expect(shown(done.after), body).toHaveLength(0);
       }
     });
 
@@ -890,13 +922,6 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
         );
       };
       const shapes: [string, string, string][] = [
-        // Code indented on both sides: the table is not at the end of the text, and no fence follows.
-        ['indented code on both sides', `    code\n\n${FRUIT}\n\n    more code`, 'inside-code'],
-        [
-          'indented code on both sides, under text',
-          `Intro.\n\n    code\n\n${FRUIT}\n\n    more code`,
-          'inside-code',
-        ],
         // A fence that opens a list item is no block of its own after the table.
         [
           'a bulleted item that opens with a fence',
