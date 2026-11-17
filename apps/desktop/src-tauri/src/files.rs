@@ -190,12 +190,55 @@ pub fn print_window(window: WebviewWindow) -> Result<(), String> {
     window.print().map_err(|error| error.to_string())
 }
 
-/// Whether `path` is a folder that is there. The save panel starts in the default folder for new
-/// documents only while it is: the folder may have been moved or deleted since Preferences chose
-/// it (`src/host.ts`). It tells nothing of what the folder holds.
+/// The file in the app's data folder that holds the folders the person chose in Preferences.
+const CHOSEN_FILE: &str = "folders.json";
+
+/// The folders the person chose with the folder panel (`choose_folder`), kept for the next launch.
+/// `folder_exists` answers of these and of what a sidebar shows, and of no other path.
+#[derive(Default)]
+pub struct ChosenFolders(Remembered);
+
+/// Makes the chosen folders known to the app, those of the last launches included.
+pub fn set_up(app: &AppHandle) {
+    let chosen = match app.path().app_data_dir() {
+        Ok(folder) => ChosenFolders(Remembered::load(folder.join(CHOSEN_FILE))),
+        Err(_) => ChosenFolders::default(),
+    };
+    app.manage(chosen);
+}
+
+/// Whether `path` is a folder that is there, and is one the person chose in Preferences or one a
+/// sidebar shows, or is inside one, by what it really is (links followed, hidden names refused).
+/// The save panel starts in the default folder for new documents only while it is there: the folder
+/// may have been moved or deleted since Preferences chose it (`src/host.ts`). It tells nothing of
+/// any other path, which gets the same `false` as a missing one: a window can't ask about the disk.
 #[tauri::command(async)]
-pub fn folder_exists(path: String) -> bool {
-    Path::new(&path).is_dir()
+pub fn folder_exists(app: AppHandle, path: String) -> bool {
+    let shown = app.state::<crate::project::Projects>().folders();
+    let chosen = app.state::<ChosenFolders>().0.lock().clone();
+    folder_known(&shown, &chosen, &path)
+}
+
+/// `folder_exists`, given the folders a sidebar shows and those the person chose.
+fn folder_known(shown: &[PathBuf], chosen: &[String], path: &str) -> bool {
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return false;
+    }
+    let Ok(real) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    real.is_dir()
+        && shown
+            .iter()
+            .cloned()
+            .chain(chosen.iter().map(PathBuf::from))
+            // A folder that is no place, such as one that is empty, would hold every path.
+            .filter(|base| base.is_absolute())
+            .any(|base| {
+                real.strip_prefix(file_scope::real(&base))
+                    .is_ok_and(|below| !file_scope::is_hidden_below(below))
+            })
 }
 
 /// `start`, where the folder panel opens, if it is a folder that is there.
@@ -224,7 +267,7 @@ pub fn choose_folder(
     if let Some(start) = panel_start(start) {
         panel = panel.set_directory(start);
     }
-    panel
+    let chosen = panel
         .blocking_pick_folder()
         .map(|folder| {
             folder
@@ -232,7 +275,11 @@ pub fn choose_folder(
                 .map(|path| path.to_string_lossy().into_owned())
                 .map_err(|error| error.to_string())
         })
-        .transpose()
+        .transpose()?;
+    if let Some(folder) = &chosen {
+        app.state::<ChosenFolders>().0.note(folder);
+    }
+    Ok(chosen)
 }
 
 #[cfg(test)]
@@ -248,17 +295,64 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_that_is_there_exists_and_a_file_or_a_missing_path_does_not() {
+    fn only_a_folder_the_person_chose_or_a_sidebar_shows_is_answered_of() {
         let dir = folder("folder-exists");
-        std::fs::write(dir.join("plan.md"), "One").unwrap();
-        assert!(folder_exists(dir.to_string_lossy().into_owned()));
-        assert!(!folder_exists(
-            dir.join("plan.md").to_string_lossy().into_owned()
+        for name in ["chosen/inner", "project/docs", "other", "project/.hidden"] {
+            std::fs::create_dir_all(dir.join(name)).unwrap();
+        }
+        std::fs::write(dir.join("chosen/plan.md"), "One").unwrap();
+        let at = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        let shown = [dir.join("project")];
+        let chosen = [at("chosen")];
+        let known = |path: String| folder_known(&shown, &chosen, &path);
+
+        // Inside what the person chose or what a sidebar shows, and there.
+        assert!(known(at("chosen")));
+        assert!(known(at("chosen/inner")));
+        assert!(known(at("project/docs")));
+        // An arbitrary folder that is there, a path from nowhere and a way out through `..`:
+        // refused as a missing path is.
+        assert!(!known(at("other")));
+        assert!(!known(dir.to_string_lossy().into_owned()));
+        assert!(!known("/".to_owned()));
+        assert!(!known(String::new()));
+        assert!(!known("chosen".to_owned()));
+        assert!(!known(at("chosen/../other")));
+        // A hidden folder below one, a file, and a folder that isn't there.
+        assert!(!known(at("project/.hidden")));
+        assert!(!known(at("chosen/plan.md")));
+        assert!(!known(at("chosen/gone")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_followed_before_the_folder_is_judged() {
+        use std::os::unix::fs::symlink;
+        let dir = folder("folder-exists-link");
+        for name in ["chosen", "other"] {
+            std::fs::create_dir_all(dir.join(name)).unwrap();
+        }
+        // A link in the chosen folder to another that is there: the folder it leads to is no
+        // chosen one's.
+        symlink(dir.join("other"), dir.join("chosen/out")).unwrap();
+        // A link outside to the chosen folder, which is what it really is.
+        symlink(dir.join("chosen"), dir.join("way-in")).unwrap();
+        let chosen = [dir.join("chosen").to_string_lossy().into_owned()];
+        let known = |name: &str| folder_known(&[], &chosen, &dir.join(name).to_string_lossy());
+        assert!(!known("chosen/out"));
+        assert!(known("way-in"));
+        // And a chosen folder that is itself a link is judged by where it leads.
+        let by_link = [dir.join("way-in").to_string_lossy().into_owned()];
+        assert!(folder_known(
+            &[],
+            &by_link,
+            &dir.join("chosen").to_string_lossy()
         ));
-        assert!(!folder_exists(
-            dir.join("gone").to_string_lossy().into_owned()
+        assert!(!folder_known(
+            &[],
+            &by_link,
+            &dir.join("other").to_string_lossy()
         ));
-        assert!(!folder_exists(String::new()));
     }
 
     #[test]

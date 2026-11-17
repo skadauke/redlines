@@ -39,21 +39,21 @@ pub struct Remembered {
 
 impl Remembered {
     /// The documents kept in `file`.
-    fn load(file: PathBuf) -> Self {
+    pub(crate) fn load(file: PathBuf) -> Self {
         Self {
             paths: Mutex::new(read_list(&file)),
             file: Some(file),
         }
     }
 
-    fn lock(&self) -> MutexGuard<'_, Vec<String>> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, Vec<String>> {
         self.paths
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Notes that a window holds the document at `path`.
-    fn note(&self, path: &str) {
+    pub(crate) fn note(&self, path: &str) {
         let mut paths = self.lock();
         if put_first(&mut paths, path) {
             self.keep(&paths);
