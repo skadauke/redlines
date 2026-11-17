@@ -74,7 +74,7 @@ import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
   markEnd,
   marksOverlapping,
-  marksStartingIn,
+  marksReaching,
   windowEnd,
   windowStart,
   type Zone,
@@ -505,8 +505,9 @@ function analyze(state: EditorState, kept: number | null, zone?: Zone): Model {
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const whole = state.field(parsedField);
-  // In a window, the marks that open in it: none reaches out of it (`windows.ts`).
-  const marksHere = zone ? marksStartingIn(whole, zone.from, zone.to) : whole.marks;
+  // In a window, the marks that open in it, and those of a block of its own that reach into it
+  // from above, whose pieces that start in the window it draws (`windows.ts`).
+  const marksHere = zone ? marksReaching(whole, zone.from, zone.to) : whole.marks;
   const parsed = zone ? { ...whole, marks: marksHere } : whole;
   // Simple is Redlines with the changes' looks mostly off (design: The views and the looks): the same
   // parts and layers, so that the bars land on the same lines, with no deleted text, no underline
