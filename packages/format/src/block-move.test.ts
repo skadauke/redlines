@@ -180,6 +180,29 @@ describe('moving blocks that hold comments or pending changes (#1052)', () => {
     expect(problemsOf(parse(after))).toEqual([]);
   });
 
+  it('carries a comment that starts at the first character of a paragraph, and a highlight that ends one', () => {
+    const text = file(
+      '<!--cmt k6hg-->Alpha<!--/k6hg--> one\n\nBeta <!--hl k6hj-->two<!--/k6hj-->',
+      { k6hj: 'ada' },
+      thread('k6hg', 'bo', 'One.'),
+    );
+    for (const [at, up, expected] of [
+      [
+        'Alpha',
+        false,
+        'Beta <!--hl k6hj-->two<!--/k6hj-->\n\n<!--cmt k6hg-->Alpha<!--/k6hg--> one',
+      ],
+      ['Beta', true, 'Beta <!--hl k6hj-->two<!--/k6hj-->\n\n<!--cmt k6hg-->Alpha<!--/k6hg--> one'],
+    ] as const) {
+      const view = viewOf(text);
+      const from = newestView(text).map.toSource(view.indexOf(at), 1);
+      const run = blockRunAt(text, { from, to: from })!;
+      const plan = moveBlockEdits(text, run, neighbourGap(run, up)!)!;
+      expect(plan.verbatim, at).toBe(true);
+      expect(bodyOf(applyChanges(text, plan.edits)).trim(), at).toBe(expected);
+    }
+  });
+
   it('writes a plain move that holds no comment as it did', () => {
     const plain = file('- alpha\n- beta');
     const run = blockRunAt(plain, { from: 3, to: 3 })!;

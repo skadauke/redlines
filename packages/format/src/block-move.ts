@@ -261,7 +261,9 @@ function build(
   );
   const lead = place.insert.startsWith(chunk) ? 0 : breakOf.length;
   let insert = place.insert;
-  const cut = { from: takenFrom, to: takenTo };
+  const cut = verbatim
+    ? { from: map.toSource(taken.from, -1), to: takenTo }
+    : { from: takenFrom, to: takenTo };
   if (verbatim) {
     const own = verbatimChunk(text, map, firstUnit.lineFrom, lastUnit.to, cut);
     if (!own) return undefined;
@@ -298,7 +300,7 @@ function verbatimChunk(
   viewTo: number,
   cut: Range,
 ): string | undefined {
-  const from = map.toSource(viewFrom, 1);
+  const from = map.toSource(viewFrom, -1);
   let to = map.toSource(viewTo, -1);
   for (let m = CLOSER.exec(text.slice(to)); m; m = CLOSER.exec(text.slice(to))) to += m[0].length;
   if (cut.from > from || cut.to < to) return undefined;
