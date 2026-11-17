@@ -56,6 +56,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { joinSession, type Session } from './session.ts';
 import type { SyncState } from '@redlines/sync';
 import { tauriSessionPorts } from './session-tauri.ts';
+import { browserSessionPorts, tabsCanShare } from './session-browser.ts';
 import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
@@ -230,7 +231,7 @@ function sessionStatus(): string | undefined {
 
 /** Joins the session of the document at `path`, as its leader when there is none yet. */
 async function beginSession(path: string, follow = false): Promise<void> {
-  session = await joinSession(tauriSessionPorts(), editor, {
+  session = await joinSession(isTauri ? tauriSessionPorts() : browserSessionPorts(path), editor, {
     path,
     follow,
     person: { handle: author.handle, name: author.name },
@@ -239,7 +240,10 @@ async function beginSession(path: string, follow = false): Promise<void> {
     save: async () => ((await controller.save()) ? controller.diskText : null),
     onSaved: (text) => controller.savedBySession(text),
     onLoaded: () => controller.sessionLoaded(),
-    onLead: () => controller.becameLeader(),
+    onLead: () => {
+      controller.becameLeader();
+      if (import.meta.env.DEV) document.documentElement.dataset['session'] = 'leading';
+    },
     onState: (state) => {
       sessionState = state;
       render();
@@ -251,6 +255,10 @@ async function beginSession(path: string, follow = false): Promise<void> {
     notice: (message) => notice.flash(message),
   });
   controller.enterSession(session);
+  // Debug only (two-windows.html): what the journeys wait for.
+  if (import.meta.env.DEV) {
+    document.documentElement.dataset['session'] = session.leading ? 'leading' : 'following';
+  }
 }
 
 /** Takes this window out of its session, as when it opens another document. */
@@ -266,7 +274,7 @@ async function endSession(): Promise<void> {
 /** Another window with this document's text, kept in step with this one's: a session. */
 async function openAnotherWindow(): Promise<void> {
   const path = controller.state.path;
-  if (!isTauri || path === null) return;
+  if ((!isTauri && !tabsCanShare) || path === null) return;
   try {
     if (!session) await beginSession(path);
     await host.openWindow(path, undefined, undefined, true);
@@ -1824,7 +1832,24 @@ if (isTauri) {
   updates?.setAutomatic(settings.checkForUpdates);
 } else {
   installShortcuts(menuModel, shortcutBook);
-  await controller.open('sample.md');
+  const query = new URLSearchParams(location.search);
+  const joining = query.get('join');
+  if (joining !== null && tabsCanShare) {
+    // Another tab on a document: its text is the session's, which the tab that leads gives.
+    controller.followSession(joining);
+    await beginSession(joining, true).catch(async (error: unknown) => {
+      console.error('Could not join the session', error);
+      await controller.open('sample.md');
+    });
+  } else {
+    await controller.open('sample.md');
+    // Debug only (the two-windows page, src/two-windows.ts): this tab starts the session.
+    if (import.meta.env.DEV && query.get('session') === 'host' && tabsCanShare) {
+      await beginSession('sample.md').catch((error: unknown) => {
+        console.error('Could not start the session', error);
+      });
+    }
+  }
   // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
