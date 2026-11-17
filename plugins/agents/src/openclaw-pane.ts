@@ -7,6 +7,7 @@
 // `openClawCommand`) and says no, with a line to show, to what it won't run.
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
+import { renderGuided, type GuidedDeps, type GuidedOptions } from './openclaw/guided.ts';
 import { button, el, reasonOf, row, textField } from './pane-dom.ts';
 import { skillControls, type PaneSkill } from './skill-controls.ts';
 
@@ -41,6 +42,13 @@ export interface OpenClawDeps {
    * (an OpenClaw elsewhere reads that machine's folders). Without it, the section offers none.
    */
   skill?: PaneSkill;
+  /**
+   * The guided setup: an agent on any computer, reached over Tailscale, which connects to Redlines
+   * as a node (openclaw/sheet.ts). Without it, only the `openclaw` command's form is offered.
+   */
+  guided?: GuidedDeps;
+  /** For screenshots and tests: the screen the guided sheet opens at, with what it knows. */
+  guidedStart?: GuidedOptions['start'];
 }
 
 /** Whether a Gateway's address is on this Mac: its host is the machine's own. */
@@ -281,7 +289,21 @@ export function renderOpenClaw(
   };
 
   adding.append(...closed());
-  control.append(items, adding, problem, note, ...(skill ? [...skill.nodes, skillWhere] : []));
+  control.append(
+    ...(deps.guided
+      ? [
+          renderGuided(deps.guided, {
+            alive,
+            ...(deps.guidedStart ? { start: deps.guidedStart } : {}),
+          }),
+        ]
+      : []),
+    items,
+    adding,
+    problem,
+    note,
+    ...(skill ? [...skill.nodes, skillWhere] : []),
+  );
   void deps.list().then(show, (error: unknown) => {
     if (alive()) problem.textContent = `Couldn’t list the OpenClaw agents: ${reasonOf(error)}`;
   });

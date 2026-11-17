@@ -142,22 +142,24 @@ describe('task boxes that cannot change', () => {
     expect(editor.getDoc()).toMatch(/^- \[x\] item<!--fmt \w+ \+check-->\n- other <!--ins bbk2-->/);
   });
 
-  it("says why when another person's insertion is in the item's own paragraph", () => {
+  it("checks the box over another person's insertion in the item's own paragraph", () => {
     const doc = `- [ ] item <!--ins bbk2-->added<!--/bbk2-->\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
     const notices: string[] = [];
     const editor = mount(doc, true, notices);
     click(editor, 0);
-    expect(notices).toEqual(['Accept or reject the changes in this paragraph first.']);
-    expect(editor.getDoc()).toBe(doc);
+    // The item is a replacement that holds Bob's insertion in its old text (format §3.12, #808).
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toContain('<!--sub');
+    expect(editor.getDoc()).toContain('[x] item');
   });
 
-  it('says a pending change is in the way when one follows the bracket', () => {
+  it('checks the box over a pending change that follows the bracket', () => {
     const doc = `- [ ] <!--fmt bbk2 +bold-->item<!--/bbk2-->\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
     const notices: string[] = [];
     const editor = mount(doc, true, notices);
     click(editor, 0);
-    expect(notices).toEqual(['Accept or reject the changes in this paragraph first.']);
-    expect(editor.getDoc()).toBe(doc);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toContain('[x]');
   });
 
   it('ignores a request for a position that is not a task box', () => {

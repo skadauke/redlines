@@ -47,6 +47,12 @@ export function tierOfCode(code: EditErrorCode | undefined): RefusalTier {
 
 export const REFUSALS: readonly RefusalEntry[] = [
   [
+    'packages/format/src/inline.ts',
+    'DIV_FENCE',
+    'widen',
+    "a marker can't stand on a `:::` line (rule 9): the edit is a replacement of the paragraph or div that holds the fence (§3.12), written by the widened path (Q0)",
+  ],
+  [
     'packages/editor/src/image-crop.ts',
     'CROP_RAW',
     'disable',

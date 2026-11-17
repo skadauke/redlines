@@ -64,21 +64,22 @@ export function newIntentId(): string {
 
 /** A random source and the log of what it gave. */
 export interface Drawing {
-  random: (n: number) => Uint8Array;
+  random: ((n: number) => Uint8Array) | undefined;
   drawn: number[][];
 }
 
 /**
- * A source that gives what `source` gives (the system's when it has none) and keeps the bytes. The
- * format draws one id after another, and a draw is only a few bytes.
+ * A source that gives what `source` gives, and keeps the bytes. With no source (the system's, in
+ * the app) the format is left to draw its own, as it always did, and nothing is kept: deriving such
+ * an intent draws ids from a stream of its own id's, the same each time. A session sets a source.
  */
 export function recording(source?: (n: number) => Uint8Array): Drawing {
   const drawn: number[][] = [];
-  const random = source ?? ((n: number) => crypto.getRandomValues(new Uint8Array(n)));
+  if (!source) return { drawn, random: undefined };
   return {
     drawn,
     random: (n) => {
-      const bytes = random(n);
+      const bytes = source(n);
       drawn.push([...bytes]);
       return bytes;
     },
@@ -104,6 +105,7 @@ export function replaying(intent: Pick<Intent, 'id' | 'drawn'>): (n: number) => 
 function stream(seed: string, n: number): Uint8Array {
   let h = 0x811c9dc5;
   for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 0x01000193);
+  if (h === 0) h = 1;
   const out = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     h ^= h << 13;

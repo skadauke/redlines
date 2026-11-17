@@ -1,0 +1,490 @@
+/*
+ * The setup sheet for connecting an OpenClaw agent (plugins/agents/src/openclaw/sheet.ts) and the
+ * agent's card (guided.ts), in Preferences › Agents. The theme's grays and sizes, as the mockups
+ * (docs/research/mockups/openclaw-connection.html) draw them: nothing is red, since red is the
+ * Track Changes pen's, and a failure is a gray card with one button.
+ */
+
+.rl-oc-sheet {
+  margin-top: 10px;
+  border: 1px solid var(--rl-rule);
+  border-radius: var(--rl-radius-card, 12px);
+  background: var(--rl-page);
+  color: var(--rl-ink);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rl-oc-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 20px 16px;
+  min-height: 340px;
+}
+
+.rl-oc-body h1 {
+  margin: 0 0 2px;
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 700;
+}
+
+.rl-oc-body h2 {
+  margin: 0 0 6px;
+  font-size: var(--rl-size-ui);
+  font-weight: 700;
+}
+
+.rl-oc-body p {
+  margin: 0;
+}
+
+.rl-oc-sub {
+  color: var(--rl-ink-2);
+}
+
+.rl-oc-small {
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  line-height: 16px;
+}
+
+.rl-oc-gap {
+  margin-top: 6px !important;
+}
+
+.rl-oc-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-oc-steps b {
+  color: var(--rl-ink);
+}
+
+.rl-oc-pips {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.rl-oc-pips i {
+  display: block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--rl-off, var(--rl-rule));
+}
+
+.rl-oc-pips i.rl-oc-pip-done {
+  background: var(--rl-on, var(--rl-ink-2));
+}
+
+.rl-oc-list,
+.rl-oc-choices {
+  display: contents;
+}
+
+.rl-oc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: var(--rl-radius-card, 12px);
+  background: var(--rl-card, var(--rl-page));
+}
+
+.rl-oc-row[role='radio'] {
+  cursor: pointer;
+}
+
+.rl-oc-row[role='radio']:focus-visible {
+  outline: none;
+  border-color: var(--rl-ink-3);
+}
+
+.rl-oc-selected {
+  border-color: var(--rl-ink-2);
+  box-shadow: inset 0 0 0 1px var(--rl-ink-2);
+}
+
+.rl-oc-dim {
+  opacity: 0.55;
+}
+
+.rl-oc-row-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.rl-oc-row-text > b {
+  display: block;
+  font-weight: 700;
+}
+
+.rl-oc-row-text > .rl-oc-small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.rl-oc-radio {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--rl-on, var(--rl-ink-2));
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.rl-oc-radio-on::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rl-ink);
+}
+
+.rl-oc-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rl-ink);
+}
+
+.rl-oc-dot-off {
+  background: transparent;
+  border: 1.5px solid var(--rl-on, var(--rl-ink-2));
+  box-sizing: border-box;
+}
+
+.rl-oc-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  font-size: var(--rl-size-ui-small);
+  font-weight: 700;
+}
+
+.rl-oc-mark-ok {
+  background: var(--rl-ink);
+  color: var(--rl-page);
+}
+
+.rl-oc-mark-wait {
+  border: 1.5px dashed var(--rl-on, var(--rl-ink-2));
+  color: var(--rl-ink-2);
+}
+
+.rl-oc-mark-no {
+  border: 1.5px solid var(--rl-ink-2);
+  color: var(--rl-ink-2);
+}
+
+.rl-oc-body > .rl-pref-button {
+  align-self: flex-start;
+}
+
+.rl-oc-primary {
+  background: var(--rl-ink) !important;
+  border-color: var(--rl-ink) !important;
+  color: var(--rl-page) !important;
+}
+
+.rl-oc-primary:disabled {
+  background: var(--rl-tint, var(--rl-pressed)) !important;
+  border-color: var(--rl-rule) !important;
+  color: var(--rl-ink-3) !important;
+}
+
+.rl-oc-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--rl-radius-menu, 10px);
+  background: var(--rl-tint, var(--rl-pressed));
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  line-height: 16px;
+}
+
+.rl-oc-note b {
+  color: var(--rl-ink);
+}
+
+.rl-oc-fail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: var(--rl-radius-card, 12px);
+  background: var(--rl-card, var(--rl-page));
+}
+
+.rl-oc-fail b {
+  font-weight: 700;
+}
+
+.rl-oc-fail p {
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  line-height: 16px;
+}
+
+.rl-oc-key {
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-oc-details summary {
+  cursor: pointer;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-oc-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.rl-oc-foot-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.rl-oc-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--rl-ink-2);
+  font: inherit;
+  font-size: var(--rl-size-ui-small);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.rl-oc-link:focus-visible {
+  outline: 1px solid var(--rl-ink-3);
+  outline-offset: 2px;
+}
+
+.rl-oc-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rl-oc-field {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+}
+
+.rl-oc-secret {
+  font-family: var(--rl-font-mono);
+  letter-spacing: 0.08em;
+}
+
+.rl-oc-pre {
+  position: relative;
+  max-height: 190px;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--rl-rule);
+  border-radius: var(--rl-radius-menu, 10px);
+  background: var(--rl-tint, var(--rl-pressed));
+  color: var(--rl-ink);
+  font-family: var(--rl-font-mono);
+  font-size: var(--rl-size-ui-small);
+  line-height: 17px;
+  white-space: pre-wrap;
+}
+
+.rl-oc-pre:focus-visible {
+  outline: none;
+  border-color: var(--rl-ink-3);
+}
+
+.rl-oc-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rl-oc-section {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rl-rule);
+}
+
+.rl-oc-problem {
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-oc-center {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0;
+}
+
+.rl-oc-code {
+  padding: 16px 26px;
+  border: 1px solid var(--rl-rule);
+  border-radius: var(--rl-radius-card, 12px);
+  background: var(--rl-tint, var(--rl-pressed));
+  font-family: var(--rl-font-mono);
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.rl-oc-status:empty {
+  display: none;
+}
+
+/* The agent's card. */
+.rl-oc-guided {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rl-oc-guided > .rl-pref-button {
+  align-self: flex-start;
+}
+
+.rl-oc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: var(--rl-radius-card, 12px);
+  background: var(--rl-card, var(--rl-page));
+}
+
+.rl-oc-card p {
+  margin: 0;
+}
+
+.rl-oc-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rl-oc-wrap {
+  flex-wrap: wrap;
+}
+
+.rl-oc-label {
+  flex: none;
+  width: 70px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-oc-grow {
+  flex: 1;
+}
+
+.rl-oc-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--rl-author-4, var(--rl-ink-2));
+  color: #fff;
+  font-size: var(--rl-size-ui-small);
+  font-weight: 700;
+}
+
+.rl-oc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--rl-tint, var(--rl-pressed));
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-oc-chip-x {
+  padding: 0 0 0 2px;
+  border: 0;
+  background: none;
+  color: var(--rl-ink-2);
+  font: inherit;
+  font-size: var(--rl-size-ui-small);
+  cursor: pointer;
+}
+
+.rl-oc-card .rl-oc-chip,
+.rl-oc-card .rl-oc-seg {
+  background: var(--rl-pressed, var(--rl-tint));
+}
+
+.rl-oc-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--rl-tint, var(--rl-pressed));
+}
+
+.rl-oc-seg-choice {
+  height: 22px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--rl-ink-2);
+  font: inherit;
+  font-size: var(--rl-size-ui-small);
+  cursor: pointer;
+}
+
+.rl-oc-seg-choice:disabled {
+  color: var(--rl-ink-3);
+  cursor: default;
+}
+
+.rl-oc-seg-on {
+  background: var(--rl-seg-on, var(--rl-page));
+  color: var(--rl-ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.rl-oc-seg-choice:focus-visible {
+  outline: 1px solid var(--rl-ink-3);
+}
+
+.rl-oc-state {
+  flex: none;
+}
