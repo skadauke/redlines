@@ -69,7 +69,7 @@ const LIST_KEYS: Step[] = [
  * (Seed 146, Return in the middle of a `2.` item's text in a sublist numbered from 2 under text, held
  * this list until the keys read that line as the text it is, #600.)
  */
-const KNOWN_STAGE_1: ReadonlySet<number> = new Set([46, 130]);
+const KNOWN_STAGE_1: ReadonlySet<number> = new Set([]);
 
 /** Where a walk may start: the start of a line's text, or a line's end, in the body. */
 function edges(doc: string): number[] {

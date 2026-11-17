@@ -157,6 +157,33 @@ const readsAsText = (row: string) =>
   (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1';
 
 /**
+ * The last line of an item's own paragraph, as CommonMark reads the file: the editor's parse keeps a
+ * list marker line that doesn't continue the item (a number other than 1 or an empty marker, less
+ * indented than the item's text) as a lazy line of its paragraph, where it is a list item of its
+ * own (#446). Lines from that one on are cut off.
+ */
+function ownLines(state: EditorState, block: Block, item: SyntaxNode): Line {
+  const { doc } = state;
+  const last = doc.lineAt(block.lines.to);
+  const first = doc.lineAt(block.lines.from);
+  const offset = textOffset(state, item);
+  for (let n = first.number + 1; n <= last.number; n++) {
+    const row = doc.line(n).text;
+    const quoted = QUOTE_PREFIX.exec(row)![0].length;
+    const at = columnAt(row, quoted + /^[ \t]*/.exec(row.slice(quoted))![0].length);
+    const base = columnAt(row, quoted);
+    if (at - base >= offset) continue;
+    if (
+      /^[ \t>]*(?:\d{1,9}[.)]|[-+*])[ \t]*$/.test(row) ||
+      (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1'
+    ) {
+      return doc.line(n - 1);
+    }
+  }
+  return last;
+}
+
+/**
  * Why an item can't move (up a level, or out of its list, or into the paragraph above it) while a
  * pending change in the line below it would make that line read otherwise: an item that the change
  * leaves empty (a deletion of all its text, an insertion that is all of it) is an item with text in
@@ -960,15 +987,16 @@ function outOfList(
 ): KeyEdit {
   const userEvent = 'delete.backward.block';
   const { doc } = state;
+  const ownEnd = ownLines(state, block, item);
   // A line below that a pending change empties would follow the text as an underline (#292).
-  if (readsOtherwiseBelow(state, doc.lineAt(item.to))) {
+  if (readsOtherwiseBelow(state, ownEnd)) {
     return { ...nothing(state), refusal: BELOW_CHANGES };
   }
   const list = item.parent;
   // A one-item list is the format's block change, which writes nothing for the line below: a number
   // other than 1 there is text of the paragraph once the item is one (the key writes the blank line
   // that keeps it apart), so it takes the way of a longer list.
-  const underItem = doc.lineAt(item.to);
+  const underItem = ownEnd;
   const below = underItem.number < doc.lines ? doc.line(underItem.number + 1).text : '';
   const alone =
     (list?.getChildren('ListItem').length ?? 0) <= 1 &&
@@ -980,7 +1008,7 @@ function outOfList(
   const line = doc.lineAt(block.lines.from);
   const own = block.containers.at(-1)!;
   // What stood in the item moves out of it with the paragraph, by the item's own offset.
-  const under = leaving(state, item, doc.lineAt(block.lines.to).number);
+  const under = leaving(state, item, ownEnd.number);
   // The first line of the file, Track Changes on: the format takes the marker out as a change of
   // its own, and the lines below it, up to a blank line, must not turn into text of this one or
   // make a heading of it (an item that can't interrupt a paragraph: numbered other than 1, or
@@ -1008,10 +1036,12 @@ function outOfList(
     if (prev) before = state.sliceDoc(prev.lines.to, own.prefix.from);
   }
   // The next item, numbered other than 1, right under it would be read into the paragraph.
-  const last = doc.lineAt(block.lines.to);
+  const last = ownEnd;
   if (last.number < doc.lines) {
     const next = doc.line(last.number + 1);
-    const number = /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text);
+    const number =
+      /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text) ??
+      /^([ \t>]*)(?:[-+*]|(\d{1,9})[.)])[ \t]*$/.exec(next.text);
     if (number && number[2] !== '1') {
       // The first line of the file, Track Changes on: the format takes the marker out as a change
       // of its own, and has no place for the blank line that this item's number needs after it

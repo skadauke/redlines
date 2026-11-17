@@ -51,10 +51,6 @@ const DEL: Step[] = ['Delete'];
 const FIRST_NUMBERED =
   "This item can't leave its list while Track Changes is on: a line below it (a number other than 1, an empty item or an underline) would read as part of its text. Take the marker out with Track Changes off, or move the lines below it first.";
 
-/** Track Changes off leaves the next line as the text it reads as: no item to read (a known untracked key). */
-const UNTRACKED_TEXT =
-  'The untracked key leaves the line below as text of the paragraph, as it reads.';
-
 /** Words for a marker inside another container on the file's first line. */
 const DEEP_AT_START =
   "A marker inside a quote or another list can't be taken out of the first line of the file while Track Changes is on. Turn Track Changes off for this change, or start the file with a line of text first.";
@@ -717,17 +713,15 @@ describe('At the start of the document, Track Changes on', () => {
         name: 'a bullet above an item numbered other than 1',
         doc: '- ‸a⏎2. b',
         keys: BS,
-        off: { caret: '‸a⏎2. b' },
+        off: { caret: '‸a⏎⏎2. b' },
         on: { caret: '- ‸a⏎2. b', refusal: FIRST_NUMBERED },
-        skipOff: { 'list-reads': UNTRACKED_TEXT },
       },
       {
         name: 'a bullet above an empty item',
         doc: '- ‸a⏎- ',
         keys: BS,
-        off: { caret: '‸a⏎- ' },
+        off: { caret: '‸a⏎⏎- ' },
         on: { caret: '- ‸a⏎- ', refusal: FIRST_NUMBERED },
-        skipOff: { 'list-reads': UNTRACKED_TEXT },
       },
       // #292: the untracked key took the bullet out in front of an item that a pending deletion
       // empties, which the newest view reads as a heading (it was a known gap, `render` skipped).

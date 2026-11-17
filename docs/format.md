@@ -898,7 +898,10 @@ away.
   reads alike in both and is no reason. A numbered item that doesn't
   start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
   an item that has no item under it when its old sibling, numbered otherwise than 1, would become
-  its first child right under its text; and so is indenting
+  its first child right under its text; and so is outdenting one whose next item at its own
+  indentation a pending change empties in some reading of the file (the file, the newest view or the
+  original view), which would turn the text into a heading in the readings where it is empty
+  (#433); and so is indenting
   one right after text where it would not be the first of a new sublist, unless the sublist above it
   is numbered with the same delimiter, which it joins with the number it has. Indenting one that
   becomes the first of a new sublist writes `1.` (the mark keeps the old number, below). Changing
