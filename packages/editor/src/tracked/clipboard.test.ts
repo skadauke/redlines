@@ -193,9 +193,9 @@ describe('copied images', () => {
     const asked: string[] = [];
     const editor = load(text, {
       resolveImage: (path) => `asset://${path}`,
-      imageData: async (path) => {
+      imageData: (path) => {
         asked.push(path);
-        return { mimeType: 'image/png', data: 'QUJD' };
+        return Promise.resolve({ mimeType: 'image/png', data: 'QUJD' });
       },
     });
     const out = (await copyData(editor, 0, text.indexOf('\n'))).getData('text/html');
