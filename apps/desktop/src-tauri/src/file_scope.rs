@@ -191,12 +191,48 @@ pub fn allowed(scope: &tauri::fs::Scope, path: &Path) -> bool {
     scope.is_allowed(real(path))
 }
 
+/// The spellings the scope was told of: every path it was allowed by (the dialogs, `offer`,
+/// `allow_document`, Rename, the real files of links), as given. A project is shown for such a
+/// spelling and for the real path, and for no other way to the same file (#458).
+fn told() -> &'static Mutex<std::collections::HashSet<PathBuf>> {
+    static TOLD: std::sync::OnceLock<Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    TOLD.get_or_init(Mutex::default)
+}
+
+fn tell(path: &Path) {
+    told()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(path.to_path_buf());
+}
+
+/// Whether the scope allows the file at `path`, and `path` is a spelling it was told of (or one
+/// below a folder it was told of), or is the file's real path. A path that only reaches an allowed
+/// file through another link is refused as a missing one is, so that no guess of a link tells
+/// whether it is there.
+pub fn spelled(scope: &tauri::fs::Scope, path: &Path) -> bool {
+    if !allowed(scope, path) {
+        return false;
+    }
+    if path == real(path) {
+        return true;
+    }
+    let told = told()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    path.ancestors().any(|spelling| told.contains(spelling))
+}
+
 /// Whenever a path is allowed, allows the file it really is as well, which is what the file system
 /// plugin asks about: the open dialog gives the path the person went through, a link to a folder
 /// such as `~/Dropbox` included. Tauri's scope adds that file itself today; this keeps it so.
-fn follow_links(scope: &tauri::fs::Scope) {
+pub(crate) fn follow_links(scope: &tauri::fs::Scope) {
     let allow = scope.clone();
     scope.listen(move |event| {
+        if let tauri::scope::fs::Event::PathAllowed(path) = event {
+            tell(path);
+        }
         if let tauri::scope::fs::Event::PathAllowed(path) = event
             && let Ok(real) = std::fs::canonicalize(path)
             // The file itself is allowed already, and allowing it again would be heard again.
@@ -233,7 +269,7 @@ pub fn set_up(app: &AppHandle) {
 /// Says whether the scope allows the document.
 pub(crate) fn show(scope: &tauri::fs::Scope, projects: &Projects, path: &str) -> bool {
     let path = Path::new(path);
-    if !allowed(scope, path) {
+    if !spelled(scope, path) {
         return false;
     }
     projects.show(path);
@@ -260,7 +296,7 @@ fn hold(
     path: &str,
 ) -> bool {
     let path = Path::new(path);
-    if !allowed(scope, path) {
+    if !spelled(scope, path) {
         return false;
     }
     remembered.note(&real(path).to_string_lossy());
@@ -773,6 +809,43 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_path_through_a_link_that_nobody_opened_shows_no_project() {
+        use std::os::unix::fs::symlink;
+        let disk = folder("show-through-link");
+        let (shared, repo_b) = (disk.join("shared"), disk.join("repo-b"));
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::create_dir_all(repo_b.join(".git")).unwrap();
+        std::fs::write(shared.join("plan.md"), "").unwrap();
+        symlink("../shared", repo_b.join("docs")).unwrap();
+        let (scope, projects) = (scope(), Projects::default());
+        // The person opened shared/plan.md; a page names it through repo-b's link.
+        scope.allow_file(shared.join("plan.md")).unwrap();
+        assert!(!show(
+            &scope,
+            &projects,
+            &repo_b.join("docs/plan.md").to_string_lossy()
+        ));
+        assert!(projects.folders().is_empty());
+        // The path the person opened, and the real one, still show theirs.
+        assert!(show(
+            &scope,
+            &projects,
+            &shared.join("plan.md").to_string_lossy()
+        ));
+        let real = std::fs::canonicalize(shared.join("plan.md")).unwrap();
+        assert!(show(&scope, &projects, &real.to_string_lossy()));
+        // A link the person opened by is its own spelling.
+        scope.allow_file(repo_b.join("docs/plan.md")).unwrap();
+        assert!(show(
+            &scope,
+            &projects,
+            &repo_b.join("docs/plan.md").to_string_lossy()
+        ));
+        std::fs::remove_dir_all(&disk).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn a_window_holds_only_a_file_the_scope_allows() {
         use std::os::unix::fs::symlink;
 
@@ -798,6 +871,9 @@ mod tests {
 
         // A file it was given, through a link: remembered as the file it really is.
         scope.allow_file(notes.join("plan.md")).unwrap();
+        // Through a link nobody told the scope of: refused as a missing file is.
+        assert!(!hold(&folder.join("plan-link.md")));
+        scope.allow_file(folder.join("plan-link.md")).unwrap();
         assert!(hold(&folder.join("plan-link.md")));
         let real = std::fs::canonicalize(notes.join("plan.md")).unwrap();
         assert_eq!(*remembered.lock(), [real.to_string_lossy()]);
