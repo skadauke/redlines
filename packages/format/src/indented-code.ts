@@ -454,15 +454,41 @@ function lineEndOf(text: string, start: number): number {
  * ends of the text of a deletion comes back. When it has none, it has no indented code, and
  * nothing need be read. */
 export function mayIndent(body: string): boolean {
-  if (/ {4}|\t|\\x(?:09|20)/i.test(body)) return true;
+  // Plain searches first: they are much quicker than the pattern over a long file.
+  if (body.includes('    ') || body.includes('\t')) return true;
+  if ((body.includes('\\x') || body.includes('\\X')) && /\\x(?:09|20)/i.test(body)) return true;
   if (!body.includes('<!--')) return false;
-  const edges = body.replace(
-    /<!--[^\n]*?-->/g,
-    (comment) =>
+  return / {4}/.test(commentEdges(body));
+}
+
+/** What `mayIndent` reads once the comments are taken out: of each one, the white space after its
+ * id and author (that of a deletion's text) and before its `-->`. Found with plain searches: a
+ * comment is the first `-->` on its line after its `<!--`, and a payload may be a whole code block
+ * on one line, which a pattern over it takes a long time to cross. */
+function commentEdges(body: string): string {
+  let out = '';
+  let at = 0;
+  for (let open = body.indexOf('<!--'); open !== -1; open = body.indexOf('<!--', open + 1)) {
+    if (open < at) continue;
+    const close = body.indexOf('-->', open + 4);
+    if (close === -1) break;
+    const newline = body.indexOf('\n', open + 4);
+    if (newline !== -1 && newline < close) continue;
+    const comment = body.slice(open, close + 3);
+    out += body.slice(at, open);
+    out +=
       (/^<!--\S+ \S+ ([ \t]*)/.exec(comment)?.[1] ?? '') +
-      (/([ \t]*)-->$/.exec(comment)?.[1] ?? ''),
-  );
-  return / {4}/.test(edges);
+      trailingSpace(comment, comment.length - 3);
+    at = close + 3;
+  }
+  return out + body.slice(at);
+}
+
+/** The run of spaces and tabs that ends right before `end`. */
+function trailingSpace(text: string, end: number): string {
+  let start = end;
+  while (start > 0 && (text[start - 1] === ' ' || text[start - 1] === '\t')) start--;
+  return text.slice(start, end);
 }
 
 /**

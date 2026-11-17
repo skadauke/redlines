@@ -5,6 +5,7 @@ import {
   EditError,
   accept,
   addComment,
+  emptiedFormats,
   newestView,
   parse,
   reject,
@@ -72,7 +73,7 @@ const skip = (reason: string): Derived => ({ ok: false, reason });
 
 /** The mark as a person saw it: its kind, author and every character from its first marker to its
  * last, payloads and everything inside it included. */
-export function signatureOf(text: string, mark: MarkRange): string {
+function defaultSignature(text: string, mark: MarkRange): string {
   let from = Infinity;
   let to = 0;
   for (const segment of mark.segments) {
@@ -80,6 +81,61 @@ export function signatureOf(text: string, mark: MarkRange): string {
     to = Math.max(to, segment.close?.to ?? Math.max(segment.content.to, segment.open.to));
   }
   return `${mark.kind}|${mark.entry.by}|${text.slice(from, to)}`;
+}
+
+/** What an intent is derived with: the writers of the tracked form. The default is the format
+ * library called as the first simulations called it; the editor's own are in `real.ts`. */
+export interface Writers {
+  /** Typing, deleting and substituting: the edits of one transaction, tracked. */
+  edits(
+    text: string,
+    edits: TextChange[],
+    ctx: EditContext,
+    how: 'type' | 'delete' | 'sub',
+  ): TextChange[];
+  format(text: string, runs: Range[], op: FormatOp, ctx: EditContext): TextChange[];
+  comment(text: string, range: Range, note: string, ctx: EditContext): TextChange[];
+  reply(text: string, thread: string, body: string, ctx: EditContext): TextChange[];
+  /** The changes of a decision, or null when the mark is not as it was seen (the guard). */
+  decide(
+    text: string,
+    decision: 'accept' | 'reject',
+    mark: MarkRange,
+    seen: string,
+    guard: boolean,
+  ): TextChange[] | null;
+  /** The mark as a person saw it, which a decision carries. */
+  signature(text: string, mark: MarkRange): string;
+}
+
+export const formatWriters: Writers = {
+  // A deletion that empties a format takes its delimiters too, as the editor's tracking filter
+  // makes it before the library sees it (#584): `trackedEdits` writes the edit it is given.
+  edits: (text, edits, ctx, how) =>
+    trackedEdits(text, how === 'delete' ? [...emptiedFormats(text, edits)] : edits, ctx).changes,
+  format: (text, runs, op, ctx) =>
+    (runs.length === 1 && runs[0]
+      ? trackedFormat(text, runs[0], op, ctx)
+      : trackedFormatRanges(text, runs, op, ctx)
+    ).changes,
+  comment: (text, range, note, ctx) => addComment(text, range, note, ctx).changes,
+  reply: (text, thread, body, ctx) => reply(text, thread, body, ctx),
+  decide: (text, decision, mark, seen, guard) => {
+    if (guard && defaultSignature(text, mark) !== seen) return null;
+    return decision === 'accept' ? accept(text, mark.id) : reject(text, mark.id);
+  },
+  signature: defaultSignature,
+};
+
+let writers: Writers = formatWriters;
+
+/** Derives with other writers, until `useWriters(formatWriters)`. */
+export function useWriters(next: Writers): void {
+  writers = next;
+}
+
+export function signatureOf(text: string, mark: MarkRange): string {
+  return writers.signature(text, mark);
 }
 
 interface Seen {
@@ -188,7 +244,9 @@ function deriveUnsafe(text: string, intent: Intent, guard: boolean): Derived {
       if (!place) return skip('anchor-gone');
       const insert =
         place.side === 'after' ? ` ${body.words.join(' ')}` : `${body.words.join(' ')} `;
-      const { changes } = trackedEdits(text, [{ from: place.at, to: place.at, insert }], ctx);
+      const changes = writers.edits(text, [{ from: place.at, to: place.at, insert }], ctx, 'type');
+      // The editor may decline an edit (it asks, or tells the person why): nothing was written.
+      if (changes.length === 0) return skip('declined');
       return { ok: true, changes, summary: summaryOf(intent, { adds: body.words }) };
     }
     case 'delete':
@@ -203,7 +261,8 @@ function deriveUnsafe(text: string, intent: Intent, guard: boolean): Derived {
         ...run,
         insert: i === 0 ? words.join(' ') : '',
       }));
-      const { changes } = trackedEdits(text, edits, ctx);
+      const changes = writers.edits(text, edits, ctx, body.kind);
+      if (changes.length === 0) return skip('declined');
       return { ok: true, changes, summary: summaryOf(intent, { removes, adds: words }) };
     }
     case 'bold': {
@@ -211,12 +270,9 @@ function deriveUnsafe(text: string, intent: Intent, guard: boolean): Derived {
       const runs = runsOf(seen, body.tokens);
       if (runs.length === 0) return skip('nothing-left');
       const op: FormatOp = { kind: 'inline', format: 'bold', on: body.on };
-      const result =
-        runs.length === 1 && runs[0]
-          ? trackedFormat(text, runs[0], op, ctx)
-          : trackedFormatRanges(text, runs, op, ctx);
-      if (result.changes.length === 0) return skip('no-change');
-      return { ok: true, changes: result.changes, summary: summaryOf(intent, {}) };
+      const changes = writers.format(text, runs, op, ctx);
+      if (changes.length === 0) return skip('no-change');
+      return { ok: true, changes, summary: summaryOf(intent, {}) };
     }
     case 'comment': {
       const seen = see(text);
@@ -230,13 +286,13 @@ function deriveUnsafe(text: string, intent: Intent, guard: boolean): Derived {
         if (!place) return skip('anchor-gone');
         range = { from: place.at, to: place.at };
       }
-      const { changes } = addComment(text, range, body.note, ctx);
+      const changes = writers.comment(text, range, body.note, ctx);
       return { ok: true, changes, summary: summaryOf(intent, { note: body.note }) };
     }
     case 'reply': {
       const thread = parse(text).ledger.comments.find((c) => c.text === body.note);
       if (!thread) return skip('thread-gone');
-      const changes = reply(text, thread.id, body.body, ctx);
+      const changes = writers.reply(text, thread.id, body.body, ctx);
       return {
         ok: true,
         changes,
@@ -247,8 +303,8 @@ function deriveUnsafe(text: string, intent: Intent, guard: boolean): Derived {
       const parsed = parse(text);
       const mark = parsed.marks.find((m) => m.id === body.mark);
       if (!mark) return skip('already-decided');
-      if (guard && signatureOf(text, mark) !== body.seen) return skip('guard');
-      const changes = body.decision === 'accept' ? accept(text, mark.id) : reject(text, mark.id);
+      const changes = writers.decide(text, body.decision, mark, body.seen, guard);
+      if (changes === null) return skip('guard');
       const tokens = mapMarkTokens(text, mark);
       return {
         ok: true,

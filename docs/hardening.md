@@ -13,7 +13,7 @@ easy to promise and easy to break by a character: a marker in front of a line tu
 block, a blank line turns a tight list loose, and a pending change that is decided in another order
 reads another way.
 
-## The four properties
+## The five properties
 
 What the format and the editor are built to hold, in one sentence each. They are what the tests try
 to break, not a promise that nothing breaks: where a gap has been found it is listed under *What
@@ -48,6 +48,16 @@ isn't held*, and a gap is a bug.
    `4ca53fc`, where the keys were CodeMirror's own, inside Redlines' tracked layer), plus a
    millisecond for noise, on test documents of 16 KB and 150 KB with 200 changes, scaled to the
    machine by a calibration (`cost.test.ts`, below).
+5. **Every state a session confirms is meant to be a file that reads as its newest view, with what
+   each person wrote in it once, in their name, and the same in every copy.** Several people edit one
+   file at once, through an authority or, in a simulation, with none. The check is the session
+   oracle of `packages/collab-sim`, run over the editor's own writers (`real.ts`): at every confirmed
+   state the markup and the ledger are valid and the body reads as the newest view does; no word is
+   lost, swallowed, duplicated or misattributed; no edit is left untracked and nothing decided or
+   deleted comes back; a decision moves only its own mark; every comment and reply is in the ledger
+   once; every copy has the authority's text at every version. Nothing in it is a promise: the
+   numbers are in [research/collaboration.md](research/collaboration.md#the-sessions-over-the-editors-own-writers),
+   and the gaps under *What isn't held*.
 
 ## What holds them
 
@@ -105,6 +115,20 @@ alignment change, one mark at the end of the header row, is among the operations
 `table-cols-random`, `table-format-random` and `table-rows-random` draw it with other people's
 marks, rows and columns around it: every order of deciding it reads alike, and the pair model,
 `table-cols-random` and `table-rows-random` fail on a decision of it that is refused.
+
+### The session harness: `packages/collab-sim`
+
+Seeded live sessions over the real format library, with an oracle that runs on every confirmed
+state (the fifth property). `real.ts` derives each person's intent with the editor's own writers:
+typing, deleting and replacing go through a headless editor's tracking filter, and formats,
+comments, replies and decisions through `writeFormat`, `writeReview` and `guardDecision`.
+`real.test.ts` holds, in CI, that on the text an intent was made on the editor writes what the
+format library writes (byte for byte, but for ids when it widens an edit), and that sessions with an
+authority and with none settle and converge. A deep run is off CI:
+
+```sh
+REDLINES_REAL=60 REDLINES_REAL_OUT=real.json pnpm exec vitest run packages/collab-sim/src/real.test.ts
+```
 
 ### Differential runs against main
 

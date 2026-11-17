@@ -241,6 +241,28 @@ function remember(text: string, scanned: Scan): void {
   if (recent.length > RECENT) recent.pop();
 }
 
+/**
+ * The scan of `after`, which is `before` with `changes`, made from the scan of `before` when that
+ * is one of the last few (#700): equal to `scan(after)`, and remembered as it is. An edit that
+ * writes a long block or a ledger is read again only where it changed.
+ */
+export function scanAfter(
+  before: string,
+  after: string,
+  changes: readonly { from: number; to: number }[],
+): Scan {
+  const known = knownScan(after);
+  if (known) return known;
+  if (changes.length > 0) {
+    const from = Math.min(...changes.map((change) => change.from));
+    const oldTo = Math.max(...changes.map((change) => change.to));
+    const change = { from, oldTo, newTo: oldTo + after.length - before.length };
+    const made = scanChanged(before, after, change);
+    if (made) return made;
+  }
+  return scan(after);
+}
+
 /** The scan of `text` if it is among the last few, and none otherwise: it never scans. */
 export function knownScan(text: string): Scan | undefined {
   for (const known of recent) if (known.text === text) return known.scanned;
@@ -318,8 +340,9 @@ export function scanChanged(before: string, text: string, change: Change): Scan 
     start,
     stop: (at) => at >= limit && has(points, at - delta),
   });
-  if (made.stoppedAt === undefined || made.trail.unclosed) return undefined;
-  const resume = made.stoppedAt - delta;
+  if (made.trail.unclosed) return undefined;
+  // A scan that reached the end of the text without a line start to stop at has read all the rest.
+  const resume = made.stoppedAt === undefined ? Infinity : made.stoppedAt - delta;
   const shift = <T extends { from: number; to: number }>(item: T): T => ({
     ...item,
     from: item.from + delta,

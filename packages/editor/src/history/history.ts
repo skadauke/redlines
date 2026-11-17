@@ -56,6 +56,7 @@ import {
 } from '@redlines/format';
 import { parsedField } from '../tracked/field.ts';
 import type { AgentStep } from '../api.ts';
+import { plainIntent, recordedAs } from '../tracked/intent.ts';
 import type { StepLabel } from './names.ts';
 
 /** The branch a step is popped from: the steps done, or the steps undone. */
@@ -1411,14 +1412,17 @@ class HistoryState {
         return state.update({
           changes: personal,
           selection: EditorSelection.single(Math.max(0, from), Math.max(0, from, to)),
-          annotations: fromHistory.of({
-            side,
-            rest,
-            selection,
-            owner: null,
-            label: event.label,
-            meta,
-          }),
+          annotations: [
+            fromHistory.of({
+              side,
+              rest,
+              selection,
+              owner: null,
+              label: event.label,
+              meta,
+            }),
+            recordedAs(plainIntent(state, personal)),
+          ],
           filter: false,
           userEvent: 'undo',
           scrollIntoView: true,
@@ -1428,14 +1432,18 @@ class HistoryState {
         changes,
         selection: event.startSelection,
         effects: event.effects,
-        annotations: fromHistory.of({
-          side,
-          rest,
-          selection,
-          owner: event.owner,
-          label: event.label,
-          meta,
-        }),
+        annotations: [
+          fromHistory.of({
+            side,
+            rest,
+            selection,
+            owner: event.owner,
+            label: event.label,
+            meta,
+          }),
+          // Undo and Redo write the text as it was or is to be: plain edits, to a session.
+          recordedAs(plainIntent(state, changes)),
+        ],
         filter: false,
         userEvent: side === DONE ? 'undo' : 'redo',
         scrollIntoView: true,
