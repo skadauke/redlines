@@ -73,6 +73,23 @@ describe('citations as chips', () => {
     expect(editor.view.dom.textContent).toContain('@fig-flow');
   });
 
+  it('leaves links, addresses, math, indented code and changing citations as text', () => {
+    const doc = [
+      'A [see @smith](http://u.org), https://medium.com/@user/p and <https://x.com/@h>.',
+      '',
+      '[@a, see @fig-x] and [@smith<!--ins k3x9-->2020]<!--/k3x9-->.',
+      '',
+      '    indented @code',
+      '',
+      '$$ a @b $$',
+      '',
+      'Cited [see @a and @b, p. 2].',
+      '',
+    ].join('\n');
+    const { doc: text } = editorAt(doc, 0).view.state;
+    expect(citationsOf(text).map((each) => each.text)).toEqual(['a, b p. 2']);
+  });
+
   it('shows the source while the caret is on the citation', () => {
     const at = DOC.indexOf('@lee2019') + 2;
     const editor = editorAt(DOC, at);

@@ -39,17 +39,20 @@ interface Citation {
 
 const kept = new WeakMap<Text, Citation[]>();
 
-/** The text of a bracket as a chip says it: the keys, parted by semicolons, with their locators. */
+/** The text of a bracket as a chip says it: the keys, parted by semicolons, with their locators. A
+ * bracket that holds a key Quarto numbers anywhere is a cross-reference's. */
 function bracketText(bracket: string): { keys: string[]; text: string } | undefined {
   const keys: string[] = [];
   const parts: string[] = [];
   for (const part of bracket.slice(1, -1).split(';')) {
-    const found = KEY.exec(part);
-    KEY.lastIndex = 0;
-    if (!found?.[1]) continue;
-    keys.push(found[1]);
-    const locator = part.slice((found.index ?? 0) + found[0].length).trim();
-    parts.push(locator === '' ? found[1] : `${found[1]} ${locator.replace(/^,\s*/, '')}`);
+    const found = [...part.matchAll(KEY)];
+    const last = found.at(-1);
+    if (!last) continue;
+    const named = found.map((each) => each[1] ?? '');
+    keys.push(...named);
+    const locator = part.slice((last.index ?? 0) + last[0].length).trim();
+    const said = named.join(', ');
+    parts.push(locator === '' ? said : `${said} ${locator.replace(/^,\s*/, '')}`);
   }
   if (keys.length === 0 || keys.some((key) => XREF.test(key))) return undefined;
   return { keys, text: parts.join('; ') };
@@ -61,6 +64,8 @@ function read(doc: Text): Citation[] {
   const found: Citation[] = [];
   const comment = { open: false };
   let code: string | null = null;
+  let math = false;
+  let blankBefore = true;
   let n = 1;
   if (doc.lines > 1 && /^---[ \t]*$/.test(doc.line(1).text)) {
     for (let i = 2; i <= doc.lines; i++) {
@@ -74,6 +79,8 @@ function read(doc: Text): Citation[] {
     const line = doc.line(n);
     const text = blanked(line.text, comment);
     const fence = FENCE.exec(line.text);
+    const wasBlank = blankBefore;
+    blankBefore = line.text.trim() === '';
     if (code !== null) {
       if (fence?.[1] && fence[1][0] === code[0] && fence[1].length >= code.length) code = null;
       continue;
@@ -82,23 +89,45 @@ function read(doc: Text): Citation[] {
       code = fence[1];
       continue;
     }
-    if (!text.includes('@')) continue;
-    // Brackets first; what is left of the line holds the narrative citations.
-    let rest = text;
-    for (const bracket of text.matchAll(BRACKET)) {
-      const said = bracketText(bracket[0]);
-      if (!said) continue;
-      const from = line.from + bracket.index;
-      found.push({ from, to: from + bracket[0].length, ...said });
-      rest =
-        rest.slice(0, bracket.index) +
-        ' '.repeat(bracket[0].length) +
-        rest.slice(bracket.index + bracket[0].length);
+    // Display math, and a code block indented by four spaces after a blank line, are no text.
+    if (/^\s*\$\$/.test(text)) {
+      const closes = /\$\$\s*(?:\{[^}]*\})?\s*$/.test(text.replace(/^\s*\$\$/, ''));
+      if (!closes) math = !math;
+      continue;
     }
-    for (const key of rest.matchAll(NARRATIVE)) {
-      if (XREF.test(key[1] ?? '')) continue;
-      const from = line.from + key.index;
-      found.push({ from, to: from + key[0].length, keys: [key[1] ?? ''], text: key[1] ?? '' });
+    if (math) continue;
+    if (wasBlank && /^(?: {4}|\t)/.test(line.text)) continue;
+    if (!text.includes('@')) continue;
+    const whole = text.replace(/\$[^$\n]*\$/g, (span) => ' '.repeat(span.length));
+    // A text that differs from the line's own holds a marker or code there: no chip hides one.
+    const plain = (from: number, to: number) => line.text.slice(from, to) === text.slice(from, to);
+    const spans: { from: number; to: number }[] = [];
+    for (const bracket of whole.matchAll(BRACKET)) {
+      const end = bracket.index + bracket[0].length;
+      spans.push({ from: bracket.index, to: end });
+      // A bracket that a `(`, `{` or `[` follows is a link or a span.
+      if (/^[({[]/.test(whole.slice(end, end + 1)) || !plain(bracket.index, end)) continue;
+      const said = bracketText(bracket[0]);
+      if (said) found.push({ from: line.from + bracket.index, to: line.from + end, ...said });
+    }
+    for (const key of whole.matchAll(NARRATIVE)) {
+      const from = key.index;
+      const to = from + key[0].length;
+      if (XREF.test(key[1] ?? '') || !plain(from, to)) continue;
+      if (spans.some((span) => from >= span.from && to <= span.to)) continue;
+      // Not in an address or an autolink.
+      const word =
+        whole
+          .slice(Math.max(0, from - 120), from)
+          .split(/\s/)
+          .at(-1) ?? '';
+      if (/[/<]$/.test(word) || /:\/\/|\]\(/.test(word)) continue;
+      found.push({
+        from: line.from + from,
+        to: line.from + to,
+        keys: [key[1] ?? ''],
+        text: key[1] ?? '',
+      });
     }
   }
   found.sort((a, b) => a.from - b.from);
