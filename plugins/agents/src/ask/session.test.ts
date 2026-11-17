@@ -745,6 +745,18 @@ describe('the model an Ask runs (#507)', () => {
     expect(lastRequest(claude).model).toBeUndefined();
   });
 
+  it('follows the agent a follow-up names while it is typed, and back (#837)', async () => {
+    const { session } = setup({ claudeModels: MODELS });
+    await vi.waitFor(() => expect(session.state.choice?.agent).toEqual(CLAUDE));
+    session.setModel('opus');
+    session.draft('@codex what about it?');
+    expect(session.state.choice).toEqual({ agent: CODEX, models: [], model: undefined });
+    session.draft('@claude what about it?');
+    expect(session.state.choice).toEqual({ agent: CLAUDE, models: MODELS, model: 'opus' });
+    session.draft('');
+    expect(session.state.choice?.agent).toEqual(CLAUDE);
+  });
+
   it('names no model for an agent that lists none', async () => {
     const { session, claude } = setup({ chosenModel: 'opus' });
     await vi.waitFor(() => expect(session.state.choice).not.toBeNull());

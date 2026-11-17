@@ -421,10 +421,15 @@ function fromAnswer(message: Record<string, unknown>, state: AcpState): AgentEve
       const sessionId = result['sessionId'];
       if (error !== undefined || typeof sessionId !== 'string') {
         const why = errorMessage(error);
+        // More than one agent at the Gateway, and none named: say where to name one (#401).
+        const hint =
+          why && /agent-prefixed session key|select an agent explicitly/i.test(why)
+            ? ' Name the agent in Preferences › Agents › OpenClaw.'
+            : '';
         return {
           type: 'error',
           message: why
-            ? `${name} couldn’t open a session: ${why}`
+            ? `${name} couldn’t open a session: ${why}${hint}`
             : `${name} couldn’t open a session.`,
         };
       }
