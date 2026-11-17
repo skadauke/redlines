@@ -13,6 +13,9 @@ export interface CalloutMenu {
   current: string;
   /** Called with the type chosen, when it is not the current one. */
   choose(type: string): void;
+  /** A Quarto callout has a title, set after the types: the title it has, and what sets it (null
+   * takes it away). The menu names itself for a callout, not an alert. */
+  title?: { current: string | null; set(title: string | null): void };
 }
 
 /** The menu that is open on a view, so that there is never more than one, and the button it hangs
@@ -61,6 +64,18 @@ export const calloutMenuTheme = EditorView.baseTheme({
     backgroundColor: 'var(--rl-pressed)',
     boxShadow: 'inset 2px 0 0 var(--rl-ink-2)',
   },
+  '.rl-callout-rule': { height: '1px', margin: '4px 6px', backgroundColor: 'var(--rl-rule)' },
+  '.rl-callout-title-field': {
+    boxSizing: 'border-box',
+    width: '220px',
+    margin: '2px',
+    padding: '4px 8px',
+    border: '1px solid var(--rl-rule)',
+    borderRadius: '6px',
+    backgroundColor: 'var(--rl-paper, transparent)',
+    color: 'inherit',
+    font: 'inherit',
+  },
   '.rl-callout-item-check': { width: '18px', flex: 'none', color: 'var(--rl-ink-2)' },
 });
 
@@ -81,7 +96,7 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
   const list = document.createElement('div');
   list.className = 'rl-callout-popover';
   list.setAttribute('role', 'menu');
-  list.setAttribute('aria-label', 'Alert type');
+  list.setAttribute('aria-label', menu.title ? 'Callout type and title' : 'Alert type');
   const items: HTMLButtonElement[] = [];
   for (const { type, name } of menu.types) {
     const item = document.createElement('button');
@@ -97,6 +112,28 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
     item.append(check, name);
     items.push(item);
     list.append(item);
+  }
+  const titleItems: HTMLButtonElement[] = [];
+  if (menu.title) {
+    const rule = document.createElement('div');
+    rule.className = 'rl-callout-rule';
+    rule.setAttribute('role', 'separator');
+    list.append(rule);
+    const add = (name: string, id: string) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'rl-callout-item';
+      item.dataset['action'] = id;
+      item.setAttribute('role', 'menuitem');
+      const gap = document.createElement('span');
+      gap.className = 'rl-callout-item-check';
+      gap.setAttribute('aria-hidden', 'true');
+      item.append(gap, name);
+      titleItems.push(item);
+      list.append(item);
+    };
+    add(menu.title.current === null ? 'Set Title…' : 'Change Title…', 'title');
+    if (menu.title.current !== null) add('Clear Title', 'clear');
   }
   view.dom.append(list);
 
@@ -143,9 +180,47 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
   };
   for (const item of items) item.addEventListener('click', () => pick(item));
 
+  // The title is typed in a field that takes the menu's place; Return sets it (nothing typed takes
+  // the title away), Esc leaves it as it was.
+  const editTitle = () => {
+    const title = menu.title;
+    if (!title) return;
+    const current = !stale();
+    const field = document.createElement('input');
+    field.type = 'text';
+    field.className = 'rl-callout-title-field';
+    field.value = title.current ?? '';
+    field.setAttribute('aria-label', 'Callout title');
+    field.placeholder = 'Title';
+    list.replaceChildren(field);
+    place();
+    field.focus();
+    field.select();
+    field.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        const value = field.value.replace(/[\r\n]+/g, ' ').trim();
+        close(true);
+        if (current && value !== (title.current ?? '')) title.set(value === '' ? null : value);
+      }
+    });
+  };
+  for (const item of titleItems) {
+    item.addEventListener('click', () => {
+      if (item.dataset['action'] === 'title') editTitle();
+      else {
+        const current = !stale();
+        close(true);
+        if (current) menu.title?.set(null);
+      }
+    });
+  }
+
   const move = (by: number) => {
-    const at = items.indexOf(document.activeElement as HTMLButtonElement);
-    const next = items[(at + by + items.length) % items.length];
+    const all = [...items, ...titleItems];
+    const at = all.indexOf(document.activeElement as HTMLButtonElement);
+    const next = all[(at + by + all.length) % all.length];
     next?.focus();
   };
   list.addEventListener('keydown', (event) => {

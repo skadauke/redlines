@@ -293,6 +293,7 @@ applies its inverse:
 | `-check=X`                 | The same, when the box was written `[X]`                                                      |
 | `was=TYPE`                 | Block type changed; `TYPE` is the old type                                                    |
 | `was=TYPE=SYNTAX`          | The same, when the old syntax was written otherwise than the serializer writes it (`3. `, `* `) |
+| `was=fence=ATTRIBUTES`     | Quarto callout's type or title changed in a `.qmd`; `ATTRIBUTES` is the old text of the opening fence's attributes, a value as above (§3.3, "Quarto callouts") |
 | `was=indent=N`             | List item indented or outdented; `N` is the number of spaces that were in front of its bullet |
 | `was=indent=N was=ol=SYNTAX` | A numbered item indented to be the first of a new sublist, which is written `1.`; `SYNTAX` is the number it had (`3.\x20`). Rejecting moves it back and writes that number |
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row, a value as above. A point at the end of the header row's last cell (§3.7); other tools write a range around the table |
@@ -1011,6 +1012,36 @@ the brackets is the new type.
   is written plainly.
 - A change of the type changes no words (the readings that decisions are held to leave the type
   out), so every order of decisions reads alike.
+
+**Quarto callouts.** In a `.qmd` or `.Rmd` file (§9.1), a div whose opening fence has the class
+`callout-note`, `-tip`, `-important`, `-warning` or `-caution` is a callout, drawn in the alert's
+box, and its type, and its title (`title="…"`), change as a block format change too. Pandoc takes a
+fence only when nothing else is on its line (§3.1, rule 9), so the mark stands outside the fences:
+the opener alone on the line before the opening fence, with a blank line after it, and the closer
+alone on the blank line after the closing fence. The payload is `was=fence=ATTRIBUTES`, the
+opening fence's old attribute text as a value (`{.callout-note}`, with a space written `\x20`),
+and the fence has the new attributes.
+
+```markdown
+<!--fmt q2hw was=fence={.callout-note}-->
+
+::: {.callout-warning title="Mind the gap"}
+Report every ward the same way.
+:::
+<!--/q2hw-->
+```
+
+- Rejecting writes the old attribute text back and takes the markers away; accepting takes the
+  markers away. The type is one of the five, `title` is set, changed or taken away (a quote or a
+  backslash in it is escaped, a line break is a blank), and everything else on the fence, an id,
+  another class, `collapse="true"`, stays as it was written. A bare class (`::: callout-note`) gets
+  braces where a title is added. One mark holds a change of the type and of the title together,
+  and the author's own change is changed in place, as an alert's is.
+- The callout stands between blank lines (or at the start of the body, or under a heading, a
+  thematic break or a closing fence), so that the opener and the closer are blocks of their own.
+  The attribute text is syntax, as an alert's type is: a change of it changes no words.
+- A title that comes from the first heading of the body is text, not an attribute: setting a title
+  writes `title="…"`, which Quarto takes before the heading.
 
 ## 3. Where markers go
 

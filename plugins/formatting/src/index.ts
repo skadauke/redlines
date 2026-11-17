@@ -15,6 +15,7 @@ import {
   boxChange,
   calloutMenuEffect,
   calloutName,
+  QUARTO_CALLOUTS,
   calloutOf,
   type CalloutMenuRequest,
   checkBoxEffect,
@@ -1163,10 +1164,27 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
    * button, and choosing a type is a block format change of the alert, tracked or plain.
    */
   function listenForCalloutMenu(): () => void {
-    const ask = ({ pos, type, anchor }: CalloutMenuRequest) => {
+    const ask = ({ pos, type, anchor, quarto }: CalloutMenuRequest) => {
       const { doc } = view.state;
       // The place is the alert's, if it still is: the text may have changed since the press.
       if (!Number.isInteger(pos) || pos < 0 || pos > doc.length) return;
+      if (quarto) {
+        // A Quarto callout: its five types, and its title. The place is still its opening fence.
+        if (!/^:{3,}[ \t]*(?:\{|callout-)/.test(doc.lineAt(pos).text)) return;
+        const here = { from: pos, to: pos };
+        openCalloutMenu(view, {
+          anchor,
+          types: QUARTO_CALLOUTS.map((each) => ({ type: each, name: calloutName(each) })),
+          current: type,
+          choose: (to) => void format(here, { kind: 'callout', type: to }, 'format.callout'),
+          title: {
+            current: quarto.title,
+            set: (title) =>
+              void format(here, { kind: 'callout-title', title }, 'format.callout-title'),
+          },
+        });
+        return;
+      }
       if (!/^>[ \t]?\[![A-Za-z]/.test(doc.lineAt(pos).text)) return;
       // GitHub's types, and any other that a file has already: it is the file's to offer.
       const others: string[] = [];
