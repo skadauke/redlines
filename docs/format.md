@@ -3793,8 +3793,8 @@ A ledger whose `version` is not `1` is read with a warning, and the next write p
 ### 5.3 People
 
 - `people` maps a handle (§2.4) to a person. Fields: `name` (required; what Word shows), `email`,
-  `org`, `accounts` (stable ids such as `github:ada-l` or Microsoft 365 ids from Word, used to
-  match the same person across documents and on Word import), `aliases` (other names seen on
+  `org`, `accounts` (stable ids such as `github:ada-l`, used to
+  match the same person across documents; Word's account ids are never written by the import), `aliases` (other names seen on
   import), `agent: true` and `for: HANDLE` for an agent acting for a person, `members` for a team
   that can be mentioned, and `deleted: true` for someone who left; their handle stays.
 - A handle is derived from the email's local part, or else from the name, with `-2`, `-3` appended

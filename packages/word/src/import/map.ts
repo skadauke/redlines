@@ -270,6 +270,10 @@ class Mapper {
     body = this.unanchored(body);
     body = body.replace(/\s+$/, '') + '\n';
     this.prune(body);
+    this.restoreNotes(body);
+    if (this.ctx.people.unkept() > 0) {
+      this.ctx.note('people', "Word's account ids for the people in this file were not kept.");
+    }
     const ledger = this.ctx.ledger((comment) => this.commentText(comment));
     body = this.withLedger(body, ledger);
     return { markdown: body, report: this.ctx.report(), media: this.ctx.media };
@@ -291,6 +295,57 @@ class Mapper {
     for (const [id, entry] of Object.entries(this.ctx.marks)) {
       if (entry.move && !this.ctx.marks[entry.move]) delete entry.move;
       void id;
+    }
+  }
+
+  /**
+   * Word's revisions have no place for a change's note, so the source part's ledger keeps it
+   * (#1081). A change that comes back with the author and time of a source change that had a note
+   * gets it again, the n-th with the n-th, when the file and the source hold the same number of
+   * changes by that author at that time. When they don't, nothing is guessed and the report says
+   * how many notes were not restored.
+   */
+  private restoreNotes(body: string): void {
+    const source = this.options.source;
+    if (!source) return;
+    const key = (m: { entry: { by: string; at: string } }) => `${m.entry.by} ${m.entry.at}`;
+    const inOrder = (text: string, entries?: Record<string, { by: string; at: string }>) =>
+      parse(text)
+        .marks.map((m) => ({
+          id: m.id,
+          entry: { ...m.entry, ...entries?.[m.id] },
+          from: m.segments[0]?.open.from ?? 0,
+        }))
+        .toSorted((a, b) => a.from - b.from);
+    const before = new Map<string, ReturnType<typeof inOrder>>();
+    for (const mark of inOrder(source.markdown)) {
+      if (mark.entry.at === '' || mark.entry.by === 'unknown') continue;
+      before.set(key(mark), [...(before.get(key(mark)) ?? []), mark]);
+    }
+    const now = new Map<string, ReturnType<typeof inOrder>>();
+    for (const mark of inOrder(body, this.ctx.marks))
+      now.set(key(mark), [...(now.get(key(mark)) ?? []), mark]);
+    let lost = 0;
+    for (const [k, was] of before) {
+      const noted = was.filter((m) => m.entry.note !== undefined);
+      if (noted.length === 0) continue;
+      const found = now.get(k) ?? [];
+      if (found.length !== was.length) {
+        lost += noted.length;
+        continue;
+      }
+      was.forEach((m, i) => {
+        const entry = this.ctx.marks[found[i]?.id ?? ''];
+        if (entry && m.entry.note !== undefined) entry.note = m.entry.note;
+      });
+    }
+    if (lost > 0) {
+      this.ctx.note(
+        'note',
+        lost === 1
+          ? 'A change note could not be matched to its change, and was not kept.'
+          : `${lost} change notes could not be matched to their changes, and were not kept.`,
+      );
     }
   }
 
@@ -591,9 +646,40 @@ class Mapper {
       `| ${pad(cells)
         .map((c) => (c === '' ? ' ' : c))
         .join(' | ')} |`;
-    const lines = [line(header), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`];
+    const aligns = this.columnAligns(table, width);
+    const lines = [line(header), `| ${aligns.join(' | ')} |`];
     for (const row of rows.slice(1)) lines.push(line(row));
     return lines.join('\n');
+  }
+
+  /**
+   * The delimiter row's cells: a column's alignment is Word's cell justification where every cell
+   * of the column agrees (#1080). Where they differ, or Word's justification has no Markdown form
+   * (`both`), the column is left plain and the loss is reported.
+   */
+  private columnAligns(table: Table, width: number): string[] {
+    const seen: Set<string>[] = Array.from({ length: width }, () => new Set<string>());
+    for (const row of table.rows) {
+      let col = 0;
+      for (const cell of row.cells) {
+        const first = cell.blocks.find((block) => block.type === 'paragraph');
+        const align = first?.type === 'paragraph' ? (first.align ?? 'left') : 'left';
+        if (cell.vMerge !== 'continue') seen[col]?.add(align === 'start' ? 'left' : align);
+        col += Math.max(1, cell.span);
+      }
+    }
+    let lost = false;
+    const out = seen.map((set) => {
+      const values = [...set];
+      if (values.length === 1 && values[0] === 'right') return '---:';
+      if (values.length === 1 && values[0] === 'center') return ':---:';
+      if (values.some((v) => v !== 'left')) lost = true;
+      return '---';
+    });
+    if (lost) {
+      this.ctx.note('formatting', 'Formatting with no Markdown form was dropped: alignment.');
+    }
+    return out;
   }
 
   // ---- the restore of untouched blocks
