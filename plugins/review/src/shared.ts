@@ -2,7 +2,15 @@
 // write to the ledger, and how a refused action shows.
 
 import type { EditorView, Rect } from '@codemirror/view';
-import { calloutName, type Author, type Editor } from '@redlines/editor';
+import {
+  calloutName,
+  editSourceFacet,
+  recordedAs,
+  type Author,
+  type Editor,
+  type ReviewRequest,
+  writeReview,
+} from '@redlines/editor';
 import {
   type BlockType,
   EditError,
@@ -361,6 +369,32 @@ export function editContext(author: Author): EditContext {
  */
 export function applyEdit(view: EditorView, changes: TextChange[], userEvent: string): void {
   if (changes.length) view.dispatch({ changes, userEvent });
+}
+
+/**
+ * A review action by `author`, now: a comment, a highlight, a reply, a resolve or a reopen. Written
+ * by the format and applied as one step, with what was asked recorded beside it. Returns the id of
+ * the comment or highlight made.
+ *
+ * @throws EditError when the format refuses it.
+ */
+export function applyReview(
+  view: EditorView,
+  author: Author,
+  request: ReviewRequest,
+  userEvent: string,
+): string | undefined {
+  const { author: person, time } = editContext(author);
+  const { random } = view.state.facet(editSourceFacet);
+  const made = writeReview(view.state.doc.toString(), request, {
+    author: person,
+    time,
+    ...(random ? { random } : {}),
+  });
+  if (made.changes.length) {
+    view.dispatch({ changes: made.changes, userEvent, annotations: [recordedAs(made.intent)] });
+  }
+  return made.id;
 }
 
 /** How long the message of a refused action shows. */

@@ -15,10 +15,6 @@ import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { acceptAndStop, changesToAccept, trackingBack } from './accept-stop.ts';
 import {
-  accept as acceptChange,
-  acceptMarks,
-  reject as rejectChange,
-  rejectMarks,
   recordTracking as recordTrackingInFile,
   setView as viewInFile,
   type TextChange,
@@ -136,7 +132,10 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
+import { recordedAs } from './tracked/intent.ts';
+import { writeReview } from './tracked/review-intent.ts';
 import {
+  editSourceFacet,
   editingKeymap,
   refusedEditEffect,
   setTrackingEffect,
@@ -258,6 +257,13 @@ export {
 } from './tracked/typing.ts';
 export { editSourceFacet } from './tracked/typing.ts';
 export { intentAnnotation, intentOf, newIntentId, recordedAs } from './tracked/intent.ts';
+export { deriveReview, markSignature, writeReview } from './tracked/review-intent.ts';
+export type {
+  DerivedReview,
+  ReviewIntent,
+  ReviewOp,
+  ReviewRequest,
+} from './tracked/review-intent.ts';
 export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
 export { deriveTable, writeTable } from './table/intent.ts';
 export type { TableIntent, TableRequest, TableWriter, WrittenTable } from './table/intent.ts';
@@ -566,12 +572,32 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     options.onUiState?.(ui);
   }
   /** Applies a decision as one step to undo, apart from the typing around it. */
-  const decide = (changes: TextChange[], userEvent: string) => {
-    if (!changes.length) return;
+  const decide = (decision: 'accept' | 'reject', id: string | readonly string[]) => {
+    const who = author;
+    const { random } = view.state.facet(editSourceFacet);
+    const made = writeReview(
+      view.state.doc.toString(),
+      {
+        op: 'decide',
+        decision,
+        ids: typeof id === 'string' ? [id] : id,
+        ...(typeof id === 'string' ? {} : { many: true as const }),
+      },
+      {
+        author: who,
+        time: `${new Date().toISOString().slice(0, 16)}Z`,
+        ...(random ? { random } : {}),
+      },
+    );
+    if (!made.changes.length) return;
     view.dispatch({
-      changes,
-      annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
-      userEvent,
+      changes: made.changes,
+      annotations: [
+        trackedEditAnnotation.of(true),
+        isolateHistory.of('full'),
+        recordedAs(made.intent),
+      ],
+      userEvent: decision,
     });
   };
 
@@ -750,8 +776,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       tellNewPeople();
     },
     accept: (id) => {
-      const text = view.state.doc.toString();
-      decide(typeof id === 'string' ? acceptChange(text, id) : acceptMarks(text, id), 'accept');
+      decide('accept', id);
     },
     acceptAllAndStopTracking: () => {
       const tr = acceptAndStop(view.state);
@@ -761,8 +786,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       return true;
     },
     reject: (id) => {
-      const text = view.state.doc.toString();
-      decide(typeof id === 'string' ? rejectChange(text, id) : rejectMarks(text, id), 'reject');
+      decide('reject', id);
     },
     addExtension: (extension) => {
       const entry = { extension };
