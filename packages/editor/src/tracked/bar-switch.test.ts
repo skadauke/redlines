@@ -129,6 +129,70 @@ describe('the click on a change bar', () => {
     expect(scrollDOM.scrollTop).toBe(7);
   });
 
+  describe('a line that moves after the switch (#415)', () => {
+    /** The layout, with `moved` px added to every line's top once the test says CodeMirror re-estimated. */
+    function late() {
+      const state = { moved: 0 };
+      const geometry: BarGeometry = {
+        ...layout,
+        lineTop: (view, pos) => layout.lineTop(view, pos) + state.moved,
+      };
+      return { state, geometry };
+    }
+    const frames = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    it('puts the line back when the lines above it are estimated again a moment later', async () => {
+      const editor = load({ view: 'simple' });
+      const { scrollDOM } = editor.view;
+      const { state, geometry } = late();
+      const line = editor.view.state.doc.line(2).from;
+      const before = geometry.lineTop(editor.view, line);
+      switchLookAt(editor.view, line, geometry);
+      await frames(50);
+      expect(geometry.lineTop(editor.view, line)).toBeCloseTo(before, 0);
+      // The correction that came after the two passes: the line is 300 px lower.
+      state.moved = 300;
+      await frames(100);
+      expect(geometry.lineTop(editor.view, line)).toBeCloseTo(before, 0);
+      expect(scrollDOM.scrollTop).toBe(10 + 300);
+    });
+
+    it.each(['touchstart', 'pointerdown', 'keydown'])('lets go at a %s', async (type) => {
+      const editor = load({ view: 'simple' });
+      const { scrollDOM } = editor.view;
+      const { state, geometry } = late();
+      const line = editor.view.state.doc.line(2).from;
+      switchLookAt(editor.view, line, geometry);
+      await frames(50);
+      scrollDOM.dispatchEvent(new Event(type, { bubbles: true }));
+      const there = scrollDOM.scrollTop;
+      state.moved = 300;
+      await frames(100);
+      expect(scrollDOM.scrollTop).toBe(there);
+    });
+
+    it('lets go when the person scrolls, and after its time', async () => {
+      const editor = load({ view: 'simple' });
+      const { scrollDOM } = editor.view;
+      const { state, geometry } = late();
+      const line = editor.view.state.doc.line(2).from;
+      switchLookAt(editor.view, line, geometry);
+      await frames(50);
+      scrollDOM.dispatchEvent(new Event('wheel', { bubbles: true }));
+      const there = scrollDOM.scrollTop;
+      state.moved = 300;
+      await frames(100);
+      expect(scrollDOM.scrollTop).toBe(there);
+      // And it does not keep holding for good.
+      switchLookAt(editor.view, line, geometry);
+      await frames(900);
+      const settled = scrollDOM.scrollTop;
+      state.moved = 500;
+      await frames(100);
+      expect(scrollDOM.scrollTop).toBe(settled);
+    });
+  });
+
   describe('what a switch with no pointer keeps in place (#330)', () => {
     const rect = (top: number, bottom: number) => ({
       top,
