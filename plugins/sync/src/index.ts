@@ -13,10 +13,17 @@ import {
   anchorFormat,
   anchorIntent,
   anchorMove,
+  anchorPaste,
+  anchorReview,
+  anchorTable,
   intentOf,
   rederiveFormat,
   rederiveIntent,
   rederiveMove,
+  rederivePaste,
+  rederiveReview,
+  rederiveSteps,
+  rederiveTable,
   remoteStep,
 } from '@redlines/editor';
 import type { Editor, Intent, Rederived } from '@redlines/editor';
@@ -305,7 +312,15 @@ function rederive(
           ? rederiveFormat(state, anchorFormat(origin, intent))
           : intent?.kind === 'move'
             ? rederiveMove(state, anchorMove(origin, intent))
-            : null;
+            : intent?.kind === 'table'
+              ? rederiveTable(state, anchorTable(origin, intent))
+              : intent?.kind === 'widened-paste'
+                ? rederivePaste(state, anchorPaste(origin, intent))
+                : intent?.kind === 'steps'
+                  ? rederiveSteps(state, origin, intent)
+                  : intent?.kind === 'review'
+                    ? rederiveReview(state, anchorReview(origin, intent))
+                    : null;
     const take = (placed: Rederived) => {
       if (placed.ok) {
         changes = placed.changes;
