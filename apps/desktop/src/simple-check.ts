@@ -1,6 +1,7 @@
 // Debug only: checks Redlines' simple look in WebKit, where happy-dom can't: the click on a change
-// bar through real layout (the target found by `posAtCoords` and the layer's bars, the line kept
-// where it was, the hand and the wider bar), and the drawing as the page has it. Serve the page with
+// bar through real layout (the target found by `posAtCoords` and the layer's bars: it opens the
+// card of the change there and leaves the look, as #716 made it; the line kept where it was, the
+// hand and the wider bar), and the drawing as the page has it. Serve the page with
 // `VITE_SIMPLE_CHECK=1 pnpm dev` (or `pnpm tauri dev`, for WKWebView) and open it in WebKit: it
 // reads nothing in a release build. Each check reports one console line, `SIMPLE-CHECK <name> pass`
 // or `SIMPLE-CHECK <name> FAIL <json>`, then `SIMPLE-CHECK done <passed> passed, <failed> failed`.
@@ -256,7 +257,7 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
     },
   },
   {
-    name: 'click-switches-and-keeps-the-line',
+    name: 'click-opens-the-card-and-keeps-the-line-and-the-look',
     async run(editor) {
       await open(editor, 'simple');
       const target = barTarget(editor);
@@ -264,17 +265,35 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
       const taken = click(editor, target.x, target.y);
       await frames();
       const after = editor.getUiState();
-      if (!taken || after.view !== 'redlines') return { taken, view: after.view };
+      // In Simple, a click on a change's bar opens that change's card, and the look stays (#664).
+      const card = editor.view.dom.querySelector('.rl-card-what')?.textContent ?? null;
+      if (!taken || after.markupView !== 'simple' || !card) {
+        return { taken, view: after.view, markupView: after.markupView, card };
+      }
       // The line that was under the pointer is where it was, to the pixel.
       const moved = target.line.isConnected
         ? target.line.getBoundingClientRect().top - target.top
         : null;
       const next = barTarget(editor);
       const drift = next ? next.top - target.top : null;
-      if (drift === null || Math.abs(drift) > 1) return { moved, drift };
-      click(editor, next!.x, next!.y);
+      return drift === null || Math.abs(drift) > 1 ? { moved, drift } : null;
+    },
+  },
+  {
+    name: 'click-in-redlines-switches-to-simple-and-keeps-the-line',
+    async run(editor) {
+      await open(editor, 'redlines');
+      const target = barTarget(editor);
+      if (!target) return { note: 'no bar drawn' };
+      const taken = click(editor, target.x, target.y);
       await frames();
-      return editor.getUiState().view === 'simple' ? null : { view: editor.getUiState().view };
+      const after = editor.getUiState();
+      if (!taken || after.markupView !== 'simple') {
+        return { taken, view: after.view, markupView: after.markupView };
+      }
+      const next = barTarget(editor);
+      const drift = next ? next.top - target.top : null;
+      return drift === null || Math.abs(drift) > 1 ? { drift } : null;
     },
   },
   {
@@ -329,12 +348,14 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
         click(editor, target.x, target.y);
         if (editor.getUiState().view !== view) problems[view] = editor.getUiState().view;
       }
-      // A double-click switches once.
-      await open(editor, 'simple');
+      // A double-click in Redlines switches once, to Simple, and not back.
+      await open(editor, 'redlines');
       const again = barTarget(editor)!;
       click(editor, again.x, again.y);
       click(editor, again.x, again.y, { detail: 2 });
-      if (editor.getUiState().view !== 'redlines') problems['double'] = editor.getUiState().view;
+      if (editor.getUiState().markupView !== 'simple') {
+        problems['double'] = editor.getUiState().markupView;
+      }
       return Object.keys(problems).length ? problems : null;
     },
   },

@@ -2450,8 +2450,16 @@ it, one per line:
   would leave its end without its start: the operation with Track Changes on is a replacement of the
   table, which takes the comment's blocks into the unit (§3.12). Another column of the table, and the
   operation with Track Changes off, are written as they were. A table keeps at least one column:
-  deleting the last, or rejecting the insertion of the last, is refused ("Delete the table
-  instead."). With Track Changes off the columns go from the original as well, so the last column
+  the operation that deletes the last one is refused ("Delete the table instead."). A decision that
+  leaves a table with no column of its original is not (#477): when every column that is left is a
+  pending insertion, the table reads as inserted whole, with nothing as its original (the original
+  view has no table, and no view throws), and rejecting the last inserted column takes the table
+  away, with the blank line after it; a comment in it stays as a point where the table was. Where the
+  original column is a pending deletion, rejecting the last inserted column is the deletion of the
+  whole table (rule 6) in the mark of that deletion, with the original table as its payload:
+  accepting it gives no table, rejecting it the original, as deciding the column's deletion does, in
+  either order. With several deleted columns or another change pending in the table the decision
+  keeps its refusal ("A table keeps at least one column."), which no order reads alike yet. With Track Changes off the columns go from the original as well, so the last column
   that is not pending can't be taken out ("Accept or reject the column changes in this table
   first.").
 - **Rule 6, deleting the table.** This is what the operation writes; an edit that merely covers the
@@ -2637,13 +2645,15 @@ it, one per line:
   is never written with a pipe or a line break of a row in a change that its author did not type.
   Where the only way to keep a backslash or an underscore apart from a marker beside it would be to
   write the pipe at the edge of a cell again, in a change of its own (a cell with no space between
-  its text and its pipe, next to a marker such as a comment point), rejecting half of it would leave
-  the row a cell too many or too few, and the key is refused: "This key can't be written here with
-  Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending
-  change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the
-  change next to it first, or turn off Track Changes." A cell with a space after its text and a
-  closing pipe after that takes the key. A row with no closing pipe may refuse it, in these words
-  or in those of §3.1 (rules 4 and 5).
+  its text and its pipe, next to a marker such as a comment point), the key is written as a
+  replacement of the table (§3.12): the old table, with its pending marks, is the old text, so every
+  order of decisions reads the row alike. Only where no unit holds the replacement is the key refused,
+  in the words "This key can't be written here with Track Changes on: it would have to rewrite a
+  pipe or a line break of the table next to a pending change, and Markdown would read the row
+  otherwise in some order of decisions. Accept or reject the change next to it first, or turn off
+  Track Changes." A cell with a space after its text and a closing pipe after that takes the key
+  as typed. A row with no closing pipe may refuse it, in these words or in those of §3.1 (rules 4
+  and 5).
 - **A cell a row lacks.** GFM reads a row with fewer cells than the header as having blank cells
   after its last. The file has no text for them, so there is no place in it to type. Typing into one
   writes the pipes it needs first, plain: both versions have them, as in rule 7, so nothing reads

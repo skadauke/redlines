@@ -68,4 +68,13 @@ export const nodeIo: CliIo = {
   },
   now: () => new Date(),
   randomHex: (n) => randomBytes(n).toString('hex'),
+  writeBytes: (path, bytes) => writeFile(path, bytes),
+  async exportDocx(text) {
+    // Loaded here and not in `run.ts`, so the program in the app, which has no Node, never holds it.
+    const { exportDocx, exportReport } = await import('@redlines/word');
+    return {
+      bytes: await exportDocx(text),
+      notes: exportReport(text).entries.map((entry) => entry.message),
+    };
+  },
 };

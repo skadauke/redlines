@@ -103,7 +103,7 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
   }
 }
 
-const PENDING_PIPE =
+export const PENDING_PIPE =
   "This key can't be written here with Track Changes on: it would have to rewrite a pipe or a line break of the table next to a pending change, and Markdown would read the row otherwise in some order of decisions. Accept or reject the change next to it first, or turn off Track Changes.";
 
 /**

@@ -13,7 +13,8 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@redlines/format": "workspace:*"
+    "@redlines/format": "workspace:*",
+    "@redlines/word": "workspace:*"
   },
   "devDependencies": {
     "rolldown": "1.2.14"

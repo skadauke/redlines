@@ -5,9 +5,9 @@
 // they can: a row that keeps its place is not rewritten, and the delimiter row follows the first row
 // in every state.
 
-import { lineEnd } from './blocks.ts';
+import { bodyStart, lineEnd, lineStart, nextLineStart } from './blocks.ts';
 import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
-import type { Range, TextChange } from './types.ts';
+import type { Parsed, Range, TextChange } from './types.ts';
 
 /**
  * A row of the table as it is to be: row `src` of the table as written (the header is 0), with the
@@ -338,4 +338,38 @@ export function joinPoints(changes: readonly TextChange[]): TextChange[] {
   }
   for (const p of points) if (!used.has(p)) result.push(p);
   return result.toSorted((a, b) => a.from - b.from || a.to - b.to);
+}
+
+/** Whether the line that starts at `start` is blank. */
+const blankLine = (text: string, start: number): boolean =>
+  /^[ \t]*$/.test(text.slice(start, lineEnd(text, start)));
+
+/**
+ * What a table's removal takes out as text, with Track Changes off: the table and the blank lines
+ * after it, up to the line of what follows, or when nothing follows, the table and the break before it
+ * (so that the neighbors stay as far apart as they were).
+ */
+export function plainRange(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+): { from: number; to: number } {
+  const stop = parsed.ledgerRange?.from ?? text.length;
+  const first = bodyStart(text);
+  const start = lineStart(text, table.from);
+  // A line of text right above the table (a table can start in a paragraph's next line) is kept apart
+  // from what follows by the blank line after the table, which then stays.
+  const apart = start <= first || blankLine(text, lineStart(text, start - 1));
+  let after = nextLineStart(text, table.to);
+  if (!apart && after < stop) return { from: table.from, to: after };
+  while (after < stop && blankLine(text, after)) after = nextLineStart(text, after);
+  if (after < stop) return { from: table.from, to: after };
+  let above = start;
+  while (above > first) {
+    const line = lineStart(text, above - 1);
+    above = line;
+    if (blankLine(text, line)) continue;
+    return { from: lineEnd(text, line), to: table.to };
+  }
+  return { from: table.from, to: table.to };
 }

@@ -68,15 +68,12 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'journeys') }}
-          UNTIL_SWEEP: true
         shell: bash
         run: |
           run=true
           if [ "$EVENT" = pull_request ]; then
-            # Until Epic #537's final sweep, no Mac jobs on pull requests, label or not: dispatch
-            # the workflow by hand (gh workflow run journeys.yml --ref <branch>).
             run=false
-            [ "$LABELED" = true ] && [ "$UNTIL_SWEEP" != true ] && run=true
+            [ "$LABELED" = true ] && run=true
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
           echo "The journeys run: $run"

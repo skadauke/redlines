@@ -43,6 +43,8 @@ export type {
   TableRow,
   Tracked,
 } from './import/model.ts';
+export { exportReport } from './export/report.ts';
+export type { ExportReport } from './shared/report.ts';
 export { mapDocx, warningsOf } from './import/map.ts';
 export type { ImportOptions, ImportResult, RestoreSource } from './import/map.ts';
 export { importDocx } from './import/import.ts';

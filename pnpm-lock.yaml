@@ -89,6 +89,9 @@ importers:
       '@redlines/toolbar':
         specifier: workspace:*
         version: link:../../plugins/toolbar
+      '@redlines/word':
+        specifier: workspace:*
+        version: link:../../packages/word
       '@tauri-apps/api':
         specifier: ^2.12.4
         version: 2.12.4
@@ -228,6 +231,9 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
+      '@redlines/word':
+        specifier: workspace:*
+        version: link:../word
     devDependencies:
       rolldown:
         specifier: 1.2.14
