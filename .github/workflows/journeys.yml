@@ -36,6 +36,10 @@ on:
       main-tier:
         type: boolean
         default: false
+      # The commit to test (ci.yml's full run tests the open Epic branch); empty is this run's own.
+      ref:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -59,6 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
           persist-credentials: false
 
@@ -86,6 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.ref || github.sha }}
           # A pull request's changed paths come from its merge base with the target branch. (The strings:
           # in an expression 0 is false, and `cond && 0 || 1` would be 1.)
           fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
