@@ -569,6 +569,38 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
   const sibling = newItem(state, item);
   const refuse = (refusal: string): KeyEdit => ({ ...nothing(state), refusal });
   const first = state.doc.lineAt(block.lines.from).number === item.line.number;
+  // Return over a selection that starts the text of a nested first item, under the text of its
+  // item, with Track Changes on: the deletion has gone in first, and the item's own line holds
+  // only its syntax and the struck text, with the rest of its text on the line below, where the
+  // caret stands. The item is then empty in the newest view, which a break right under the text of
+  // the item above would read as an underline: the empty item goes in above it with the blank
+  // line, as for a Return at the start of the first item (#395).
+  if (
+    head <= start &&
+    !first &&
+    state.field(trackingField, false) &&
+    items.length > 1 &&
+    state.doc.lineAt(block.lines.from).number === item.line.number + 1 &&
+    /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(item.line.text.replace(/<!--[^]*?-->/g, '')) &&
+    /<!--del /.test(item.line.text)
+  ) {
+    const above = item.node.prevSibling ? null : lineAbove(state, item.line);
+    if (
+      above &&
+      !BLANK.test(above.text) &&
+      itemDepth(state, above) < items.length &&
+      !/(?:\\| {2,})$/.test(above.text)
+    ) {
+      const joined = `\n${blankOf(item.indent)}\n${item.indent}${item.marker}${item.after}`;
+      return {
+        changes: [{ from: above.to, insert: joined }],
+        selection: EditorSelection.single(head + joined.length),
+        userEvent: 'input.break',
+        caretAt: head,
+        fallback: refuse(NEEDS_BLANK_LINE),
+      };
+    }
+  }
   if (head <= start && first) {
     // An empty item above, the caret staying with the text. A task item keeps its own box: the
     // new item's goes in front of it.
