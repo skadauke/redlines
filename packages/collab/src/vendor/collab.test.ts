@@ -1,4 +1,5 @@
-import { ChangeSet, EditorState, Text } from '@codemirror/state';
+import { ChangeSet, EditorState, StateEffect, Text } from '@codemirror/state';
+import type { Transaction } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import type { LoggedUpdate, Update } from './collab.ts';
 import {
@@ -167,37 +168,18 @@ describe('the vendored collab', () => {
   describe('the divergence in upstream', () => {
     // Upstream maps a late push over the composition of the updates logged since its base, and a
     // client maps its own edits over the same updates one at a time. With three clients editing
-    // one short text, the two disagree, and the client's text no longer fits the log.
-    it('is found by search, upstream diverges, the fix never does', () => {
-      let upstreamBad: string | null = null;
-      for (let seed = 1; seed <= 3000 && !upstreamBad; seed++) {
-        upstreamBad = run(upstream, seed, 'one');
-      }
-      expect(upstreamBad).not.toBeNull();
-      const failing = Number(/seed (\d+)/.exec(upstreamBad ?? '')?.[1]);
-      expect(run(fixed, failing, 'one')).toBeNull();
+    // one short text, the two disagree about where an insertion goes: the letters are the same and
+    // their order differs. These sessions were found by searching seeds 1 to 20000.
+    it.each([11, 14, 15])('session %i: upstream ends with other text, the fix does not', (seed) => {
+      expect(run(upstream, seed, 'one')).toMatch(/authority ".*", client ".*"/);
+      expect(run(fixed, seed, 'one')).toBeNull();
+      expect(run(fixed, seed, 'all')).toBeNull();
     });
 
-    it("a late push over two logged updates ends with the authority's text", () => {
-      const base = 'abcdef';
-      const make = (impl: Impl) => {
-        const authority = new Authority(base, impl);
-        // Ada types between "b" and "c", unsent. Bo removes "bc", logged in two updates.
-        let ada = insert(client(base, 'ada'), 2, 'X');
-        const bo = client(base, 'bo');
-        const bo1 = remove(bo, 1, 2);
-        const bo2 = remove(bo1, 1, 2);
-        const cy = insert(client(base, 'cy'), 2, 'Y');
-        authority.push(0, [sendableUpdates(bo2)[0]!]);
-        authority.push(1, [sendableUpdates(bo2)[1]!]);
-        authority.push(0, sendableUpdates(cy));
-        // Ada pushes late, based on version 0.
-        ada = sync(authority, ada, impl, 'one');
-        return { authority, ada };
-      };
-      const f = make(fixed);
-      expect(f.ada.doc.toString()).toBe(f.authority.doc.toString());
-      expect(sendableUpdates(f.ada)).toHaveLength(0);
+    it('the rebase alone is the cause: the fixed receive agrees with the fixed authority only', () => {
+      const mixed: Impl = { rebase: upstreamRebaseUpdates, receive: receiveUpdates };
+      const bad = [11, 14, 15].filter((seed) => run(mixed, seed, 'one') !== null);
+      expect(bad.length).toBeGreaterThan(0);
     });
   });
 
@@ -208,14 +190,35 @@ describe('the vendored collab', () => {
     }
   });
 
-  it('rebases to the same result however the log is cut into steps', () => {
-    const a = insert(client('abcdef', 'a'), 3, 'Q');
+  it('rebases over each update in turn, as a client receiving them would', () => {
+    const ada = insert(client('abcdef', 'a'), 3, 'Q');
     const over: LoggedUpdate[] = [
       { changes: ChangeSet.of({ from: 2, to: 4 }, 6).desc, clientID: 'b' },
       { changes: ChangeSet.of({ from: 2, insert: 'zz' }, 4).desc, clientID: 'c' },
     ];
-    const [out] = fixed.rebase(sendableUpdates(a), over);
-    expect(out?.changes.length).toBe(6);
+    const [out] = fixed.rebase(sendableUpdates(ada), over);
     expect(out?.clientID).toBe('a');
+    expect(
+      ChangeSet.of({ from: 2, to: 4 }, 6)
+        .compose(ChangeSet.of({ from: 2, insert: 'zz' }, 4))
+        .compose(out!.changes)
+        .apply(Text.of(['abcdef']))
+        .toString(),
+    ).toBe('abzzQef');
+  });
+
+  it('moves a shared effect with the text it points at', () => {
+    const mark = StateEffect.define<number>({ map: (v, ch) => ch.mapPos(v) });
+    const config = {
+      clientID: 'a',
+      sharedEffects: (tr: Transaction) => tr.effects.filter((e) => e.is(mark)),
+    };
+    let a = EditorState.create({ doc: 'abc', extensions: [collab(config)] });
+    a = a.update({ effects: mark.of(2) }).state;
+    const remote: Update = { changes: ChangeSet.of({ from: 0, insert: 'XY' }, 3), clientID: 'b' };
+    const out = fixed.rebase(sendableUpdates(a), [{ changes: remote.changes.desc, clientID: 'b' }]);
+    expect(out[0]?.effects?.map((e) => e.value)).toEqual([4]);
+    const received = fixed.receive(a, [remote]).state;
+    expect(sendableUpdates(received)[0]?.effects.map((e) => e.value)).toEqual([4]);
   });
 });

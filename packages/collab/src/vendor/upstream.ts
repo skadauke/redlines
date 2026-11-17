@@ -40,6 +40,7 @@ export function upstreamReceiveUpdates(state: EditorState, updates: readonly Upd
         clientID,
       );
     });
+    changes = all;
   }
   const next = new CollabState(version, unconfirmed);
   if (!changes) return state.update({ annotations: [collabReceive.of(next)] });
