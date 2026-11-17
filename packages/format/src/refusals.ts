@@ -804,6 +804,24 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/format/src/track.ts', 'SELF_CHECK', 'widen', 'inventory #76'],
   [
     'packages/format/src/track.ts',
+    "This block can't be added as a tracked change he",
+    'widen',
+    'a block start typed into an empty item (#583): written as a replacement of the item; where none holds it, the edit is asked about',
+  ],
+  [
+    'packages/format/src/track.ts',
+    'SPLIT_ALONE',
+    'widen',
+    'a split that would stand alone at the start of a lazy line (#615): written as a replacement of the item',
+  ],
+  [
+    'packages/format/src/track.ts',
+    'SPLIT_IN_INDENT',
+    'widen',
+    "a split inside the change of an item's indent (#605): written as a replacement of the item",
+  ],
+  [
+    'packages/format/src/track.ts',
     "Text can't be typed inside ${name} while it is p",
     'widen',
     'inventory #58',

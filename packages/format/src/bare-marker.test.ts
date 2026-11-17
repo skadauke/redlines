@@ -233,9 +233,14 @@ describe('an agent suggests text after a bare marker', () => {
 });
 
 describe("random bare markers with other people's marks around them", () => {
-  // No block's start (` - a`, ` 1. a`, ` # a`, ` > a`, ` ---`, a table) typed into a bare item: they
-  // need the widening of a replacement (#583). Inline markup after the space is drawn.
+  // A block's start (` - a`, ` 1. a`, ` ---`, a table) typed into a bare item is written as a
+  // replacement of the item (#583). Inline markup after the space is drawn.
   const TYPED = [
+    ' ---',
+    ' - a',
+    ' 1. a',
+    ' - - -',
+    ' | a |\n|---|',
     ' a',
     ' ',
     'a',
