@@ -17,9 +17,14 @@ import { newestView, originalView } from './views.ts';
 
 vi.setConfig({ testTimeout: 60_000 });
 
-/** The text with ordered-list numbers as written (known gap: they are not renumbered). */
+/** The text with ordered-list numbers as written (known gap: they are not renumbered), and with
+ * no blank line of the replacement's closer: it stands alone on the line after a fence that ends
+ * the new text, in its item's indent (format §3.12), and the newest view keeps that line. */
 const numberless = (text: string) =>
-  text.trimEnd().replace(/^(\s*(?:>\s*)*)\d{1,9}([.)])/gm, '$1N$2');
+  text
+    .trimEnd()
+    .replace(/^(\s*(?:>\s*)*)\d{1,9}([.)])/gm, '$1N$2')
+    .replace(/^([ \t>]*(?:`{3,}|~{3,})[^\n]*)\n[ \t]+(?=\n)/gm, '$1');
 
 /** The marks of a file, and those inside the payloads of its substitutions. */
 const marksIn = (text: string) => parse(text).marks.length + payloadMarksOf(parse(text)).length;
