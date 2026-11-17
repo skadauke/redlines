@@ -233,6 +233,15 @@ importers:
         specifier: 1.2.14
         version: 1.2.14
 
+  packages/collab:
+    dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@redlines/format':
+        specifier: workspace:*
+        version: link:../format
+
   packages/collab-sim:
     dependencies:
       '@redlines/format':
