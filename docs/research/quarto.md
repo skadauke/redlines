@@ -177,6 +177,27 @@ What follows for Redlines:
   file; where it is opened first from the shortcode, it knows it. A file opened alone has no main
   file, and the "open" link is only a hint.
 
+### Comments on an include, and `--keep-md` (Q2, not run with Quarto)
+
+- **A comment on an include line** is a block mark: its opener is alone on the line before the
+  shortcode and its closer alone on the line after, each with its line break as syntax (the
+  carrier a block change's marks have, `closerRange`), so every view and every decision reads the
+  file as it was, deleting the thread gives the bytes back, and the shortcode stays alone on its
+  line, which is what Quarto expands. A comment whose end falls on an include line is taken to
+  the line's edge, so a marker never stands on it. In a `.md` file the line is text and a comment is
+  placed as before. The decision matches the rule above ("no mark ever holds an include line"):
+  the marks hold the whole line, never part of it, and the included file's ledger comes after the
+  opener, where the first ledger after a marker is the included file's own.
+- **`--keep-md` and the review copy.** The joined file that `keep-md` leaves is derived output: the
+  expansion of the parts, with one ledger per part and no record of where a part began. Redlines
+  doesn't need it for a review: the review copy of a `.qmd` is its own Word export (decision 5),
+  which reads each part through the include and keeps its marks and comments. Opened in Redlines
+  anyway, a joined file is read like any file with several ledgers (each marker reads the first
+  ledger after it, #915), and a comment on it stays in the joined file and never reaches the
+  parts, so it is a reading copy, not one to review in. This is read from Quarto's documentation and
+  untested: the first run of `quarto-check` with Quarto installed should confirm that `keep-md`
+  holds the ledgers and the markers as the parts had them.
+
 ## Rendering: what each tool draws
 
 - **Quick Look** (#821, merged): the Clean view of the newest text; `.callout-*` as a quiet box with

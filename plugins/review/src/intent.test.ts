@@ -151,8 +151,8 @@ describe('review actions of the plugin', () => {
     const doc = 'Intro.\n\n::: {.callout-tip}\nA tip.\n:::\n\nAfter.\n';
     const opening = doc.indexOf(':::');
     const closing = doc.indexOf(':::\n\nAfter') + 3;
-    // A marker on a ::: line is no marker at all in pandoc: GitHub's dialect takes the range, and
-    // the Quarto dialect refuses it where the format has no placement.
+    // A marker on a ::: line is no marker at all in pandoc: GitHub's dialect puts one there, and
+    // the Quarto dialect keeps every marker off the fences.
     const gfm = mount(doc);
     applyReview(
       gfm.editor.view,
@@ -162,21 +162,10 @@ describe('review actions of the plugin', () => {
     );
     expect(gfm.editor.view.state.doc.toString()).toMatch(/^:::.*<!--/m);
     const qmd = mount(doc, false, 'pandoc');
-    expect(() =>
-      applyReview(
-        qmd.editor.view,
-        ada,
-        { op: 'comment', range: { from: opening, to: closing }, body: 'Check.' },
-        'review.comment',
-      ),
-    ).toThrow(EditError);
-    // A range around the callout puts the markers outside the fences, and the intent keeps the
-    // dialect, so that deriving it again writes the same.
-    const around = { from: 0, to: doc.indexOf('After.') + 6 };
     applyReview(
       qmd.editor.view,
       ada,
-      { op: 'comment', range: around, body: 'Check.' },
+      { op: 'comment', range: { from: opening, to: closing }, body: 'Check.' },
       'review.comment',
     );
     const after = qmd.editor.view.state.doc.toString();
@@ -184,6 +173,7 @@ describe('review actions of the plugin', () => {
       if (line.startsWith(':::')) expect(line).not.toContain('<!--');
     }
     expect(after).toMatch(/<!--cmt \w+-->/);
+    // The intent keeps the dialect, so that deriving it again writes the same.
     const { before, intent } = qmd.seen[0]!;
     expect(intent.dialect).toBe('pandoc');
     const again = deriveReview(before, intent);

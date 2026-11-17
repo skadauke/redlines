@@ -11,6 +11,8 @@ import {
   createEditor,
   deriveFormat,
   deriveReview,
+  deriveMove,
+  deriveWidenedPaste,
   deriveSteps,
   deriveTable,
   editSourceFacet,
@@ -87,6 +89,10 @@ function derived(seen: Seen): string {
       const made = deriveReview(text, intent);
       return made.ok ? applyChanges(text, made.changes) : text;
     }
+    case 'move':
+      return deriveMove(before, intent).apply(before.doc).toString();
+    case 'widened-paste':
+      return applyChanges(text, deriveWidenedPaste(text, intent));
   }
 }
 

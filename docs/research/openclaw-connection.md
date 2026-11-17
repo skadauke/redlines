@@ -559,11 +559,7 @@ failure comes back as an error in the Gateway's words, and `session/cancel` or S
 everything it already does with a reply (the author as the agent, tracked suggestions) is the
 page's.
 
-**What it doesn't do yet.** The agent *works* on the document through the node's tools, and that
-half is the tool bridge, which isn't built: a call from the agent gets "Redlines isn't connected to
-a document for this call yet". Until it is, the prompt is the reply-only one (the thread and the
-document go in the message, `replyOnlyRequest`), so an agent answers and may quote a change but
-makes none. Streaming isn't shown: the answer arrives whole.
+**Editing.** The agent works on the document through the node's tools: see "The tool bridge" below. Streaming isn't shown: the answer arrives whole.
 
 **Checked live** (the stand-in model answers every request with one fixed sentence): a setup code
 used for an operator connection gave an operator token; a second connection with that token sent
@@ -574,3 +570,67 @@ node's `chat.send` was refused. Not seen: a real model, a real tool call from th
 approval wait for the operator, a Gateway on another computer. The fake Gateway of the unit tests
 checks the operator's signature as a Gateway would, the scopes, the filtering of other runs'
 events, a refused send, a failed run and an abort.
+
+## The tool bridge: a Gateway run edits through the node
+
+A run asked through the Gateway can now change the document it was asked from, with the same six
+tools, gate, author and thread as a local agent, and only while its run is live.
+
+**How OpenClaw routes a run's tool call to a node** (read from `openclaw@2026.11.5`, read only).
+The node's descriptors become the agent's tools (`dist/openclaw-plugin-tools-*.mjs`, the loop over
+`listConnectedNodePluginTools()`). Each tool's `execute` calls `node.invoke` with the node id, the
+command, `{server, tool, arguments}` **and the run's `sessionKey`** (same file, the `callGatewayTool
+("node.invoke", ...)` call, `...S ? { sessionKey: S } : {}`). The Gateway copies it into the
+`node.invoke.request` event the node receives (`dist/node-invoke-request-*.mjs`,
+`buildNodeInvokeRequest`: `sessionKey`; `dist/node-registry-private-*.mjs`). So node tools *are*
+session-scoped: no run token in the prompt is needed. Two things seen live: the Gateway reports the
+canonical key (`agent:main:redlines-<hex>`) even when the run was started with the bare
+`redlines-<hex>`, so a call is matched on the part after the agent; and by default OpenClaw defers
+tool schemas behind `tool_search`/`dispatch_action` (`tools.toolSearch`), which the live check turned
+off to let a stand-in model call the tool directly.
+
+**What Redlines does** (`openclaw_tools.rs`).
+- The window opens a relay for the run as for any agent and names its socket in the session's
+  `_meta.tools`. The gate (`acp_gate.rs`) allows that only for a Gateway run and only for one of
+  the window's own relays.
+- The host connects to the relay as the program does and registers it under the run's session. The
+  node's `tools/call` goes to the registered run's relay, so the window's own tools answer it (the
+  gate, the author, the thread, the edit path). Nothing here knows a tool.
+- Stop, cancel and the end of the run end the registration at once, and let go of a call that is
+  waiting. A call with no session, another session, or an ended run is refused as the tool's own
+  error: "This call is not part of a live Redlines run, so it can't change any document...".
+- The prompt (`nodeToolsPrompt`) names the six tools, still carries the thread and the document, and
+  says they work only while the run does. Agents that have the tools this way list `nodeTools`.
+
+**Checked live** (`live_tools` in `openclaw_nodes.rs`, by hand, throwaway Gateway, stand-in model
+that calls `str_replace` once): a run edited the stand-in document through the node and ended with
+the tool's answer; a call with no session and one with another run's session were refused and
+changed nothing; a run with a bare key was found by its thread; a run that was stopped (aborted at
+the Gateway, its registration ended) had its next call refused, and no call reached the window. The
+window there is a stand-in (a document in memory behind a relay's socket); the real tools answering
+a relay are covered by the page's tests.
+
+**Late calls of an aborted run.** The call carries the session key and nothing of the run: the
+node request has `id`, `nodeId`, `command`, `paramsJSON`, `timeoutMs`, `idempotencyKey` (a turn id
+and a tool call id) and `sessionKey` (`buildNodeInvokeRequest`), no run id. The thread's session is
+reused by its next run, so Redlines closes the gap itself: Stop ends the run's tools at once, and
+the thread's next run does not register until the aborted run's final `chat` event has come (the
+run's wait for it ends at `ABORT_GRACE`, 5 s) or `SETTLE_TIMEOUT` (8 s) has passed; calls in
+between are refused (`a_late_call_of_an_aborted_run_never_reaches_the_threads_next_run`).
+
+A run the Gateway never reported on (a dropped connection, or no `aborted` event within the grace)
+leaves its thread waiting for the full `SETTLE_TIMEOUT`; one that was reported on frees it at once.
+Known limits: a call waits on the window for up to 120 s inside the node's read loop; a gate check
+accepts any relay of the window, not only the run's own (a relay takes one connection, so it is a
+race); an edit in flight when Stop is pressed still lands; one run is one prompt, so a second
+prompt in a session has no tools.
+
+**Tool search on** (OpenClaw's default, `tools.toolSearch` unset): the six tools are deferred
+behind `tool_search`, `tool_describe` and `dispatch_action` as `mcp:redlines:<tool>`. The live
+check was repeated that way, the stand-in model calling `dispatch_action` with
+`mcp:redlines:str_replace`: the edit landed, and the stopped run and the bare key behaved as before.
+
+**Edits** go through the page's `answerMcp` of the run, so a Gateway run's edit is written by
+`applyAgentEdit` as a local agent's is (the push path of #954); `runs.test.ts` shows it.
+
+**Not checked:** a real model, the whole path in the app's window, a Gateway on another computer.
