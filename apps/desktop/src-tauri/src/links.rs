@@ -69,6 +69,24 @@ pub fn open_link(url: String) -> Result<(), String> {
 mod tests {
     use super::{address, command_for, opener};
 
+    /// The list of addresses that the editor's `openableAddress` is tested with as well
+    /// (`packages/editor/src/preview/link-addresses.json`): the two stay one list.
+    #[test]
+    fn agrees_with_the_editors_list_of_addresses() {
+        let list: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../packages/editor/src/preview/link-addresses.json"
+        ))
+        .expect("the list is JSON");
+        for url in list["opens"].as_array().expect("opens") {
+            let url = url.as_str().expect("a string");
+            assert_eq!(address(url), Some(url), "{url:?}");
+        }
+        for url in list["refuses"].as_array().expect("refuses") {
+            let url = url.as_str().expect("a string");
+            assert_eq!(address(url), None, "{url:?}");
+        }
+    }
+
     #[test]
     fn opens_web_and_mail_addresses_whatever_the_case_of_the_scheme() {
         for url in [

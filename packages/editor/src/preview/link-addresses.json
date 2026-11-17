@@ -1,0 +1,42 @@
+{
+  "note": "The addresses a link may open (design 5.2), read by both lists: openableAddress in links.test.ts and address in apps/desktop/src-tauri/src/links.rs. Each of opens is returned as it is; each of refuses is null.",
+  "opens": [
+    "https://example.org/a?b=1&c=2",
+    "http://example.org",
+    "HTTPS://Example.org",
+    "Http://example.org/x#y",
+    "mailto:ada@example.org",
+    "MAILTO:ada@example.org?subject=Hi%20there"
+  ],
+  "refuses": [
+    "",
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    " javascript:alert(1)",
+    "java\tscript:alert(1)",
+    "java\nscript:alert(1)",
+    "vbscript:x",
+    "data:text/html,<b>x</b>",
+    "file:///etc/passwd",
+    "tel:+15551234",
+    "ftp://example.org",
+    "x-apple.systempreferences:",
+    "//example.org/x",
+    "plan.md#intro",
+    "../plan.md",
+    "#intro",
+    "/etc/passwd",
+    "example.org",
+    "-a Calculator",
+    "https://",
+    "https:",
+    "mailto:",
+    "https://exa mple.org",
+    "https://example.org/\nopen",
+    "https://example.org/\u0000",
+    "https://example.org/\u0007",
+    "https://example.org/\u0085x",
+    "https://example.org/ x",
+    "https:/example.org"
+  ]
+}
