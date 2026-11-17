@@ -231,9 +231,14 @@ function stepInfo(tr: Transaction): StepInfo {
   const intent = made?.kind === 'steps' ? made.steps[0] : made;
   if (!intent) return { person: null, marks: [] };
   const person = intent.author?.handle ?? null;
-  // A review action (a comment, a decision) has no `tracking`: it counts as untracked, and Undo
-  // takes it back plainly.
-  if (!person || !('tracking' in intent) || !intent.tracking) return { person, marks: [] };
+  // A move and a widened paste are written tracked only: untracked, they record a typing intent. A
+  // review action (a comment, a decision) has no `tracking`: it counts as untracked, and Undo takes
+  // it back plainly.
+  const tracked =
+    'tracking' in intent
+      ? intent.tracking
+      : intent.kind === 'move' || intent.kind === 'widened-paste';
+  if (!person || !tracked) return { person, marks: [] };
   const before = tr.startState.field(parsedField, false);
   const after = tr.state.field(parsedField, false);
   if (!before || !after) return { person, marks: [] };
