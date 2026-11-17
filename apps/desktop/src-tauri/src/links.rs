@@ -9,7 +9,8 @@ use std::process::Command;
 /// after its scheme and no white space or control character in it. Anything else is None: another
 /// scheme (`javascript:`, `file:`, `data:`), no scheme, a link to another document.
 fn address(url: &str) -> Option<&str> {
-    let url = url.trim();
+    // U+FEFF is white space to the page (JavaScript's `\s`), so it is here too.
+    let url = url.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     let rest = ["https://", "http://", "mailto:"]
         .into_iter()
         .find_map(|scheme| {
@@ -17,7 +18,7 @@ fn address(url: &str) -> Option<&str> {
                 .filter(|head| head.eq_ignore_ascii_case(scheme))
                 .map(|_| &url[scheme.len()..])
         })?;
-    let plain = |c: char| !c.is_whitespace() && !c.is_control();
+    let plain = |c: char| !c.is_whitespace() && !c.is_control() && c != '\u{feff}';
     (!rest.is_empty() && rest.chars().all(plain)).then_some(url)
 }
 
@@ -68,6 +69,24 @@ pub fn open_link(url: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{address, command_for, opener};
+
+    /// The list of addresses that the editor's `openableAddress` is tested with as well
+    /// (`packages/editor/src/preview/link-addresses.json`): the two stay one list.
+    #[test]
+    fn agrees_with_the_editors_list_of_addresses() {
+        let list: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../packages/editor/src/preview/link-addresses.json"
+        ))
+        .expect("the list is JSON");
+        for url in list["opens"].as_array().expect("opens") {
+            let url = url.as_str().expect("a string");
+            assert_eq!(address(url), Some(url), "{url:?}");
+        }
+        for url in list["refuses"].as_array().expect("refuses") {
+            let url = url.as_str().expect("a string");
+            assert_eq!(address(url), None, "{url:?}");
+        }
+    }
 
     #[test]
     fn opens_web_and_mail_addresses_whatever_the_case_of_the_scheme() {

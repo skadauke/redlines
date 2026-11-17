@@ -6,7 +6,7 @@
 // `javascript:` and its kin into plain text (clipboard/copy-html.ts). A link that doesn't open is
 // left to the editor like any text: nothing is taken, nothing is promised.
 
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import {
   type EditorState,
   type Extension,
@@ -22,7 +22,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view';
-import type { SyntaxNode } from '@lezer/common';
+import type { SyntaxNode, Tree } from '@lezer/common';
 import { destination } from '../clipboard/copy-html.ts';
 
 /** What an address has after its scheme: no white space or control character. */
@@ -58,27 +58,37 @@ function mailed(address: string): string {
 /** A reference label as definitions and uses agree on it. */
 const labelKey = (label: string) => label.trim().replace(/\s+/g, ' ').toLowerCase();
 
+/** The definitions of each tree, by label: read once for a tree, then looked up. */
+const definitions = new WeakMap<Tree, Map<string, string>>();
+/** The most time (ms) a reference link may spend finishing the parse to find its definition. */
+const PARSE_BUDGET = 20;
+
 /** The destination that the definition of `label` gives, or null where nothing defines it. */
 function definition(state: EditorState, label: string): string | null {
-  const wanted = labelKey(label);
-  let found: string | null = null;
-  syntaxTree(state).iterate({
-    enter(node) {
-      if (found !== null) return false;
-      if (node.name !== 'LinkReference') return true;
-      const labelNode = node.node.getChild('LinkLabel');
-      const url = node.node.getChild('URL');
-      if (
-        labelNode &&
-        url &&
-        labelKey(state.sliceDoc(labelNode.from + 1, labelNode.to - 1)) === wanted
-      ) {
-        found = destination(state.sliceDoc(url.from, url.to));
-      }
-      return false;
-    },
-  });
-  return found;
+  // The tree may cover only the start of a large document right after load: a definition at its end
+  // is found by finishing the parse, within a small budget, and else not yet.
+  const tree = ensureSyntaxTree(state, state.doc.length, PARSE_BUDGET) ?? syntaxTree(state);
+  let found = definitions.get(tree);
+  if (!found) {
+    const map = new Map<string, string>();
+    tree.iterate({
+      enter(node) {
+        if (node.name !== 'LinkReference') return true;
+        const labelNode = node.node.getChild('LinkLabel');
+        const url = node.node.getChild('URL');
+        if (labelNode && url) {
+          const key = labelKey(state.sliceDoc(labelNode.from + 1, labelNode.to - 1));
+          // The first definition of a label is the one that counts.
+          if (!map.has(key)) map.set(key, destination(state.sliceDoc(url.from, url.to)));
+        }
+        return false;
+      },
+    });
+    // A partial tree is not remembered: the parse goes on, and the next look reads more of it.
+    if (tree.length >= state.doc.length) definitions.set(tree, map);
+    found = map;
+  }
+  return found.get(labelKey(label)) ?? null;
 }
 
 /** The destination of a `Link` node: its own, or the one its reference label gives. */
@@ -130,6 +140,18 @@ export function linkDestination(state: EditorState, pos: number): string | null 
     if (node.name === 'URL' && !bare && node.parent?.name !== 'Autolink') bare = node;
   }
   return bare ? mailed(destination(state.sliceDoc(bare.from, bare.to))) : null;
+}
+
+/**
+ * The address as the hint shows it: a format character (a bidirectional override, a zero-width
+ * space or joiner, a soft hyphen, a byte-order mark), which draws as nothing or reorders the text,
+ * is written as its code point, `<U+202E>`, so that the hint reads as what opens.
+ */
+export function visibleFormat(address: string): string {
+  return address.replace(
+    /[\p{Cf}\u2028\u2029]/gu,
+    (c) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`,
+  );
 }
 
 /** A link under the pointer: the drawn element, where its text starts, and the address it opens. */
@@ -242,7 +264,7 @@ const hintField = StateField.define<Hint | null>({
           what.textContent = `${click} to open`;
           const address = document.createElement('span');
           address.className = 'rl-link-hint-address';
-          address.textContent = hint.address;
+          address.textContent = visibleFormat(hint.address);
           dom.append(what, address);
           return { dom };
         },

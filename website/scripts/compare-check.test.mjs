@@ -13,14 +13,14 @@ test('the page agrees with docs/design.md §4', () => {
 });
 
 test('a row the page calls built and §4 calls planned fails, by its name', () => {
-  const word = 'R Markdown and Quarto';
+  const word = 'Live collaboration with people';
   const problems = compareRows(
     rows.map((r) => (r.feature === word ? { ...r, redlines: 'built' } : r)),
     PRODUCTS,
     table,
   );
   assert.equal(problems.length, 1);
-  assert.match(problems[0], /R Markdown and Quarto/);
+  assert.match(problems[0], /Live collaboration with people/);
 });
 
 test('a row §4 lacks fails, by its name', () => {
@@ -72,4 +72,10 @@ test('a one-row table reads', () => {
 
 test('a Redlines cell that is neither ✅ nor Planned is refused', () => {
   assert.throws(() => readDesignTable(MINI.replace('| ✅ |', '| Soon |')), /Redlines/);
+});
+
+test("the page leads with the rows only Redlines has, and says three (lib/site.ts)", () => {
+  const only = (r) => r.redlines === "built" && r.others.every((yes) => !yes);
+  assert.equal(rows.filter(only).length, 3);
+  assert.ok(rows.slice(0, 3).every(only));
 });
