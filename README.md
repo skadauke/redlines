@@ -56,7 +56,7 @@ and when, and the comment threads, are in a block at the end of the file.
   the folders and documents of the document's project, its repository or else its folder. Plain
   text files (`.txt`) open and save as Markdown files do, and code blocks have syntax colors. Local
   images inside the project show in the document, and an image dropped on the editor, pasted or
-  chosen with Format › Image… is saved in the project’s `images` folder and linked, as a tracked insertion when
+  chosen with Insert › Image… is saved in the project’s `images` folder and linked, as a tracked insertion when
   Track Changes is on. ⌘-click on a link opens it in the browser. GitHub alerts show as boxes with a
   type menu, `<sub>` and `<sup>` as subscript and superscript (⌥⌘, and ⌥⌘.), and emoji shortcodes
   as emoji, with a list after a colon. With two or more headings, a column of lines in the left
@@ -64,8 +64,8 @@ and when, and the comment threads, are in a block at the end of the file.
 - **The window.** The title bar is the page: the text scrolls under it, the document icon next to
   the name drags the file, a double-click on the name renames it, and the view button (a page that shows the view) and the pen switch
   Clean and Redlines and turn Track Changes on and off. A small word count sits in the lower right
-  corner. A toolbar opens from the wrench in the title bar, on right-click and from the keyboard, and
-  ⌥⌘P; Highlight is ⇧⌘H. There is no toolbar.
+  corner. No toolbar sits on the page: it opens from the wrench in the title bar, on right-click and from
+  the keyboard (⇧⌘P), and goes away again; Highlight is ⇧⌘H.
 - **Reviewing.** The View menu lists Clean, Redlines and Plain. A click on a change bar, or View ›
   Simple Look, switches Redlines to its simple look; a note's Accept and Reject there decide in
   place, and say what they decide. Notes in the rail follow the view, level with the text on the
