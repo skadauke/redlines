@@ -157,6 +157,20 @@ describe('the click on a change bar', () => {
       expect(scrollDOM.scrollTop).toBe(10 + 300);
     });
 
+    it.each(['touchstart', 'pointerdown', 'keydown'])('lets go at a %s', async (type) => {
+      const editor = load({ view: 'simple' });
+      const { scrollDOM } = editor.view;
+      const { state, geometry } = late();
+      const line = editor.view.state.doc.line(2).from;
+      switchLookAt(editor.view, line, geometry);
+      await frames(50);
+      scrollDOM.dispatchEvent(new Event(type, { bubbles: true }));
+      const there = scrollDOM.scrollTop;
+      state.moved = 300;
+      await frames(100);
+      expect(scrollDOM.scrollTop).toBe(there);
+    });
+
     it('lets go when the person scrolls, and after its time', async () => {
       const editor = load({ view: 'simple' });
       const { scrollDOM } = editor.view;

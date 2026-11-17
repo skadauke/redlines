@@ -238,25 +238,26 @@ function holdLine(
   if (!win) return;
   const until = win.performance.now() + HOLD_MS;
   let frame = 0;
-  let over = false;
+  // The page's scroller may be an element around the editor's own: a wheel, a press on its
+  // scrollbar or a touch there reaches it and not the editor's.
+  const listened = new Set<HTMLElement>([view.scrollDOM, scrollerOf(view)]);
   const stop = () => {
-    over = true;
     win.cancelAnimationFrame(frame);
-    for (const type of HOLD_STOPS) view.scrollDOM.removeEventListener(type, stop, true);
+    for (const target of listened) {
+      for (const type of HOLD_STOPS) target.removeEventListener(type, stop, true);
+    }
     if (holds.get(view) === stop) holds.delete(view);
   };
   const step = () => {
     if (!view.dom.isConnected || win.performance.now() > until) return stop();
-    view.requestMeasure({
-      read: top,
-      write: (after) => {
-        // A measure asked for before the stop may still come after it.
-        if (!over && Math.abs(after - start) >= 0.5) keep(after);
-      },
-    });
+    // Read and put back in the frame itself, not in a measure of CodeMirror's a frame later.
+    const after = top();
+    if (Math.abs(after - start) >= 0.5) keep(after);
     frame = win.requestAnimationFrame(step);
   };
-  for (const type of HOLD_STOPS) view.scrollDOM.addEventListener(type, stop, true);
+  for (const target of listened) {
+    for (const type of HOLD_STOPS) target.addEventListener(type, stop, true);
+  }
   holds.set(view, stop);
   frame = win.requestAnimationFrame(step);
 }
