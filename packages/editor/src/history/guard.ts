@@ -38,6 +38,8 @@ import {
   history,
   historyField,
   historyKeymap,
+  markNotes,
+  remoteStep,
   redo,
   redoDepth,
   type StepInfo,
@@ -82,6 +84,8 @@ const outsideField = StateField.define<boolean>({
     // outside the history, which drops their steps (a Return joined to the step before it is
     // composed out of it, exactly): what is left fits the text exactly.
     if (tr.annotation(takeBackAnnotation)) return outside;
+    // Another person's edit from the session isn't the file changed on disk: its steps are mapped.
+    if (tr.annotation(remoteStep)) return outside;
     return outside || (tr.docChanged && tr.annotation(Transaction.addToHistory) === false);
   },
 });
@@ -234,6 +238,7 @@ function stepInfo(tr: Transaction): StepInfo {
   return {
     person,
     marks: written.map((mark) => mark.id),
+    entries: markNotes(before, after),
     // The old text of a deletion is in its marker, which Undo can't find again once another person
     // accepts it.
     deleted: written

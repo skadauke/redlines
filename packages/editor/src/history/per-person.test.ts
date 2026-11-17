@@ -6,10 +6,11 @@ import { Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { acceptMarks, parse, rejectMarks, trackedEdit, type TextChange } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
+import { EditorState } from '@codemirror/state';
 import { createEditor, type Editor } from '../index.ts';
 import { refusedEditEffect, setTrackingEffect } from '../tracked/typing.ts';
 import { redoSayingWhy, undoSayingWhy } from './guard.ts';
-import { historyField, remoteStep, undoDepth } from './history.ts';
+import { history, historyField, remoteStep, undoDepth } from './history.ts';
 
 const open: Editor[] = [];
 afterEach(() => {
@@ -69,6 +70,27 @@ const decide = (editor: Editor, how: typeof acceptMarks) => {
 const track = (editor: Editor, on: boolean) =>
   editor.view.dispatch({ effects: setTrackingEffect.of(on) });
 
+/** The file as the ledger and the marks tell it: one ledger, and an entry for every mark and no more. */
+const sound = (editor: Editor) => {
+  const text = editor.view.state.doc.toString();
+  const parsed = parse(text);
+  expect(parsed.warnings).toEqual([]);
+  expect(text.split('<!-- redlines').length - 1).toBeLessThanOrEqual(1);
+  expect(Object.keys(parsed.ledger.marks).sort()).toEqual(
+    parsed.marks.map((mark) => mark.id).sort(),
+  );
+};
+
+/** What the history keeps of its steps, as it saves it. */
+const savedSteps = (state: EditorState) =>
+  (
+    state.toJSON({ history: historyField }) as {
+      history: {
+        done: { meta?: { person?: string; marks: string[]; touchedBy: string | null } }[];
+      };
+    }
+  ).history.done;
+
 const bodyOf = (editor: Editor) => editor.view.state.doc.toString().split('\n\n<!-- redlines')[0];
 const parsedOf = (editor: Editor) => parse(editor.view.state.doc.toString());
 
@@ -115,6 +137,8 @@ describe('undo, per person', () => {
     const { editor, said } = made('Hello world\n', false);
     type(editor, 5, 5, ' there');
     remote(editor, 11, 11, '!');
+    // Beside the step: it is not marked as touched, and Undo takes it back whole.
+    expect(savedSteps(editor.view.state)[0]!.meta!.touchedBy).toBeNull();
     undoSayingWhy(editor.view);
     expect(said).toEqual([]);
     expect(bodyOf(editor)).toBe('Hello! world\n');
@@ -244,39 +268,160 @@ describe('undo, per person', () => {
     expect(undoDepth(editor.view.state)).toBe(0);
   });
 
-  it('goes on to the step below after one it took back in part', () => {
-    const { editor } = made('Hello world\n', false);
+  it('goes on to the step below after a tracked step it took back around Bo’s typing', () => {
+    const { editor, said } = made('Hello world\n', false);
     type(editor, 0, 0, 'A');
-    // Isolate the second step from the first.
+    track(editor, true);
     editor.view.dispatch({
-      changes: { from: 12, to: 12, insert: 'ZZ' },
+      changes: { from: 6, to: 6, insert: ' there' },
       userEvent: 'input.type',
       annotations: Transaction.time.of(Date.now() + 5000),
     });
-    remote(editor, 13, 13, 'Q');
+    const at = editor.view.state.doc.toString().indexOf('there');
+    remote(editor, at + 2, at + 2, 'Q');
     undoSayingWhy(editor.view);
-    expect(bodyOf(editor)).toBe('AHello worldQ\n');
+    expect(bodyOf(editor)).toBe('AHelloQ world\n');
+    sound(editor);
     undoSayingWhy(editor.view);
-    expect(bodyOf(editor)).toBe('Hello worldQ\n');
+    expect(said).toEqual([]);
+    expect(bodyOf(editor)).toBe('HelloQ world\n');
   });
 
-  it('puts the caret on what it gave back', () => {
+  it('puts the caret where it took your text out, when it takes back around Bo’s edit', () => {
     const { editor } = made('Hello world\n', true);
     type(editor, 5, 5, ' there');
-    remote(editor, 0, 0, 'Oh. ');
+    const at = editor.view.state.doc.toString().indexOf('there');
+    remote(editor, at + 2, at + 2, 'X');
     undoSayingWhy(editor.view);
-    expect(editor.view.state.selection.main.empty).toBe(true);
-    expect(bodyOf(editor)).toBe('Oh. Hello world\n');
+    const caret = editor.view.state.selection.main;
+    expect(bodyOf(editor)).toBe('HelloX world\n');
+    expect(caret.empty).toBe(true);
+    expect(editor.view.state.doc.sliceString(0, caret.head)).toBe('Hello');
   });
 
-  it('keeps what it knows of a step through the history’s JSON', () => {
-    const { editor } = made('Hello world\n', true);
+  it('keeps Bo’s tracked deletion inside your tracked step and leaves a sound file (undo, redo)', () => {
+    const { editor, said } = made('Hello world\n', true);
+    type(editor, 0, 0, 'A');
+    type(editor, 6, 6, ' there');
+    editor.view.dispatch({ changes: { from: 0, to: 0, insert: '' } });
+    const a = editor.view.state.doc.toString().indexOf('there');
+    remoteTracked(editor, a + 1, a + 3, '');
+    sound(editor);
+    undoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+    expect(bodyOf(editor)).not.toContain('there');
+    redoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+    undoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+  });
+
+  it('does the same when Bo’s tracked deletion spans the edge of your insertion', () => {
+    const { editor, said } = made('Hello world\n', true);
     type(editor, 5, 5, ' there');
-    const json = editor.view.state.toJSON({ history: historyField }) as {
-      history: { done: { meta?: { person: string; marks: string[] } }[] };
-    };
-    const kept = json.history.done.find((event) => event.meta?.person);
-    expect(kept?.meta?.person).toBe('ada');
-    expect(kept?.meta?.marks.length).toBe(1);
+    const a = editor.view.state.doc.toString().indexOf(' there');
+    remoteTracked(editor, a - 2, a + 3, '');
+    sound(editor);
+    undoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+    expect(bodyOf(editor)).not.toContain('there');
+  });
+
+  it('redoes a tracked step after Bo made a tracked edit elsewhere', () => {
+    const { editor, said } = made('Hello world\n', true);
+    type(editor, 5, 5, ' there');
+    undoSayingWhy(editor.view);
+    remoteTracked(editor, 0, 1, 'J');
+    redoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+    expect(bodyOf(editor)).toContain(' there');
+    undoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+  });
+
+  it('redoes a take-back that wrote tracked marks after Bo made a tracked edit', () => {
+    const { editor, said } = made('Hello world\n', true);
+    type(editor, 5, 5, ' there');
+    decide(editor, acceptMarks);
+    undoSayingWhy(editor.view);
+    remoteTracked(editor, 0, 1, 'J');
+    redoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+    expect(bodyOf(editor)).toContain('there');
+  });
+
+  it('takes back what is left of a replacement Bo accepted half of, plain', () => {
+    const { editor: other, said } = made('Hello world\n', true);
+    type(other, 6, 11, '');
+    const at2 = other.view.state.doc.toString().indexOf('-->') + 3;
+    type(other, at2, at2, 'moon');
+    const text = other.view.state.doc.toString();
+    const ins = parse(text)
+      .marks.filter((mark) => mark.kind === 'ins')
+      .map((mark) => mark.id);
+    other.view.dispatch({
+      changes: acceptMarks(text, ins),
+      annotations: fromBo,
+      filter: false,
+    });
+    track(other, false);
+    undoSayingWhy(other.view);
+    expect(bodyOf(other)).toBe('Hello world\n');
+    sound(other);
+    expect(said).toEqual([]);
+  });
+
+  it('takes back what is left of a replacement Bo accepted half of, tracked', () => {
+    const { editor, said } = made('Hello world\n', true);
+    type(editor, 6, 11, '');
+    const at = editor.view.state.doc.toString().indexOf('-->') + 3;
+    type(editor, at, at, 'moon');
+    const text = editor.view.state.doc.toString();
+    const ins = parse(text)
+      .marks.filter((mark) => mark.kind === 'ins')
+      .map((mark) => mark.id);
+    editor.view.dispatch({ changes: acceptMarks(text, ins), annotations: fromBo, filter: false });
+    undoSayingWhy(editor.view);
+    expect(said).toEqual([]);
+    sound(editor);
+    const after = parsedOf(editor);
+    expect(after.marks.map((mark) => [mark.kind, mark.payload])).toEqual([['del', 'moon']]);
+    expect(bodyOf(editor)).toContain('world');
+  });
+
+  it('keeps what it knows of a step through the history’s JSON, and uses it after fromJSON', () => {
+    const extensions = [
+      history({
+        stepInfo: () => ({
+          person: 'ada',
+          marks: ['k3x9'],
+          deleted: [{ id: 'k3x9', at: 2, text: 'ab' }],
+          entries: { k3x9: { entry: { by: 'ada', at: '2026-11-17T10:00Z' } } },
+        }),
+      }),
+    ];
+    const first = EditorState.create({ doc: 'Hello', extensions });
+    const made1 = first.update({
+      changes: { from: 0, insert: 'X' },
+      userEvent: 'input.type',
+    }).state;
+    const saved: unknown = made1.toJSON({ history: historyField });
+    const restored = EditorState.fromJSON(saved, { extensions }, { history: historyField });
+    const again = savedSteps(restored);
+    expect(again).toEqual(savedSteps(made1));
+    expect(again[0]!.meta).toMatchObject({
+      person: 'ada',
+      marks: ['k3x9'],
+      deleted: [{ id: 'k3x9', at: 2, text: 'ab' }],
+      entries: { k3x9: { entry: { by: 'ada' } } },
+    });
+    expect(undoDepth(restored)).toBe(1);
   });
 });

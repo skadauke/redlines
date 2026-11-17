@@ -18,6 +18,7 @@ export {
   redoSelection,
   remoteStep,
   type DeletedText,
+  type LedgerNote,
   type StepInfo,
   type StepMeta,
   undo,
