@@ -699,6 +699,93 @@ function wordHeading(el: Element): number {
 
 const hasBlock = (el: Element) => !!el.querySelector(BLOCK_SELECTOR);
 
+/** A length in CSS as points, or 0 for one that isn't a length. */
+function points(value: string | undefined): number {
+  const match = /^(-?[\d.]+)(pt|px|in|cm|mm|pc|em)?$/.exec((value ?? '').trim());
+  if (!match) return 0;
+  const n = Number(match[1]);
+  const unit = match[2] ?? 'px';
+  const per: Record<string, number> = {
+    pt: 1,
+    px: 0.75,
+    in: 72,
+    cm: 28.35,
+    mm: 2.835,
+    pc: 12,
+    em: 11,
+  };
+  return n * (per[unit] ?? 0);
+}
+
+/**
+ * A paragraph that Google Docs or Word sets apart as a quote: Word's quote styles, or an indent
+ * of a quarter inch and more (Docs has no quote block, and its copy keeps the indent alone).
+ */
+function quoted(el: Element, tag: string): boolean {
+  if (tag !== 'p') return false;
+  if (/(?:^|\s)Mso(?:Intense)?Quote(?:\s|$)/.test(el.getAttribute('class') ?? '')) return true;
+  // A hanging indent (a bibliography), a table of contents, and a paragraph inside a list item or a
+  // quote are indented for another reason.
+  if (
+    points(css(el).get('text-indent')) < 0 ||
+    /(?:^|\s)MsoToc\d/.test(el.getAttribute('class') ?? '')
+  )
+    return false;
+  if (el.parentElement?.closest('li, blockquote')) return false;
+  return points(css(el).get('margin-left')) >= 18;
+}
+
+/** A paragraph all in a monospace font, which is a line of a code block in Docs and Word. */
+function codeLine(el: Element): boolean {
+  if (!['p', 'div'].includes(el.tagName.toLowerCase()) || hasBlock(el)) return false;
+  const runs: Run[] = [];
+  collect(el, formatOf(el, PLAIN), runs);
+  const texts = runs.filter((run) => run.type === 'text' && run.text.trim());
+  return (
+    texts.length > 0 &&
+    runs.every((run) => run.type === 'break' || (run.type === 'text' && run.format.code)) &&
+    texts.every((run) => run.type === 'text' && run.format.code)
+  );
+}
+
+/** A blank line of a code block: an empty paragraph set in a monospace font. */
+const blankCodeLine = (el: Element) =>
+  ['p', 'div'].includes(el.tagName.toLowerCase()) &&
+  !(el.textContent ?? '').replace(INVISIBLE, '').trim() &&
+  !el.querySelector('img') &&
+  monoStyled(el);
+
+/** Whether a line's own CSS sets a monospace font (not a `<code>` tag): a paragraph set as code. */
+const monoStyled = (el: Element) =>
+  !el.querySelector('code') &&
+  [el, ...Array.from(el.querySelectorAll('[style]'))].some((n) =>
+    MONOSPACE.test(css(n).get('font-family') ?? ''),
+  );
+
+/** The text of a line of code, as it is written. */
+function lineText(el: Element): string {
+  let text = '';
+  const walk = (node: Node) => {
+    if (isText(node)) text += (node.nodeValue ?? '').replace(/\s*\n\s*/g, ' ');
+    else if (isElement(node)) {
+      if (node.tagName.toLowerCase() === 'br') text += '\n';
+      else node.childNodes.forEach(walk);
+    }
+  };
+  walk(el);
+  return text
+    .replace(INVISIBLE, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+$/, '');
+}
+
+/** Lines as a fenced block, its fence longer than any run of backticks in them. */
+function fenced(lines: string[]): string {
+  const text = lines.join('\n');
+  const fence = '`'.repeat(Math.max(3, ...(text.match(/`+/g) ?? []).map((run) => run.length + 1)));
+  return `${fence}\n${text}\n${fence}`;
+}
+
 class Converter {
   /** The blocks under `parent`, as Markdown. */
   blocks(parent: Element, format: Format, ctx: Context): string[] {
@@ -717,7 +804,11 @@ class Converter {
       }
       pending = [];
     };
-    for (const child of Array.from(parent.childNodes)) {
+    // The index in `out` of a quote that the next quoted paragraph continues.
+    let quoteAt = -1;
+    const nodes = Array.from(parent.childNodes);
+    for (let at = 0; at < nodes.length; at++) {
+      const child = nodes[at]!;
       if (isText(child)) {
         if (word && !(child.nodeValue ?? '').trim()) continue;
         endList();
@@ -734,6 +825,47 @@ class Converter {
         continue;
       }
       endList();
+      if (!ctx.cell && codeLine(child)) {
+        // Consecutive lines of code (Docs sets each color apart) are one fenced block.
+        const lines = [lineText(child)];
+        let end = at;
+        let kept = 1;
+        for (let next = at + 1; next < nodes.length; next++) {
+          const sibling = nodes[next]!;
+          if (isText(sibling) && !(sibling.nodeValue ?? '').trim()) continue;
+          if (!isElement(sibling)) break;
+          if (codeLine(sibling)) {
+            lines.push(lineText(sibling));
+            kept = lines.length;
+            end = next;
+          } else if (blankCodeLine(sibling)) lines.push('');
+          else break;
+        }
+        // A blank line at the end of the block is not in it.
+        lines.length = kept;
+        if (lines.length > 1 || monoStyled(child)) {
+          flush();
+          out.push(fenced(lines));
+          at = end;
+          continue;
+        }
+      }
+      if (!ctx.cell && quoted(child, tag)) {
+        flush();
+        const inner = this.blocks(child, own, ctx).join('\n\n');
+        if (inner) {
+          const text = inner
+            .split('\n')
+            .map((line) => (line ? `> ${line}` : '>'))
+            .join('\n');
+          if (quoteAt === out.length - 1 && quoteAt >= 0) out[quoteAt] += `\n>\n${text}`;
+          else {
+            out.push(text);
+            quoteAt = out.length - 1;
+          }
+        }
+        continue;
+      }
       if (codeBlockStyle(child, tag)) {
         flush();
         out.push(...this.pre(child, ctx));
@@ -1010,7 +1142,14 @@ class Converter {
         });
         const text = blocks.join('<br>').replace(/\n/g, '<br>').replace(/\|/g, '\\|');
         const style = css(cell);
-        const a = (cell.getAttribute('align') ?? style.get('text-align') ?? '').toLowerCase();
+        // Docs and Word set the alignment on the paragraph in the cell.
+        const inner = cell.querySelector('p[style*="text-align"], div[style*="text-align"]');
+        const a = (
+          cell.getAttribute('align') ??
+          style.get('text-align') ??
+          (inner ? css(inner).get('text-align') : '') ??
+          ''
+        ).toLowerCase();
         const span = Math.max(1, Number.parseInt(cell.getAttribute('colspan') ?? '1', 10) || 1);
         const down = Math.max(1, Number.parseInt(cell.getAttribute('rowspan') ?? '1', 10) || 1);
         for (let k = 0; k < Math.min(span, 50); k++) {

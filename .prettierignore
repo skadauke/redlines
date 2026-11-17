@@ -11,3 +11,6 @@ apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/permissions/
 apps/desktop/src-tauri/icons/
 apps/desktop/redlines/bundle/
+
+# Captured clipboard HTML, kept as the app wrote it
+packages/editor/src/clipboard/fixtures/
