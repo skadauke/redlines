@@ -226,9 +226,8 @@ The window, on the desktop:
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
   in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close,
   Open .docx… (a Word or Google Docs file as a new, unsaved document, with its import report in a
-  notification; `redlines import-docx` does the same from the command line), Export to Word… (a save panel, then a notification, never a dialog, that says what Word can't hold; in the
-  development page the file downloads), Print and Export as PDF. `redlines export-docx <file> [-o out.docx]` does the same
-  from the command line. A printed page is the document as it reads now, set as a document: every
+  notification), Export to Word… (a save panel, then a notification, never a dialog, that says what Word can't hold; in the
+  development page the file downloads), Print and Export as PDF. The Node command line (`pnpm redlines`) has `export-docx <file> [-o out.docx]` and `import-docx`; the program in the app does not carry them. A printed page is the document as it reads now, set as a document: every
   pending insertion as plain text and every pending deletion left out (the Original, when the
   window shows that), with no change bar, comment, note or highlight, none of the window around
   it, and nothing of the YAML front matter. It is black on white in every theme, in the theme's own
@@ -1310,7 +1309,7 @@ writes a `.docx` from a Redlines file (tracked changes, comments, replies, table
 splits, joins, moves, images and task lists, with the data a round trip needs, #834, #847, #845),
 reads a `.docx` with its revisions and comments (#840) and maps the result to Markdown with its
 marks and ledger (#866), and has Google Docs' differences (#838). File › Export to Word… calls
-the writer (#841) and File › Open .docx… the reader (#881, with its pictures, #885); Copy for Word
+the writer (#841) and File › Open .docx… the reader (#881; pictures are carried into the images folder after a save panel, #885); Copy for Word
 and the full Word round trip are still to be wired in; File › Print and Export as PDF are built.
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
