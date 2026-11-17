@@ -109,7 +109,8 @@ describe('a document of 4,000 own-line marker blocks', () => {
 
   it('draws only the window of the blocks a keystroke touches, never the whole text', () => {
     const { view } = editorFor(documentOf(4_000));
-    const at = view.state.doc.line(Math.floor(view.state.doc.lines / 2)).to;
+    // In the text of a block, in front of its closing marker.
+    const at = view.state.doc.toString().indexOf('Paragraph 2000') + 'Paragraph 20'.length;
     trackedStats.windowed = trackedStats.whole = 0;
     view.dispatch({ changes: { from: at, insert: 'x' } });
     view.dispatch({ changes: { from: at + 1, insert: 'y' } });

@@ -162,7 +162,14 @@ describe('the tracked display, kept and drawn again in windows', () => {
       const parts: string[] = [];
       const ids = IDS.slice(0, 120);
       ids.forEach((id, n) => {
-        parts.push(`<!--ins ${id}-->\n\nInserted block ${n}, ${WORDS}.<!--/${id}-->`);
+        // Every fifth block's text is a table, a list or a fence, which no window may be cut across.
+        const text = [
+          `Inserted block ${n}, ${WORDS}.`,
+          `| a | b |\n| - | - |\n| ${n} | x |`,
+          `- item ${n}\n- item two`,
+          '```\ncode\n```',
+        ][n % 5 < 3 ? 0 : (n % 5) - 2]!;
+        parts.push(`<!--ins ${id}-->\n\n${text}<!--/${id}-->`);
       });
       const entries = ids.map((id) => `  ${id}: {by: ada, at: 2026-10-31T09:30Z}\n`).join('');
       const doc = `${parts.join('\n\n')}\n\n<!-- redlines\nversion: 1\nmarks:\n${entries}-->\n`;

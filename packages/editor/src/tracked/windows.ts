@@ -30,6 +30,8 @@ const FIRM =
 const MAX_FIRM = 4000;
 /** How many blocks or lines are looked at before a window runs to the end of the text. */
 const MAX_STEPS = 4000;
+/** How many marks are looked at for a block of its own, each read by its lines. */
+const MAX_BLOCK_STEPS = 64;
 
 interface MarkIndex {
   starts: number[];
@@ -125,6 +127,14 @@ function blockEnd(r: Reading, index: MarkIndex, i: number): number {
   if (!r.whole && close.to >= r.reach) return -1;
   const text = doc.sliceString(segment.open.from, close.to);
   if (text.split('<!--').length !== 3 || text.split('-->').length !== 3) return -1;
+  // Its text is one paragraph after the blank line the opener takes: no blank line in it, and no
+  // block syntax at its start (a table, a list, a fence, a quote, a heading or indented code), whose
+  // lines the window would be cut across.
+  const inner = text.slice(segment.open.to - segment.open.from + 2, close.from - segment.open.from);
+  if (!text.startsWith('\n\n', segment.open.to - segment.open.from)) return -1;
+  if (/\n[ \t]*(?:\n|$)/.test(inner) || /^(?: {0,3}[|>#`~*+-]|\d{1,9}[.)]| {4}|\t)/.test(inner)) {
+    return -1;
+  }
   return close.from;
 }
 
@@ -191,7 +201,7 @@ export function windowStart(state: EditorState, parsed: Parsed, pos: number): nu
   // The nearest block of its own that ends before `pos`; a firm stretch farther back doesn't count.
   const index = indexOf(parsed);
   let own = 0;
-  for (let i = after(index.starts, pos) - 1; i >= 0 && steps++ < MAX_STEPS; i--) {
+  for (let i = after(index.starts, pos) - 1; i >= 0 && steps++ < MAX_BLOCK_STEPS; i--) {
     const end = blockEnd(r, index, i);
     if (end >= 0 && end <= pos) {
       own = end;
@@ -225,7 +235,7 @@ export function windowEnd(state: EditorState, parsed: Parsed, pos: number): numb
   const index = indexOf(parsed);
   let own = Infinity;
   for (let i = Math.max(0, after(index.starts, pos) - 1); i < index.starts.length; i++) {
-    if (steps++ > MAX_STEPS) break;
+    if (steps++ > MAX_BLOCK_STEPS) break;
     const end = blockEnd(r, index, i);
     if (end > pos) {
       own = end;
