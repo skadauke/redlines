@@ -11,10 +11,12 @@ import { awayFromIncludes, type AroundInclude } from './include.ts';
 import { anchorRange, assertRange, checkAnchor, withinBody } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
+import { beforePipes } from './comments.ts';
 import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
+import { decisionsHold, hasTableChange, nearRanges, refusalsOf } from './table-settle.ts';
 import { readTables } from './table.ts';
 import { highlightAgainstRows, inPendingRow, rowWidenings } from './table-rules.ts';
 import type { TableRead } from './table.ts';
@@ -126,6 +128,7 @@ export function addHighlight(
   range: Range,
   ctx: EditContext,
   rowsWidened = false,
+  settled = false,
 ): { changes: TextChange[]; id: string } {
   return withDialect(ctx.dialect, () => {
     const recorded = recordIds(ctx);
@@ -145,6 +148,7 @@ export function addHighlight(
       let placed: Range;
       try {
         placed = anchorRange(text, parsed, markers, fenced.inner, HIGHLIGHT_WORDS);
+        placed = beforePipes(text, parsed, markers, placed, HIGHLIGHT_WORDS);
       } catch (error) {
         // Where a marker can't go is told in words that every edit shares, which say why but not what
         // to do (format §3.1): a highlight says that too.
@@ -185,7 +189,21 @@ export function addHighlight(
       inCode: HIGHLIGHT_WORDS.inCode,
     });
     const across = refuseAcrossPendingRows(text, parsed, wanted, placed, rowsWidened);
-    if (!across) return { changes, id };
+    if (!across) {
+      // In a table with a change pending, the ends stand where no decision of it becomes impossible (#396).
+      if (settled || !hasTableChange(text)) return { changes, id };
+      const before = refusalsOf(text);
+      if (decisionsHold(text, changes, before)) return { changes, id };
+      for (const candidate of nearRanges(text, wanted, 60)) {
+        try {
+          const found = addHighlight(text, candidate, recorded.replay(), rowsWidened, true);
+          if (decisionsHold(text, found.changes, before)) return found;
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+        }
+      }
+      return { changes, id };
+    }
     // A highlight can't leave one row for another while a row is inserted or moved, and has no point
     // form to be left as: its ends are taken to rows that are not pending, so that no decision of a
     // row can take a marker away (format §3.12).

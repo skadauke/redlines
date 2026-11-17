@@ -15,8 +15,15 @@ import { anchorRange, assertRange, checkAnchor } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
+import { decisionsHold, hasTableChange, nearRanges, refusalsOf } from './table-settle.ts';
 import { readTables } from './table.ts';
-import { commentAcrossRows, inPendingRow, pastRowMark, rowWidenings } from './table-rules.ts';
+import {
+  beforeHeaderPipe,
+  commentAcrossRows,
+  inPendingRow,
+  pastRowMark,
+  rowWidenings,
+} from './table-rules.ts';
 import type { TableRead } from './table.ts';
 import { applyChanges, eolOf } from './changes.ts';
 import type { EditContext, Ledger, Parsed, Range, TextChange, Thread } from './types.ts';
@@ -65,6 +72,7 @@ export function addComment(
   body: string,
   ctx: EditContext,
   rowsWidened = false,
+  settled = false,
 ): { changes: TextChange[]; id: string } {
   return withDialect(ctx.dialect, () => {
     const recorded = recordIds(ctx);
@@ -80,6 +88,7 @@ export function addComment(
     else {
       let placed = anchorRange(text, parsed, markers, fenced.inner, COMMENT_WORDS);
       placed = pastPendingRowMarks(text, parsed, markers, placed);
+      placed = beforePipes(text, parsed, markers, placed, COMMENT_WORDS);
       around = fenced.apply(awayFromIncludes(text, placed));
     }
     const { from, to } = around;
@@ -120,7 +129,21 @@ export function addComment(
     });
     const after = applyChanges(text, changes);
     const across = acrossMovedRows(after, id, rowsWidened);
-    if (!across) return { changes, id };
+    if (!across) {
+      // In a table with a change pending, the ends stand where no decision of it becomes impossible (#376).
+      if (settled || !hasTableChange(text)) return { changes, id };
+      const before = refusalsOf(text);
+      if (decisionsHold(text, changes, before)) return { changes, id };
+      for (const candidate of nearRanges(text, range, 60)) {
+        try {
+          const found = addComment(text, candidate, body, recorded.replay(), rowsWidened, true);
+          if (decisionsHold(text, found.changes, before)) return found;
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+        }
+      }
+      return { changes, id };
+    }
     // A comment that runs from one row into another while a move is pending can't be left as a point
     // when the move is decided: its ends are taken to rows that are not pending (format §3.12).
     if (rowsWidened) throw across.error;
@@ -160,6 +183,38 @@ function pastPendingRowMarks(
   // Where the ends are now, the rules of every anchor hold again.
   const range = { from, to: Math.max(from, to) };
   return anchorRange(text, parsed, markers, range, COMMENT_WORDS);
+}
+
+/**
+ * `placed`, with an end after the closing pipe of a header moved in front of it (`beforeHeaderPipe`).
+ */
+export function beforePipes(
+  text: string,
+  parsed: Parsed,
+  markers: readonly MarkerRange[],
+  placed: Range,
+  words: AnchorWords,
+): Range {
+  let { from, to } = placed;
+  const tables = readTables(text, parsed);
+  for (const table of tables) {
+    from = beforeHeaderPipe(table, text, from);
+    to = beforeHeaderPipe(table, text, to);
+  }
+  if (from === placed.from && to === placed.to) return placed;
+  // Where the rules of an anchor hold again, which may be after the pipe once more (a delimiter run
+  // that the marker would split): then the end goes on, further in front of the pipe.
+  const after = (at: number) => tables.some((table) => beforeHeaderPipe(table, text, at) !== at);
+  let want = Math.max(from, to);
+  let moved = anchorRange(text, parsed, markers, { from, to: want }, words);
+  for (let step = 0; step < 24 && (after(moved.to) || after(moved.from)); step++) {
+    // In front of the marker that it is in or after, or a character back.
+    const inside = markers.find((marker) => marker.from < want && want <= marker.to);
+    want = Math.max(0, inside ? inside.from : want - 1);
+    from = Math.min(from, want);
+    moved = anchorRange(text, parsed, markers, { from, to: Math.max(from, want) }, words);
+  }
+  return moved;
 }
 
 /**

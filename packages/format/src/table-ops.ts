@@ -1609,9 +1609,17 @@ export function decideRows(
     changes.push(...commentsOf(parsed, table, leaving));
     for (const mark of parsed.marks) {
       if (mark.kind !== 'cmt' && mark.kind !== 'hl') continue;
-      const at = mark.segments[0]?.open.from ?? -1;
-      const row = table.rows.findIndex((r) => r.from <= at && at <= r.to);
-      if (row !== -1 && leaving.has(row)) anchored.add(mark.id);
+      // An end in a row that leaves is written again as a point (`commentsOf`), the closer too when the
+      // comment's opener stands in another row (#376): the old marker goes with the row.
+      const ends = mark.segments.flatMap((segment) => [
+        segment.open.from,
+        segment.close?.from ?? -1,
+      ]);
+      const inLeaving = ends.some((at) => {
+        const row = table.rows.findIndex((r) => r.from <= at && at <= r.to);
+        return row !== -1 && leaving.has(row);
+      });
+      if (inLeaving) anchored.add(mark.id);
     }
     // A comment or a highlight in a row that is taken out and written again is written with it
     // (format §3.7, "Moving rows"): a decision of the text would leave its markers at the place the row
