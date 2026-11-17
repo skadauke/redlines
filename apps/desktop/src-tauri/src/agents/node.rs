@@ -105,6 +105,13 @@ impl Identity {
 /// nothing when the tools can't answer now.
 pub trait ToolHost: Send + Sync {
     fn mcp(&self, request: &str) -> Option<String>;
+
+    /// The same for a call that came from the run of an agent, which the Gateway names by the
+    /// session it runs in (`None` for a call made outside any run, such as `openclaw nodes invoke`).
+    /// A host that doesn't tell runs apart answers as `mcp` does.
+    fn mcp_in(&self, request: &str, _session: Option<&str>) -> Option<String> {
+        self.mcp(request)
+    }
 }
 
 /// Why a connection gave up, in the terms of the sheet's failure cards.
@@ -299,6 +306,7 @@ fn answer_call(
     published: &[String],
     command: &str,
     params_json: &str,
+    session: Option<&str>,
 ) -> Result<(String, String), String> {
     if command != COMMAND {
         return Err(format!("This node has no command {command}."));
@@ -327,7 +335,7 @@ fn answer_call(
     })
     .to_string();
     let reply = host
-        .mcp(&request)
+        .mcp_in(&request, session)
         .ok_or("The Redlines tools aren’t available right now.")?;
     let reply: Value =
         serde_json::from_str(&reply).map_err(|_| "The tools gave no answer.".to_owned())?;
@@ -470,8 +478,15 @@ fn run(
                         node_id,
                         command,
                         params_json,
+                        session_key,
                     } => {
-                        let answered = answer_call(host, &published, &command, &params_json);
+                        let answered = answer_call(
+                            host,
+                            &published,
+                            &command,
+                            &params_json,
+                            session_key.as_deref(),
+                        );
                         let frame = match &answered {
                             Ok((tool, result)) => {
                                 emit(Event::Called { tool: tool.clone() });
@@ -1135,12 +1150,12 @@ mod tests {
             r#"{"server":"redlines","tool":""}"#,
         ] {
             assert!(
-                answer_call(&Tools, &published, COMMAND, params).is_err(),
+                answer_call(&Tools, &published, COMMAND, params, None).is_err(),
                 "{params}"
             );
         }
         let good = r#"{"server":"redlines","tool":"view"}"#;
-        assert!(answer_call(&Tools, &published, COMMAND, good).is_ok());
+        assert!(answer_call(&Tools, &published, COMMAND, good, None).is_ok());
     }
 
     #[test]

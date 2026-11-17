@@ -575,13 +575,14 @@ const agents =
           ...(isTauri
             ? {
                 more: async () =>
-                  (await listedAcpAgents()).map(({ id, name, program, args, bridge }) =>
+                  (await listedAcpAgents()).map(({ id, name, program, args, bridge, gateway }) =>
                     createAcpProvider(processes, {
                       id,
                       name,
                       command: program,
                       args,
                       ...(bridge === undefined ? {} : { bridge }),
+                      ...(gateway === true ? { gateway: true as const } : {}),
                     }),
                   ),
               }

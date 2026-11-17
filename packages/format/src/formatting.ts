@@ -2678,7 +2678,9 @@ function ownBlockEdit(
     // about its marks. Any other reason that nothing is written is the block's own, and is told as
     // the mark path tells it.
     const already =
-      op.kind === 'callout' || (op.kind === 'block' && hasType(view, shown.from, op.to));
+      op.kind === 'callout' ||
+      op.kind === 'callout-title' ||
+      (op.kind === 'block' && hasType(view, shown.from, op.to));
     return already && allOwn([shown]) ? { changes: [], markIds: [], extendedIds: [] } : undefined;
   }
   // Every character of the lines the change is asked on and writes in is your own new text.

@@ -9,6 +9,7 @@
 // refused with the same message.
 
 import {
+  ChangeSet,
   Compartment,
   EditorSelection,
   EditorState,
@@ -20,29 +21,32 @@ import {
   Transaction,
 } from '@codemirror/state';
 import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
-import type { Parsed, Warning } from '@redlines/format';
+import type { Parsed, TextChange, Warning } from '@redlines/format';
 import { takeBackAnnotation } from '../blocks/open.ts';
 import { hardBreakAtoms } from '../preview/decorations.ts';
 import { atomsOf } from '../tracked/decorations.ts';
 import { intentOf } from '../tracked/intent.ts';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
-import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
+import {
+  authoredChanges,
+  RAW_READ_ONLY,
+  rawIsReadOnly,
+  refusedEditEffect,
+} from '../tracked/typing.ts';
 import { agentCaret } from './caret.ts';
 import {
-  dropStaleEffect,
   history,
   historyField,
   historyKeymap,
+  markNotes,
+  remoteStep,
   redo,
   redoDepth,
-  staleUndo,
+  type StepInfo,
   undo,
   undoDepth,
 } from './history.ts';
 import { labelOf } from './names.ts';
-
-/** What Undo says when another person has changed the text of the step it would take back. */
-export const staleMessage = (name: string) => `${name} has changed this since.`;
 
 export const UNDO_AFTER_RELOAD = 'Undo isn’t available after the file changed on disk.';
 export const REDO_AFTER_RELOAD = 'Redo isn’t available after the file changed on disk.';
@@ -80,6 +84,8 @@ const outsideField = StateField.define<boolean>({
     // outside the history, which drops their steps (a Return joined to the step before it is
     // composed out of it, exactly): what is left fits the text exactly.
     if (tr.annotation(takeBackAnnotation)) return outside;
+    // Another person's edit from the session isn't the file changed on disk: its steps are mapped.
+    if (tr.annotation(remoteStep)) return outside;
     return outside || (tr.docChanged && tr.annotation(Transaction.addToHistory) === false);
   },
 });
@@ -133,14 +139,6 @@ function sayingWhy(command: StateCommand, message: string): Command {
   return (view) => {
     // Raw while edits are tracked takes no step back, with or without a sheet that asks about typing.
     if (!rawIsReadOnly(view.state) && command(view)) return true;
-    // Per-person undo: the step is yours, but someone else has changed its text since.
-    const stale = command === undo ? staleUndo(view.state) : null;
-    if (stale) {
-      view.dispatch({
-        effects: [refusedEditEffect.of(staleMessage(stale)), dropStaleEffect.of(null)],
-      });
-      return true;
-    }
     const why = whyNot(view.state, message);
     if (!why) return false;
     view.dispatch({ effects: refusedEditEffect.of(why) });
@@ -227,10 +225,10 @@ function outOfHiddenText(tr: Transaction): EditorSelection {
 }
 
 /** Whose a step is: the intent's author, and the marks a tracked step wrote (per-person undo). */
-function stepInfo(tr: Transaction): { person: string | null; marks: readonly string[] } {
-  const recorded = intentOf(tr);
-  // An edit of several writes is one person's: the first write says whose.
-  const intent = recorded?.kind === 'steps' ? recorded.steps[0] : recorded;
+function stepInfo(tr: Transaction): StepInfo {
+  const made = intentOf(tr);
+  // A group of steps is one person's: the first step says who, and whether it was tracked.
+  const intent = made?.kind === 'steps' ? made.steps[0] : made;
   if (!intent) return { person: null, marks: [] };
   const person = intent.author?.handle ?? null;
   if (!person || !intent.tracking) return { person, marks: [] };
@@ -238,16 +236,37 @@ function stepInfo(tr: Transaction): { person: string | null; marks: readonly str
   const after = tr.state.field(parsedField, false);
   if (!before || !after) return { person, marks: [] };
   const known = new Set(before.marks.map((mark) => mark.id));
+  const written = after.marks.filter((mark) => !known.has(mark.id));
   return {
     person,
-    marks: after.marks.filter((mark) => !known.has(mark.id)).map((mark) => mark.id),
+    marks: written.map((mark) => mark.id),
+    entries: markNotes(before, after),
+    // The old text of a deletion is in its marker, which Undo can't find again once another person
+    // accepts it.
+    deleted: written
+      .filter((mark) => mark.payload && (mark.kind === 'del' || mark.kind === 'sub'))
+      .map((mark) => ({ id: mark.id, at: mark.segments[0]!.open.from, text: mark.payload! })),
   };
+}
+
+/** Writes edits as the person's own, for Undo of a step that another person decided. */
+function takeBack(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): ChangeSet | null {
+  try {
+    return authoredChanges(state, text, parsed, edits);
+  } catch {
+    return null;
+  }
 }
 
 /** The history, and Undo and Redo from the Edit menu, which reach the page as input events. */
 export function undoHistory(): Extension {
   return [
-    history({ agentCaret, visibleCaret: outOfHiddenText, label: labelOf, stepInfo }),
+    history({ agentCaret, visibleCaret: outOfHiddenText, label: labelOf, stepInfo, takeBack }),
     restart.of([]),
     droppedField,
     outsideField,
