@@ -34,6 +34,7 @@ import {
   renumbered,
   squash,
   thread,
+  viewBlocks,
 } from './test-helpers.ts';
 import { SELF_CHECK, fineEdit as trackedEdit, fineEdits as trackedEdits } from './track.ts';
 import type { EditContext, Person, TextChange } from './types.ts';
@@ -1412,6 +1413,34 @@ describe('on random documents', { timeout: 600_000 }, () => {
           if (/[ \t]/.test(view.text[wanted.to] ?? '')) {
             asked.push(applyChanges(view.text, [{ ...wanted, to: wanted.to + 1 }]));
           }
+          // A deletion of all the text of a block, with its break, takes the block with it: the
+          // empty item or paragraph is not left (format §3.4).
+          const whole = viewBlocks(view.text).find(
+            (b) => b.text === wanted.from && b.next === wanted.to,
+          );
+          if (whole) {
+            asked.push(applyChanges(view.text, [{ from: whole.line, to: whole.next, insert: '' }]));
+          }
+          // A deletion of all the text of a wrapped line, a middle or the last line of a
+          // paragraph, takes the break in front of it, so that the paragraph is not parted by the
+          // empty line that the text alone would leave (format §3.2, #427).
+          let lineStart = wanted.from;
+          while (/[ \t]/.test(view.text[lineStart - 1] ?? '')) lineStart--;
+          let lineEnd = wanted.to;
+          while (/[ \t]/.test(view.text[lineEnd] ?? '')) lineEnd++;
+          const above =
+            view.text
+              .slice(0, lineStart - 1)
+              .split('\n')
+              .pop() ?? '';
+          if (
+            view.text[lineStart - 1] === '\n' &&
+            (view.text[lineEnd] === '\n' || lineEnd === view.text.length) &&
+            /\S/.test(above) &&
+            !/^[ \t>]*(?:#{1,6}[ \t]|[-*+][ \t]|\d+[.)][ \t])/.test(above)
+          ) {
+            asked.push(applyChanges(view.text, [{ ...wanted, from: lineStart - 1 }]));
+          }
         }
         const got = squash(same(dropEmptyBlocks(newestView(after).text)));
         const wants = asked.map((view) => squash(same(dropEmptyBlocks(view))));
@@ -1441,13 +1470,16 @@ describe('on random documents', { timeout: 600_000 }, () => {
         if (rejected !== undefined) {
           expect(flat(rejected), `${label}: rejecting`).toBe(flat(originalView(after).text));
         }
-        // No mark is lost, except an insertion, deletion or split of the author's own that was used
-        // up, or cancelled.
+        // No mark is lost, except an insertion, deletion, substitution or split of the author's own
+        // that was used up, or cancelled (a substitution whose new text is taken away is the old
+        // text again).
         const kept = new Set(parsed.marks.map((m) => m.id));
         for (const mark of before.marks) {
           if (kept.has(mark.id)) continue;
           expect(mark.entry.by, `${label}: ${mark.id} was lost`).toBe(author.handle);
-          expect(['ins', 'del', 'split'], `${label}: ${mark.id} was lost`).toContain(mark.kind);
+          expect(['ins', 'del', 'sub', 'split'], `${label}: ${mark.id} was lost`).toContain(
+            mark.kind,
+          );
         }
         text = after;
         edits++;
