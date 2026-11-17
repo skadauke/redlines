@@ -8,9 +8,8 @@
 // what it is doing as its state changes; the bubble draws it. Each answer is kept with the agent
 // that gave it: a follow-up may name another.
 //
-// The reach (what the agent may read) is decided as a run decides it (runs.ts, `reachOf`): the
-// document alone for a document with no file, a folder too broad or Preferences saying so; else what
-// the person allowed for this agent and folder, asked until they allow something.
+// The reach (what the agent may read) is decided by the function a comment's run calls too
+// (`decideReach`, reach.ts), so that the two can't differ.
 
 import { answerMcp, ASK_TOOLS, askPrompt, quoteBlock } from '@redlines/agent-tools';
 import type { ToolContext } from '@redlines/agent-tools';
@@ -26,6 +25,7 @@ import type {
   ToolLines,
 } from '@redlines/plugin-api';
 import { mentionedAgents } from '../mentions.ts';
+import { decideReach } from '../reach.ts';
 import { agentHandle, type LiveLine, type RunDeps } from '../runs.ts';
 
 /** What the question is when the person asks nothing: the selected text, explained. */
@@ -33,8 +33,6 @@ export const EXPLAIN = 'Explain this in the context of the document.';
 
 /** The line a run starts with, until the agent says what it is doing. */
 const STARTING = 'Starting…';
-/** Said when the folder is the home folder or the disk's root. */
-const TOO_BROAD = 'Folder too broad: this document only';
 
 export interface AskDeps {
   agents: HostAgents;
@@ -238,25 +236,19 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
   ): Promise<Reach | null> {
     const root = path === null ? null : await deps.projectRoot(path);
     if (mine !== epoch) return null;
-    const folder = root && !root.tooBroad ? root.folder : undefined;
-    const atDocument: Reach = root?.tooBroad
-      ? { scope: 'document', note: TOO_BROAD }
-      : { scope: 'document' };
-    const machine = agent.readLimit === 'machine';
-    if (!machine && (folder === undefined || deps.settings.defaultScope() === 'document')) {
-      return atDocument;
-    }
-    const asked = folder ?? root?.folder ?? '';
-    let answer = deps.settings.consent(agent.id, asked);
-    // Only Allow and Just this document are remembered; a no an earlier version stored asks again.
-    if (answer === 'no' || (machine && answer === 'document')) answer = undefined;
-    if (answer === undefined) {
-      const given = await consent(mine, agent, asked);
-      if (given === null || given === 'no' || mine !== epoch) return null;
-      deps.settings.setConsent(agent.id, asked, given);
-      answer = given;
-    }
-    return answer === 'document' || folder === undefined ? atDocument : { scope: 'folder', folder };
+    const reach = await decideReach({
+      agent,
+      root,
+      defaultScope: () => deps.settings.defaultScope(),
+      consent: (id, folder) => deps.settings.consent(id, folder),
+      setConsent: (id, folder, answer) => deps.settings.setConsent(id, folder, answer),
+      ask: (folder) => consent(mine, agent, folder),
+      over: () => mine !== epoch,
+      // An Ask reads the folder at most: the home folder is for a comment's run.
+      home: false,
+    });
+    if (reach === null) return null;
+    return { ...reach, scope: reach.scope === 'document' ? 'document' : 'folder' };
   }
 
   /** Puts the first-run question on the line, and waits for the answer: null if the run stops. */
