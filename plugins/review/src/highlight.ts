@@ -1,6 +1,7 @@
 // The Highlight command (format §2.2): a reviewer's highlight on the selection, or on the word under
-// the caret, and taking it away again, from one key. Where the selection or caret is in a highlight
-// already, the command removes it, as accepting does: it is dismissed and the text stays.
+// the caret, and taking it away again, from one key. Where the selection lies entirely inside a
+// highlight, or the caret is in one, the command removes it, as accepting does: it is dismissed and
+// the text stays. A selection that overlaps a highlight, or reaches out of it, is highlighted whole.
 
 import type { EditorState } from '@codemirror/state';
 import {
@@ -81,8 +82,21 @@ function inSegment(segment: Segment, from: number, to: number): boolean {
 }
 
 /**
- * The highlights that the selection or caret is inside of, or that the selection overlaps, in
- * document order: the ones the command removes, and that a menu shows as on. None in Plain, where
+ * Whether the selection lies entirely inside the highlight, from its first opener to its last closer,
+ * with some of its text. A selection that reaches out of it, or that only overlaps it, is not inside.
+ */
+function insideMark(mark: MarkRange, from: number, to: number): boolean {
+  const first = mark.segments[0];
+  const last = mark.segments[mark.segments.length - 1];
+  if (!first || !last?.close) return false;
+  if (from < first.open.from || to > last.close.to) return false;
+  return mark.segments.some((segment) => inSegment(segment, from, to));
+}
+
+/**
+ * The highlights that the selection or caret is entirely inside of, in document order: the ones the
+ * command removes, and that a menu shows as on. A selection that merely overlaps a highlight, or
+ * reaches out of it, is in none: the command highlights it whole (format 2.2). None in Plain, where
  * the command does neither, and none in a state without the editor's fields, such as the empty one
  * that a menu asks for a title (`baseTitle`).
  */
@@ -90,9 +104,7 @@ export function highlightsAt(state: EditorState): readonly MarkRange[] {
   const parsed = state.field(parsedField, false);
   if (!parsed || state.field(viewModeField, false) === 'raw') return [];
   const { from, to } = state.selection.main;
-  return highlightMarks(parsed).filter((mark) =>
-    mark.segments.some((segment) => inSegment(segment, from, to)),
-  );
+  return highlightMarks(parsed).filter((mark) => insideMark(mark, from, to));
 }
 
 /** The command's title: it takes the highlight away where there is one, and makes one elsewhere. */
@@ -131,7 +143,7 @@ function highlightTarget(state: EditorState): Range | null {
 
 /**
  * Makes a highlight on the selection or on the word under the caret, or, where the selection or
- * caret is in a highlight or overlaps one, removes those. Both are one step to undo. Returns
+ * caret is entirely inside a highlight, removes those. Both are one step to undo. Returns
  * whether it did something: Plain takes no highlight and says so, as a comment is refused there, and
  * so is a selection with no text to highlight, or one that the format refuses, in its words, all
  * through the editor's `onNotice`.
