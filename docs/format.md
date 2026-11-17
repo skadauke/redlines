@@ -2510,6 +2510,10 @@ it, one per line:
   moved to the top is the new header, the delimiter row following it in every state. Accepting a move
   takes the marker and the deletion line away; rejecting it moves the row itself back, with what was
   typed in it since and its comments, and takes the deletion line away. Either half decides both.
+  Accepting a change in the moved row (another person's typing, say) writes the kept copy again, as the
+  row now reads with the changes still pending in it rejected, so that the original view, and the row
+  that rejecting the move gives back, hold the accepted text: the typing travels with the row, either
+  half rejects, and accepting the typing and rejecting the move read the same in either order (#475).
   A comment or a highlight in the row goes with it: a range in a cell, a range across two cells or a
   point. At the new place it stands in the row where it stood. Rejecting the move gives the row back
   with it, in the same place, and nothing of it stays behind. The kept copy below the table holds
