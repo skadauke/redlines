@@ -77,24 +77,32 @@ export function encodePayload(text: string, style?: '\r\n' | '\n'): string {
 
 /** Encodes text that is already as a payload holds it: `\n` the file's own line break (above). */
 export function encodePayloadText(s: string): string {
+  // Only the characters below are written otherwise: the text between them is copied as it is, which
+  // is most of a long payload, such as a whole block of code.
   let out = '';
-  for (let i = 0; i < s.length; i++) {
+  let copied = 0;
+  const special = /[\r\uffff\n`|\-{%\\]/g;
+  for (let found = special.exec(s); found !== null; found = special.exec(s)) {
+    const i = found.index;
     const c = s.charAt(i);
     const previous = s.charAt(i - 1);
+    out += s.slice(copied, i);
+    copied = i + 1;
     switch (c) {
       case '\r':
         // A CRLF, or a CR alone.
         if (s.charAt(i + 1) === '\n') {
           out += '\\x0d\\n';
-          i++;
+          copied = special.lastIndex = i + 2;
         } else out += '\\x0d';
         break;
-      case '\uffff':
+      case '\uffff': {
         // An LF of a CRLF file, or a U+FFFF of the text, by the letter after it.
-        if (s.charAt(i + 1) === 'a') out += '\\x0a';
-        else out += '\uffff';
-        if (s.charAt(i + 1) === 'a' || s.charAt(i + 1) === 'b') i++;
+        const letter = s.charAt(i + 1);
+        out += letter === 'a' ? '\\x0a' : '\uffff';
+        if (letter === 'a' || letter === 'b') copied = special.lastIndex = i + 2;
         break;
+      }
       case '\n':
         out += '\\n';
         break;
@@ -113,17 +121,15 @@ export function encodePayloadText(s: string): string {
       case '%':
         out += previous === '{' ? `\\${c}` : c;
         break;
-      case '\\':
+      default:
+        // A backslash, the one character left of `special`.
         out +=
           ESCAPED_AFTER_BACKSLASH.has(s.charAt(i + 1)) || s.startsWith(LF_IN_CRLF, i + 1)
             ? '\\\\'
             : '\\';
-        break;
-      default:
-        out += c;
     }
   }
-  return out;
+  return out + s.slice(copied);
 }
 
 /** The escapes of `encodePayload`, and what each stands for. */
