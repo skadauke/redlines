@@ -542,6 +542,10 @@ function itemDepth(state: EditorState, line: Line): number {
   return block ? itemsAround(state, block).length : 0;
 }
 
+/** A line that ends in a hard break: two spaces, or a backslash that no other backslash escapes
+ * (`\\` is a backslash, no break, #291). */
+const HARD_BREAK_END = /(?<!\\)(?:\\\\)*(?:\\| {2,})$/;
+
 /** Why Return at the start of a nested list's first item, under the text of its item, is refused. */
 const NEEDS_BLANK_LINE =
   "An empty item can't start a list right under a line of text in Markdown, and a blank line there would make the item above it loose. Put a blank line above the list first.";
@@ -589,7 +593,7 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       above &&
       !BLANK.test(above.text) &&
       itemDepth(state, above) < items.length &&
-      !/(?:\\| {2,})$/.test(above.text)
+      !HARD_BREAK_END.test(above.text)
     ) {
       const joined = `\n${blankOf(item.indent)}\n${item.indent}${item.marker}${item.after}`;
       return {
@@ -622,7 +626,7 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
     // would stand on the blank line, with Track Changes on the key says so.
     const above = item.node.prevSibling ? null : lineAbove(state, item.line);
     const under = above && !BLANK.test(above.text) && itemDepth(state, above) < items.length;
-    if (under && tracking && items.length > 1 && /(?:\\| {2,})$/.test(above.text)) {
+    if (under && tracking && items.length > 1 && HARD_BREAK_END.test(above.text)) {
       // A hard break above: the break typed after its backslash would put a marker right behind it.
       return refuse(NEEDS_BLANK_AFTER_HARD_BREAK);
     }
