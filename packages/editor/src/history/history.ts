@@ -769,7 +769,9 @@ class HistoryState {
         (event.owner
           ? !this.isolated && lastEvent.owner?.group === event.owner.group
           : !lastEvent.owner &&
-            lastEvent.meta.person === event.meta.person &&
+            (!lastEvent.meta.person ||
+              !event.meta.person ||
+              lastEvent.meta.person === event.meta.person) &&
             !lastEvent.meta.touchedBy &&
             !lastChanges.empty &&
             (!userEvent || joinableUserEvent.test(userEvent)) &&
@@ -793,7 +795,7 @@ class HistoryState {
           lastEvent.owner,
           joinedLabel(lastEvent.label, event.label),
           {
-            person: lastEvent.meta.person,
+            person: lastEvent.meta.person ?? event.meta.person,
             marks: [...lastEvent.meta.marks, ...event.meta.marks],
             touchedBy: lastEvent.meta.touchedBy,
           },
