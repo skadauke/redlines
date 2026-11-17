@@ -2019,9 +2019,11 @@ A new paragraph.<!--split v2pc-->
   against the text that was asked for (apart from white space around breaks and the numbers of a
   list); if it still reads otherwise the form is refused, and the edit when no form can be written
   (`no-legal-placement`). Edits that take no break in front of a marker are not checked this way.
-- **An agent's `str_replace` at a pending insertion**, anyone's, leaves that insertion rejectable.
-  Where the insertion could be rejected before the edit and rejecting it would be refused after,
-  whatever the cause, the edit is refused (`no-legal-placement`) and writes nothing.
+- **An agent's `str_replace` next to a pending change**, anyone's, leaves it decidable. A change in
+  the blocks the edit touches that could be accepted before the edit, or rejected, can be after it.
+  The edit is written at the grain of its words; where that would leave a decision impossible, it is
+  written as a replacement of the unit that holds the marks (§3.12); where that would too, the edit
+  is refused (`no-legal-placement`) and writes nothing.
 
 ### 3.5 Atomic content
 
