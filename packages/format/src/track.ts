@@ -1269,7 +1269,14 @@ function coverBreaks(
     if (from === to) {
       // Text typed in the prefix of a block goes after it. Text typed in the blank lines between
       // two blocks stays where it is: it is a block of its own (format §3.4).
-      if (prefix < from && from < found.end) {
+      // Words typed at the start of a line whose prefix is only white space, the indent of an
+      // item's line, go after it too, as after a split: the line after a break that a substitution
+      // holds (#438). Not a bullet or a heading, which is typed in front of the prefix.
+      const indent =
+        prefix === from &&
+        /^[ \t]+$/.test(plan.text.slice(prefix, found.end)) &&
+        /^[\p{L}\p{M}\p{Extended_Pictographic}:]/u.test(typed);
+      if ((prefix < from || indent) && from < found.end) {
         from = found.end;
         to = from;
       }

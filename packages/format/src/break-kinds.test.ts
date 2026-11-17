@@ -3,7 +3,7 @@
 // reads alike.
 
 import { describe, expect, it } from 'vitest';
-import { applyChanges, restoredPayload } from './changes.ts';
+import { applyChanges, plainPayload, restoredPayload } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { decodePayload, encodePayload, LF_IN_CRLF } from './payload.ts';
@@ -25,6 +25,26 @@ describe('a payload keeps the kind of its line breaks', () => {
     expect(encodePayload('a\r\nb', '\n')).toBe('a\\x0d\\nb');
     expect(encodePayload('a\rb', '\n')).toBe('a\\x0db');
     expect(encodePayload('a\rb', '\r\n')).toBe('a\\x0db');
+  });
+
+  it('keeps a U+FFFF of the text, and reads the old form of an LF in a CRLF file the same (#943)', () => {
+    for (const style of ['\n', '\r\n'] as const) {
+      for (const text of [
+        '\uffff',
+        'a\uffffb',
+        'a\nb\uffff\n',
+        '\\\uffff',
+        '\uffffa',
+        '\uffffb\n',
+      ]) {
+        const written = encodePayload(text, style);
+        expect(restoredPayload(decodePayload(written), style), JSON.stringify(text)).toBe(text);
+      }
+    }
+    // A literal U+FFFF is written as it is, and an LF of a CRLF file is still `\x0a`.
+    expect(encodePayload('a\uffffb', '\r\n')).toBe('a\uffffb');
+    expect(encodePayload('a\nb\uffff', '\r\n')).toBe('a\\x0ab\uffff');
+    expect(plainPayload(decodePayload('a\\x0ab\uffff'))).toBe('a\nb\uffff');
   });
 
   it('writes every break as \\n where the text has no kind of its own', () => {
@@ -231,6 +251,13 @@ describe('the escapes never collide with text a person typed, and never leak', (
           literal,
         );
       }
+    }
+  });
+
+  it('gives back a deleted literal U+FFFF byte for byte, beside an LF in a CRLF file (#943)', () => {
+    for (const body of ['say \uffff\r\nthen\nmore', 'a\uffffb', 'x\nbeta\uffff\r\n\uffffz']) {
+      const cut = edit(body, { from: 0, to: body.length - 1, insert: '' });
+      expect(rejected(cut, 'k3x9'), JSON.stringify(body)).toBe(body);
     }
   });
 

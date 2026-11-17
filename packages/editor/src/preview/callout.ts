@@ -25,6 +25,9 @@ export interface CalloutMenuRequest {
   pos: number;
   type: string;
   anchor: HTMLElement;
+  /** Set for a Quarto callout (a `:::` div): the title that `title="…"` gives it now, or null. The
+   * menu then offers Quarto's five types and a title to set or clear. */
+  quarto?: { title: string | null };
 }
 
 export const calloutMenuEffect = StateEffect.define<CalloutMenuRequest>();

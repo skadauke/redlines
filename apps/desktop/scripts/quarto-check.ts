@@ -14,7 +14,15 @@
 // What it ran and how to read it: docs/research/quarto-check.md.
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -169,6 +177,15 @@ function render(dir: string, name: string, format: Format, label: string): strin
     dir,
   );
   if (run.status !== 0) throw new Error(`quarto render failed:\n${run.stderr.slice(-800)}`);
+  // `keep-typ` can leave the .typ next to the input instead of in the output folder (CI's first run
+  // with Quarto 1.11.9 saw it for the include probe): bring it in, so every render reads its own folder.
+  const typ = join(dir, name.replace(/\.qmd$/, '.typ'));
+  if (
+    format === 'typst' &&
+    !readdirSync(out).some((file) => file.endsWith('.typ')) &&
+    existsSync(typ)
+  )
+    renameSync(typ, join(out, name.replace(/\.qmd$/, '.typ')));
   return out;
 }
 

@@ -19,12 +19,13 @@ mod allowed;
 pub mod connections;
 pub mod gateway;
 mod latest;
+mod log;
 pub mod node;
 mod openclaw_agent;
 mod openclaw_chat;
 mod openclaw_nodes;
 mod openclaw_protocol;
-mod log;
+mod openclaw_tools;
 mod process;
 mod question;
 mod reach;
@@ -45,11 +46,11 @@ pub use process::Runs;
 pub use which::Programs;
 
 use acp::{AcpAgent, AcpAgents, Found};
-use connections::{Change, Connections, Kind, NewConnection, Secret, View};
-use openclaw_nodes::Nodes;
 use acp_runs::AcpRuns;
 use allowed::Agent;
+use connections::{Change, Connections, Kind, NewConnection, Secret, View};
 use log::RunInfo;
+use openclaw_nodes::Nodes;
 use process::{ExecOutput, RunMessage, Spec, Started};
 use relay::Relays;
 use setup::{Outcome, Setups};
@@ -321,7 +322,9 @@ pub fn openclaw_node_connect(
         .filter(|code| !code.trim().is_empty())
         .map(Secret::new)
         .transpose()
-        .map_err(|_| "That doesn’t look like a setup code: it is one line with no spaces.".to_owned())?;
+        .map_err(|_| {
+            "That doesn’t look like a setup code: it is one line with no spaces.".to_owned()
+        })?;
     app.state::<Nodes>()
         .connect(&app, &handle, code, &this_mac_name())
 }
@@ -383,6 +386,7 @@ pub fn acp_start(
             bridge,
             bundled,
             talk,
+            app.state::<Nodes>().tools(),
             || app.get_webview_window(owner).is_some(),
             move |message| {
                 let _ = on_line.send(message);

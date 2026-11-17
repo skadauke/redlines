@@ -15,6 +15,7 @@ import {
   boxChange,
   calloutMenuEffect,
   calloutName,
+  QUARTO_CALLOUTS,
   calloutOf,
   type CalloutMenuRequest,
   checkBoxEffect,
@@ -468,6 +469,31 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       if (!(error instanceof EditError)) throw error;
       notice(explain(error));
       return false;
+    }
+  };
+
+  /** Why a format change can't be written at `range`, or undefined where it can: asked before a menu
+   * offers it, so that an item is disabled with the reason, and no click is refused. It changes
+   * nothing and tells no one: no notice, and ids from a source of its own, so that the ids the editor
+   * draws are not spent. */
+  const whyNot = (range: Range, op: FormatOp): string | undefined => {
+    if (view.state.field(trackingField) && view.state.field(viewModeField) === 'raw') {
+      return RAW_READ_ONLY;
+    }
+    try {
+      writeFormat(view.state.doc.toString(), {
+        tracking: view.state.field(trackingField),
+        ranges: [range],
+        op,
+        author: personOf(options.author),
+        time: ledgerTime(new Date()),
+        dialect: view.state.facet(dialectFacet),
+        random: (n) => crypto.getRandomValues(new Uint8Array(n)),
+      });
+      return undefined;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      return error.message;
     }
   };
 
@@ -1163,10 +1189,48 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
    * button, and choosing a type is a block format change of the alert, tracked or plain.
    */
   function listenForCalloutMenu(): () => void {
-    const ask = ({ pos, type, anchor }: CalloutMenuRequest) => {
+    const ask = ({ pos, type, anchor, quarto }: CalloutMenuRequest) => {
       const { doc } = view.state;
       // The place is the alert's, if it still is: the text may have changed since the press.
       if (!Number.isInteger(pos) || pos < 0 || pos > doc.length) return;
+      if (quarto) {
+        // A Quarto callout: its five types, and its title. The place is still its opening fence.
+        if (!/^:{3,}[ \t]*(?:\{|callout-)/.test(doc.lineAt(pos).text)) return;
+        const here = { from: pos, to: pos };
+        openCalloutMenu(view, {
+          anchor,
+          types: QUARTO_CALLOUTS.map((each) => {
+            const reason =
+              each === type ? undefined : whyNot(here, { kind: 'callout', type: each });
+            return { type: each, name: calloutName(each), ...(reason ? { disabled: reason } : {}) };
+          }),
+          current: type,
+          choose: (to) => void format(here, { kind: 'callout', type: to }, 'format.callout'),
+          title: {
+            current: quarto.title,
+            ...(() => {
+              // Asked with a title other than the one it has, which would be no change at all.
+              const set = whyNot(here, {
+                kind: 'callout-title',
+                title: quarto.title === null ? 'x' : `${quarto.title}\u200b`,
+              });
+              const clear =
+                quarto.title === null
+                  ? undefined
+                  : whyNot(here, { kind: 'callout-title', title: null });
+              return {
+                check: (typed: string | null) =>
+                  whyNot(here, { kind: 'callout-title', title: typed }),
+                ...(set ? { disabled: set } : {}),
+                ...(clear ? { clearDisabled: clear } : {}),
+              };
+            })(),
+            set: (title) =>
+              void format(here, { kind: 'callout-title', title }, 'format.callout-title'),
+          },
+        });
+        return;
+      }
       if (!/^>[ \t]?\[![A-Za-z]/.test(doc.lineAt(pos).text)) return;
       // GitHub's types, and any other that a file has already: it is the file's to offer.
       const others: string[] = [];

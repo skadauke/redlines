@@ -96,6 +96,7 @@ export function createMacAgents(
           name: provider.name,
           readLimit: provider.readLimit,
           ...(provider.toolbox === false ? { toolbox: false as const } : {}),
+          ...(provider.nodeTools === true ? { nodeTools: true as const } : {}),
           ...(provider.models ? { models: provider.models } : {}),
           ...(provider.seesImages === true ? { seesImages: true as const } : {}),
           state,
@@ -208,8 +209,9 @@ export function createMacAgents(
       const chosen = options.models?.()[agent];
       const request = !listed(asked.model) && listed(chosen) ? { ...asked, model: chosen } : asked;
       // An agent that answers in text has no toolbox: no relay is opened for it, and it is not
-      // an error that its tools never started.
-      if (provider.toolbox === false) {
+      // an error that its tools never started. One that reaches the tools through a node does
+      // have the relay: the host connects to it when the run's session opens.
+      if (provider.toolbox === false && provider.nodeTools !== true) {
         for await (const event of provider.run(request, NO_TOOLS, signal)) {
           if (event.type === 'error') agents.forget();
           yield event;

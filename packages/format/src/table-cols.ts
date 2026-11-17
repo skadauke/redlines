@@ -28,7 +28,6 @@ import {
   rowMarker,
   setPositions,
 } from './table-rows.ts';
-import { EditError } from './errors.ts';
 import { commentsOfCols, tableExtent } from './table-rules.ts';
 import type { MarkRange, Parsed, Range, TextChange } from './types.ts';
 
@@ -447,9 +446,6 @@ export function originalOrder(table: TableRead): number[] {
  * markers and the deletion lines away; rejecting takes inserted columns away, writes deleted columns
  * back where they were and moves a moved column back to its place. Both halves of a move are decided
  * together. Every deletion's position is rewritten as the columns around it go and come.
- *
- * @throws EditError when the table would be left with no column of its own and a deleted column still
- *   pending (see below).
  */
 export function decideCols(
   text: string,
@@ -537,9 +533,22 @@ export function decideCols(
     // Every column that is left is an inserted one that goes: the table reads as inserted whole, with
     // nothing as its original, and it goes with them (#477). A column deleted and still pending is
     // the original of the table, which rejecting the last inserted column can't take with it
-    // (`wholeTableDeleted` writes that, with the deciding of the other).
-    const kept = colDeletions.some(({ line }) => !decidedLines.has(line));
-    if (kept) throw new EditError('A table keeps at least one column.', 'no-legal-placement');
+    // (`wholeTableDeleted` writes that, with the deciding of the other). Where `wholeTableDeleted` can't
+    // (several columns deleted, or a deleted column that is half of a move), the decision is widened to
+    // the unit that holds them, the table's columns: the deleted ones come back with the rejection
+    // (format §3.7, #891).
+    const kept = colDeletions.filter(({ line }) => !decidedLines.has(line));
+    if (kept.length > 0) {
+      return decideCols(
+        text,
+        parsed,
+        table,
+        new Set([...ids, ...kept.map(({ deletion }) => deletion.mark.id)]),
+        action,
+        original,
+        keepMark,
+      );
+    }
     const extent = tableExtent(text, table);
     const range = plainRange(text, parsed, { ...table, to: extent.to });
     return {
