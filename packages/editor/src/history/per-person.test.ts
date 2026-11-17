@@ -134,6 +134,26 @@ describe('undo, per person', () => {
     expect(said).toEqual([staleMessage('Bo')]);
   });
 
+  it('marks the steps others touched when several remote changes came, one after another', () => {
+    const { editor, said } = made('Hello world\n', false);
+    type(editor, 0, 0, 'A');
+    // A second step, apart from the first.
+    editor.view.dispatch({
+      changes: { from: 12, to: 12, insert: 'ZZ' },
+      userEvent: 'input.type',
+      annotations: Transaction.time.of(Date.now() + 5000),
+    });
+    // Bo edits twice before the first of them is undone, in text that changes the length ahead of it.
+    remote(editor, 0, 0, 'Oh. ');
+    remote(editor, 0, 0, 'And ');
+    remote(editor, 21, 21, 'Q');
+    expect(bodyOf(editor)).toBe('And Oh. AHello worldZQZ\n');
+    undoSayingWhy(editor.view);
+    expect(said).toEqual([staleMessage('Bo')]);
+    undoSayingWhy(editor.view);
+    expect(bodyOf(editor)).toBe('And Oh. Hello worldZQZ\n');
+  });
+
   it('puts the caret on what it gave back', () => {
     const { editor } = made('Hello world\n', true);
     type(editor, 5, 5, ' there');

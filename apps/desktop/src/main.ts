@@ -54,6 +54,7 @@ import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { joinSession, type Session } from './session.ts';
+import type { SyncState } from '@redlines/sync';
 import { tauriSessionPorts } from './session-tauri.ts';
 import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
@@ -216,6 +217,16 @@ function askAboutThisWindow(): Promise<boolean> {
 
 /** This document's session, when it is in several windows (src/session.ts). */
 let session: Session | null = null;
+let sessionState: SyncState = 'synced';
+let sessionPeers = 0;
+
+/** Where the document stands among its windows, for the title bar; nothing for a document alone. */
+function sessionStatus(): string | undefined {
+  if (!session) return undefined;
+  if (sessionState === 'offline') return 'Offline: your edits are kept';
+  if (sessionState === 'ended') return 'No longer in the session';
+  return sessionPeers > 0 ? `In ${sessionPeers + 1} windows` : undefined;
+}
 
 /** Joins the session of the document at `path`, as its leader when there is none yet. */
 async function beginSession(path: string, follow = false): Promise<void> {
@@ -229,6 +240,14 @@ async function beginSession(path: string, follow = false): Promise<void> {
     onSaved: (text) => controller.savedBySession(text),
     onLoaded: () => controller.sessionLoaded(),
     onLead: () => controller.becameLeader(),
+    onState: (state) => {
+      sessionState = state;
+      render();
+    },
+    onPeers: (peers) => {
+      sessionPeers = peers.length;
+      render();
+    },
     notice: (message) => notice.flash(message),
   });
   controller.enterSession(session);
@@ -238,6 +257,8 @@ async function beginSession(path: string, follow = false): Promise<void> {
 async function endSession(): Promise<void> {
   const ended = session;
   session = null;
+  sessionPeers = 0;
+  sessionState = 'synced';
   controller.leaveSession();
   await ended?.stop();
 }
@@ -1612,6 +1633,7 @@ function render(): void {
   titleBar.update({
     name: doc.name,
     dirty: doc.dirty,
+    ...(sessionStatus() ? { sync: sessionStatus()! } : {}),
     fileDraggable: doc.path !== null && canDragFile,
     plainOnly: ui.kind === 'plain-only',
     view: ui.view,

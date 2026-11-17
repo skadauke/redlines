@@ -9,9 +9,15 @@ import { EditorState, Annotation, ChangeSet, Text, Transaction } from '@codemirr
 import { SyncClient, Replica } from '@redlines/collab';
 import type { Pending, SyncState, Transport } from '@redlines/collab';
 import type { Credential, Peer } from '@redlines/collab';
-import { anchorIntent, intentOf, rederiveIntent } from '@redlines/editor';
+import { anchorIntent, intentOf, rederiveIntent, remoteStep } from '@redlines/editor';
 import type { Editor, Intent } from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
+import { ensureStyle, presenceExtension, showPeers } from './presence.ts';
+import type { PeerView } from './presence.ts';
+import type { Remote } from '@redlines/collab';
+
+export { FLAG_MS, PALETTE, peersShown, STYLE, STYLE_ID } from './presence.ts';
+export type { PeerView } from './presence.ts';
 
 export type { SyncState } from '@redlines/collab';
 
@@ -35,6 +41,8 @@ export interface SyncOptions {
   /** A short message for the person; defaults to the console. */
   notice?: (message: string) => void;
   onState?: (state: SyncState) => void;
+  /** The other windows of the session changed: who is there, in each one's color. */
+  onPeers?: (peers: readonly Peer[]) => void;
   /** Called when the authority's text replaced the editor's (a joining window). */
   onLoaded?: () => void;
   retryMs?: number;
@@ -45,7 +53,7 @@ export interface SyncBinding {
   readonly replica: Replica<EditNote>;
   /** Resolves when everything made here is confirmed by the authority. */
   settled(): Promise<void>;
-  /** Other people's presence, as the authority last said it. */
+  /** The other windows, as the authority last said them. */
   readonly peers: readonly Peer[];
   /** Leaves the session; the editor keeps its text and is the window's alone again. */
   stop(): Promise<void>;
@@ -80,30 +88,105 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
     options.hosts ? view.state.doc : '',
     options.hosts ? (options.version ?? 0) : 0,
   );
-  const peers: Peer[] = [];
+  let peers: Peer[] = [];
+  /** What each peer last said, to place again when the text or this window's version moves. */
+  let lastPeers: readonly Peer[] = [];
+  const seen = new Map<string, { key: string; stamp: number }>();
+  ensureStyle();
 
-  const apply = (spec: { changes: ChangeSet | { from: number; to: number; insert: string } }) => {
+  const apply = (
+    spec: { changes: ChangeSet | { from: number; to: number; insert: string } },
+    from?: { person: string; name: string },
+  ) => {
     view.dispatch({
       ...spec,
       annotations: [
         received.of(true),
         Transaction.addToHistory.of(false),
         Transaction.remote.of(true),
+        // Another person's edit is theirs for Undo: it stays when this person takes back their own.
+        ...(from ? [remoteStep.of(from)] : []),
       ],
       filter: false,
     });
   };
 
-  const removeListener = editor.addExtension(
+  /** What a window is called: its name from the authority, or the author's handle. */
+  const nameOf = (clientID: string, by: string): string =>
+    peers.find((peer) => peer.clientID === clientID)?.name ?? by;
+
+  /** The other windows' carets and selections, placed in what this window shows. */
+  const placePeers = () => {
+    const views: PeerView[] = [];
+    for (const peer of lastPeers) {
+      const state = peer.state as { v?: unknown; h?: unknown; a?: unknown };
+      if (
+        typeof state.v !== 'number' ||
+        typeof state.h !== 'number' ||
+        typeof state.a !== 'number'
+      ) {
+        continue;
+      }
+      const head = replica.mapFrom(state.h, state.v);
+      const anchor = replica.mapFrom(state.a, state.v);
+      // A window that is ahead of this one: placed once this one has caught up.
+      if (head === null || anchor === null) continue;
+      const key = `${state.v}:${state.h}:${state.a}`;
+      const before = seen.get(peer.clientID);
+      const stamp = before?.key === key ? before.stamp : Date.now();
+      seen.set(peer.clientID, { key, stamp });
+      views.push({
+        clientID: peer.clientID,
+        name: peer.name,
+        color: peer.color ?? 'p1',
+        head: replica.toShown(head),
+        anchor: replica.toShown(anchor),
+        stamp,
+      });
+    }
+    showPeers(view, views);
+  };
+
+  const heard = (next: readonly Peer[]) => {
+    lastPeers = next;
+    peers = [...next];
+    for (const id of [...seen.keys()]) {
+      if (!next.some((peer) => peer.clientID === id)) seen.delete(id);
+    }
+    placePeers();
+    options.onPeers?.(peers);
+  };
+
+  /** Says where this window's caret is, a moment after it moves, and now and then. */
+  let said: ReturnType<typeof setTimeout> | null = null;
+  const sayWhere = () => {
+    if (said) return;
+    said = setTimeout(() => {
+      said = null;
+      const { head, anchor } = view.state.selection.main;
+      void client.presence({
+        v: replica.version,
+        h: replica.toConfirmed(head),
+        a: replica.toConfirmed(anchor),
+      });
+    }, 80);
+  };
+  const heartbeat = setInterval(sayWhere, 10_000);
+
+  const removeListener = editor.addExtension([
+    presenceExtension(),
     EditorView.updateListener.of((update) => {
+      if (update.selectionSet || update.docChanged) sayWhere();
       if (!update.docChanged) return;
+      let local = false;
       for (const tr of update.transactions) {
         if (!tr.docChanged || tr.annotation(received)) continue;
         replica.local(tr.changes, tr.startState.doc, { intent: intentOf(tr) });
+        local = true;
       }
-      client.edited();
+      if (local) client.edited();
     }),
-  );
+  ]);
 
   const client = new SyncClient<EditNote>({
     transport: options.transport,
@@ -112,8 +195,20 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
     loaded: options.hosts,
     ...(options.retryMs ? { retryMs: options.retryMs } : {}),
     notice,
-    ...(options.onState ? { onState: options.onState } : {}),
-    showRemote: (changes) => apply({ changes }),
+    onState: (state) => {
+      if (state === 'synced') sayWhere();
+      options.onState?.(state);
+    },
+    onPeers: heard,
+    showRemote: (remote: Remote) => {
+      apply(
+        { changes: remote.changes },
+        // A window of the same person is another editor for Undo, as another person is.
+        { person: `${remote.by}:${remote.clientID}`, name: nameOf(remote.clientID, remote.by) },
+      );
+      placePeers();
+      sayWhere();
+    },
     showAll: (doc) => {
       const change = between(view.state.doc, doc);
       if (change) apply({ changes: change });
@@ -130,9 +225,14 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
     client,
     replica,
     settled: () => client.sync(),
-    peers,
+    get peers() {
+      return peers;
+    },
     stop: async () => {
       removeListener();
+      clearInterval(heartbeat);
+      if (said) clearTimeout(said);
+      showPeers(view, []);
       await client.stop();
     },
   };

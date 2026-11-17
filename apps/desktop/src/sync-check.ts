@@ -39,8 +39,8 @@ const DOCUMENT = [
 ].join('\n');
 
 const PEOPLE: Record<string, Identity> = {
-  ada: { handle: 'ada', name: 'Ada Lovelace', role: 'owner' },
-  bo: { handle: 'bo', name: 'Bo Chen', role: 'editor' },
+  ada: { handle: 'ada', name: 'Ada (window 1)', role: 'owner', color: 'p1' },
+  bo: { handle: 'bo', name: 'Bo (window 2)', role: 'editor', color: 'p2' },
 };
 
 interface Pane {
@@ -60,7 +60,7 @@ function pane(host: HTMLElement, who: 'ada' | 'bo', hub: Hub, hosts: boolean): P
   host.append(holder);
   const editor = createEditor(mount, {
     doc: hosts ? DOCUMENT : '',
-    author: { handle: who, name: PEOPLE[who]!.name },
+    author: { handle: who, name: who === 'ada' ? 'Ada Lovelace' : 'Bo Chen' },
   });
   const binding = syncEditor(editor, {
     transport: memoryTransport(hub, `${who}-1`),
@@ -182,6 +182,62 @@ export async function runSyncCheck(): Promise<void> {
     left.editor.view.state.doc.toString() === authority.text &&
       right.editor.view.state.doc.toString() === authority.text &&
       parse(authority.text).warnings.length === 0,
+  );
+
+  // Each window's undo takes back its own edit and leaves the other's: Ada types, Bo types
+  // elsewhere, Ada undoes (through the browser's own Undo).
+  typeAfter(left.editor, 'is for Ada', ' ZED');
+  typeAfter(right.editor, 'one word', ' QUX');
+  await settled();
+  // The same undo as the keyboard's and the Edit menu's.
+  left.editor.focus();
+  left.editor.undo();
+  const undone = await waitFor(() => !authority.text.includes(' ZED'));
+  await settled();
+  report(
+    'Undo takes back this window’s own edit and leaves the other window’s',
+    undone &&
+      authority.text.includes(' QUX') &&
+      left.editor.view.state.doc.toString() === authority.text,
+    { text: authority.text },
+  );
+
+  // Where the other window's caret and selection are, in its color, with its name.
+  const at = (editor: Editor, text: string) => editor.view.state.doc.toString().indexOf(text);
+  const from = at(left.editor, 'both of them');
+  left.editor.view.dispatch({ selection: { anchor: from, head: from + 'both of them'.length } });
+  right.editor.view.dispatch({ selection: { anchor: at(right.editor, 'Bo’s') + 2 } });
+  const caretIn = (editor: Editor) =>
+    editor.view.dom.querySelector<HTMLElement>('.rl-presence-caret');
+  const tintIn = (editor: Editor) =>
+    editor.view.dom.querySelector<HTMLElement>('.rl-presence-selection');
+  // Presence follows the move a moment later; the caret and the selection are those it ended on.
+  const seen = await waitFor(
+    () =>
+      tintIn(right.editor)?.textContent === 'both of them' &&
+      !!caretIn(left.editor)?.textContent?.includes('Bo') &&
+      !!caretIn(right.editor)?.textContent?.includes('Ada'),
+  );
+  const rightCaret = caretIn(right.editor);
+  const leftCaret = caretIn(left.editor);
+  report('each window shows the other’s caret with its name', seen, {
+    right: rightCaret?.textContent,
+    left: leftCaret?.textContent,
+  });
+  const tint = tintIn(right.editor);
+  report(
+    'the other window’s selection is tinted over the same words',
+    tint?.textContent === 'both of them',
+    { tint: tint?.textContent },
+  );
+  const colorOf = (el: HTMLElement | null | undefined) =>
+    el ? getComputedStyle(el).borderLeftColor : null;
+  const adaInBo = colorOf(rightCaret);
+  const boInAda = colorOf(leftCaret);
+  report(
+    'a window has one color in every window, and the two differ',
+    !!adaInBo && !!boInAda && adaInBo !== boInAda && adaInBo === 'rgb(47, 107, 208)',
+    { adaInBo, boInAda },
   );
   console.log(`SYNC-CHECK done ${passed} passed, ${failed} failed`);
 }

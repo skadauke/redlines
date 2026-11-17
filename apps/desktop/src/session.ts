@@ -15,12 +15,13 @@ import {
   type Call,
   type DurableLog,
   type Notice,
+  type Peer,
   type Reply,
   type Transport,
   type WalRecord,
 } from '@redlines/collab';
 import type { Editor } from '@redlines/editor';
-import { syncEditor, type SyncBinding, type SyncState } from '@redlines/sync';
+import { PALETTE, syncEditor, type SyncBinding, type SyncState } from '@redlines/sync';
 
 /** What the app answers a window that joins a document's session. */
 export interface Joined {
@@ -81,6 +82,8 @@ export interface SessionOptions {
   /** This window leads from now on: the window that did closed. */
   onLead?(): void;
   onState?(state: SyncState): void;
+  /** The other windows of the session changed. */
+  onPeers?(peers: readonly Peer[]): void;
   notice?(message: string): void;
   /**
    * The window has no text of its own and joins a session that is there: if there is none, it
@@ -254,12 +257,33 @@ export class PortLog implements DurableLog {
   }
 }
 
-/** Anyone in a session of this app's windows may be in it: they are the person's own. */
+/**
+ * The number a window is known by in a session: the main window is the first, `doc-<n>` the one
+ * after it. It comes from the label, so that the window that leads next gives every window the
+ * same name and color as the one before it.
+ */
+export function ordinalOf(label: string): number {
+  const found = /(\d+)$/.exec(label);
+  return label === 'main' || !found ? 1 : Number(found[1]) + 1;
+}
+
+/**
+ * Anyone in a session of this app's windows may be in it: they are the person's own. Each window is
+ * named for its number, and has a color of its own that every window shows it in.
+ */
 function authenticateFor(person: { handle: string; name: string }) {
-  return (credential: unknown): AuthResult =>
-    typeof credential === 'object' && credential !== null && 'key' in credential
-      ? { handle: person.handle, name: person.name, role: 'owner' }
-      : { error: 'forbidden' };
+  return (credential: unknown): AuthResult => {
+    if (typeof credential !== 'object' || credential === null || !('key' in credential)) {
+      return { error: 'forbidden' };
+    }
+    const n = ordinalOf(String(credential.key));
+    return {
+      handle: person.handle,
+      name: `${person.name} (window ${n})`,
+      role: 'owner',
+      color: PALETTE[(n - 1) % PALETTE.length]!,
+    };
+  };
 }
 
 /** Joins the session of the document `options.path`, or starts it when there is none. */
@@ -369,15 +393,23 @@ export async function joinSession(
     }, options.saveDelayMs ?? 1000);
   }
 
-  /** Answers the calls other windows make to this one, the leader. */
+  /** While this window takes the lead over, a call that comes waits for the hub. */
+  let taking: Promise<void> | null = null;
+  let served = false;
+
+  /** Answers the calls other windows make to this one, the leader. Listens once. */
   const serve = async () => {
+    if (served) return;
+    served = true;
     await listen(EVENTS.call, (payload) => {
       const { from, id, call } = payload as { from: string; id: number; call: Call };
-      if (!hub) return;
       const answer = (reply: Reply) => ports.send(from, EVENTS.reply, { id, reply });
       const refuse = () =>
         answer({ ok: false, error: 'forbidden', message: 'Not a window of this session.' });
       void (async () => {
+        // The others ask as soon as the app says who leads: the answer waits for the hub.
+        if (taking) await taking.catch(() => {});
+        if (!hub || !leading) return;
         if (call.call === 'hello') {
           // Only a window the app counts in the session may join it.
           const members = await ports.members(path).catch(() => [] as string[]);
@@ -415,13 +447,22 @@ export async function joinSession(
 
   const clientID = `${ports.label}`;
   let transport: Switch;
+  // What the leader answers, and tells: heard by every window, for one that leads may be replaced.
+  await listen(EVENTS.reply, (payload) => {
+    const { id, reply } = payload as { id: number; reply: Reply };
+    remote?.replied(id, reply);
+  });
+  await listen(EVENTS.notice, (payload) => {
+    remote?.heard((payload as { notice: Notice }).notice);
+  });
+  // Every window listens for calls: the one that leads next must not miss the first.
+  await serve();
   if (leading) {
     const left =
       joined.left && joined.left.base === editor.view.state.doc.toString() ? joined.left : null;
     hub = await host(editor.view.state.doc.toString(), left);
     windowOf.set(clientID, ports.label);
     transport = new Switch(memoryTransport(hub, clientID));
-    await serve();
     if (left && hub.authority.text !== editor.view.state.doc.toString()) {
       // What the last run confirmed and never saved comes back, as a reload does: unsaved.
       editor.reloadDoc(hub.authority.text);
@@ -429,13 +470,6 @@ export async function joinSession(
   } else {
     remote = new Remote(ports, leader);
     transport = new Switch(remote);
-    await listen(EVENTS.reply, (payload) => {
-      const { id, reply } = payload as { id: number; reply: Reply };
-      remote?.replied(id, reply);
-    });
-    await listen(EVENTS.notice, (payload) => {
-      remote?.heard((payload as { notice: Notice }).notice);
-    });
   }
   await listen(EVENTS.saved, (payload) => {
     const { id, text } = payload as { id?: number; text: string | null };
@@ -454,6 +488,7 @@ export async function joinSession(
     ...(leading && hub ? { version: hub.authority.version } : {}),
     notice: (message) => options.notice?.(message),
     onState: (state) => options.onState?.(state),
+    onPeers: (peers) => options.onPeers?.(peers),
     onLoaded: () => options.onLoaded?.(),
     retryMs: 500,
   });
@@ -463,7 +498,9 @@ export async function joinSession(
   const moved = (change: Moved): void => {
     epoch = change.epoch;
     leader = change.leader;
-    if (change.leader === ports.label) void takeOver();
+    if (change.leader === ports.label) {
+      if (!leading) takeOver();
+    } else if (leading) demote(change.leader);
     else if (remote) {
       remote.retarget(change.leader);
       binding.client.rejoin();
@@ -472,24 +509,42 @@ export async function joinSession(
   onMoved = moved;
   for (const change of early.splice(0)) moved(change);
 
-  async function takeOver(): Promise<void> {
-    try {
-      const log = await ports.walRead(path);
-      if (!log) throw new Error('The session has no log to take over from.');
-      windowOf.clear();
-      windowOf.set(clientID, ports.label);
-      hub = await host(log.base, log);
-      leading = true;
-      remote?.retarget(ports.label);
-      transport.use(memoryTransport(hub, clientID));
-      remote = null;
-      await serve();
-      binding.client.rejoin();
-      options.onLead?.();
-    } catch (error) {
-      console.error('Could not take over the session', error);
-      options.notice?.('The session could not go on in this window.');
-    }
+  function takeOver(): void {
+    if (taking) return;
+    // Set before anything waits: the others ask the moment the app says who leads, and a call
+    // that comes meanwhile waits for the hub (`serve`).
+    taking = (async () => {
+      try {
+        const log = await ports.walRead(path);
+        if (!log) throw new Error('The session has no log to take over from.');
+        windowOf.clear();
+        windowOf.set(clientID, ports.label);
+        hub = await host(log.base, log);
+        leading = true;
+        remote?.retarget(ports.label);
+        transport.use(memoryTransport(hub, clientID));
+        remote = null;
+        binding.client.rejoin();
+        options.onLead?.();
+      } catch (error) {
+        console.error('Could not take over the session', error);
+        options.notice?.('The session could not go on in this window.');
+      }
+    })().finally(() => {
+      taking = null;
+    });
+  }
+
+  /** The window that led was replaced (a tab that hung, and ran again): it hosts no more. */
+  function demote(to: string): void {
+    hub?.authority.end();
+    hub = null;
+    leading = false;
+    windowOf.clear();
+    if (saveTimer) clearTimeout(saveTimer);
+    remote = new Remote(ports, to);
+    transport.use(remote);
+    binding.client.rejoin();
   }
 
   const session: Session = {

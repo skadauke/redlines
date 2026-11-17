@@ -78,6 +78,12 @@ export interface StepMeta {
   touchedBy: string | null;
   /** Whether another person typed inside the step's text, which rejecting its marks would take. */
   tainted?: boolean;
+  /**
+   * Whether another person's change has come since, and with it the ledger may have changed: a
+   * tracked step is then taken back by rejecting its own marks, not by writing its inverse over
+   * a ledger that is no longer the one it left.
+   */
+  shared?: boolean;
 }
 
 const NO_META: StepMeta = { person: null, marks: [], touchedBy: null };
@@ -260,7 +266,10 @@ const historyField_ = StateField.define<HistoryState>({
       );
     }
     const remote = tr.annotation(remoteStep);
-    if (remote && !tr.changes.empty) return state.addRemote(tr.changes.desc, remote);
+    if (remote && !tr.changes.empty) {
+      const ledger = tr.startState.field(parsedField, false)?.ledgerRange?.from ?? null;
+      return state.addRemote(tr.changes, remote, ledger);
+    }
     if (tr.effects.some((effect) => effect.is(dropStaleEffect))) return state.dropStale();
     const drop = tr.effects.find((effect) => effect.is(dropStepsEffect));
     if (drop) {
@@ -424,6 +433,20 @@ class HistEvent {
     this.meta = meta;
   }
 
+  withShared(): HistEvent {
+    if (this.meta.shared) return this;
+    return new HistEvent(
+      this.changes,
+      this.effects,
+      this.mapped,
+      this.startSelection,
+      this.selectionsAfter,
+      this.owner,
+      this.label,
+      { ...this.meta, shared: true },
+    );
+  }
+
   withTouched(name: string, tainted: boolean): HistEvent {
     return new HistEvent(
       this.changes,
@@ -433,7 +456,7 @@ class HistEvent {
       this.selectionsAfter,
       this.owner,
       this.label,
-      { ...this.meta, touchedBy: name, tainted },
+      { ...this.meta, touchedBy: name, tainted, shared: true },
     );
   }
 
@@ -654,6 +677,17 @@ function touches(changes: ChangeSet, remote: ChangeDesc): boolean {
     }
   });
   return touched;
+}
+
+/** `changes` without the parts that write the ledger (from `ledger` on, or a ledger's own text). */
+function withoutLedger(changes: ChangeSet, ledger: number | null): ChangeDesc {
+  const kept: { from: number; to: number; insert: string }[] = [];
+  changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+    const text = inserted.toString();
+    if ((ledger !== null && from >= ledger) || text.includes('<!-- redlines')) return;
+    kept.push({ from, to, insert: text });
+  });
+  return ChangeSet.of(kept, changes.length).desc;
 }
 
 /** Whether `remote` inserts text strictly inside a range `changes` takes back. */
@@ -899,19 +933,40 @@ class HistoryState {
     );
   }
 
-  /** Another person's change: the steps it touched, and then it is mapped away like any other. */
-  addRemote(mapping: ChangeDesc, remote: { person: string; name: string }): HistoryState {
+  /**
+   * Another person's change: the steps it touched, and then it is mapped away like any other.
+   * `ledger` is where the ledger starts in the text it changed: what it writes there (the entries of
+   * its own marks) is not the text of anyone's step, and touches none.
+   */
+  addRemote(
+    changes: ChangeSet,
+    remote: { person: string; name: string },
+    ledger: number | null,
+  ): HistoryState {
     const done = this.done.slice();
+    const mapping = changes.desc;
     let m = mapping;
+    // The same change without what it writes in the ledger, to tell which steps it touched.
+    let body = withoutLedger(changes, ledger);
     for (let i = done.length - 1; i >= 0; i--) {
       const event = done[i]!;
       if (!event.changes) continue;
       const { person, touchedBy } = event.meta;
-      if (person && person !== remote.person && !touchedBy && touches(event.changes, m)) {
-        done[i] = event.withTouched(remote.name, insertsInside(event.changes, m));
+      if (person && person !== remote.person && !touchedBy && touches(event.changes, body)) {
+        done[i] = event.withTouched(remote.name, insertsInside(event.changes, body));
+      } else if (person && person !== remote.person) {
+        done[i] = event.withShared();
       }
-      // The change in the text from before this step.
+      // The change in the text from before this step. The steps below keep the coordinates they had
+      // before the remote changes that came since, which are held in `mapped` and reach them when
+      // this step is popped: so those are taken out again (a change that came earlier, in another
+      // length, would otherwise not fit the step below).
       m = m.mapDesc(event.changes);
+      body = body.mapDesc(event.changes);
+      if (event.mapped) {
+        m = m.mapDesc(event.mapped.invertedDesc);
+        body = body.mapDesc(event.mapped.invertedDesc);
+      }
     }
     return new HistoryState(
       done,
@@ -965,12 +1020,18 @@ class HistoryState {
       // Per-person undo: a tracked step that others have touched is taken back by rejecting its own
       // marks, which leaves their text; the caret goes to what it gave back.
       const personal =
-        side === DONE && event.meta.person && event.meta.touchedBy ? rejection(event, state) : null;
+        side === DONE &&
+        event.meta.person &&
+        (event.meta.touchedBy || (event.meta.shared && event.meta.marks.length))
+          ? rejection(event, state)
+          : null;
       if (personal) {
         let from = -1;
         let to = 0;
+        // The first change is the text itself; what follows it in the ledger is bookkeeping.
         personal.iterChangedRanges((_fa, _ta, fromB, toB) => {
-          if (from < 0) from = fromB;
+          if (from >= 0) return;
+          from = fromB;
           to = toB;
         });
         return state.update({
