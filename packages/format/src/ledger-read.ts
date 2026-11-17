@@ -72,11 +72,16 @@ const HIDDEN_HEAD = /(?:^|[\r\n])<!-- redlines[ \t]*(?=[\r\n]|$)/;
  * find that ledger (format §5.1). A ledger that is found is never covered by a comment. Pass the
  * file's `scan` if you have it.
  */
-export function ledgerHidden(text: string, scanned: Scan = scan(text)): boolean {
+export function ledgerHidden(text: string, scanned?: Scan): boolean {
   if (!text.includes('<!-- redlines')) return false;
-  const found = scanned.ledgers.at(-1)?.start ?? -1;
-  for (const part of scanned.verbatim) {
-    if (part.kind !== 'comment' || part.to <= found) continue;
+  const read = scanned ?? scan(text);
+  // A ledger that is found is read: a comment that holds another `<!-- redlines` line is an
+  // ordinary comment about one.
+  if (read.ledgers.length > 0) return false;
+  for (const part of read.verbatim) {
+    if (part.kind !== 'comment') continue;
+    // The comment's `-->` ends the file: it is the ledger's own.
+    if (text.slice(part.to).trim() !== '') continue;
     if (HIDDEN_HEAD.test(text.slice(part.from + 4, part.to))) return true;
   }
   return false;
