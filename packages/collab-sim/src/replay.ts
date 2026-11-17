@@ -32,6 +32,8 @@ export interface ReplayConfig {
   offlineP?: number;
   render?: boolean;
   net?: NetConfig;
+  /** The range of a long outage in ms (default 2 000 to 8 000). */
+  offlineMs?: [number, number];
 }
 
 interface Op {
@@ -92,6 +94,9 @@ export interface ReplayStats {
   outages: number;
   /** Nodes derived, and states shown. */
   derived: number;
+  /** What went over the links: messages, bytes of intents (JSON), and of the requests that a link
+   * coming back sends (counted at 12 bytes, about a version vector of five replicas). */
+  bytes: { messages: number; ops: number; sync: number };
 }
 
 export interface ReplayResult {
@@ -181,6 +186,8 @@ class Replica {
   sync(peer: Replica): void {
     const link = this.world.linkBetween(this, peer);
     const mine = new Set(this.ids);
+    this.world.stats.bytes.sync += 12;
+    this.world.stats.bytes.messages++;
     link.send(this.world.direction(this, peer), () => {
       for (const op of peer.known) {
         if (!mine.has(op.id)) this.world.send(peer, this, op);
@@ -215,6 +222,7 @@ class ReplayWorld {
     latencies: [],
     outages: 0,
     derived: 0,
+    bytes: { messages: 0, ops: 0, sync: 0 },
   };
   private readonly options: { render: boolean };
 
@@ -313,6 +321,8 @@ class ReplayWorld {
   }
 
   send(from: Replica, to: Replica, op: Op): void {
+    this.stats.bytes.messages++;
+    this.stats.bytes.ops += JSON.stringify(op).length;
     this.linkBetween(from, to).send(this.direction(from, to), () => to.receive(op, from));
   }
 
@@ -351,6 +361,7 @@ export function runReplay(config: ReplayConfig): ReplayResult {
   const ops = config.ops ?? 20;
   const net = config.net ?? DEFAULT_NET;
   const span = ops * 1400;
+  const long = config.offlineMs ?? [2000, 8000];
 
   for (let i = 0; i < count; i++) world.replicas.push(new Replica(i, world, rng.fork()));
   for (const a of world.replicas) {
@@ -377,7 +388,7 @@ export function runReplay(config: ReplayConfig): ReplayResult {
     };
     const plan = rng.fork();
     if (plan.chance(config.offlineP ?? 0.4))
-      outage(plan.next() * span * 0.8, 2000 + plan.next() * 6000);
+      outage(plan.next() * span * 0.8, long[0] + plan.next() * (long[1] - long[0]));
     if (plan.chance(0.3)) outage(plan.next() * span, 100 + plan.next() * 900);
     let t = plan.next() * 500;
     for (let n = 0; n < ops; n++) {
