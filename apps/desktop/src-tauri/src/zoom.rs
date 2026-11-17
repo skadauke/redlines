@@ -342,7 +342,16 @@ mod tests {
     #[test]
     fn the_ladder_is_the_pages() {
         let page = include_str!("../../src/text-size.ts");
-        assert!(page.contains("[0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]"));
+        // The page's `ZOOM_LADDER`, read as numbers: a rung changed in one file only fails here.
+        let start = page.find("export const ZOOM_LADDER").expect("ZOOM_LADDER");
+        let literal = &page[start..];
+        let literal = &literal[literal.find("= [").expect("its literal") + 3..];
+        let literal = &literal[..literal.find(']').expect("its end")];
+        let theirs: Vec<f64> = literal
+            .split(',')
+            .map(|rung| rung.trim().parse().expect("a number"))
+            .collect();
+        assert_eq!(theirs, LADDER);
         assert!(is_rung(1.25));
         for not in [1.3, 0.0, 2.5, f64::NAN] {
             assert!(!is_rung(not), "{not}");
