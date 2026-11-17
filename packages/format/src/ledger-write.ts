@@ -39,8 +39,25 @@ const YAML_WORD = /^(?:y|n|yes|no|on|off|true|false|null)$/i;
 // eslint-disable-next-line no-control-regex
 const CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g;
 
+const CONTROLS_SPLIT = new RegExp(CONTROLS.source);
+
 function escapeControls(encoded: string): string {
   return encoded.replace(CONTROLS, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+}
+
+/** The payload of a value, with its control characters escaped. A backslash before one is written
+ * `\\`, since the `\x` of the escape would else pair with it (format §5.5). */
+function encodeValue(value: string): string {
+  const parts = value.split(CONTROLS_SPLIT);
+  const found = value.match(CONTROLS) ?? [];
+  return parts
+    .map((part, i) => {
+      const last = i === parts.length - 1;
+      const encoded =
+        !last && part.endsWith('\\') ? encodePayload(`${part}x`).slice(0, -1) : encodePayload(part);
+      return last ? encoded : encoded + escapeControls(found[i] ?? '');
+    })
+    .join('');
 }
 
 /** A key that needs no quotes: what ids and handles are made of, with no `--`. */
@@ -54,14 +71,19 @@ const PLAIN_KEY = /^[A-Za-z_](?:[A-Za-z0-9_]|-(?!-))*$/;
  */
 function key(value: string): string {
   if (PLAIN_KEY.test(value) && !YAML_WORD.test(value)) return value;
-  const quoted = escapeControls(value.replaceAll('\\', '\\\\').replaceAll('"', '\\"'));
+  // A key is on one line, so a line break in it is an escape, as is what YAML 1.1 takes for one.
+  const quoted = escapeControls(value.replaceAll('\\', '\\\\').replaceAll('"', '\\"'))
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\r')
+    .replaceAll(String.fromCharCode(0x2028), '\\u2028')
+    .replaceAll(String.fromCharCode(0x2029), '\\u2029');
   return `"${quoted.replace(/(?<=-)-/g, '\\x2d')}"`;
 }
 
 /** A one-line string as a YAML scalar: plain when that reads back the same in every parser, else
  * double-quoted. The payload escapes apply (format §5.5). */
 function scalar(value: string): string {
-  const encoded = escapeControls(encodePayload(value));
+  const encoded = encodeValue(value);
   const plain =
     TIME.test(encoded) ||
     (PLAIN.test(encoded) &&
@@ -82,7 +104,8 @@ function block(indent: string, name: string, text: string): string[] {
       let written: string;
       if (line === '') written = '\\';
       else if (line === '\\') written = '\\\\';
-      else written = escapeControls(encodePayload(line));
+      else if (/^[ \t]+$/.test(line)) written = line.replace(/ /g, '\\x20').replace(/\t/g, '\\x09');
+      else written = encodeValue(line);
       // The first line sets the block's indentation, so its leading spaces can't stay as they are.
       if (i === 0) written = written.replace(/^ +/, (spaces) => '\\x20'.repeat(spaces.length));
       return `${indent}  ${written}`;

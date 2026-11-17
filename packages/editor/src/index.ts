@@ -712,7 +712,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const brought = onFile?.changesToDoc(made.changes, fileLineBreak(view.state) ?? '\n');
     view.dispatch({
       changes: brought ? brought.changes : made.changes,
-      effects: brought?.styles.length ? [addLineBreakStyles.of(brought.styles)] : [],
+      ...(brought?.styles.length ? { effects: [addLineBreakStyles.of(brought.styles)] } : {}),
       annotations: [
         trackedEditAnnotation.of(true),
         isolateHistory.of('full'),
