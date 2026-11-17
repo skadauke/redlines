@@ -71,7 +71,12 @@ const PLAIN_KEY = /^[A-Za-z_](?:[A-Za-z0-9_]|-(?!-))*$/;
  */
 function key(value: string): string {
   if (PLAIN_KEY.test(value) && !YAML_WORD.test(value)) return value;
-  const quoted = escapeControls(value.replaceAll('\\', '\\\\').replaceAll('"', '\\"'));
+  // A key is on one line, so a line break in it is an escape, as is what YAML 1.1 takes for one.
+  const quoted = escapeControls(value.replaceAll('\\', '\\\\').replaceAll('"', '\\"'))
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\r')
+    .replaceAll(String.fromCharCode(0x2028), '\\u2028')
+    .replaceAll(String.fromCharCode(0x2029), '\\u2029');
   return `"${quoted.replace(/(?<=-)-/g, '\\x2d')}"`;
 }
 

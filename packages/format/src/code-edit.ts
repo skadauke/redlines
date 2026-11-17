@@ -61,6 +61,8 @@ export interface Holder {
 
 const OPEN_FENCE = /^([ \t>]*)(`{3,}|~{3,})/;
 const CLOSE_FENCE = /^[ \t>]*(`{3,}|~{3,})[ \t]*$/;
+/** A closing fence as a line of the block's content can hold it: up to 3 spaces in. */
+const INDENT_CLOSE_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const MATH_LINE = /^[ \t>]*\$\$[ \t]*$/;
 const RAW_OPEN = /^[ \t]{0,3}<(script|pre|style|textarea|title)(?=[\s>]|$)/i;
 
@@ -512,7 +514,9 @@ export function assertStillBlock(block: CodeBlock, now: string): void {
           : lines.slice(1)
         : inner;
       const ends = body.some((line) => {
-        const fence = CLOSE_FENCE.exec(line)?.[1];
+        // A fence indented by 4 spaces or more, past the container's prefix, is code (CommonMark).
+        const rest = line.startsWith(prefix) ? line.slice(prefix.length) : line;
+        const fence = INDENT_CLOSE_FENCE.exec(rest)?.[1];
         return fence !== undefined && fence[0] === run[0] && fence.length >= run.length;
       });
       if (ends) throw new EditError(ENDS_BLOCK, 'no-legal-placement');

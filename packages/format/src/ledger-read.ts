@@ -1,7 +1,7 @@
 // Reading the ledger (format §5): finding the comment, parsing its YAML, and turning the result into
 // a `Ledger`. Nothing here throws: a ledger that can't be read becomes an empty one and a warning.
 
-import { parse as parseYaml } from 'yaml';
+import { isNode, isScalar, parseDocument, visit } from 'yaml';
 import { isId } from './ids.ts';
 import { decodeText } from './payload.ts';
 import { scan } from './scan.ts';
@@ -202,13 +202,39 @@ function byAt(value: string): { by: string; at: string } {
 const yamlRead = new Map<string, { doc: unknown } | { error: unknown }>();
 const YAML_KEPT = 64;
 
+/**
+ * The YAML of `source`, read with every value a string, and an error for a key that a map holds
+ * twice. The `yaml` package's own check (`uniqueKeys`) compares each key with every key before it,
+ * so a ledger of 20,000 marks took 12 s to read, against 1 s with the check made here, with a set.
+ */
+function parseYamlUnique(source: string): unknown {
+  const document = parseDocument(source, {
+    schema: 'failsafe',
+    uniqueKeys: false,
+    logLevel: 'error',
+  });
+  const [error] = document.errors;
+  if (error !== undefined) throw error;
+  visit(document, {
+    Map(_, map) {
+      const seen = new Set<unknown>();
+      for (const pair of map.items) {
+        const name: unknown = isScalar(pair.key)
+          ? pair.key.value
+          : JSON.stringify(isNode(pair.key) ? pair.key.toJSON() : pair.key);
+        if (seen.has(name)) throw new Error('Map keys must be unique');
+        seen.add(name);
+      }
+    },
+  });
+  return document.toJS();
+}
+
 function yamlOf(source: string): unknown {
   let found = yamlRead.get(source);
   if (found === undefined) {
     try {
-      found = {
-        doc: parseYaml(source, { schema: 'failsafe', uniqueKeys: true, logLevel: 'error' }),
-      };
+      found = { doc: parseYamlUnique(source) };
     } catch (error) {
       found = { error };
     }
