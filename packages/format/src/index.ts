@@ -67,6 +67,15 @@ export {
   writeLedger,
 } from './ledger-map.ts';
 export type { LedgerMap, LedgerOp, LedgerSettings } from './ledger-map.ts';
+export { applyLog, applyLogEntry, ledgerState } from './ledger-log.ts';
+export type {
+  Decision,
+  DroppedDecision,
+  LedgerState,
+  LogBody,
+  LogEntry,
+  Outcome,
+} from './ledger-log.ts';
 export { mergeLedgers, renameMarkId } from './ledger-merge.ts';
 export type { LedgerMerge, LedgerMergeOptions, LedgerRename, MergeSide } from './ledger-merge.ts';
 export { recordTracking, setView } from './settings.ts';
