@@ -712,7 +712,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // stay: walk seed 294 of `REDLINES_FUZZ=300`, a rejected insertion above an open Return).
     // The open block is taken back in the same step, and the decision is made on the file's text.
     const open = onFile ? null : openBlock(view.state);
-    const taken = open ? takeBackChanges(view.state) : null;
+    const taken = open ? takeBackChanges(view.state, true) : null;
     if (open && taken) {
       const whole = ChangeSet.of(made.changes, text.length);
       let touched = false;
