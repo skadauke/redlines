@@ -228,7 +228,9 @@ function outOfHiddenText(tr: Transaction): EditorSelection {
 
 /** Whose a step is: the intent's author, and the marks a tracked step wrote (per-person undo). */
 function stepInfo(tr: Transaction): { person: string | null; marks: readonly string[] } {
-  const intent = intentOf(tr);
+  const recorded = intentOf(tr);
+  // An edit of several writes is one person's: the first write says whose.
+  const intent = recorded?.kind === 'steps' ? recorded.steps[0] : recorded;
   if (!intent) return { person: null, marks: [] };
   const person = intent.author?.handle ?? null;
   if (!person || !intent.tracking) return { person, marks: [] };
