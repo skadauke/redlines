@@ -2,7 +2,7 @@
 // a document of its own, or text on the clipboard. Nothing is kept unless the person asks.
 
 import { ChangeSet } from '@codemirror/state';
-import type { Author, Editor } from '@redlines/editor';
+import { dialectFacet, type Author, type Editor } from '@redlines/editor';
 import { addComment, applyChanges, type EditContext, type Person, reply } from '@redlines/format';
 import { fitReply, joinReply } from '@redlines/agent-tools';
 import { agentHandle } from '../runs.ts';
@@ -68,7 +68,11 @@ export function keepAsComment(editor: Editor, keep: KeepAsComment): string {
   if (!first) throw new Error('There is no answer to keep');
   const me = personOf(keep.author);
   const time = ledgerTime((keep.now ?? (() => new Date()))());
-  const by = (author: Person): EditContext => ({ author, time });
+  const by = (author: Person): EditContext => ({
+    author,
+    time,
+    dialect: view.state.facet(dialectFacet),
+  });
 
   const start = view.state.doc.toString();
   let text = start;

@@ -29,8 +29,9 @@ struct PreviewRenderer {
         var message: String?
     }
 
-    /// The renderer in `script`, the text of preview.js, which defines `redlinesPreview`.
-    init(script: String) throws {
+    /// The renderer in `script`, the text of preview.js, which defines `redlinesPreview`; or any
+    /// script that defines the function named `function` (thumbnail.js, `redlinesThumbnail`).
+    init(script: String, function: String = "redlinesPreview") throws {
         guard let context = JSContext() else { throw Failure.missing("no JavaScript context") }
         let thrown = self.thrown
         context.exceptionHandler = { _, exception in
@@ -38,8 +39,8 @@ struct PreviewRenderer {
         }
         context.evaluateScript(script)
         if let message = thrown.message { throw Failure.script(message) }
-        guard let render = context.objectForKeyedSubscript("redlinesPreview"), !render.isUndefined else {
-            throw Failure.missing("the script defines no redlinesPreview")
+        guard let render = context.objectForKeyedSubscript(function), !render.isUndefined else {
+            throw Failure.missing("the script defines no \(function)")
         }
         self.context = context
         self.render = render
@@ -59,6 +60,18 @@ struct PreviewRenderer {
             throw Failure.script("redlinesPreview gave no page")
         }
         return html
+    }
+
+    /// What a script whose function takes a file's text and answers with a string gives for it: the
+    /// thumbnail's blocks, as JSON.
+    func string(text: String) throws -> String {
+        thrown.message = nil
+        let result = render.call(withArguments: [text])
+        if let message = thrown.message { throw Failure.script(message) }
+        guard let result, result.isString, let string = result.toString() else {
+            throw Failure.script("the script gave no string")
+        }
+        return string
     }
 
     /// The local images that the page for a file would draw, as the paths that the document wrote:

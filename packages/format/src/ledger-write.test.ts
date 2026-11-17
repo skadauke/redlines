@@ -8,7 +8,7 @@ import { serializeLedger, setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { REFUSALS, ada, bo, context } from './test-helpers.ts';
-import { SELF_CHECK, trackedEdit } from './track.ts';
+import { trackedEdit } from './track.ts';
 import type { EditContext, Ledger, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -833,8 +833,7 @@ describe('the bytes a file gets back (format §5.1, §9.2)', () => {
       const breaks = [...body.matchAll(/\r\n|\r|\n/g)];
       for (const found of breaks) {
         const kind = found[0];
-        // The last of its kind, and of the file's kind: the others come back in the file's (§2.5,
-        // #142).
+        // The last of its kind, and of the file's kind (the others are in the test below).
         if (breaks.filter((other) => other[0] === kind).length > 1 || kind !== eolOf(body)) {
           continue;
         }
@@ -861,13 +860,6 @@ describe('the bytes a file gets back (format §5.1, §9.2)', () => {
       }
     },
   );
-
-  /** Whether a body has line breaks of another kind than the file's (`eolOf`), a CR alone or LF
-   * and CRLF both, which a payload gives back in the file's kind (format §2.5). */
-  const mixed = (body: string) =>
-    /\r(?!\n)/.test(body) || (body.includes('\r\n') && /(?<!\r)\n/.test(body));
-  /** A text with each line break an LF. */
-  const kinds = (text: string) => text.replace(/\r\n?/g, '\n');
 
   /** Text typed after the file's last line break, and that line break deleted. */
   function endsOf(text: string): TextChange[] {
@@ -903,40 +895,40 @@ describe('the bytes a file gets back (format §5.1, §9.2)', () => {
           if (!parse(after).ledgerRange) {
             // White space deleted at the end of a file with no change is no change (§3.4).
             expect(after, label).toBe(newest);
-          } else if (!mixed(body)) {
+          } else {
+            // A line break keeps its own kind, a CR alone and an LF in a CRLF file too (§2.5).
             expect(original, label).toBe(body);
-          } else if (!/\r(?!\n)/.test(body)) {
-            // A line break of another kind than the file's comes back in the file's (§2.5). After
-            // a CR alone, the LF that comes back can make one CRLF of the two: the gap below.
-            expect(kinds(original), label).toBe(kinds(body));
           }
         }
       }
     },
   );
 
-  it("gives a payload's line break back in the file's kind, not its own (a known gap)", () => {
-    // Keeping the kind of a payload's line break needs an escape the format doesn't have yet
-    // (format §2.5): #142. Text typed after a final LF in a file whose line breaks are CRLF makes a
-    // substitution of that LF, whose payload comes back as a CRLF.
+  it("gives a payload's line break back in its own kind (#142)", () => {
+    // Text typed after a final LF in a file whose line breaks are CRLF makes a substitution of that
+    // LF, whose payload says it is an LF: rejecting gives it back as one (format §2.5).
     const body = 'Hello world.\r\n\r\nSecond line here.\n';
     const typed = tracked(body, { from: body.length, to: body.length, insert: 'Z' });
-    expect(typed).toContain('here.<!--sub k3x9 \\n-->\nZ<!--/k3x9-->');
-    expect(rejected(typed)).toBe('Hello world.\r\n\r\nSecond line here.\r\n');
+    expect(typed).toContain('here.<!--sub k3x9 \\x0a-->\nZ<!--/k3x9-->');
+    expect(rejected(typed)).toBe(body);
     expect(accepted(typed)).toBe('Hello world.\r\n\r\nSecond line here.\nZ');
   });
 
-  it('refuses to delete a CR alone past the ledger, as it does in the body', () => {
-    // It would come back as an LF, which makes one CRLF with a CR in front of it: a line break
-    // fewer for a CommonMark reader (#142). The check of what an edit makes of the file refuses it
-    // in the body, and past the ledger too.
+  it('deletes a CR alone past the ledger, which comes back as a CR (#142)', () => {
+    // It used to come back as an LF, which makes one CRLF with a CR in front of it: a line break
+    // fewer for a CommonMark reader. It is a CR now, as it was, so the edit is written, in the body
+    // and past the ledger.
     const cr = tracked('Hello world.\r\r', { from: 6, to: 11, insert: 'there' });
     const end = cr.length;
     const deletion = { from: end - 1, to: end, insert: '' };
-    expect(() => trackedEdit(cr, deletion, context(ada, ['w8nn']))).toThrow(SELF_CHECK);
-    expect(() =>
+    const crCut = applyChanges(cr, trackedEdit(cr, deletion, context(ada, ['w8nn'])));
+    expect(rejected(crCut)).toBe('Hello world.\r\r');
+    expect(accepted(crCut)).toBe('Hello there.\r');
+    const inBody = applyChanges(
+      'Hello world.\r\r',
       trackedEdit('Hello world.\r\r', { from: 12, to: 13, insert: '' }, context(ada, ['w8nn'])),
-    ).toThrow(SELF_CHECK);
+    );
+    expect(rejected(inBody)).toBe('Hello world.\r\r');
     // What is typed after the ledger still goes there, and so does a deleted line break of the
     // file's kind (§5.1).
     const typed = applyChanges(
@@ -1151,12 +1143,6 @@ describe('on random files (format §5.1, §9.2)', { timeout: 600_000 }, () => {
 
   /** The text's last line break. */
   const lastBreak = (text: string) => /\r\n$|\r$|\n$/.exec(text)?.[0] ?? '';
-  /** Whether a body has line breaks of another kind than the file's (`eolOf`), a CR alone or LF
-   * and CRLF both, which a payload gives back in the file's kind (format §2.5). */
-  const mixed = (body: string) =>
-    /\r(?!\n)/.test(body) || (body.includes('\r\n') && /(?<!\r)\n/.test(body));
-  const kinds = (text: string) => text.replace(/\r\n?/g, '\n');
-
   it('gives back the bytes when every change is rejected, and the newest text when accepted', () => {
     const files = fuzzCount(300);
     reordered = 0;
@@ -1240,13 +1226,11 @@ describe('on random files (format §5.1, §9.2)', { timeout: 600_000 }, () => {
         const now = originalView(text).text;
         if (atEnd) {
           atTheEnd++;
-          // White space deleted at the end of a file with no change is no change (format §3.4). A
-          // line break of another kind than the file's comes back in the file's (§2.5), and after
-          // a CR alone, the LF that comes back can make one CRLF of the two.
+          // White space deleted at the end of a file with no change is no change (format §3.4).
+          // Any other change gives every line break back as it was, of whatever kind (§2.5).
           if (!parse(before).ledgerRange && !parse(text).ledgerRange) {
             expect(now, label).toBe(newest);
-          } else if (!mixed(body)) expect(now, label).toBe(original);
-          else if (!/\r(?!\n)/.test(body)) expect(kinds(now), label).toBe(kinds(original));
+          } else expect(now, label).toBe(original);
           original = now;
         }
         expect(now, label).toBe(original);

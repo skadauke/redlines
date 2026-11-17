@@ -13,6 +13,8 @@
 // What has no legal form is refused. The result is checked against the plain edit of both views,
 // and an edit that would come out otherwise is refused too, so the file is never damaged.
 
+import { withDialect } from './dialect.ts';
+import type { MarkdownDialect } from './dialect.ts';
 import { assertWholeCharacters } from './characters.ts';
 import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
@@ -61,6 +63,8 @@ import { wrappedLineStart } from './wrapped-line.ts';
 export interface UntrackedContext {
   random?: (n: number) => Uint8Array;
   author?: Person;
+  /** The dialect of the file (§9.1), from its name; GitHub's when absent. */
+  dialect?: MarkdownDialect;
 }
 
 /** The message of an edit that would come out other than the plain edit of the text, which the
@@ -455,6 +459,15 @@ export function untrackedEditHalf(
 }
 
 function edited(
+  text: string,
+  edit: TextChange,
+  ctx: UntrackedContext,
+  half: boolean,
+): TextChange[] {
+  return withDialect(ctx.dialect, () => editedIn(text, edit, ctx, half));
+}
+
+function editedIn(
   text: string,
   edit: TextChange,
   ctx: UntrackedContext,

@@ -201,14 +201,14 @@ describe('the menu in an alert’s title', () => {
     expect(editor.getDoc()).toContain('[!NOTE]');
   });
 
-  it('says why when the type can’t change here, and changes nothing', () => {
+  it('changes the type over another person’s insertion in the alert, as a replacement', () => {
     const doc =
       'Intro.\n\n> [!NOTE]\n> Useful <!--ins k3x9-->new <!--/k3x9-->information.\n\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo Chen}\nmarks:\n  k3x9: {by: bo, at: 2026-10-13T22:30Z}\n-->\n';
     const { editor, notices } = mount(doc, { tracking: true });
     (openMenu(editor).querySelector('[data-type="tip"]') as HTMLElement).click();
-    expect(editor.getDoc()).toBe(doc);
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatch(/Accept or reject/);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toContain('<!--sub');
+    expect(editor.getDoc()).toContain('[!TIP]');
   });
 
   it('is asked for by the effect, and a request for a place with no alert is ignored', () => {

@@ -44,6 +44,7 @@ import {
 import { followText } from './anchor.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
+export { dialectFacet } from './dialect.ts';
 export { inFrontMatter };
 export {
   type Container,
@@ -82,6 +83,7 @@ import {
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -95,7 +97,8 @@ import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { imageInSelection } from './image-size.ts';
 import { CROP_NO_IMAGE, CROP_RAW, CROP_REMOTE, startCrop } from './image-crop.ts';
-import { dialectFacet, noticeFacet } from './image-size.ts';
+import { dialectFacet } from './dialect.ts';
+import { noticeFacet } from './image-size.ts';
 import { likelyParsing } from './likely/parse.ts';
 import {
   imageOpening,
@@ -402,6 +405,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
+    options.includes ? includeFacet.of(options.includes) : [],
+    quartoIncludes(),
     imageSelection(),
     undoHistory(),
     trackingBack,

@@ -3,6 +3,7 @@
 
 import type { EditorView, Rect } from '@codemirror/view';
 import { calloutName, type Author, type Editor } from '@redlines/editor';
+import type { MarkdownDialect } from '@redlines/format';
 import {
   type BlockType,
   EditError,
@@ -20,6 +21,7 @@ import {
   suggestions,
   type TextChange,
   type Time,
+  plainPayload,
 } from '@redlines/format';
 
 /** The editor that the review interface works on, and the person using it. */
@@ -243,7 +245,8 @@ export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
   if (change.kind === 'fmt') {
     return { old: '', added: '', label: formatLabel(formatChange(parsed, change)) };
   }
-  const old = change.kind === 'del' || change.kind === 'sub' ? (change.payload ?? '') : '';
+  const old =
+    change.kind === 'del' || change.kind === 'sub' ? plainPayload(change.payload ?? '') : '';
   const added =
     change.kind === 'split' ? '\n' : change.kind === 'del' ? '' : insertedText(parsed, change);
   return { old, added };
@@ -347,12 +350,16 @@ function ledgerTime(date: Date): Time {
 }
 
 /** An edit by `author`, now. Only the fields `author` has are written to the ledger's people. */
-export function editContext(author: Author): EditContext {
+export function editContext(author: Author, dialect?: MarkdownDialect): EditContext {
   const person: Person = { handle: author.handle, name: author.name };
   if (author.email !== undefined) person.email = author.email;
   if (author.agent !== undefined) person.agent = author.agent;
   if (author.for !== undefined) person.for = author.for;
-  return { author: person, time: ledgerTime(new Date()) };
+  return {
+    author: person,
+    time: ledgerTime(new Date()),
+    ...(dialect === undefined ? {} : { dialect }),
+  };
 }
 
 /**
