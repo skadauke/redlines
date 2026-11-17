@@ -10,9 +10,9 @@ import {
   commitEdit,
   eolOf,
   hiddenError,
-  inEol,
   markerRanges,
   paragraphBreaks,
+  restoredPayload,
   spliceRepairs,
   workingLedger,
 } from './edit-support.ts';
@@ -29,7 +29,7 @@ import {
 } from './format-undo.ts';
 import { parse } from './parse.ts';
 import { scanPayload } from './scan.ts';
-import { encodePayload } from './payload.ts';
+import { encodePayload, encodePayloadText } from './payload.ts';
 import {
   findInPayload,
   intact,
@@ -204,7 +204,7 @@ function decisionChanges(
     const open = openerRange(segment);
     const { close, payload } = segment;
     const whole = { from: open.from, to: (close ?? open).to };
-    const restored = inEol(payload ?? '', eol);
+    const restored = restoredPayload(payload ?? '', eol);
     if (mark.kind === 'split') {
       // Rejecting it takes the break with it, or the deletion of the break that someone recorded.
       const to = action === 'accept' ? open.to : splitEnd(text, segment.open, deletions, limit);
@@ -700,7 +700,7 @@ function decideInPayload(
     const owner = outer?.marks.find((held) => held.id === site?.owner);
     const segment = owner?.segments[site?.segment ?? -1];
     if (!outer || !owner || !segment) throw new EditError(UNFINISHED, 'no-legal-placement');
-    written = `${outer.text.slice(0, segment.open.from)}<!--${owner.kind} ${owner.id} ${encodePayload(
+    written = `${outer.text.slice(0, segment.open.from)}<!--${owner.kind} ${owner.id} ${encodePayloadText(
       written,
     )}-->${outer.text.slice(segment.open.to)}`;
   }
@@ -710,7 +710,7 @@ function decideInPayload(
   const change: TextChange = {
     from: opener.from,
     to: opener.to,
-    insert: `<!--${holder.kind} ${holder.id} ${encodePayload(written)}-->`,
+    insert: `<!--${holder.kind} ${holder.id} ${encodePayloadText(written)}-->`,
   };
   const keeps = inside.kind === 'hl' ? 'both' : action === 'accept' ? 'newest' : 'original';
   return commitEdit(text, [change], workingLedger(parsed.ledger), {

@@ -244,13 +244,26 @@ early, must stay on one line, and must not let other tools act on what it contai
 - A reader decodes left to right, after turning CRLF and CR into LF. The escapes are `\\`, `\n`,
   `\-`, `\xHH`, `\|`, `\{` and `\%`. Any other backslash is literal, so Markdown escapes such as
   `\*` are kept as written. When a payload goes back into the text, as when a deletion is
-  rejected, its line breaks are written as the file writes them.
+  rejected, its line breaks are written as the rule on line breaks below says.
 - The file writes line breaks as its body has them: CRLF when the body has a CRLF, and when it has
   none, as the ledger's lines end, which were written while the body still had its CRLFs, as when
   the last of them are deleted; LF in a file with neither. The body is the file without the ledger
   and its blank line (§5.1), so adding the ledger never changes this. Typed text and the ledger
-  take the same line breaks. A payload's line break of another kind, as in a file with mixed line
-  breaks, comes back in the file's.
+  take the same line breaks. A new ledger takes the line break that the file had before the edit
+  that makes it, so that a change that takes the file's last CRLF out of the body leaves the
+  ledger, and with it the file, CRLF.
+- **A line break keeps its own kind.** Rejecting a change gives the old text back byte for byte, so
+  an LF in a CRLF file comes back as an LF, a CRLF in an LF file as a CRLF, and a CR alone as a CR.
+  In a payload, `\n` is a line break of the file's kind, as it always was, so a file of one kind
+  needs nothing more, and every file written before reads the same. A break of the other kind is
+  written as the kind it is: `\x0d\n` for a CRLF, `\x0d` for a CR alone, and `\x0a` for an LF in a
+  file whose line breaks are CRLF. A CRLF right after a CR alone is always `\x0d\n`, so that
+  `\x0d` and `\n` never read as one CRLF. A reader gives these back as they are, and the plain `\n`
+  in the file's kind as it is when the payload goes back. The file's kind is the one the rule
+  above says, taken before the edit that writes the payload: a change that takes the last CRLF of
+  the body out of it still leaves the file CRLF, so the `\n`s of its payloads still mean CRLF. Only
+  a tool that gives the body a CRLF where it had none, or takes the ledger away, changes what the
+  `\n`s of changes already written mean; a break that is written with its own kind never changes.
 - All 271,452 non-empty strings of up to five characters over a 12-character alphabet of the
   characters above round-trip.
 - The ledger uses the same escapes, except that a value may span lines (§5.5).
