@@ -23,7 +23,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -171,6 +171,20 @@ impl Connections {
         }
     }
 
+    /// Why a folder may not be reached: it holds Redlines' own folder of secrets, or is inside it.
+    /// A tool that could open it could read every token.
+    fn folder_holds_secrets(&self, folder: &str) -> Option<String> {
+        let folder = Path::new(folder);
+        let own = fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
+        let there = fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        (own.starts_with(&there) || there.starts_with(&own)).then(|| {
+            format!(
+                "{} holds the files Redlines keeps its connections in, so no agent may reach it.",
+                folder.display()
+            )
+        })
+    }
+
     fn records(&self) -> PathBuf {
         self.root.join("connections.json")
     }
@@ -179,17 +193,29 @@ impl Connections {
         self.root.join(handle)
     }
 
-    /// The connections in the file, leaving out an entry this would not have written.
+    /// The connections in the file, leaving out an entry this would not have written. A file that
+    /// can't be read shows as none: a change refuses instead (`checked`), so that it never saves
+    /// over what it couldn't read.
     pub fn list(&self) -> Vec<Connection> {
+        self.checked().unwrap_or_default()
+    }
+
+    /// The same, or why the file couldn't be read. No file is none.
+    fn checked(&self) -> Result<Vec<Connection>, String> {
         if self.root.as_os_str().is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let Ok(text) = fs::read_to_string(self.records()) else {
-            return Vec::new();
+        let text = match fs::read_to_string(self.records()) {
+            Ok(text) => text,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(format!("Couldn’t read the OpenClaw agents: {error}")),
         };
-        let all: Vec<Connection> = serde_json::from_str(&text).unwrap_or_default();
+        let all: Vec<Connection> = serde_json::from_str(&text).map_err(|_| {
+            "The file of OpenClaw agents can’t be read, and Redlines leaves it as it is.".to_owned()
+        })?;
         let mut seen: Vec<String> = Vec::new();
-        all.into_iter()
+        Ok(all
+            .into_iter()
             .filter(|one| {
                 let fine = is_handle(&one.handle)
                     && !seen.contains(&one.handle)
@@ -201,7 +227,7 @@ impl Connections {
                 seen.push(one.handle.clone());
                 fine
             })
-            .collect()
+            .collect())
     }
 
     /// The connections with a flag for each secret that is kept.
@@ -232,7 +258,7 @@ impl Connections {
         now: u64,
         ask: impl FnOnce(&Question) -> bool,
     ) -> Result<Vec<View>, String> {
-        let _one_at_a_time = self.changing.try_lock().map_err(|_| BUSY.to_owned())?;
+        let _one_at_a_time = try_hold(&self.changing)?;
         if self.root.as_os_str().is_empty() {
             return Err("Redlines has no folder of its own to keep this in.".to_owned());
         }
@@ -259,7 +285,9 @@ impl Connections {
         let url = new.url.clone();
         let mut folders = Vec::new();
         for folder in &new.folders {
-            if let Some(problem) = folder_problem(folder) {
+            if let Some(problem) =
+                folder_problem(folder).or_else(|| self.folder_holds_secrets(folder))
+            {
                 return Err(problem);
             }
             if !folders.contains(folder) {
@@ -269,7 +297,7 @@ impl Connections {
         if folders.len() > MAX_FOLDERS {
             return Err("That is too many folders.".to_owned());
         }
-        let mut all = self.list();
+        let mut all = self.checked()?;
         if all.len() >= MAX_CONNECTIONS {
             return Err("That is as many OpenClaw connections as Redlines keeps.".to_owned());
         }
@@ -282,10 +310,12 @@ impl Connections {
         let question = Question {
             title: format!("Let {name} suggest changes in your documents?"),
             message: format!(
-                "{name} is an OpenClaw agent on {computer}. It will write in your documents as \
-                 {handle}, as tracked changes, and Redlines will show every one. {reach} Redlines \
-                 limits what {name} does in your documents, not what {name} does elsewhere.",
+                "{name} is an OpenClaw agent on {computer} (Gateway {address}). It will write in \
+                 your documents as {handle}, as tracked changes, and Redlines will show every one. \
+                 {reach} Redlines limits what {name} does in your documents, not what {name} does \
+                 elsewhere.",
                 handle = new.handle,
+                address = new.url,
                 reach = reach_sentence(&folders),
             ),
             yes: "Allow",
@@ -320,8 +350,8 @@ impl Connections {
         change: Change,
         ask: impl FnOnce(&Question) -> bool,
     ) -> Result<Vec<View>, String> {
-        let _one_at_a_time = self.changing.try_lock().map_err(|_| BUSY.to_owned())?;
-        let mut all = self.list();
+        let _one_at_a_time = try_hold(&self.changing)?;
+        let mut all = self.checked()?;
         let one = all
             .iter_mut()
             .find(|one| one.handle == handle)
@@ -343,7 +373,9 @@ impl Connections {
             }
             folders.clear();
             for folder in wanted {
-                if let Some(problem) = folder_problem(folder) {
+                if let Some(problem) =
+                    folder_problem(folder).or_else(|| self.folder_holds_secrets(folder))
+                {
                     return Err(problem);
                 }
                 if !folders.contains(folder) {
@@ -387,8 +419,8 @@ impl Connections {
     #[allow(dead_code)] // The node connection notes its use (OC 4).
     /// Notes that the connection was used, for "Last used".
     pub fn used(&self, handle: &str, now: u64) -> Result<(), String> {
-        let _one_at_a_time = self.changing.lock().map_err(|_| BUSY.to_owned())?;
-        let mut all = self.list();
+        let _one_at_a_time = hold(&self.changing);
+        let mut all = self.checked()?;
         if let Some(one) = all.iter_mut().find(|one| one.handle == handle) {
             one.last_used = Some(now);
             self.save(&all)?;
@@ -398,8 +430,8 @@ impl Connections {
 
     /// Removes a connection and every secret of it. The records keep nothing of it.
     pub fn remove(&self, handle: &str) -> Result<Vec<View>, String> {
-        let _one_at_a_time = self.changing.lock().map_err(|_| BUSY.to_owned())?;
-        let mut all = self.list();
+        let _one_at_a_time = hold(&self.changing);
+        let mut all = self.checked()?;
         all.retain(|one| one.handle != handle);
         if is_handle(handle) {
             // Gone, whatever else the folder holds: a file that shouldn't be there goes too.
@@ -417,7 +449,7 @@ impl Connections {
 
     /// Keeps a secret of a connection that is in the records, replacing the one it had.
     pub fn keep(&self, handle: &str, kind: Kind, secret: &Secret) -> Result<(), String> {
-        let _one_at_a_time = self.changing.lock().map_err(|_| BUSY.to_owned())?;
+        let _one_at_a_time = hold(&self.changing);
         if self.get(handle).is_none() {
             return Err("That connection isn’t there any more.".to_owned());
         }
@@ -441,15 +473,25 @@ impl Connections {
         }
         let folder = self.folder_of(handle);
         let file = folder.join(kind.file());
-        let private = |path: &Path| {
-            fs::symlink_metadata(path).is_ok_and(|meta| {
-                !meta.file_type().is_symlink() && meta.permissions().mode() & 0o077 == 0
-            })
+        let private = |meta: &fs::Metadata| {
+            meta.permissions().mode() & 0o077 == 0 && meta.uid() == unsafe { libc::geteuid() }
         };
-        if !private(&folder) || !private(&file) {
+        let folder_meta = fs::symlink_metadata(&folder).ok()?;
+        if folder_meta.file_type().is_symlink() || !private(&folder_meta) {
             return None;
         }
-        let text = fs::read_to_string(&file).ok()?;
+        // One open file, which is not a link, is what is checked and what is read.
+        let mut open = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&file)
+            .ok()?;
+        let meta = open.metadata().ok()?;
+        if !meta.is_file() || !private(&meta) || meta.len() > 8192 {
+            return None;
+        }
+        let mut text = String::new();
+        io::Read::read_to_string(&mut open, &mut text).ok()?;
         Secret::new(&text).ok()
     }
 
@@ -457,14 +499,22 @@ impl Connections {
     /// This connection's device key, made the first time it is asked for: 32 random bytes of the
     /// operating system's, as hex, kept like any secret.
     pub fn device_key(&self, handle: &str) -> Result<Secret, String> {
+        let _one_at_a_time = hold(&self.changing);
         if let Some(existing) = self.secret(handle, Kind::DeviceKey) {
             return Ok(existing);
+        }
+        if self.get(handle).is_none() {
+            return Err("That connection isn’t there any more.".to_owned());
         }
         let mut seed = [0u8; 32];
         getrandom::fill(&mut seed).map_err(|error| format!("Couldn’t make a key: {error}"))?;
         let hex: String = seed.iter().map(|byte| format!("{byte:02x}")).collect();
         let secret = Secret::new(&hex)?;
-        self.keep(handle, Kind::DeviceKey, &secret)?;
+        write_private(
+            &self.folder_of(handle).join(Kind::DeviceKey.file()),
+            hex.as_bytes(),
+        )
+        .map_err(failed)?;
         Ok(secret)
     }
 
@@ -476,6 +526,22 @@ impl Connections {
 
 const BUSY: &str = "Another change to the OpenClaw agents is waiting for your answer.";
 
+/// Takes the lock for a change that asks a question: refuses at once if one is up. A lock that a
+/// panic poisoned guards nothing that can be wrong, so it is taken all the same.
+fn try_hold(lock: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+    match lock.try_lock() {
+        Ok(guard) => Ok(guard),
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => Ok(poisoned.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => Err(BUSY.to_owned()),
+    }
+}
+
+/// Takes the lock for a change that asks nothing, waiting for one that does.
+fn hold(lock: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
+    lock.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn failed(error: io::Error) -> String {
     format!("Couldn’t keep that: {error}")
 }
@@ -484,12 +550,20 @@ fn failed(error: io::Error) -> String {
 fn reach_sentence(folders: &[String]) -> String {
     match folders {
         [] => "It can reach the document you send it with a request, and nothing else.".to_owned(),
-        [one] => format!("Its tools can open files in {one}."),
-        many => format!(
-            "Its tools can open files in {} folders: {}.",
-            many.len(),
-            many.join(", ")
-        ),
+        [one] => format!("Its tools can read files in {one}."),
+        many => {
+            let shown: Vec<&str> = many.iter().take(3).map(String::as_str).collect();
+            let more = many.len() - shown.len();
+            let and_more = if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            };
+            format!(
+                "Its tools can read files in these folders: {}{and_more}.",
+                shown.join(", ")
+            )
+        }
     }
 }
 
@@ -542,10 +616,11 @@ fn write_private(file: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut name = file.as_os_str().to_owned();
     name.push(format!(".{}.tmp", std::process::id()));
     let next = PathBuf::from(name);
+    // Made new, with the mode it keeps: a file left by a crash, or put there, is never written to.
+    let _ = fs::remove_file(&next);
     let written = fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(&next)
         .and_then(|mut out| {
@@ -869,6 +944,88 @@ mod tests {
         all.push(evil);
         fs::write(&file, serde_json::to_string(&all).unwrap()).unwrap();
         assert_eq!(store.list().len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_folder_that_holds_or_is_inside_the_secrets_is_refused() {
+        let root = scratch("holds");
+        let store = Connections::new(root.join("openclaw"));
+        for folder in [
+            root.display().to_string(),
+            root.join("openclaw").display().to_string(),
+            root.join("openclaw/moby-ada").display().to_string(),
+        ] {
+            let mut bad = new("moby-ada");
+            bad.folders = vec![folder.clone()];
+            assert!(store.add(bad, 1, yes).is_err(), "{folder}");
+        }
+        let mut fine = new("moby-ada");
+        fine.folders = vec![root.join("elsewhere").display().to_string()];
+        store.add(fine, 1, yes).unwrap();
+        let change = Change {
+            level: None,
+            folders: Some(vec![root.display().to_string()]),
+        };
+        assert!(store.update("moby-ada", change, yes).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_records_file_that_cant_be_read_is_left_alone() {
+        let root = scratch("corrupt");
+        let store = Connections::new(root.join("openclaw"));
+        store.add(new("moby-ada"), 1, yes).unwrap();
+        let file = root.join("openclaw/connections.json");
+        fs::write(&file, "{ not json").unwrap();
+        assert!(store.list().is_empty());
+        assert!(store.add(new("claw-ada"), 1, yes).is_err());
+        assert!(store.remove("moby-ada").is_err());
+        assert_eq!(fs::read_to_string(&file).unwrap(), "{ not json");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_stale_temporary_file_is_never_written_to() {
+        let root = scratch("stale");
+        let store = Connections::new(root.join("openclaw"));
+        store.add(new("moby-ada"), 1, yes).unwrap();
+        let stale = root.join(format!(
+            "openclaw/moby-ada/node-token.{}.tmp",
+            std::process::id()
+        ));
+        fs::write(&stale, "old").unwrap();
+        fs::set_permissions(&stale, fs::Permissions::from_mode(0o666)).unwrap();
+        store
+            .keep("moby-ada", Kind::NodeToken, &Secret::new("abc").unwrap())
+            .unwrap();
+        assert_eq!(mode(&root.join("openclaw/moby-ada/node-token")), 0o600);
+        assert!(!stale.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_question_names_the_gateway_and_says_read() {
+        let root = scratch("words");
+        let store = Connections::new(root.join("openclaw"));
+        let mut many = new("moby-ada");
+        many.folders = (1..=6).map(|n| format!("/Users/ada/Folder{n}")).collect();
+        let mut asked = String::new();
+        store
+            .add(many, 1, |question| {
+                asked = question.message.clone();
+                true
+            })
+            .unwrap();
+        assert!(
+            asked.contains("wss://studio-mini.yak-bebop.ts.net"),
+            "{asked}"
+        );
+        assert!(asked.contains("read files in these folders"), "{asked}");
+        assert!(
+            asked.contains("and 3 more") && !asked.contains("Folder6"),
+            "{asked}"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
