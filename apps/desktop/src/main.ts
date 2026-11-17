@@ -523,6 +523,30 @@ const editor = createEditor(element('#editor'), {
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
     void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
+  // The pictures of a paste from Google Docs are at Google's addresses, which the page can't fetch:
+  // the app does (`fetch_remote_image`, Google's image hosts only), and the bytes are saved like any
+  // pasted picture. A plain browser has none, and the pictures stay linked.
+  onFetchImage: isTauri
+    ? async (url) => {
+        try {
+          const read = await invoke<{ mimeType: string; data: string }>('fetch_remote_image', {
+            url,
+          });
+          const extension = {
+            'image/jpeg': 'jpg',
+            'image/png': 'png',
+            'image/gif': 'gif',
+            'image/webp': 'webp',
+            'image/bmp': 'bmp',
+          }[read.mimeType];
+          if (!extension) return null;
+          const bytes = Uint8Array.from(atob(read.data), (char) => char.charCodeAt(0));
+          return { bytes, type: read.mimeType, extension };
+        } catch {
+          return null;
+        }
+      }
+    : undefined,
   // An image dragged from the sidebar is the project's own file: linked by its path, not copied.
   projectImageLink: (dragged) => relativeImagePath(controller.state.path, dragged),
   // An Undo or Redo with nothing to take: the Mac's beep.
