@@ -4502,13 +4502,24 @@ const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
  */
 function carriedBehindText(text: string, parsed: Parsed): number {
   let count = 0;
+  // White space in the text of a change, and no part of a carrier (which holds the prefix of its
+  // block's line).
   const inside = (at: number) =>
     parsed.marks.some((mark) =>
-      mark.segments.some((s) => s.content.from <= at && at < s.content.to),
+      mark.segments.some(
+        (s) =>
+          s.content.from <= at &&
+          at < s.content.to &&
+          !(s.carrier && s.carrier.from <= at && at < s.carrier.to),
+      ),
+    ) &&
+    !parsed.marks.some((mark) =>
+      mark.segments.some((s) => s.carrier && s.carrier.from <= at && at < s.carrier.to),
     );
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
-      if (!segment.carrier) continue;
+      // Only the later segment of a change that another change's text parts.
+      if (!segment.carrier || segment === mark.segments[0]) continue;
       const start = lineStart(text, segment.open.from);
       if (!/[ \t]/.test(text.slice(start, segment.open.from))) continue;
       for (let at = start; at < segment.open.from; at++) {
