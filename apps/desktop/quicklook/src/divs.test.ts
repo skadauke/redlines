@@ -93,6 +93,19 @@ describe('Pandoc divs', () => {
     expect(html).not.toContain('rl-callout');
   });
 
+  it('is not fooled by a comment sign in a code span, or a class in a title', () => {
+    const span = markdownToHtml('A `<!--` span.\n\n::: {.callout-note}\nIn.\n:::\n');
+    expect(span).toContain('rl-callout-note');
+    const title = markdownToHtml('::: {.columns title="see .callout-tip"}\nIn.\n:::\n');
+    expect(title).not.toContain('rl-callout');
+  });
+
+  it('draws no unbalanced box when a mark falls inside a raw HTML block', () => {
+    const html = markdownToHtml('<pre>\n::: {.callout-note}\nIn.\n:::\n');
+    expect(html).not.toContain('rl-callout');
+    expect(html.split('<div').length).toBe(html.split('</div>').length);
+  });
+
   it('works on CRLF text', () => {
     const html = markdownToHtml('::: {.callout-note}\r\nA.\r\n:::\r\n');
     expect(html).toContain('rl-callout-note');

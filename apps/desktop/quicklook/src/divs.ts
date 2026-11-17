@@ -40,7 +40,9 @@ function calloutOf(info: string): { kind: string; title: string | null } | null 
   let classes: string[];
   let title: string | null = null;
   if (ATTRIBUTES.test(info)) {
-    classes = [...info.matchAll(/(?:^|[\s{])\.([\w-]+)/g)].map((found) => found[1] ?? '');
+    classes = [...info.replace(/"[^"]*"|'[^']*'/g, '""').matchAll(/(?:^|[\s{])\.([\w-]+)/g)].map(
+      (found) => found[1] ?? '',
+    );
     const given = /(?:^|[\s{])title\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(info);
     title = (given?.[1] ?? given?.[2] ?? '').trim() || null;
   } else {
@@ -124,7 +126,7 @@ export function markDivs(source: string): MarkedDivs {
         continue;
       }
     }
-    if (commentOpensIn(body)) {
+    if (/^ {0,3}<!--/.test(body) && commentOpensIn(body)) {
       comment = true;
       out.push(line);
       continue;
@@ -153,7 +155,19 @@ export function markDivs(source: string): MarkedDivs {
   const left = new RegExp(`${nonce}\\d+z`, 'g');
   return {
     text: out.join(''),
-    finish: (html) =>
-      html.replace(paragraph, (_, n: string) => marks[Number(n)] ?? '').replace(left, ''),
+    finish: (html) => {
+      let starts = 0;
+      let ends = 0;
+      const drawn = html.replace(paragraph, (_, n: string) => {
+        const box = marks[Number(n)] ?? '';
+        if (box === BOX_END) ends += 1;
+        else if (box !== '') starts += 1;
+        return box;
+      });
+      // A mark inside a raw HTML block (an unclosed <pre>, say) isn't a paragraph, and can't be
+      // drawn: then no box is, rather than boxes that don't balance.
+      if (starts === ends) return drawn.replace(left, '');
+      return html.replace(paragraph, '').replace(left, '');
+    },
   };
 }
