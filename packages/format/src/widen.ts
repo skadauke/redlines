@@ -214,8 +214,9 @@ function widenIn(
     // A line break typed in a unit that holds code is read too: the text after it may stand less deep
     // than the container, and the blocks after the unit read otherwise beside the closer (#586).
     const broken =
-      sorted.some((edit) => edit.insert.includes('\n')) &&
-      /^(?: {4,}|\t)\S|^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to));
+      sorted.some(
+        (edit) => edit.insert.includes('\n') || text.slice(edit.from, edit.to).includes('\n'),
+      ) && /^(?: {4,}|\t)\S|^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to));
     const kept =
       done && !((fromSpare || fenced || broken) && readsOtherMicromark(text, done.changes))
         ? done
