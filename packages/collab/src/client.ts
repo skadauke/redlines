@@ -10,8 +10,8 @@
 import type { ChangeSet, Text } from '@codemirror/state';
 import { declareFootprint, changedRanges, mapFootprint, touches } from './footprint.ts';
 import { FORMAT_VERSION, PROTOCOL_VERSION } from './protocol.ts';
-import type { Credential, WireRange } from './protocol.ts';
-import type { Pending, Replica } from './replica.ts';
+import type { Credential, Peer, PresenceState, WireRange } from './protocol.ts';
+import type { Pending, Remote, Replica } from './replica.ts';
 import type { Notice, Reply, Transport } from './wire.ts';
 
 export type SyncState =
@@ -44,8 +44,13 @@ export interface SyncOptions<T> {
    * the rest are derived again on `confirmed`, each on what the ones before it made.
    */
   rederive(confirmed: Text, pending: readonly Pending<T>[], drop: number): Rederived<T>;
-  /** Shows others' edits in the editor: changes to what the person sees, over their pending ones. */
-  showRemote(changes: ChangeSet): void;
+  /**
+   * Shows another person's edit in the editor: the change to what the person sees, over their
+   * pending ones, and whose it is.
+   */
+  showRemote(remote: Remote): void;
+  /** Everyone else's presence, as the authority last said it. */
+  onPeers?(peers: readonly Peer[]): void;
   /** Shows the replica's whole text, after the person's edits were derived again. */
   showAll(doc: Text): void;
   /** The authority's text replaces what the editor holds (a joining window, or a reset). */
@@ -102,6 +107,24 @@ export class SyncClient<T = unknown> {
     void this.sync();
   }
 
+  /**
+   * Says where this window's caret and selection are (null: gone), for the others to show. Nothing
+   * is stored; the authority forgets it after a while, so it is said again from time to time.
+   */
+  async presence(state: PresenceState | null): Promise<void> {
+    if (this.#stopped || !this.#joined) return;
+    try {
+      const reply = await this.#o.transport.call({
+        call: 'presence',
+        clientID: this.#replica.clientID,
+        state,
+      });
+      if (reply.ok && 'peers' in reply) this.#o.onPeers?.(reply.peers);
+    } catch {
+      // Offline: the next one says it again.
+    }
+  }
+
   /** The person edited: send it. */
   edited(): void {
     void this.sync();
@@ -137,6 +160,7 @@ export class SyncClient<T = unknown> {
   #heard(notice: Notice): void {
     if (this.#stopped) return;
     if (notice.kind === 'version') void this.sync();
+    else if (notice.kind === 'peers') this.#o.onPeers?.(notice.peers);
     else if (notice.kind === 'epoch') {
       this.#joined = false;
       void this.sync();
@@ -265,16 +289,13 @@ export class SyncClient<T = unknown> {
       return false;
     }
     if (!('updates' in reply)) return false;
-    let shown: ChangeSet | null = null;
     for (const update of reply.updates) {
       if (update.version <= replica.version) continue;
       if (update.clientID !== replica.clientID && this.#touchesPending(update.footprint)) {
         this.#mustRederive = true;
       }
-      const change = replica.receive([update]);
-      if (change) shown = shown ? shown.compose(change) : change;
+      for (const remote of replica.receive([update])) this.#o.showRemote(remote);
     }
-    if (shown) this.#o.showRemote(shown);
     // A full page means more: go on until the log has been read to its end.
     if (reply.updates.length >= PULL) return this.#catchUp();
     return true;

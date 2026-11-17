@@ -1912,6 +1912,23 @@ one session on one Mac, with no network, no account and no invitation.
 - **Save is once, after a pause.** The leader saves when the log has been quiet for a second and
   its own edits are confirmed. Save in another window asks the leader. A window closes without a
   question when the authority has everything it made; the leader that closes writes the file first.
+- **Each window is a person to the others.** It has a name ("Ada (window 2)") and a color of its own,
+  chosen by the authority and the same in every window, which follow the window through a
+  handover. The others show its caret with its name on a flag that fades after five seconds, and
+  its selection tinted, in that color. A caret is sent as a position in the confirmed text at a
+  version, and every window places it again among its own text, so it stays among the same words
+  while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
+  windows", or that edits are kept while the session can't be reached.
+- **Undo is each window's own.** A step knows whose it is, and a change that came from another window
+  is never undone by this one (§5.13): a tracked step is taken back by rejecting its own marks, and
+  an untracked step that the other window changed since is left alone, with the name of the window
+  that did.
+- **Tabs of a browser are windows too.** With no app to say who leads, the tabs of a document do it
+  with what a browser has: a Web Lock held by the leader, a BroadcastChannel between them, and
+  IndexedDB for the epoch and the log (`apps/desktop/src/session-tabs.ts`). The leader says it is
+  alive every second; a follower that hears nothing for five steals the lock (a page that hangs
+  keeps its lock), takes over from the log in a new epoch, and the old leader, when it runs again,
+  hosts no more and can no longer write the log.
 - **A person who works alone is untouched.** A document has no session until it is opened in a
   second window, and a session with one window left works as it did: the file is byte for byte what
   the editor writes.
@@ -2233,7 +2250,9 @@ old file as `SKILL.md.bak`, or as the next free `SKILL.md.bak.1`, `.2` …, so t
 this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
 in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
 The Claude Code skill is also a plugin, and this repository a marketplace for it
-(`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
+(`.claude-plugin/marketplace.json`). Claude Code loads both a plugin's skill and a personal one, so
+someone who has both sees it listed twice (`redlines` and `redlines:redlines`); the app installs the
+copy only, never the plugin, and the Claude Code row says to keep one. Publishing the skill on ClawHub, OpenClaw's registry, is its
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks

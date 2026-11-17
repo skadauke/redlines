@@ -8,9 +8,9 @@
 // can't miss one again. It is the wider sibling of `packages/editor/src/table/intent-gap.test.ts`,
 // which pins what each intent derives; here, the plain writes also derive what they made.
 //
-// Not here: the review plugin's decisions, comments and highlights (their own intents, with the
-// review guard), whose commands the test doesn't mount; and the find bar's replace, which is typing
-// to Track Changes and takes the typing intent the same way (`input.replace`).
+// The review plugin is mounted: its decisions, comments and highlights record review intents. Not
+// here: the find bar's replace, which is typing to Track Changes and takes the typing intent the
+// same way (`input.replace`).
 import { forceParsing } from '@codemirror/language';
 import { EditorState, Transaction } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
@@ -26,6 +26,7 @@ import {
 import { createEmoji } from '@redlines/emoji';
 import { createFind } from '@redlines/find';
 import { createFormatting } from '@redlines/formatting';
+import { createReview } from '@redlines/review';
 import { createTables } from '@redlines/tables';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -220,6 +221,10 @@ function drivers(editor: Editor): Driver[] {
       e.recordTracking();
     },
   ]);
+  out.push(['accept ids', (e) => ['k3x9', 'w2rf', 'p7qd'].forEach((id) => e.accept(id))]);
+  out.push(['reject ids', (e) => ['k3x9', 'w2rf', 'p7qd'].forEach((id) => e.reject(id))]);
+  out.push(['accept list', (e) => e.accept(['k3x9', 'w2rf', 'p7qd'])]);
+  out.push(['reject list', (e) => e.reject(['k3x9', 'w2rf', 'p7qd'])]);
   out.push([
     'recordView',
     (e) => {
@@ -283,11 +288,13 @@ describe.each([true, false])('every write, Track Changes %s', (tracking) => {
         }),
       ],
     });
+    const review = createReview(editor, { author });
     const offs = [
       createFormatting(editor, { author, notice: () => undefined }),
       createTables(editor),
       createEmoji(editor),
       createFind(editor),
+      () => review.destroy(),
     ];
     open.push(() => {
       for (const off of offs) off();

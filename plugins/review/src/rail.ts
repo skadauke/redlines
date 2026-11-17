@@ -34,19 +34,14 @@ import {
   refusedEditEffect,
   setViewModeEffect,
   viewModeField,
-  dialectFacet,
 } from '@redlines/editor';
 import {
-  addComment,
   rejectReason,
   type Handle,
   type MarkRange,
   type Parsed,
   type Person,
   type Range,
-  reopen,
-  reply,
-  resolve,
   suggestions,
   type Thread,
   type Time,
@@ -58,14 +53,13 @@ import { DraftKeeper, type DraftsNow, type KeptDrafts } from './drafts.ts';
 import { icon, type IconName } from './icons.ts';
 import { authorLine, byline, colorClass, formatTime } from './people.ts';
 import {
-  applyEdit,
+  applyReview,
   attempt,
   button,
   changesOf,
   changeTexts,
   decideSuggestion,
   describeChanges,
-  editContext,
   element,
   errorLine,
   rowsDone,
@@ -1558,14 +1552,14 @@ class Rail {
     const { state } = this.view;
     const range = state.field(newComment);
     if (!range) throw new Error('No new comment is being written');
-    const doc = state.doc.toString();
-    const { changes, id } = addComment(
-      doc,
-      range,
-      text,
-      editContext(this.ctx.author, this.view.state.facet(dialectFacet)),
+    const id = applyReview(
+      this.view,
+      this.ctx.author,
+      { op: 'comment', range, body: text },
+      'review.comment',
     );
-    applyEdit(this.view, changes, 'review.comment');
+    // A comment always has an id; without one the format refused it above.
+    if (id === undefined) throw new Error('The comment has no id');
     this.select(id);
     return { thread: id, id };
   }
@@ -1638,10 +1632,10 @@ class Rail {
       this.view.state.field(parsedField).ledger.comments.find((thread) => thread.id === id)
         ?.replies ?? [];
     const before = new Set(repliesOf().map((posted) => posted.id));
-    const doc = this.view.state.doc.toString();
-    applyEdit(
+    applyReview(
       this.view,
-      reply(doc, id, text, editContext(this.ctx.author, this.view.state.facet(dialectFacet))),
+      this.ctx.author,
+      { op: 'reply', thread: id, body: text },
       'review.reply',
     );
     const posted = repliesOf().find((added) => !before.has(added.id));
@@ -1651,18 +1645,12 @@ class Rail {
   }
 
   resolve(id: string): void {
-    const doc = this.view.state.doc.toString();
-    applyEdit(
-      this.view,
-      resolve(doc, id, editContext(this.ctx.author, this.view.state.facet(dialectFacet))),
-      'review.resolve',
-    );
+    applyReview(this.view, this.ctx.author, { op: 'resolve', thread: id }, 'review.resolve');
   }
 
   /** Reopens a resolved thread. */
   reopen(id: string): void {
-    const doc = this.view.state.doc.toString();
-    applyEdit(this.view, reopen(doc, id), 'review.reopen');
+    applyReview(this.view, this.ctx.author, { op: 'reopen', thread: id }, 'review.reopen');
   }
 
   destroy(): void {

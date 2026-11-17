@@ -5,6 +5,7 @@ import type { UntrackedAsker } from './tracked/ask.ts';
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+import type { DecisionOutcome } from './tracked/decided.ts';
 import type { Handle, MarkRange, Parsed, Range, Twin, TwinKind } from '@redlines/format';
 
 /**
@@ -108,6 +109,8 @@ export interface EditorUiState {
    * selection, or with only a caret, in the document.
    */
   canAcceptAll: boolean;
+  /** How many changes Accept All Changes and Stop Tracking would accept now: the count to show. */
+  acceptAllCount: number;
   /** Whether there is a step to redo. */
   canRedo: boolean;
 }
@@ -612,6 +615,25 @@ export interface Editor {
   acceptAllAndStopTracking(): boolean;
   /** Rejects a pending change by its mark id, as `accept` does. */
   reject(id: string | readonly string[]): void;
+  /**
+   * A decision as the person saw it, for a window that shows marks a while before a click lands on
+   * newer text: `seen` is each mark's `seenOf`, taken when it was drawn. A mark that changed since,
+   * or is gone, is left alone and says why ("Bo changed this suggestion. Review it again.", "Ada
+   * accepted this a moment ago."), and nothing is thrown for it. With `bulk`, the marks are decided
+   * each on its own and the ones that stand are decided (Accept All, with the ids of the click).
+   *
+   * @throws EditError when the format refuses a decision that stands.
+   */
+  decideSeen(
+    decision: 'accept' | 'reject',
+    ids: readonly string[],
+    seen: readonly string[],
+    options?: { bulk?: boolean },
+  ): DecisionOutcome;
+  /** What a person sees of each mark now, to carry in `decideSeen`; '' for a mark that isn't there. */
+  seenOf(ids: readonly string[]): string[];
+  /** Records that someone decided a mark, in another window, for the message a late decision gets. */
+  noteDecided(id: string, by: string, kind: 'accept' | 'reject'): void;
   /**
    * Adds CodeMirror extensions after the editor was made, as a plugin such as @redlines/review
    * does. Like the extensions given in `EditorOptions`, they stay when another document is opened

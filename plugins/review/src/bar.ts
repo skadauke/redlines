@@ -21,19 +21,17 @@ import {
   setCurrentChange,
   setViewModeEffect,
   viewModeField,
-  dialectFacet,
 } from '@redlines/editor';
-import { addComment, EditError, type MarkRange, type Parsed, rejectReason } from '@redlines/format';
+import { EditError, type MarkRange, type Parsed, rejectReason } from '@redlines/format';
 import { authorLine, byline, colorClass } from './people.ts';
 import { icon, type IconName } from './icons.ts';
 import {
-  applyEdit,
+  applyReview,
   attempt,
   button,
   changesOf,
   decideSuggestion,
   describeChanges,
-  editContext,
   element,
   errorLine,
   flash,
@@ -589,13 +587,7 @@ class Panel {
     }
     try {
       const range = spanOf(change);
-      const { changes } = addComment(
-        view.state.doc.toString(),
-        range,
-        text,
-        editContext(ctx.author, view.state.facet(dialectFacet)),
-      );
-      applyEdit(view, changes, 'review.comment');
+      applyReview(view, ctx.author, { op: 'comment', range, body: text }, 'review.comment');
     } catch (failure) {
       if (!(failure instanceof EditError || failure instanceof RangeError)) throw failure;
       flash(error, failure.message);

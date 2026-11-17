@@ -318,6 +318,22 @@ impl Conversation {
         Ok(folder)
     }
 
+    /// The relay a run at a Gateway names in a line `check` has let through (`session/new`'s
+    /// `_meta.tools`), if it does: the one `Relays::claim` is asked about.
+    pub fn tools_socket(&self, line: &str) -> Option<String> {
+        if !self.gateway_tools {
+            return None;
+        }
+        let message: Value = serde_json::from_str(line).ok()?;
+        (message["method"] == "session/new")
+            .then(|| {
+                message["params"]["_meta"]["tools"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .flatten()
+    }
+
     /// Whether this is the id of the session the agent opened for this run.
     fn is_session(&self, id: &Value) -> bool {
         self.session

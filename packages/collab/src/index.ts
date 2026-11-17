@@ -24,7 +24,7 @@ export { Hub } from './hub.ts';
 export type { NoticeListener } from './hub.ts';
 export { memoryTransport } from './memory.ts';
 export { Replica } from './replica.ts';
-export type { Pending } from './replica.ts';
+export type { Pending, Remote } from './replica.ts';
 export type { Call, Notice, Reply, Transport } from './wire.ts';
 export type { DurableLog } from './wal.ts';
 export {

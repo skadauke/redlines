@@ -303,6 +303,7 @@ mod tests {
             open: Duration::from_secs(3),
             poll: Duration::from_millis(20),
             ping_every: Duration::from_secs(5),
+            call: Duration::from_secs(5),
             pairing_retry: Duration::from_millis(10),
             pairing_window: Duration::from_secs(1),
             backoff_start: Duration::from_millis(10),

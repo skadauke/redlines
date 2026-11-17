@@ -18,6 +18,7 @@ import type { TableIntent } from '../table/intent.ts';
 import type { WidenedPasteIntent } from '../table/widened-paste.ts';
 import { authorFacet } from './field.ts';
 import type { FormatIntent } from './format-intent.ts';
+import type { ReviewIntent } from './review-intent.ts';
 
 /** An edit of an intent, in the offsets of the text it was made to. */
 export interface IntentEdit extends TextChange {
@@ -69,7 +70,13 @@ export interface StepsIntent {
 }
 
 export type Intent =
-  TypingIntent | FormatIntent | TableIntent | StepsIntent | MoveIntent | WidenedPasteIntent;
+  | TypingIntent
+  | FormatIntent
+  | TableIntent
+  | StepsIntent
+  | MoveIntent
+  | WidenedPasteIntent
+  | ReviewIntent;
 
 /** An intent with no id yet: what the writers make. */
 export type Unnamed<T = Intent> = T extends unknown ? Omit<T, 'id'> : never;
