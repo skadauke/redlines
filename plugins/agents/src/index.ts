@@ -55,3 +55,11 @@ export type {
   AltTextOptions,
   AltWriter,
 } from './alt-text/index.ts';
+export { tailscaleView } from './openclaw/tailscale.ts';
+export type {
+  Check as TailscaleCheck,
+  TailscaleAction,
+  TailscalePeer,
+  TailscaleStatus,
+  TailscaleView,
+} from './openclaw/tailscale.ts';
