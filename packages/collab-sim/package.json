@@ -10,9 +10,11 @@
   },
   "scripts": {
     "typecheck": "tsc",
-    "matrix": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts"
+    "matrix": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts",
+    "yjs": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/yjs-cli.ts"
   },
   "dependencies": {
-    "@redlines/format": "workspace:*"
+    "@redlines/format": "workspace:*",
+    "yjs": "13.6.33"
   }
 }
