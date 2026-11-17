@@ -1387,7 +1387,11 @@ The importer ships in April.
   the carrier of a change's opener reach further than it did, over the blank lines after a marker
   that it takes away, such as the closer of a block change whose text is all deleted: the opener
   would then start the next block, and rejecting its change would join its text to that block.
-  Such a decision is refused until the change is decided.
+  Such a decision is refused until the change is decided. An edit does not write the form that
+  leaves an opener with a carrier on a line that starts with white space of another change (a space
+  typed at the start of the line after a paragraph break inside another person's insertion): the
+  carrier would stay or go with the order of decisions. Such an edit is written as a replacement of
+  the block (§3.12) (#108).
 - At top level, a blank line follows the opener. In a tight list none does, because a blank line
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
