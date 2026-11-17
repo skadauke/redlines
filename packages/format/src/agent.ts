@@ -148,15 +148,16 @@ function suggestForms(
         insert: hunk.insert,
       };
     });
-  const editsOf = (hunks: readonly Hunk[]): TextChange[] =>
-    // A deletion that empties an inline format takes its delimiters too, as a key does (#584).
-    [...emptiedFormats(text, hunkEdits(hunks))];
+  // A deletion that empties an inline format takes its delimiters too, as a key does (#584),
+  // unless `emptied` is off: see `written`.
+  const editsOf = (hunks: readonly Hunk[], emptied = true): TextChange[] =>
+    emptied ? [...emptiedFormats(text, hunkEdits(hunks))] : hunkEdits(hunks);
   // A change that takes the break in front of a block takes the block's marker with it, as a
   // person's backspace does; an edit that keeps the marker in the new text asks for the marker as
   // text of the paragraph. Each form is written so, or is refused (#245).
   const asked = view.text.slice(0, start) + after + view.text.slice(start + before.length);
-  const written = (hunks: readonly Hunk[], c: EditContext): TrackedEdits => {
-    const edits = trackedEdits(text, editsOf(hunks), c);
+  const writtenWith = (hunks: readonly Hunk[], c: EditContext, emptied: boolean): TrackedEdits => {
+    const edits = trackedEdits(text, editsOf(hunks, emptied), c);
     if (!hunks.some((hunk) => joinsBlock(before, hunk))) return edits;
     const reads = (result: TrackedEdits) =>
       readsAs(newestView(applyChanges(text, result.changes)).text, asked);
@@ -167,12 +168,26 @@ function suggestForms(
       return { from: hunk.from, to: hunk.to + marker.length, insert: hunk.insert + marker };
     });
     try {
-      const again = trackedEdits(text, editsOf(kept), c);
+      const again = trackedEdits(text, editsOf(kept, emptied), c);
       if (reads(again)) return again;
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
     }
     throw new EditError(JOIN_REFUSED, 'no-legal-placement');
+  };
+  // Where taking an emptied format's delimiters makes a block join read otherwise than asked (the
+  // delimiters the new text keeps are gone), the edit is written as it was before that step: the
+  // agent's own edit, which is never refused for it. No input reaches this yet: a brute-force search
+  // (every unique substring of eight documents with a bold, strike, code span, list item, heading,
+  // quote and fence, against each deletion of a range of it) found none (likely because the closer stands
+  // between the emptied text and a break, so the hunks that join and that empty never meet).
+  const written = (hunks: readonly Hunk[], c: EditContext): TrackedEdits => {
+    try {
+      return writtenWith(hunks, c, true);
+    } catch (error) {
+      if (!(error instanceof EditError) || error.message !== JOIN_REFUSED) throw error;
+      return writtenWith(hunks, c, false);
+    }
   };
   const words = wordHunks(before, after);
   if (words.length === 0) return { changes: [], markIds: [], extendedIds: [] };
