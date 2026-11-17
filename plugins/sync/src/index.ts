@@ -19,7 +19,7 @@ import {
   rederiveMove,
   remoteStep,
 } from '@redlines/editor';
-import type { Editor, Intent } from '@redlines/editor';
+import type { Editor, Intent, Rederived } from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
 import { placeLedgerWrite } from './ledger.ts';
 import { ensureStyle, peersShown, presenceExtension, showPeers } from './presence.ts';
@@ -295,7 +295,10 @@ function rederive(
     const mapped = fits && shift ? edit.changes.map(shift) : edit.changes;
     let changes: ChangeSet | null = null;
     const origin = (edit.note.origin ?? edit.start).toString();
-    const placed =
+    // The text's own changes (Undo, an agent's edit) are written as they are: mapped over what
+    // others did, with their ledger write and their rejections made again on the newest text.
+    const asIs = !intent || (intent.kind === 'typing' && intent.exact === true);
+    const byWords = (): Rederived | null =>
       intent?.kind === 'typing'
         ? rederiveIntent(state, anchorIntent(origin, intent))
         : intent?.kind === 'format'
@@ -303,22 +306,26 @@ function rederive(
           : intent?.kind === 'move'
             ? rederiveMove(state, anchorMove(origin, intent))
             : null;
-    if (placed) {
+    const take = (placed: Rederived) => {
       if (placed.ok) {
         changes = placed.changes;
         notices.push(...placed.notices);
-      } else if (intent.exact && edit.changes.length === state.doc.length) {
-        // The text's own changes (Undo, an agent's edit) that can't be placed by their source: as
-        // the session mapped them over what others changed, which never takes them back.
-        changes = edit.changes;
       } else {
         notices.push(`An edit of yours was taken back: ${placed.reason}`);
       }
+    };
+    if (!asIs) {
+      const placed = byWords();
+      if (placed) take(placed);
+      else notices.push('A change of yours could not be placed after what others changed.');
     } else if (fits && mapped.length === state.doc.length) {
       // Mapped over what others did, but its ledger write is made again on the newest ledger.
       changes = edit.note.made
         ? (placeLedgerWrite(state.doc, mapped, edit.start, edit.note.made) ?? mapped)
         : mapped;
+    } else if (intent) {
+      const placed = byWords();
+      if (placed) take(placed);
     } else {
       notices.push('A change of yours could not be placed after what others changed.');
     }
