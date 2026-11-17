@@ -121,7 +121,8 @@ function widenToHtmlBlocks(
     const at = starts[first];
     const after = starts[last];
     if (at === undefined || after === undefined) continue;
-    const lineEndAt = after + (lines[last]?.length ?? 0);
+    const line = lines[last] ?? '';
+    const lineEndAt = after + line.length - (line.endsWith('\r') ? 1 : 0);
     const open = lineTextStart(text, shown.offsets[at] ?? 0);
     const close = shown.offsets[lineEndAt] ?? body;
     if (start > open && start < close) from = Math.min(from, open);

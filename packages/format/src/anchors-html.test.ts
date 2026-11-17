@@ -103,4 +103,12 @@ describe('a range with an end in an HTML block', () => {
       'The <!--hl h4kz-->importer<!--/h4kz--> <!--hl k3x9-->ships<!--/k3x9-->.\n',
     );
   });
+
+  it('ends the anchor before the carriage return of a CRLF file, not between \r and \n', () => {
+    const doc = file('A\r\n\r\n<div>\r\nx\r\n</div>\r\n\r\nEnd\r\n');
+    const from = doc.indexOf('x');
+    const after = highlighted(doc, { from, to: from + 1 });
+    expect(after).toContain('</div><!--/k3x9-->\r\n');
+    expect(after).not.toContain('\r<!--');
+  });
 });
