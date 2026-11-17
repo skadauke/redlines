@@ -181,40 +181,27 @@ describe('a table with no column of its original, beside other pending changes (
     );
   });
 
-  it('every other kind of pending change in the table, by Bo or by Ada', () => {
-    const others: WithoutTable<TableOp>[] = [
-      { kind: 'insertRows', after: 1, count: 1 },
-      { kind: 'deleteRows', rows: [1] },
-      { kind: 'moveRows', rows: [1], to: 2 },
-      { kind: 'align', cols: [0], align: 'right' },
-      { kind: 'align', cols: [1], align: 'center' },
-      { kind: 'moveCols', cols: [0], to: 2 },
-    ];
-    let built = 0;
-    for (const person of [bo, ada]) {
-      for (const other of others) {
-        for (const base of [ONE, TWO]) {
-          const last = base === ONE ? 1 : 2;
-          const steps: Step[] = [
-            [bo, { kind: 'insertCols', after: last, count: 1 }, ['t6vw']],
-            [bo, { kind: 'deleteCols', cols: base === ONE ? [0] : [0, 1] }, ids()],
-            [person, other, ['r4ab', 'r5cd', 'r6ef', 'r7gh', 'r8jk', 'r9mn']],
-          ];
-          let text: string;
-          try {
-            text = make(base, steps);
-          } catch {
-            continue;
-          }
-          built++;
-          check(
-            `${person.handle} ${JSON.stringify(other)} in ${base === ONE ? 'one' : 'two'}`,
-            text,
-          );
-        }
-      }
+  it("another person's row, pending in the table beside the one deleted column (written by hand)", () => {
+    // No operation writes this state (a table operation beside another person's change is a replacement),
+    // so the file is made as a merge makes it: the carrier of the table's deletion holds the row.
+    const table = '| <!--ins t5vw col--> |\n| --- |\n|  |\n| <!--ins r4ab row--> |';
+    const gone = '<!--del v6xz col=1  a \\n - \\n x -->';
+    const ledger = { t5vw: 'bo', v6xz: 'bo', r4ab: 'ada' };
+    for (const [label, body] of [
+      ['in a document', `Before.\n\n${table}\n\n${gone}\n\nText.`],
+      ['the whole text', `${table}\n\n${gone}`],
+    ] as const) {
+      const text = file(body, ledger);
+      check(label, text);
+      const rejected = applyChanges(text, reject(text, 't5vw'));
+      // The table is deleted whole, with the row still pending in it, or all of it is rejected with the
+      // column where no unit holds the table: no change of the table is left outside the deletion.
+      expect(
+        parse(rejected).marks.some((m) => m.id === 't5vw'),
+        label,
+      ).toBe(false);
+      expect(trim(originalView(rejected).text), label).toContain('| a |');
     }
-    expect(built).toBeGreaterThan(8);
   });
 
   it('two deleted columns, one by each of two people', () => {

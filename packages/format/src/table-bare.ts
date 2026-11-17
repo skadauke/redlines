@@ -67,7 +67,10 @@ export function wholeTableDeleted(
         },
       ).changes;
     } catch (error) {
-      if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
+      const held =
+        error instanceof Untrackable ||
+        (error instanceof EditError && error.code === 'no-legal-placement');
+      if (!held) throw error;
       // No unit holds the table with those changes in it (it is the whole text, and the closer of a
       // replacement would stand alone): the decision is widened to the table's changes, which are
       // all rejected with it, the table as it was. Every order reads alike, since the changes are
@@ -79,17 +82,17 @@ export function wholeTableDeleted(
   return undefined;
 }
 
-/** Every change with a marker in the lines of the table: its inserted and deleted columns and rows,
- * its alignment change and any other mark but a comment or a highlight. */
+/** Every change with all its markers in the lines of the table: its inserted and deleted columns and rows
+ * and any other mark but a comment or a highlight (a change that runs out of the table stays). */
 function everyChangeIn(text: string, parsed: Parsed, table: TableRead): MarkRange[] {
   const extent = tableExtent(text, table);
   return parsed.marks.filter(
     (mark) =>
       mark.kind !== 'cmt' &&
       mark.kind !== 'hl' &&
-      mark.segments.some((segment) =>
-        [segment.open, segment.close].some(
-          (range) => range !== undefined && extent.from <= range.from && range.to <= extent.to,
+      mark.segments.every((segment) =>
+        [segment.open, segment.close].every(
+          (range) => range === undefined || (extent.from <= range.from && range.to <= extent.to),
         ),
       ),
   );
