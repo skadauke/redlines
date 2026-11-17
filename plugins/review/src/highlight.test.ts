@@ -280,24 +280,41 @@ describe('the Highlight command', () => {
     expect(titleOf(editor)).toBe('Highlight');
   });
 
-  it('removes the highlights that a selection is in or overlaps, all in one step to undo', () => {
+  it('removes a highlight that the selection lies entirely inside, and the text stays', () => {
     const { editor } = mount(marked, { real: true });
-    // From inside the first to inside the second.
+    select(editor, 'port');
+    expect(titleOf(editor)).toBe('Remove Highlight');
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(true);
+    expect(highlights(editor).map((mark) => mark.id)).toEqual(['w8nn']);
+    expect(doc(editor)).toContain('The importer ships in');
+    // The whole word is inside it too.
+    select(editor, 'April');
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(true);
+    expect(highlights(editor)).toEqual([]);
+  });
+
+  it('highlights a selection that overlaps a highlight, whole, and takes none away (#377)', () => {
+    const { editor } = mount(marked, { real: true });
+    // The whole line, which holds two, overlaps both and is inside neither.
+    editor.view.dispatch({ selection: { anchor: 0, head: place(editor, 'ships').to } });
+    expect(titleOf(editor)).toBe('Highlight');
+    expect(activeIds(editor)).not.toContain(HIGHLIGHT_COMMAND);
+    expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(true);
+    expect(highlights(editor)).toHaveLength(3);
+    expect(editor.getParsed().ledger.marks).toHaveProperty('h4kz');
+    expect(editor.getParsed().ledger.marks).toHaveProperty('w8nn');
+    // From inside the first to inside the second: the same.
+    expect(editor.undo()).toBe(true);
+    expect(doc(editor)).toBe(marked);
     const from = place(editor, 'porter').from;
     const to = place(editor, 'Apr').to;
     editor.view.dispatch({ selection: { anchor: from, head: to } });
     expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(true);
-    expect(highlights(editor)).toEqual([]);
-    expect(editor.getParsed().ledger.marks).toEqual({});
-    expect(editor.getDoc()).toContain('The importer ships in April.');
-    // One step brings both back.
-    expect(editor.undo()).toBe(true);
-    expect(doc(editor)).toBe(marked);
-    // A selection of the whole line that holds one, which it overlaps, is no highlight on the line.
-    editor.view.dispatch({ selection: { anchor: 0, head: place(editor, 'ships').to } });
+    expect(highlights(editor)).toHaveLength(3);
+    // The new one covers the whole selection: pressing again, inside it, takes that one away.
     expect(titleOf(editor)).toBe('Remove Highlight');
     expect(editor.commands.run(HIGHLIGHT_COMMAND)).toBe(true);
-    expect(highlights(editor).map((mark) => mark.id)).toEqual(['w8nn']);
+    expect(highlights(editor).map((mark) => mark.id)).toEqual(['h4kz', 'w8nn']);
   });
 
   it('toggles: a second press takes the first one back, on a selection and on a caret', () => {
@@ -445,18 +462,21 @@ describe('what the Format menu and the palette show of Highlight', () => {
       caretAt(editor, caret);
       expect(status(), `caret at ${caret}`).toEqual(OUT);
     }
-    // A selection that has some of its text, whether it starts in it, ends in it or holds it all.
+    // A selection that lies entirely inside it, markers included.
     for (const [from, to] of [
       [word.from + 1, word.from + 3],
-      [0, word.from + 2],
-      [word.to - 2, close.to + 4],
-      [0, doc(editor).length],
+      [word.from, word.to],
+      [open.from, close.to],
     ] as const) {
       editor.view.dispatch({ selection: { anchor: from, head: to } });
       expect(status(), `selection ${from}-${to}`).toEqual(IN);
     }
-    // But not one that only ends where it starts, or starts where it ends.
+    // But not one that starts in it or ends in it, or holds it with more, which are highlighted
+    // whole (#377), nor one that only ends where it starts, or starts where it ends.
     for (const [from, to] of [
+      [0, word.from + 2],
+      [word.to - 2, close.to + 4],
+      [0, doc(editor).length],
       [0, open.from],
       [close.to, close.to + 7],
     ] as const) {

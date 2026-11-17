@@ -181,6 +181,10 @@ mark's markers there than the file had.
   author to `people`. Accepting or rejecting a highlight dismisses it and leaves the text, which is
   how it is taken away, and gives back the file it was made on; a highlight whose text is all
   removed by a decision goes with it.
+  Highlights may overlap (§3.6). In the editor, Highlight on a selection removes a highlight only
+  when the selection lies entirely inside that one highlight (or the caret is in it); on a selection
+  that overlaps a highlight or reaches out of it, it makes a new highlight over the whole selection
+  and takes none away.
 
 ### 2.3 Ids
 
