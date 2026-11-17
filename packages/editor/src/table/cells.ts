@@ -96,6 +96,14 @@ export function rectOf(
   }
   const anchor = { row: a.row.index, col: a.cell.col };
   const head = { row: h.row.index, col: h.cell.col };
+  // Rows selected whole whose end rows both lack cells have no corner cells in the columns they span:
+  // the selection that `rectSelection` made says which columns it was made for (#644).
+  const wanted = range === state.selection.main ? columnsOf.get(state.selection) : undefined;
+  if (wanted && anchor.row !== head.row) {
+    const down = anchor.row < head.row;
+    anchor.col = down ? wanted[0] : wanted[1];
+    head.col = down ? wanted[1] : wanted[0];
+  }
   return {
     table,
     rows: [Math.min(anchor.row, head.row), Math.max(anchor.row, head.row)],
@@ -166,6 +174,15 @@ export function cellOfRef(table: Table, ref: CellRef): Cell | null {
   return cells.find((cell) => cell.col === ref.col) ?? cells.at(-1) ?? null;
 }
 
+/**
+ * The columns that a selection `rectSelection` made was made for, where its two ends can't say them: a
+ * range runs from one cell's text to another's, and when both end rows of whole rows lack the columns
+ * between, the ends are in column 0 and the range is that of column 0 alone. The selection itself is the
+ * key, so that any other selection (a click, a drag, an edit that maps it) has none: the flag is gone
+ * with it, and no state of the editor holds it.
+ */
+const columnsOf = new WeakMap<EditorSelection, [number, number]>();
+
 /** The cell of a table at a row and column, when the row has it. */
 function cellAtRef(table: Table, row: number, col: number): Cell | undefined {
   return table.rows[row]?.cells.find((cell) => cell.col === col && cell.col < table.columns);
@@ -210,7 +227,13 @@ export function rectSelection(table: Table, from: CellRef, to: CellRef): EditorS
   }
   const x = cellOfRef(table, from);
   const y = cellOfRef(table, to);
-  return x && y ? EditorSelection.single(x.textFrom, y.textTo) : null;
+  if (!x || !y) return null;
+  const made = EditorSelection.single(x.textFrom, y.textTo);
+  // Corner cells the rows lack: the range alone would read as the columns of the cells it ends in.
+  if (top !== bottom && (Math.min(x.col, y.col) !== left || Math.max(x.col, y.col) !== right)) {
+    columnsOf.set(made, [left, right]);
+  }
+  return made;
 }
 
 /** The comment a rectangle makes: on the selected cells' text in one row, on the whole rows across

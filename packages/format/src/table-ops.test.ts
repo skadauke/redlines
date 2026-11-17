@@ -872,6 +872,32 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
       }
     });
 
+    it('words the refusal by the structure next to the table, not by its characters (#454)', () => {
+      const UNCLOSED =
+        "This table can't be deleted with Track Changes on while a code block that is never closed follows it. Close the code block first, or turn off Track Changes.";
+      // A fence that never closes: the words say to close it, not to put a paragraph between.
+      const open = file(`Intro.\n\n${FRUIT}\n\n\`\`\`\ncode`);
+      expect(refusal(() => remove(open)).message).toBe(UNCLOSED);
+      // A list item that opens with a fence, closed: the paragraph between is the way out.
+      for (const marker of ['-', '1.']) {
+        const pad = ' '.repeat(marker.length + 1);
+        const item = file(
+          `Intro.\n\n${FRUIT}\n\n${marker} \`\`\`\n${pad}code\n${pad}\`\`\`\n\nAfter.`,
+        );
+        expect(refusal(() => remove(item)).message, marker).toBe(CODE_AFTER);
+        const fixed = file(
+          `Intro.\n\n${FRUIT}\n\nText.\n\n${marker} \`\`\`\n${pad}code\n${pad}\`\`\`\n\nAfter.`,
+        );
+        expectEveryOrderAlike(marker, remove(fixed).after, exactly);
+      }
+      // Negative controls: an indented line that continues a paragraph above the table is no code, and
+      // an indented line right under the table is no code below it.
+      const lazy = file(`Intro\n    continues.\n\n${FRUIT}`);
+      expect(shown(remove(lazy).after)).toHaveLength(0);
+      const below = file(`Intro.\n\n    one\n\n${FRUIT}\n    two\n\nAfter.`);
+      expect(said(() => remove(below))).not.toBe(CODE_BETWEEN);
+    });
+
     it('says what to do for an HTML block right under the table, and for code above and below it', () => {
       const html = file(`Intro.\n\n${FRUIT}\n<!-- note -->\n\nAfter.`);
       expect(refusal(() => remove(html)).message).toBe(HTML_BELOW);
@@ -910,42 +936,26 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     });
 
     // What the words above are chosen by is the shape next to the table: a fence that opens the block
-    // after it, a table that ends the text after code or a rule, a table right under a line of text.
-    // A shape that looks like one and is none is refused as the ordinary deletion of a block is, in
-    // its words, unchanged.
-    it('gives the ordinary words, unchanged, for a shape that only looks like those', () => {
-      const ordinary = (text: string) => {
-        const table = readTables(text, parse(text))[0] as { from: number; to: number };
-        return refusal(() =>
-          trackedEdit(text, { from: table.from, to: table.to, insert: '' }, context(ada, IDS)),
-        );
-      };
-      const shapes: [string, string, string][] = [
-        // A fence that opens a list item is no block of its own after the table.
-        [
-          'a bulleted item that opens with a fence',
-          `Intro.\n\n${FRUIT}\n\n- \`\`\`\n  code\n  \`\`\``,
-          'unclosed-end',
-        ],
-        [
-          'a numbered item that opens with a fence',
-          `${FRUIT}\n\n1. \`\`\`\n   code\n   \`\`\``,
-          'unclosed-end',
-        ],
-      ];
-      for (const [name, body, code] of shapes) {
-        const text = file(body);
-        expect(readTables(text, parse(text)), name).toHaveLength(1);
-        const error = refusal(() => remove(text));
-        const generic = ordinary(text);
-        expect(error.message, name).toBe(generic.message);
-        expect(error.code, name).toBe(generic.code);
-        expect(error.code, name).toBe(code);
-        for (const words of [CODE_AFTER, CODE_BEFORE, UNDER_TEXT]) {
-          expect(error.message, name).not.toBe(words);
-        }
-        // Track Changes off takes the table as text, as it does anywhere.
-        expect(shown(remove(text, null).after), name).toHaveLength(0);
+    // after it (in a list item or not), a table that ends the text after code or a rule, a table right
+    // under a line of text.
+    it('says what to do for a numbered item that opens with a fence right after the table', () => {
+      const text = file(`Intro.\n\n${FRUIT}\n\n1. \`\`\`\n   code\n   \`\`\`\n\nAfter.`);
+      expect(refusal(() => remove(text)).message).toBe(CODE_AFTER);
+      // The way out is what the words say.
+      const fixed = file(`Intro.\n\n${FRUIT}\n\nText.\n\n1. \`\`\`\n   code\n   \`\`\`\n\nAfter.`);
+      expectEveryOrderAlike('numbered', remove(fixed).after, exactly);
+    });
+
+    it('deletes a table that a list item opening with a fence follows, as it does for a fence', () => {
+      // (The fence of an item is the block's fence: the deletion widens, as it does for one at the margin,
+      // and reads alike in every order. It was refused, in the words of a code block never closed.)
+      for (const body of [
+        `Intro.\n\n${FRUIT}\n\n- \`\`\`\n  code\n  \`\`\``,
+        `Intro.\n\n${FRUIT}\n\nText.\n\n- \`\`\`\n  code\n  \`\`\`\n\nAfter.`,
+      ]) {
+        const done = remove(file(body));
+        expect(shown(done.after), body).toHaveLength(0);
+        expectEveryOrderAlike(body, done.after, exactly);
       }
     });
 
