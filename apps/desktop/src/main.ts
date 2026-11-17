@@ -1075,6 +1075,8 @@ const toggleTracking = () => {
 
 /** Review ▸ Accept All Changes and Stop Tracking: the selection's changes, or all, then Track Changes off. */
 const acceptAllAndStopTracking = () => {
+  // The count is the changes at the click: what the notification says it accepted.
+  const count = editor.getUiState().acceptAllCount;
   try {
     if (!editor.acceptAllAndStopTracking()) return;
   } catch (error) {
@@ -1082,7 +1084,19 @@ const acceptAllAndStopTracking = () => {
     return notice.flash(error.message);
   }
   controller.dismissNotice(TRACKING_FOR_EVERYONE);
-  notice.flash('Changes accepted. Track Changes is off');
+  // Said with the count, and with the way back: one Undo gives the changes and Track Changes back.
+  notifications.show({
+    key: 'accept-all',
+    text: `${count === 1 ? '1 change' : `${count} changes`} accepted. Track Changes is off.`,
+    action: {
+      label: 'Undo',
+      run: (shown) => {
+        editor.undo();
+        shown.close();
+      },
+    },
+    timeout: 8000,
+  });
 };
 
 /**
