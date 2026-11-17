@@ -196,6 +196,7 @@ export function markdownBlocks(text: string): Block[] {
   let code = 0;
   let sub = 0;
   let sup = 0;
+  let resources = 0;
   let images = 0;
   const links: (string | null)[] = [];
   let sink: Atom[] | null = null;
@@ -258,7 +259,12 @@ export function markdownBlocks(text: string): Block[] {
       } else images--;
       return;
     }
-    if (images > 0) return;
+    // What stands in a link's parentheses, its address and title, is no text of the document.
+    if (token.type === 'resource') {
+      resources += kind === 'enter' ? 1 : -1;
+      return;
+    }
+    if (images > 0 || resources > 0) return;
     if (kind === 'enter') {
       switch (token.type as string) {
         case 'blockQuote':
