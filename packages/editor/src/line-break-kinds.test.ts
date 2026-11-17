@@ -34,6 +34,9 @@ function tracked(doc: string): Editor {
 const MIXED = [
   ['an LF in a CRLF file', 'Alpha\r\nbeta\ngamma\r\ndelta\r\n'],
   ['a CRLF in an LF file', 'Alpha\nbeta\r\ngamma\ndelta\n'],
+  ['a CR alone in a CRLF file', 'Alpha\r\nbeta\rgamma\r\ndelta\r\n'],
+  ['a CR alone among CRLFs and an LF', 'Alpha\r\nbeta\rgamma\ndelta\r\n'],
+  ['an LF in a file of CRs', 'Alpha\rbeta\ngamma\rdelta\r'],
 ] as const;
 
 describe.each(MIXED)('%s (#924)', (_, file) => {
@@ -42,7 +45,7 @@ describe.each(MIXED)('%s (#924)', (_, file) => {
   const ctx = { author, time: '2026-11-05T10:00Z', random: idBytes('k3x9') };
   // What the command line writes, which reads the file's bytes.
   const written = applyChanges(file, trackedEdit(file, { from, to, insert: 'X' }, ctx));
-  const lf = file.replaceAll('\r\n', '\n');
+  const lf = file.replace(/\r\n?/g, '\n');
   const docFrom = lf.indexOf('beta') + 2;
   const docTo = lf.indexOf('gamma') + 2;
 
@@ -96,7 +99,7 @@ describe.each(MIXED)('%s (#924)', (_, file) => {
   it('writes the kind when Delete takes the break out, as the command line does', () => {
     const ctx2 = { author, time: '2026-11-05T10:00Z', random: idBytes('k3x9') };
     const breakAt = file.indexOf('beta') + 4;
-    const len = file.startsWith('Alpha\r\n') ? 1 : 2;
+    const len = file.startsWith('\r\n', breakAt) ? 2 : 1;
     const cli = applyChanges(
       file,
       trackedEdit(file, { from: breakAt, to: breakAt + len, insert: '' }, ctx2),
