@@ -1205,8 +1205,19 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
           title: {
             current: quarto.title,
             ...(() => {
-              const reason = whyNot(here, { kind: 'callout-title', title: quarto.title ?? 'x' });
-              return reason ? { disabled: reason } : {};
+              // Asked with a title other than the one it has, which would be no change at all.
+              const set = whyNot(here, {
+                kind: 'callout-title',
+                title: quarto.title === null ? 'x' : `${quarto.title}\u200b`,
+              });
+              const clear =
+                quarto.title === null
+                  ? undefined
+                  : whyNot(here, { kind: 'callout-title', title: null });
+              return {
+                ...(set ? { disabled: set } : {}),
+                ...(clear ? { clearDisabled: clear } : {}),
+              };
             })(),
             set: (title) =>
               void format(here, { kind: 'callout-title', title }, 'format.callout-title'),

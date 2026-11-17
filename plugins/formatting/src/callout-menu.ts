@@ -15,7 +15,13 @@ export interface CalloutMenu {
   choose(type: string): void;
   /** A Quarto callout has a title, set after the types: the title it has, and what sets it (null
    * takes it away). The menu names itself for a callout, not an alert. */
-  title?: { current: string | null; disabled?: string; set(title: string | null): void };
+  title?: {
+    current: string | null;
+    /** Why the title can't be set, and why it can't be cleared, where it can't. */
+    disabled?: string;
+    clearDisabled?: string;
+    set(title: string | null): void;
+  };
 }
 
 /** The menu that is open on a view, so that there is never more than one, and the button it hangs
@@ -129,9 +135,10 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
       item.type = 'button';
       item.className = 'rl-callout-item';
       item.dataset['action'] = id;
-      if (menu.title?.disabled) {
+      const why = id === 'clear' ? menu.title?.clearDisabled : menu.title?.disabled;
+      if (why) {
         item.setAttribute('aria-disabled', 'true');
-        item.title = menu.title.disabled;
+        item.title = why;
       }
       item.setAttribute('role', 'menuitem');
       const gap = document.createElement('span');
