@@ -55,6 +55,7 @@ import {
   rangeEdge,
   type TextChange,
   fineEdit,
+  fineEdits,
   fineFormat,
   trackedEdit,
   trackedFormat,
@@ -599,6 +600,8 @@ function trackEdits(
   // A group of its own for several edits, or the one a caller has made for them.
   if (typeof grouped === 'string') ctx = { ...ctx, group: grouped };
   else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
+  const together = widening === false ? deletedTogether(text, parsed, edits, ctx) : null;
+  if (together) return together;
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
@@ -613,6 +616,44 @@ function trackEdits(
     const at = rangeEdge(read, edit.from, edit.insert);
     return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
   });
+}
+
+/** How many deletions are written together (below it, one at a time, as each is checked). */
+const TOGETHER = 8;
+
+/**
+ * Many deletions with room between them (the text of the cells of a rectangle that ⌫ clears) as
+ * marks, written in one pass: each edit planned and read on its own made a 300-row column take
+ * seconds (#456). `fineEdits` makes the per-cell checks of format §3.7 once, for all of them. Null
+ * when the edits are not that, or the format refuses them together: then each is written in turn.
+ * The caret goes where the last deletion starts; the tracked layer moves it out of hidden text.
+ */
+function deletedTogether(
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  ctx: EditContext,
+): Tracked | null {
+  if (edits.length < TOGETHER) return null;
+  if (
+    edits.some(
+      (edit, i) =>
+        edit.insert !== '' || edit.from >= edit.to || (i > 0 && edit.from <= edits[i - 1]!.to),
+    )
+  ) {
+    return null;
+  }
+  try {
+    const written = fineEdits(text, edits, ctx).changes;
+    const changes = ChangeSet.of(written, text.length);
+    const after = parse(applyChanges(text, written), parsed);
+    if (lineStartMarkers(after) > lineStartMarkers(parsed)) return null;
+    const main = edits.find((edit) => edit.main) ?? edits.at(-1)!;
+    return { changes, caret: changes.mapPos(main.from, -1) };
+  } catch (error) {
+    if (error instanceof EditError) return null;
+    throw error;
+  }
 }
 
 /**
