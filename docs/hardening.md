@@ -244,10 +244,6 @@ its case; each is a bug. The list is what has been found, not a count of what is
   whose LF a tracked edit takes out, so in a file with mixed line breaks the editor writes that
   break into the change as the file's own kind and rejecting gives it back in the file's kind. The
   command line writes the break's own kind and gives it back exactly (format §2.5, #924).
-- A raw line break typed at the start of a bullet item's text under a line of text, or under the line
-  of the item it is in, is written where the file reads the bullet as an item and the newest view as
-  the underline of the text above it; the words typed on its blank lines (#143) are written the same
-  way (#443).
 - The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
   as a lazy line of the item's paragraph, where CommonMark reads a list. Backspace at the first
   item of a list now reads the line below it as the file does (`ownLines` in `blocks/joins.ts`) and

@@ -841,6 +841,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   ['packages/format/src/track.ts', 'HARD_BREAK_SEPARATED', 'widen', 'inventory #52'],
   ['packages/format/src/track.ts', 'IN_CODE', 'widen', 'inventory #123'],
+  [
+    'packages/format/src/track.ts',
+    'UNDERLINING_SPLIT',
+    'alert',
+    'a raw line break at the start of a bullet under text reads two ways, and no unit holds it so that both read alike: the words say to type the text first, or decide the other change first (#443)',
+  ],
   ['packages/format/src/track.ts', 'MIXED_BREAKS', 'widen', 'inventory #128'],
   ['packages/format/src/track.ts', 'NOT_CODE', 'widen', 'inventory #127'],
   ['packages/format/src/track.ts', 'SELF_CHECK', 'widen', 'inventory #76'],
