@@ -16,10 +16,11 @@ import {
   nextLineStart,
   prefixLength,
 } from './blocks.ts';
+import { readBlocks } from './block-read.ts';
 import { EditError } from './errors.ts';
 import { snapOut } from './edit-support.ts';
 import type { MarkerRange } from './edit-support.ts';
-import { inspectPlace, stepLeft, stepRight } from './inline.ts';
+import { inspectPlace, stepLeft, stepRight, visible } from './inline.ts';
 import { scan } from './scan.ts';
 import type { Parsed, Range } from './types.ts';
 
@@ -84,6 +85,50 @@ function pastBlankLines(text: string, position: number, end: number): number {
     if (!onBlankLine(text, line)) return lineTextStart(text, line);
   }
   return position;
+}
+
+/**
+ * `range` with an end that falls inside an HTML block moved out to the edge of the whole block: its
+ * start back to the block's first character, its end on to the block's last. A comment or a
+ * highlight there is anchored to the whole block, not refused, as the block is drawn as one thing and
+ * its raw text is hidden (format §4). The blocks are read from the text without its markers, as the
+ * views read it; a text the block reader doesn't know (tabs, a lone carriage return) is left as it is.
+ */
+function widenToHtmlBlocks(
+  text: string,
+  markers: readonly MarkerRange[],
+  body: number,
+  range: Range,
+  frontEnd: number,
+): Range {
+  // The blocks are read from the body: front matter is no Markdown, and a line of it that an HTML
+  // block would start with must not take in the body after it.
+  const begin = frontEnd >= 0 ? frontEnd + 1 : 0;
+  if (begin >= body || !text.slice(begin, body).includes('<')) return range;
+  const shown = visible(text, markers, begin, body);
+  const blocks = readBlocks(shown.text)?.filter((block) => block.kind === 'html');
+  if (!blocks?.length) return range;
+  const lines = shown.text.split('\n');
+  const starts: number[] = [];
+  for (let at = 0, n = 0; n < lines.length; n++) {
+    starts.push(at);
+    at += (lines[n]?.length ?? 0) + 1;
+  }
+  let { from, to } = range;
+  const start = from;
+  const end = to;
+  for (const { first, last } of blocks) {
+    const at = starts[first];
+    const after = starts[last];
+    if (at === undefined || after === undefined) continue;
+    const line = lines[last] ?? '';
+    const lineEndAt = after + line.length - (line.endsWith('\r') ? 1 : 0);
+    const open = lineTextStart(text, shown.offsets[at] ?? 0);
+    const close = shown.offsets[lineEndAt] ?? body;
+    if (start > open && start < close) from = Math.min(from, open);
+    if (end > open && end < close) to = Math.max(to, close);
+  }
+  return { from, to };
 }
 
 /** The range of an anchor, moved to where its markers may stand (see the head of this file).
@@ -176,7 +221,17 @@ export function anchorRange(
   words: AnchorWords,
 ): Range {
   const frontEnd = frontMatterEnd(text);
-  const inBody = withinBody(text, parsed, range);
+  const bounded = withinBody(text, parsed, range);
+  if (frontEnd >= 0 && bounded.from <= frontEnd) {
+    throw new EditError(words.frontMatter, 'front-matter');
+  }
+  const inBody = widenToHtmlBlocks(
+    text,
+    markers,
+    parsed.ledgerRange?.from ?? text.length,
+    bounded,
+    frontEnd,
+  );
   if (frontEnd >= 0 && inBody.from <= frontEnd) {
     throw new EditError(words.frontMatter, 'front-matter');
   }
