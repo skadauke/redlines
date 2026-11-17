@@ -736,6 +736,53 @@ describe('the Agents pane', () => {
     expect(now().agentScope).toBe('everything');
   });
 
+  describe('answers that stand again when the setting is widened (#382)', () => {
+    const widen = (container: HTMLElement, to: string) => {
+      const select = row(container, 'What agents may read').querySelector('select')!;
+      select.value = to;
+      select.dispatchEvent(new Event('change'));
+    };
+    const consent = {
+      'claude|/a': 'everything',
+      'claude|/b': 'folder',
+      'codex|/c': 'no',
+    } as const;
+
+    it('says how many right under the setting, and offers Forget them', () => {
+      const { deps, container } = setup({}, { agentScope: 'document', consent: { ...consent } });
+      renderAgentsPane(container, deps);
+      widen(container, 'folder');
+      const text = row(container, 'What agents may read').textContent;
+      expect(text).toContain('2 folders you allowed before are readable again.');
+      expect(buttons(container, 'What agents may read')).toContain('Forget them');
+    });
+
+    it('says nothing when narrowed, or when nothing was answered wider', () => {
+      const { deps, container } = setup({}, { agentScope: 'folder', consent: { ...consent } });
+      renderAgentsPane(container, deps);
+      widen(container, 'document');
+      expect(row(container, 'What agents may read').textContent).not.toContain('allowed before');
+      const bare = setup({}, { agentScope: 'document' });
+      renderAgentsPane(bare.container, bare.deps);
+      widen(bare.container, 'everything');
+      expect(row(bare.container, 'What agents may read').textContent).not.toContain(
+        'allowed before',
+      );
+    });
+
+    it('forgets those answers and no others, and the line goes', () => {
+      const { deps, container, now } = setup({}, { agentScope: 'folder', consent: { ...consent } });
+      renderAgentsPane(container, deps);
+      widen(container, 'everything');
+      expect(row(container, 'What agents may read').textContent).toContain(
+        '1 folder you allowed before is readable again.',
+      );
+      buttonOf(container, 'What agents may read', 'Forget them').click();
+      expect(now().consent).toEqual({ 'claude|/b': 'folder', 'codex|/c': 'no' });
+      expect(row(container, 'What agents may read').textContent).not.toContain('allowed before');
+    });
+  });
+
   it('has one switch for the web, off by default, for every agent (#529)', () => {
     const { deps, container, update, now } = setup({});
     renderAgentsPane(container, deps);
