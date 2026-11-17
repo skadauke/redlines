@@ -488,16 +488,14 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
         children: childrenOf(take(Infinity, Infinity)).flatMap((para) => para.children),
       }),
     );
-  else if (pending.length > 0) {
-    // Items past the last block (a marker after it): they end its last paragraph.
-    const last = children[children.length - 1];
-    if (!(last instanceof Table)) {
-      children.push(
-        new Paragraph({
-          children: childrenOf(take(Infinity, Infinity)).flatMap((para) => para.children),
-        }),
-      );
-    }
+  else if (pending.length > 0 || children[children.length - 1] instanceof Table) {
+    // Items past the last block (a marker after it) get a paragraph of their own; Word wants a
+    // paragraph after a table in any case.
+    children.push(
+      new Paragraph({
+        children: childrenOf(take(Infinity, Infinity)).flatMap((para) => para.children),
+      }),
+    );
   }
 
   const levels = (

@@ -159,6 +159,15 @@ ${LEDGER}`;
     expect(document).toContain('>five.<');
   });
 
+  it('keeps a deletion after a final table, and does not throw on an impossible time', async () => {
+    const bad = LEDGER.replace('at: 2026-10-13T22:40Z', 'at: 2026-13-45T22:40Z');
+    const { document } = await partsOf(
+      `| a | b |\n|---|---|\n| 1 | 2 |\n\n<!--del w2rf tail old-->\n\n${bad}`,
+    );
+    expect(document).toContain('>tail old<');
+    expect(document).toMatch(/<\/w:tbl><w:p>/);
+  });
+
   it('puts a comment on an insertion', async () => {
     const text = `The <!--ins k3x9--><!--cmt c8d2-->new<!--/c8d2--><!--/k3x9--> path.\n\n${LEDGER}`;
     const { document } = await partsOf(text);

@@ -8,7 +8,7 @@ export const NO_TIME = '1970-01-01T00:00:00Z';
 /** A ledger time as Word's `w:date`. */
 export function wordDate(at: string): string {
   const found = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2}))?(?:\.\d+)?Z$/.exec(at);
-  if (!found) return NO_TIME;
+  if (!found || Number.isNaN(Date.parse(`${found[1]}:${found[2] ?? '00'}Z`))) return NO_TIME;
   return `${found[1]}:${found[2] ?? '00'}Z`;
 }
 
