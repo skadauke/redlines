@@ -111,6 +111,36 @@ const rows: Script[] = [
     tc: true,
     expect: {},
   },
+  {
+    name: '#119: Bo deletes the break in front of a line of an item that Ada splits',
+    doc: '- one<del ⏎>new ‸two⏎',
+    others: 'bo',
+    keys: ['Enter'],
+    tc: true,
+    expect: {},
+  },
+  {
+    name: '#119: the same, the split first, Bo deleting the break (a key before the split)',
+    doc: '- one<del ⏎>new tw‸o⏎',
+    others: 'bo',
+    keys: ['Enter', 'Backspace'],
+    tc: true,
+    expect: {},
+  },
+  {
+    name: '#120 1: a bare Enter on the blank line of a split in a list',
+    doc: '- one‸⏎  two⏎',
+    keys: ['Enter', { type: '\n' }],
+    tc: true,
+    expect: {},
+  },
+  {
+    name: '#102: your own Enter at the start of an item before your own block change',
+    doc: '1. gamma beta⏎2. ‸delta⏎⏎End⏎',
+    keys: [{ command: 'block.ul' }, 'ArrowUp', 'Home', 'Enter'],
+    tc: true,
+    expect: {},
+  },
 ];
 
 scriptRows(rows, 20000);
