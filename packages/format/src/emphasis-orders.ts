@@ -7,6 +7,7 @@ import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { visibleText } from './edit-support.ts';
 import { EditError } from './errors.ts';
+import { isAlignPayload } from './format-ops.ts';
 import { sameReading } from './format-reader.ts';
 import { hitsIn } from './inline.ts';
 import { markerRanges } from './markers.ts';
@@ -42,7 +43,13 @@ const MOST_LINES = 30;
 function clusterOf(parsed: Parsed, seeds: ReadonlySet<string>): Set<string> {
   // Where each mark has its markers, and its text: another mark joins by a marker that stands
   // against one of these, or inside the text of one.
-  const markers = markerRanges(parsed).filter((m) => m.mark && m.mark.kind !== 'split');
+  // A format change joins too (#484), but an alignment change, which is no text of the cell's, does not.
+  const markers = markerRanges(parsed).filter(
+    (m) =>
+      m.mark &&
+      m.mark.kind !== 'split' &&
+      !(m.mark.kind === 'fmt' && isAlignPayload(m.segment?.payload ?? '')),
+  );
   const texts = new Map<string, Range[]>();
   for (const mark of parsed.marks) {
     if (mark.kind !== 'ins' && mark.kind !== 'sub') continue;
