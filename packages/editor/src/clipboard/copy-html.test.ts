@@ -157,3 +157,15 @@ describe('markdownToHtml', () => {
     expect(out).not.toContain('<a ');
   });
 });
+
+describe('emoji shortcodes in a copy (#388)', () => {
+  const lookup = (name: string) => (name === 'tent' ? '⛺' : undefined);
+  it('writes the character for a shortcode the host knows, and keeps any other as text', () => {
+    const out = markdownToHtml('Camp :tent: and :nope: `:tent:`', undefined, undefined, lookup);
+    expect(out).toContain('Camp ⛺ and :nope:');
+    expect(out).toContain('>:tent:</code>');
+  });
+  it('keeps the shortcode as text without a lookup', () => {
+    expect(html('Camp :tent:')).toContain('Camp :tent:');
+  });
+});
