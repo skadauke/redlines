@@ -641,7 +641,7 @@ describe('OpenClaw’s bridge', () => {
     expect(createAcpProvider(processes, bridgeConfig).readLimit).toBe('machine');
   });
 
-  it('names the relay of its tools in the session of a Gateway run, and in no other', async () => {
+  it('names the relay of its tools in the session of a Gateway run, and in no other', () => {
     const processes = fakeHost(() => {}).processes;
     expect(createAcpProvider(processes, { ...bridgeConfig, gateway: true })).toMatchObject({
       toolbox: false,
