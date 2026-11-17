@@ -515,8 +515,6 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     "This table can't be deleted with Track Changes on while an HTML comment or block follows it with no blank line between. Put a blank line between them first, or turn off Track Changes.";
   const CODE_BETWEEN =
     "This table can't be deleted with Track Changes on while indented code stands both above and below it. Put a paragraph between the table and one of the code blocks first, or turn off Track Changes.";
-  const UNDER_HEADING =
-    "This table can't be deleted with Track Changes on while it starts right under a heading that has closing #s or attributes. Put a blank line between them first, or turn off Track Changes.";
   const said = (run: () => unknown) => {
     try {
       run();
