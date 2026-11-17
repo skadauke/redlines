@@ -1784,7 +1784,13 @@ function isSiblingNumber(text: string, line: number, indent: number): boolean {
  * word. Undefined where no text comes before the ledger or the end of the file, or where the line
  * starts with a marker.
  */
-function nextWordEnd(plan: Plan, at: number): number | undefined {
+function nextWordEnd(
+  plan: Plan,
+  at: number,
+  /** Set to where the last word of the body ends, when it ends in a backslash, so that no closer
+   * can follow it: the caller may take the end of the body in (`endOfBody`, #913). */
+  tail?: { at?: number },
+): number | undefined {
   const { text, markers } = plan;
   const limit = plan.parsed.ledgerRange?.from ?? text.length;
   let line = at;
@@ -1836,7 +1842,8 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
       p = stepRight(text, markers, p);
       continue;
     } else if (p >= end && oddBackslashes(visibleText(text, markers, line, p))) {
-      return nextWordEnd(plan, nextLineStart(text, p));
+      if (tail && endOfBody(plan, p)) tail.at = p;
+      return nextWordEnd(plan, nextLineStart(text, p), tail);
     } else break;
     while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
   }
@@ -2560,7 +2567,18 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       if (close.kind === 'refuse' && close.trailing !== undefined) {
         // Among or behind the trailing spaces of a hard break: the change goes on past the line
         // break, to the end of the first word of the next line.
-        const ahead = nextWordEnd(plan, nextLineStart(text, to));
+        const tail: { at?: number } = {};
+        const ahead = nextWordEnd(plan, nextLineStart(text, to), tail);
+        const last =
+          ahead === undefined && tail.at !== undefined ? endOfBody(plan, tail.at) : undefined;
+        if (last && tail.at !== undefined) {
+          // The next line is the body's last word and ends in a backslash, which would escape the
+          // closer: the change takes the word and the line break that ends the body (#913).
+          atEnd = true;
+          grow(from, last.bring ? tail.at : last.end);
+          if (last.bring) right += plan.eol;
+          continue;
+        }
         if (ahead === undefined) {
           refuse(otherMarkerAhead(plan, to) ? HARD_BREAK_NEXT_LINE : HARD_BREAK_SYNTAX);
         }
