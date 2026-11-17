@@ -5,9 +5,9 @@
 // (`packages/collab-sim`), which gives `trackedEdits` what the editor's filter would. `trackedEdits`
 // itself does not: it writes the edit it is given, and `formatting.test.ts` holds that a format
 // change keeps its syntax when its word is deleted, so that accepting both reads as the newest view.
-// An agent's `str_replace` needs no step: it compares the newest view, where the delimiters are
-// text, and so deletes them with the word (tests in the agent tools, the command line and the
-// editor's `applyAgentEdit` hold it).
+// An agent's `str_replace` (`suggestReplace`) applies it to the edits its comparison finds, since
+// the old text it was given may be only the word inside the delimiters; the tests in the agent
+// tools, the command line and the editor's `applyAgentEdit` hold it.
 
 import { micromark } from 'micromark';
 import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';

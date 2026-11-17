@@ -18,6 +18,7 @@ import { fineEdits as fineTrackedEdits, trackedEdits as widenedEdits } from './t
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Parsed, Range, TextChange } from './types.ts';
 import { closerRange } from './blocks.ts';
+import { emptiedFormats } from './emptied-formats.ts';
 import { newestView, originalView } from './views.ts';
 
 export type { Hunk } from './join.ts';
@@ -134,7 +135,7 @@ function suggestForms(
   const tableEdits = tableSuggestion(text, view, before, after, start, ctx);
   if (tableEdits) return tableEdits;
 
-  const editsOf = (hunks: readonly Hunk[]): TextChange[] =>
+  const hunkEdits = (hunks: readonly Hunk[]): TextChange[] =>
     hunks.map((hunk) => {
       if (hunk.from === hunk.to) {
         // An insertion belongs to the word before it, or to the word after it at the start.
@@ -147,6 +148,9 @@ function suggestForms(
         insert: hunk.insert,
       };
     });
+  const editsOf = (hunks: readonly Hunk[]): TextChange[] =>
+    // A deletion that empties an inline format takes its delimiters too, as a key does (#584).
+    [...emptiedFormats(text, hunkEdits(hunks))];
   // A change that takes the break in front of a block takes the block's marker with it, as a
   // person's backspace does; an edit that keeps the marker in the new text asks for the marker as
   // text of the paragraph. Each form is written so, or is refused (#245).

@@ -44,12 +44,16 @@ afterAll(() => {
 });
 
 test('the editor writes what the format library writes, on the text an intent was made on', () => {
+  // Twelve documents per workload on a deep run (`REDLINES_FUZZ=12`, as elsewhere), three on an ordinary one, which
+  // must fit CI's five seconds.
+  const fuzz = Number(process.env['REDLINES_FUZZ']);
+  const cases = Number.isInteger(fuzz) && fuzz > 0 ? fuzz : 3;
   let compared = 0;
   let widened = 0;
   let renumbered = 0;
   const kinds = new Set<string>();
   for (const workload of WORKLOADS) {
-    for (let n = 0; n < 12; n++) {
+    for (let n = 0; n < cases; n++) {
       const rng = new Rng(seedFor(41, n));
       let text = baseDocument(4, 10);
       const counters = [0, 1, 2].map(() => ({ words: 0, notes: 0, replies: 0, intents: 0 }));
@@ -102,11 +106,13 @@ test('the editor writes what the format library writes, on the text an intent wa
       }
     }
   }
-  console.info(`REAL-DERIVE compared=${compared} renumbered=${renumbered} widened=${widened}`);
+  console.info(
+    `REAL-DERIVE cases=${cases} compared=${compared} renumbered=${renumbered} widened=${widened}`,
+  );
   // The editor widened some of what the library refuses, and refused none the library wrote.
   // Most of what the editor writes is the library's, ids included.
   expect(renumbered).toBeLessThan(compared / 4);
-  expect(compared).toBeGreaterThan(200);
+  expect(compared).toBeGreaterThan(cases * 16);
   // Typing, deleting, formatting, comments, replies and decisions all met the editor.
   expect([...kinds].sort()).toEqual(
     expect.arrayContaining(['type', 'delete', 'sub', 'bold', 'comment', 'reply', 'decide']),

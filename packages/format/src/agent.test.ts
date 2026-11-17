@@ -1199,7 +1199,7 @@ describe('uniqueMatch', () => {
 describe('an agent that deletes all the text of a format', () => {
   it('leaves no `****` once the change is accepted (#584)', () => {
     const text = 'Plain **text** here.\n';
-    const { changes } = suggestReplace(text, 'text', '', context(claudeAda));
+    const { changes } = suggestReplace(text, 'text', '', context(claudeAda, ['k3x9', 'm4p2']));
     const written = applyChanges(text, changes);
     expect(applyChanges(written, acceptAll(written))).not.toContain('*');
   });
