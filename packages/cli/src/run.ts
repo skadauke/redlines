@@ -41,7 +41,8 @@ export interface CliIo {
   importDocx?(
     bytes: Uint8Array,
   ): Promise<{ markdown: string; notes: string[]; media: Record<string, Uint8Array> }>;
-  exportDocx?(text: string): Promise<{ bytes: Uint8Array; notes: string[] }>;
+  /** `file` is the Markdown's path, which the pictures it links are read beside. */
+  exportDocx?(text: string, file?: string): Promise<{ bytes: Uint8Array; notes: string[] }>;
 }
 
 const USAGE = `Usage: redlines <command> <file> [options]
@@ -147,7 +148,7 @@ async function exportDocx(rest: string[], io: CliIo): Promise<number> {
   const target = out ?? file.replace(/\.[^./\\]*$/, '') + '.docx';
   if (target === file)
     throw new EditError(`${file} is the file to export; give another name with -o.`);
-  const { bytes, notes } = await io.exportDocx(text);
+  const { bytes, notes } = await io.exportDocx(text, file);
   await io.writeBytes(target, bytes).catch(cannot('write', target));
   for (const note of notes) io.stderr(`${note}\n`);
   io.stdout(`${target}\n`);

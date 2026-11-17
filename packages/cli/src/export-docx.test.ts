@@ -70,3 +70,33 @@ describe('redlines import-docx with pictures', () => {
     });
   });
 });
+
+describe('redlines export-docx with pictures', () => {
+  it('reads the pictures a file links from its own folder, and says what it could not', async () => {
+    await inFolder(async (folder, io) => {
+      const docx = join(folder, 'pic.docx');
+      await copyFile(new URL('./picture.fixture.docx', import.meta.url), docx);
+      expect(await run(['import-docx', docx, '-o', join(folder, 'doc', 'pic.md')], io)).toBe(0);
+      // A picture of the folder, one that is not there, and one above the folder.
+      const file = join(folder, 'doc', 'plan.md');
+      await copyFile(join(folder, 'doc', 'media', 'image1.png'), join(folder, 'above.png'));
+      await writeFile(
+        file,
+        '![A dot](media/image1.png)\n\n![Gone](media/none.png)\n\n![Above](../above.png)\n',
+      );
+      const err: string[] = [];
+      const out = join(folder, 'plan.docx');
+      expect(
+        await run(['export-docx', file, '-o', out], { ...io, stderr: (m) => void err.push(m) }),
+      ).toBe(0);
+      const { readParts } = await import('@redlines/word');
+      const names = Object.keys(readParts(new Uint8Array(await readFile(out))));
+      expect(names.filter((name) => name.startsWith('word/media/'))).toHaveLength(1);
+      const said = err.join('');
+      expect(said).not.toContain('is not in the Word file');
+      expect(said).toContain('media/none.png');
+      expect(said).toContain('../above.png');
+      expect(said).not.toContain('media/image1.png');
+    });
+  });
+});

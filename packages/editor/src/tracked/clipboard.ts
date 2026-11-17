@@ -14,6 +14,7 @@
 
 import { syntaxTree } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
+import type { ImageSpot } from '../api.ts';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import {
   newestView,
@@ -27,7 +28,14 @@ import {
 import { type FontStacks, destination, fontStack } from '../clipboard/copy-html.ts';
 import { documentHtml } from '../clipboard/document-html.ts';
 import { imageReader, imageResolver, sourceOf } from '../preview/image.ts';
-import { htmlToMarkdown, htmlToRange } from '../clipboard/paste-html.ts';
+import {
+  type PictureSink,
+  htmlToMarkdown,
+  htmlToRange,
+  withPictureLinks,
+} from '../clipboard/paste-html.ts';
+import { noticeFacet } from '../image-size.ts';
+import { destination as pathDestination, imageSaverFacet } from '../images.ts';
 import { place } from '../clipboard/place.ts';
 import { pasteListItems } from '../blocks/keys.ts';
 import { LOOKS_LIKE_ITEMS } from '../blocks/paste.ts';
@@ -267,7 +275,11 @@ export const plainPastes = new WeakSet<Event>();
 const OWN_WRAPPER = /<div\s[^>]*\bdata-redlines[\s=>/]/i;
 
 /** The Markdown of a paste's HTML, or nothing when the plain text is what to paste. */
-function pastedMarkdown(data: DataTransfer, ownText: string | null): string | null {
+function pastedMarkdown(
+  data: DataTransfer,
+  ownText: string | null,
+  pictures?: PictureSink,
+): string | null {
   const html = data.getData('text/html');
   if (!html) return null;
   // Redlines' own copy is Markdown already: its plain text is the source, and the HTML would only
@@ -281,7 +293,7 @@ function pastedMarkdown(data: DataTransfer, ownText: string | null): string | nu
   ) {
     return null;
   }
-  const markdown = htmlToMarkdown(html);
+  const markdown = htmlToMarkdown(html, pictures);
   const plain = squash(data.getData('text/plain'));
   // A single link to its own address, or markup around the same words, adds nothing.
   if (
@@ -336,6 +348,108 @@ function listPaste(view: EditorView, text: string): boolean {
   if (!LOOKS_LIKE_ITEMS.test(text)) return false;
   const plain = plainText(text);
   return plain !== '' && pasteListItems(view, plain);
+}
+
+/** Pastes Markdown at the selection, as the person's own insertion, through a paste of plain text. */
+function pasteMarkdown(view: EditorView, markdown: string): void {
+  const { from, to } = view.state.selection.main;
+  const placed = place(view.state, plainText(markdown), from, to);
+  // After a `<` of the document's own, a paste must not begin a tag or a comment.
+  if (from > 0 && view.state.sliceDoc(from - 1, from) === '<') {
+    placed.text = placed.text.replace(/^[!?/]|^[A-Za-z]/, (c) =>
+      /[A-Za-z]/.test(c) ? `&#${c.charCodeAt(0)};` : `\\${c}`,
+    );
+  }
+  if ('rest' in placed) {
+    // The first paragraph joins a heading's or a link's line, the rest follows the line.
+    view.dispatch({
+      changes: [
+        { from, to, insert: placed.text },
+        { from: placed.at, insert: plainText(placed.rest) },
+      ],
+      selection: { anchor: from + placed.text.length },
+      userEvent: 'input.paste',
+      scrollIntoView: true,
+    });
+    return;
+  }
+  // The Markdown goes in as plain text does, in a paste event of its own with no HTML.
+  const converted = new DataTransfer();
+  converted.setData('text/plain', placed.text);
+  view.contentDOM.dispatchEvent(
+    new ClipboardEvent('paste', { clipboardData: converted, bubbles: true, cancelable: true }),
+  );
+}
+
+/**
+ * Saves one picture through the host, as a pasted screenshot is saved, and resolves to the path its
+ * link goes by, or null when the host said no (it says why through its own notice).
+ */
+function savePicture(
+  save: (files: File[], spot: ImageSpot, pasted: boolean) => void,
+  picture: PictureSink['pictures'][number],
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const file = new File([picture.bytes], `image.${picture.extension}`, { type: picture.type });
+    let settled = false;
+    const spot: ImageSpot = {
+      insert: (paths) => {
+        if (settled) return false;
+        settled = true;
+        resolve(paths[0] ?? null);
+        return true;
+      },
+      release: () => {
+        if (settled) return;
+        settled = true;
+        resolve(null);
+      },
+    };
+    try {
+      save([file], spot, true);
+    } catch {
+      spot.release();
+    }
+  });
+}
+
+/**
+ * A paste whose HTML holds pictures (Word's come with their bytes): each is saved through the host,
+ * one after another, and the Markdown goes in with links to the saved files. A picture that can't be
+ * saved is left out, and the person is told, never silently: the pictures that stay linked to a web
+ * address are said to be so too.
+ */
+async function pasteWithPictures(
+  view: EditorView,
+  markdown: string,
+  found: PictureSink,
+): Promise<void> {
+  const notice = view.state.facet(noticeFacet);
+  const save = view.state.facet(imageSaverFacet);
+  const paths: (string | null)[] = [];
+  if (save) for (const picture of found.pictures) paths.push(await savePicture(save, picture));
+  if (!view.dom.isConnected) return;
+  const left = found.pictures.length - paths.filter((path) => path !== null).length;
+  const parts: string[] = [];
+  if (left || found.unreadable) {
+    const count = left + found.unreadable;
+    parts.push(
+      save
+        ? `${count === 1 ? 'A picture' : `${count} pictures`} couldn’t be added from the paste.`
+        : `${count === 1 ? 'A picture' : `${count} pictures`} in the paste ${count === 1 ? 'wasn’t' : 'weren’t'} added: this window can’t save pictures.`,
+    );
+  }
+  if (found.linked) {
+    parts.push(
+      `${found.linked === 1 ? 'A picture stays' : `${found.linked} pictures stay`} linked to ${found.linked === 1 ? 'its' : 'their'} web address: ${found.linked === 1 ? 'it isn’t' : 'they aren’t'} saved in the document’s images folder.`,
+    );
+  }
+  const text = withPictureLinks(markdown, (index) => {
+    const path = paths[index];
+    return path ? pathDestination(path) : null;
+  });
+  if (text) pasteMarkdown(view, text);
+  if (parts.length) notice?.(parts.join(' '));
 }
 
 /** Copy, cut, drag and paste of the newest text, outside Plain. */
@@ -407,46 +521,30 @@ export function clipboard(): Extension {
           event.preventDefault();
           return true;
         }
-        const markdown = pastedMarkdown(data, lastCopied);
+        const pictures: PictureSink = {
+          pictures: [],
+          unreadable: 0,
+          linked: 0,
+          read: new Map(),
+        };
+        const markdown = pastedMarkdown(data, lastCopied, pictures);
         // List items into a list item are items of that list, whether they came as Markdown or as
         // plain text; one step to undo (blocks/paste.ts).
-        if (!plainPastes.has(event) && listPaste(view, markdown ?? data.getData('text/plain'))) {
+        if (
+          !plainPastes.has(event) &&
+          !pictures.pictures.length &&
+          listPaste(view, markdown ?? data.getData('text/plain'))
+        ) {
           event.preventDefault();
           return true;
         }
         if (markdown === null) return false;
         event.preventDefault();
-        const { from, to } = view.state.selection.main;
-        const placed = place(view.state, plainText(markdown), from, to);
-        // After a `<` of the document's own, a paste must not begin a tag or a comment.
-        if (from > 0 && view.state.sliceDoc(from - 1, from) === '<') {
-          placed.text = placed.text.replace(/^[!?/]|^[A-Za-z]/, (c) =>
-            /[A-Za-z]/.test(c) ? `&#${c.charCodeAt(0)};` : `\\${c}`,
-          );
-        }
-        if ('rest' in placed) {
-          // The first paragraph joins a heading's or a link's line, the rest follows the line.
-          view.dispatch({
-            changes: [
-              { from, to, insert: placed.text },
-              { from: placed.at, insert: plainText(placed.rest) },
-            ],
-            selection: { anchor: from + placed.text.length },
-            userEvent: 'input.paste',
-            scrollIntoView: true,
-          });
+        if (!pictures.pictures.length && !pictures.unreadable && !pictures.linked) {
+          pasteMarkdown(view, markdown);
           return true;
         }
-        // The Markdown goes in as plain text does, in a paste event of its own with no HTML.
-        const converted = new DataTransfer();
-        converted.setData('text/plain', placed.text);
-        view.contentDOM.dispatchEvent(
-          new ClipboardEvent('paste', {
-            clipboardData: converted,
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
+        void pasteWithPictures(view, markdown, pictures);
         return true;
       },
     }),

@@ -250,6 +250,72 @@ function formatOf(el: Element, parent: Format): Format {
   return format;
 }
 
+/** A picture that came with its bytes in the HTML, as the clipboard held it. */
+export interface PastedPicture {
+  bytes: Uint8Array<ArrayBuffer>;
+  /** The type of the bytes themselves (sniffed: Word labels a JPEG `image/png`). */
+  type: string;
+  /** The extension to save it with. */
+  extension: string;
+}
+
+/** What a paste's pictures need of the host, gathered while the HTML is read. */
+export interface PictureSink {
+  /** The pictures to save, in the order of their placeholders. */
+  pictures: PastedPicture[];
+  /** How many pictures were data the page could not read as an image. */
+  unreadable: number;
+  /** How many pictures stay linked to a web address. */
+  linked: number;
+  /** The images already read, by element, with the address each is written with. */
+  read: Map<Element, string>;
+}
+
+/** What a picture to be saved is linked by in the Markdown, until its file is there. */
+const pictureLink = (index: number) => `redlines-picture:${index}`;
+const PICTURE_LINK = /!\[((?:\\[\s\S]|[^\]\\])*)\]\(redlines-picture:(\d+)\)/g;
+
+/** The Markdown of a paste with each picture's placeholder given its link (null: left out). */
+export function withPictureLinks(markdown: string, link: (index: number) => string | null): string {
+  return markdown
+    .replace(PICTURE_LINK, (_all, alt: string, index: string) => {
+      const to = link(Number(index));
+      return to === null ? '' : `![${alt}](${to})`;
+    })
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** The type of image bytes, by their first bytes; null for any other. */
+function sniffImage(b: Uint8Array): { type: string; extension: string } | null {
+  const at = (i: number, text: string) => [...text].every((c, k) => b[i + k] === c.charCodeAt(0));
+  if (b[0] === 0x89 && at(1, 'PNG')) return { type: 'image/png', extension: 'png' };
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)
+    return { type: 'image/jpeg', extension: 'jpg' };
+  if (at(0, 'GIF8')) return { type: 'image/gif', extension: 'gif' };
+  if (at(0, 'RIFF') && at(8, 'WEBP')) return { type: 'image/webp', extension: 'webp' };
+  if (at(0, 'BM')) return { type: 'image/bmp', extension: 'bmp' };
+  return null;
+}
+
+/** The picture in a `data:` address, or null when it isn't base64 data of an image. */
+function pictureOfDataUri(uri: string): PastedPicture | null {
+  const match = /^data:image\/[a-z0-9.+-]+(?:;[^,;]*)*;base64,([\s\S]*)$/i.exec(uri);
+  if (!match) return null;
+  try {
+    const raw = atob((match[1] ?? '').replace(/\s+/g, ''));
+    const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+    const kind = sniffImage(bytes);
+    return kind ? { bytes, ...kind } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Where the pictures of the HTML being read are gathered, while a paste asks for them. */
+let sink: PictureSink | null = null;
+
 /** The runs of text, images and breaks under `node`. */
 function collect(node: Node, format: Format, runs: Run[]): void {
   if (isText(node)) {
@@ -268,9 +334,21 @@ function collect(node: Node, format: Format, runs: Run[]): void {
   }
   if (tag === 'img') {
     const lazy = node.getAttribute('data-src') ?? node.getAttribute('data-original') ?? '';
-    const src = (node.getAttribute('src') ?? '').startsWith('data:')
-      ? lazy
-      : (node.getAttribute('src') ?? lazy);
+    const given = (node.getAttribute('src') ?? '').trim();
+    let src = given.startsWith('data:') ? lazy : (node.getAttribute('src') ?? lazy);
+    // A picture whose bytes are in the HTML (Word's, Pages') is the host's to save, when the paste
+    // asks for them: its link is a placeholder until the file is there (`withPictureLinks`).
+    // An element may be read more than once (the converter measures before it writes): once counts.
+    const again = sink?.read.get(node);
+    if (sink && again !== undefined) src = again;
+    else if (sink) {
+      if (/^data:/i.test(given) && !(src && !UNSAFE.test(src))) {
+        const picture = pictureOfDataUri(given);
+        if (picture) src = pictureLink(sink.pictures.push(picture) - 1);
+        else sink.unreadable++;
+      } else if (/^https?:/i.test(src.trim())) sink.linked++;
+      sink.read.set(node, src);
+    }
     if (src && !UNSAFE.test(src)) {
       runs.push({
         type: 'image',
@@ -667,6 +745,14 @@ function wordItem(el: Element): WordItem | null {
 
 /** What a Word marker says: a bullet (Symbol, Wingdings and Courier glyphs), or a number. */
 function wordMarker(marker: string): { ordered: boolean; start: number } {
+  // Legal numbering (`1.1.`, `1.1.1`) is a number at its level: Markdown holds the last part, and
+  // the whole label is not kept.
+  const legal = /^\d+(?:\.\d+)+\.?$/.exec(marker);
+  if (legal)
+    return {
+      ordered: true,
+      start: Number.parseInt(marker.replace(/\.$/, '').split('.').at(-1)!, 10),
+    };
   const match = /^\(?([0-9]+|[a-zA-Z]+)[.)]$/.exec(marker);
   if (!match) return { ordered: false, start: 1 };
   const label = match[1]!;
@@ -1218,9 +1304,15 @@ function withoutRawHtml(text: string): string {
 }
 
 /** Markdown for the HTML of a clipboard. Empty when the HTML has no content. */
-export function htmlToMarkdown(html: string): string {
+export function htmlToMarkdown(html: string, pictures?: PictureSink): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  const blocks = new Converter().blocks(doc.body, PLAIN, { cell: false, noBold: false });
+  sink = pictures ?? null;
+  let blocks: string[];
+  try {
+    blocks = new Converter().blocks(doc.body, PLAIN, { cell: false, noBold: false });
+  } finally {
+    sink = null;
+  }
   return withoutRawHtml(
     blocks
       .join('\n\n')
