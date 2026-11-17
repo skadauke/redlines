@@ -15,7 +15,7 @@ import {
   threadEntries,
   warningNotes,
 } from '@redlines/format';
-import type { EditContext, Handle, Person } from '@redlines/format';
+import type { EditContext, Handle, MarkdownDialect, Person } from '@redlines/format';
 import { LIMITS, hasBlankLine, joinReply, normalizeBreaks, sizeOf } from './fold.ts';
 
 /** The document the tools act on. In the app it is the live editor. */
@@ -42,6 +42,8 @@ export interface ToolContext {
    * Default: false. Asked on each call, since the app may rename the document into another kind.
    */
   plainOnly?(): boolean;
+  /** The dialect of the document by its name (format §9.1); GitHub's when absent. */
+  dialect?(): MarkdownDialect;
   /**
    * The one picture this run may be shown, for `view_image`: only a request to describe an image
    * (Alt Text) gives it, and the tool has no argument that names another file. Without it, there
@@ -220,6 +222,8 @@ function minute(date: Date): string {
 
 function editContext(ctx: ToolContext, note?: string): EditContext {
   const edit: EditContext = { author: ctx.author, time: minute(ctx.now()) };
+  const dialect = ctx.dialect?.();
+  if (dialect !== undefined) edit.dialect = dialect;
   if (note !== undefined && note !== '') edit.note = note;
   return edit;
 }

@@ -20,6 +20,8 @@ const BODY = [
 ].join('\n');
 const START = file(BODY);
 const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs', 'c2dd', 'f3gg', 'h4jj', 'm5nn', 'r2zd', 's3vb'];
+/** The probe is of a `.qmd`: the rules of pandoc's dialect (format §9.1). */
+const QMD = { dialect: 'pandoc' } as const;
 
 /** The hazards pandoc has: a marker on a fence line, or inside a reference token. */
 function hazards(text: string): string[] {
@@ -41,7 +43,7 @@ function edit(find: string, replace: string, offset: number, length: number) {
   const changes = trackedEdits(
     START,
     [{ from: at, to: at + length, insert: replace }],
-    context(ada, IDS),
+    context(ada, IDS, QMD),
   ).changes;
   return applyChanges(START, changes);
 }
@@ -92,7 +94,7 @@ describe('superscripts', () => {
       const changes = trackedEdits(
         START2,
         [{ from: at, to: at + length, insert }],
-        context(ada, IDS),
+        context(ada, IDS, QMD),
       ).changes;
       const after = applyChanges(START2, changes);
       expect(bodyOf(after)).not.toMatch(/\^[^\s^]*<!--(?!\/)/);
@@ -116,7 +118,11 @@ describe('new and deleted divs', () => {
   const typed = (insert: string, after: string) => {
     const view = newestView(START).text;
     const at = view.indexOf(after) + after.length;
-    const changes = trackedEdits(START, [{ from: at, to: at, insert }], context(ada, IDS)).changes;
+    const changes = trackedEdits(
+      START,
+      [{ from: at, to: at, insert }],
+      context(ada, IDS, QMD),
+    ).changes;
     return applyChanges(START, changes);
   };
   const divs: [string, string][] = [
@@ -149,9 +155,29 @@ describe('new and deleted divs', () => {
     const view = newestView(START).text;
     const from = view.indexOf('::: {.callout-note');
     const to = view.indexOf('See @sec-intro');
-    const changes = trackedEdits(START, [{ from, to, insert: '' }], context(ada, IDS)).changes;
+    const changes = trackedEdits(START, [{ from, to, insert: '' }], context(ada, IDS, QMD)).changes;
     const after = applyChanges(START, changes);
     expect(hazards(after), after).toEqual([]);
     expectEveryOrderRead('delete', after);
+  });
+});
+
+describe('a Markdown file keeps the plain rules', () => {
+  it('writes in front of a colon line and inside @fig-x, which are text in `.md`', () => {
+    const view = newestView(START).text;
+    for (const [find, at] of [
+      ['\n:::\n', 1],
+      ['@fig-plot', 5],
+    ] as const) {
+      const from = view.indexOf(find) + at;
+      const changes = trackedEdits(
+        START,
+        [{ from, to: from, insert: 'X' }],
+        context(ada, IDS),
+      ).changes;
+      const after = applyChanges(START, changes);
+      expect(newestView(after).text).toBe(view.slice(0, from) + 'X' + view.slice(from));
+      expectEveryOrderRead('md', after);
+    }
   });
 });

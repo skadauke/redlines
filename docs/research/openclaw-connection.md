@@ -450,6 +450,34 @@ of `Health`):
    offers it again), and whether a Gateway takes a third party as a node at all.
 6. What Tailscale's `Health` says on a network that blocks it.
 
+### What the live test found
+
+Run November 17, 2026, against a throwaway `openclaw@2026.11.5` Gateway on loopback (own state
+directory, shared token, no model), with `live_gateway` in `node.rs`. What the Gateway accepted:
+the handshake, Redlines as a node (`client.id: node-host`, `mode: node`), a v2-signed device, a
+device token in `hello-ok`, six tools published, and a call routed to Redlines with
+`openclaw nodes invoke --command mcp.tools.call.v1`, which came back with the tool's answer.
+`system.run` is refused by the Gateway for a node ("reserved for shell execution").
+
+What differed from the guesses, now fixed:
+
+1. `client.id` is a closed list; a third party can't have its own. Redlines says `node-host`, and
+   is told apart by its display name and its device.
+2. A published tool is a closed object: `pluginId: "node-mcp"`, `parameters` (not `inputSchema`) and
+   `mcp: {server, tool}`, with `command: "mcp.tools.call.v1"`.
+3. A call's `paramsJSON` is `{server, tool, arguments}`, not `{name, arguments}`.
+4. A `hello-ok` answers protocol 4 to a node that offered 3, so it is no sign of a newer Gateway; a
+   Gateway that can't speak ours refuses `connect`.
+5. A setup code is base64url of `{url, bootstrapToken, expiresAtMs}`; only the token goes in
+   `auth.bootstrapToken`. Redlines now decodes it (a bare token still works).
+
+Refusals read live: a wrong token is told as a bad token, and a used setup code as a used code.
+
+**Not seen:** an approval wait. On loopback a shared token or a fresh setup code pairs the node
+silently, so "pairing required" (its words are in OpenClaw's source: `NOT_PAIRED`, "pairing
+required: ...", with `requestId`) waits for a Gateway reached from another machine. Nor was a call
+from a real agent seen: that needs a model, which the throwaway Gateway didn't have.
+
 **The steps Stephan would take, in this order, each with a throwaway Gateway** (as the first list in
 "Hands-on tests that need Stephan's OK" says: its own `OPENCLAW_STATE_DIR`, a spare loopback port,
 no model key, removed afterwards):

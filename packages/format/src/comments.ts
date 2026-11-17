@@ -3,6 +3,7 @@
 // only the ledger; deleting a thread removes both. Where the anchor's markers go is the same for a
 // highlight (anchors.ts).
 
+import { withDialect } from './dialect.ts';
 import { closerRange, openerRange } from './blocks.ts';
 import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
@@ -63,56 +64,58 @@ export function addComment(
   ctx: EditContext,
   rowsWidened = false,
 ): { changes: TextChange[]; id: string } {
-  const recorded = recordIds(ctx);
-  if (!rowsWidened) ctx = recorded.ctx;
-  assertRange(text, range);
-  const parsed = parse(text);
-  const markers = markerRanges(parsed);
-  let placed = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
-  placed = pastPendingRowMarks(text, parsed, markers, placed);
-  const { from, to } = placed;
-  const point = from === to;
+  return withDialect(ctx.dialect, () => {
+    const recorded = recordIds(ctx);
+    if (!rowsWidened) ctx = recorded.ctx;
+    assertRange(text, range);
+    const parsed = parse(text);
+    const markers = markerRanges(parsed);
+    let placed = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
+    placed = pastPendingRowMarks(text, parsed, markers, placed);
+    const { from, to } = placed;
+    const point = from === to;
 
-  const id = newId(idsIn(text), ctx.random);
-  const thread: Thread = {
-    id,
-    by: ctx.author.handle,
-    at: ctx.time,
-    likes: [],
-    replies: [],
-    text: body,
-  };
-  const quote = point ? '' : visibleText(text, markers, from, to);
-  if (quote !== '') thread.quote = quote;
-  const ledger = workingLedger(parsed.ledger);
-  addPerson(ledger, ctx.author);
-  ledger.comments.push(thread);
+    const id = newId(idsIn(text), ctx.random);
+    const thread: Thread = {
+      id,
+      by: ctx.author.handle,
+      at: ctx.time,
+      likes: [],
+      replies: [],
+      text: body,
+    };
+    const quote = point ? '' : visibleText(text, markers, from, to);
+    if (quote !== '') thread.quote = quote;
+    const ledger = workingLedger(parsed.ledger);
+    addPerson(ledger, ctx.author);
+    ledger.comments.push(thread);
 
-  const anchors: TextChange[] = [{ from, to: from, insert: `<!--cmt ${id}-->` }];
-  if (!point) anchors.push({ from: to, to, insert: `<!--/${id}-->` });
-  const changes = commitEdit(text, anchors, ledger, {
-    parsed,
-    created: [id],
-    verify: (after) => checkAnchor(after, id, !point, IN_CODE),
-    inCode: IN_CODE,
-  });
-  const after = applyChanges(text, changes);
-  const across = acrossMovedRows(after, id, rowsWidened);
-  if (!across) return { changes, id };
-  // A comment that runs from one row into another while a move is pending can't be left as a point
-  // when the move is decided: its ends are taken to rows that are not pending (format §3.12).
-  if (rowsWidened) throw across.error;
-  const table = readTables(text, parsed).find(
-    (read) => range.from <= read.to && read.from <= range.to,
-  );
-  for (const candidate of table ? rowWidenings(table, text, range) : []) {
-    try {
-      return addComment(text, candidate, body, recorded.replay(), true);
-    } catch (error) {
-      if (!(error instanceof EditError)) throw error;
+    const anchors: TextChange[] = [{ from, to: from, insert: `<!--cmt ${id}-->` }];
+    if (!point) anchors.push({ from: to, to, insert: `<!--/${id}-->` });
+    const changes = commitEdit(text, anchors, ledger, {
+      parsed,
+      created: [id],
+      verify: (after) => checkAnchor(after, id, !point, IN_CODE),
+      inCode: IN_CODE,
+    });
+    const after = applyChanges(text, changes);
+    const across = acrossMovedRows(after, id, rowsWidened);
+    if (!across) return { changes, id };
+    // A comment that runs from one row into another while a move is pending can't be left as a point
+    // when the move is decided: its ends are taken to rows that are not pending (format §3.12).
+    if (rowsWidened) throw across.error;
+    const table = readTables(text, parsed).find(
+      (read) => range.from <= read.to && read.from <= range.to,
+    );
+    for (const candidate of table ? rowWidenings(table, text, range) : []) {
+      try {
+        return addComment(text, candidate, body, recorded.replay(), true);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
     }
-  }
-  throw across.error;
+    throw across.error;
+  });
 }
 
 /**

@@ -34,6 +34,7 @@ import {
   refusedEditEffect,
   setViewModeEffect,
   viewModeField,
+  dialectFacet,
 } from '@redlines/editor';
 import {
   addComment,
@@ -1558,7 +1559,12 @@ class Rail {
     const range = state.field(newComment);
     if (!range) throw new Error('No new comment is being written');
     const doc = state.doc.toString();
-    const { changes, id } = addComment(doc, range, text, editContext(this.ctx.author));
+    const { changes, id } = addComment(
+      doc,
+      range,
+      text,
+      editContext(this.ctx.author, this.view.state.facet(dialectFacet)),
+    );
     applyEdit(this.view, changes, 'review.comment');
     this.select(id);
     return { thread: id, id };
@@ -1633,7 +1639,11 @@ class Rail {
         ?.replies ?? [];
     const before = new Set(repliesOf().map((posted) => posted.id));
     const doc = this.view.state.doc.toString();
-    applyEdit(this.view, reply(doc, id, text, editContext(this.ctx.author)), 'review.reply');
+    applyEdit(
+      this.view,
+      reply(doc, id, text, editContext(this.ctx.author, this.view.state.facet(dialectFacet))),
+      'review.reply',
+    );
     const posted = repliesOf().find((added) => !before.has(added.id));
     // A reply always gains the thread one; without it, a run would take the reply for a comment.
     if (!posted) throw new Error(`The reply to ${id} is not in the document`);
@@ -1642,7 +1652,11 @@ class Rail {
 
   resolve(id: string): void {
     const doc = this.view.state.doc.toString();
-    applyEdit(this.view, resolve(doc, id, editContext(this.ctx.author)), 'review.resolve');
+    applyEdit(
+      this.view,
+      resolve(doc, id, editContext(this.ctx.author, this.view.state.facet(dialectFacet))),
+      'review.resolve',
+    );
   }
 
   /** Reopens a resolved thread. */

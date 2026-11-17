@@ -13,6 +13,7 @@
 import { Annotation } from '@codemirror/state';
 import type { Transaction } from '@codemirror/state';
 import type { Person, TextChange } from '@redlines/format';
+import type { FormatIntent } from './format-intent.ts';
 
 /** An edit of an intent, in the offsets of the text it was made to. */
 export interface IntentEdit extends TextChange {
@@ -41,7 +42,15 @@ export interface TypingIntent {
   drawn: readonly (readonly number[])[];
 }
 
-export type Intent = TypingIntent;
+export type Intent = TypingIntent | FormatIntent;
+
+/** An intent with no id yet: what the writers make. */
+export type Unnamed<T = Intent> = T extends unknown ? Omit<T, 'id'> : never;
+
+/** The annotation that records an intent a writer made, with an id of its own. */
+export function recordedAs(intent: Unnamed): ReturnType<typeof intentAnnotation.of> {
+  return intentAnnotation.of({ ...intent, id: newIntentId() });
+}
 
 /** The intent a transaction was rewritten from, when the tracking filter made it. */
 export const intentAnnotation = Annotation.define<Intent>();
