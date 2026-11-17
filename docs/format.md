@@ -2848,6 +2848,16 @@ it, one per line:
     so that a plain edit changes both views (§3.10): the old row of a pending alignment change (so
     that rejecting it keeps what was done, and the change goes when its old and new alignments are
     the same), and the kept copy of a column that is a pending move's, in both halves of the move.
+    - A plain edit in a cell of the new rows of a table's replacement (a `sub` whose old text is the
+      table's old rows, as a pending alignment change writes it) is written in the same cell of the
+      old rows, in the payload, as well as in the text, so that it belongs to both views. The cell is
+      found by its place in the row, and the edit by the text and the runs of format syntax
+      (`*`, `_`, `~`) around it, not by offsets, since the two cells may differ in syntax alone. It
+      is alerted where no old cell corresponds: the delimiter row, a cell with a marker in it, a
+      cell that the replacement added or rewrote beyond format syntax, rows that are not as many in
+      both copies, text typed that would cut a cell (a pipe, a backtick, a backslash, `<`, a line
+      break), and a deletion that takes only part of the syntax of a pair. An edit across rows is no
+      edit in a cell, and is written as any other.
     - A plain column operation beside a pending alignment change does to `SPEC` what it does to the
       table's own rows: a deleted column's cell goes, a new column's cell is the delimiter cell it
       has in the table, a moved column's cell moves with it. The mark, with its value written
@@ -3393,6 +3403,14 @@ outside it takes the blocks it spans into the unit. A unit of more than eight to
 new text of someone else's substitution, the unit is a unit of that new text, written inside it:
 the old text of the second is the new text of the first, and the first's marks stand around it.
 Accepting the first leaves the second pending; rejecting the first takes the second with it.
+
+**Delimiters.** A fine write that replaces, deletes or types an emphasis delimiter (`*`, `_`, `~`), or
+stands right against one, in a paragraph that holds a marker, is read with micromark first (`atDelimiter`
+in `widen.ts`). Typing over one `*` of another person's pending bold `**`, or a pasted run next to their
+pending split, can write a file that micromark reads otherwise than the newest view; the paragraph is
+replaced whole instead (#299, #265). Where another person's mark ends at the unit's edge (a pending
+split's break or deletion of one), the unit is tried with the block beside it, which holds the mark
+whole, before the refusal below applies.
 
 **The old text holds other people's marks.** The old text of a replacement may hold another
 person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every

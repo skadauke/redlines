@@ -244,14 +244,6 @@ const LINK_IN_OLD_TEXT =
  */
 const OLDER: { issue: string; why: string; shape: (found: Found) => boolean }[] = [
   {
-    issue: '#299',
-    why: 'an edit against the delimiters of a pending bold reads otherwise than the views',
-    shape: ({ control, checks }) =>
-      READS_OTHERWISE.includes(checks[0] ?? '') &&
-      /<!--fmt \w{4} \+bold/.test(control) &&
-      DELIMITER_BY_MARKER.test(control),
-  },
-  {
     issue: '#265',
     why: 'a delimiter run next to another person’s pending change, or a change over their deletion of a backslash, reads otherwise in some order of decisions',
     shape: ({ control, checks }) =>
