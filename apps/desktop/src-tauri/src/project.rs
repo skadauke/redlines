@@ -1694,6 +1694,26 @@ mod tests {
     }
 
     #[test]
+    fn a_document_in_the_home_folder_is_still_allowed_and_answered_but_shows_no_folder() {
+        let home = folder("home-allowed");
+        make(&home, &["note.md"]);
+        let (scope, projects) = (scope(), Projects::default());
+        scope.allow_file(home.join("note.md")).unwrap();
+        // The window may use the file and learns that its project is too broad (the page then
+        // shows the notice); the only things it loses are the project's folder and its pictures.
+        let root = project_of(
+            &scope,
+            &projects,
+            &home.join("note.md").to_string_lossy(),
+            Some(&home),
+        )
+        .unwrap();
+        assert!(root.is_too_broad());
+        assert!(file_scope::allowed(&scope, &home.join("note.md")));
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
     fn the_sidebar_shows_the_project_and_for_one_too_broad_no_folder() {
         let repo = folder("sidebar-folder");
         make(&repo, &[".git/", "docs/plan.md"]);
