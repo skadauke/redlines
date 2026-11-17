@@ -86,6 +86,7 @@ import {
   inEol,
   markerRanges,
   nameOf,
+  plainPayload,
   restoredPayload,
   snapOut,
   visibleText,
@@ -2916,7 +2917,9 @@ function originalBetween(plan: Plan, from: number, to: number): string {
   return plan.markers
     .filter((m) => m.role === 'open' && m.from >= from && m.to <= to)
     .map((m) =>
-      m.mark?.kind === 'del' || m.mark?.kind === 'sub' ? (m.segment?.payload ?? '') : '',
+      m.mark?.kind === 'del' || m.mark?.kind === 'sub'
+        ? plainPayload(m.segment?.payload ?? '')
+        : '',
     )
     .join('');
 }

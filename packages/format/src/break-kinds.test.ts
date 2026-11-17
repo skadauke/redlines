@@ -216,3 +216,35 @@ describe('every order of decisions reads alike, with mixed line breaks', () => {
     expect(tried).toBeGreaterThan(50);
   });
 });
+
+describe('the escapes never collide with text a person typed, and never leak', () => {
+  const rejected = (text: string, id: string) => applyChanges(text, reject(text, id));
+  const edit = (text: string, change: TextChange) =>
+    applyChanges(text, trackedEdit(text, change, context(ada, ['k3x9'])));
+
+  it('keeps a literal \\x0d, \\x0a and \\n in prose or code as text', () => {
+    for (const literal of ['\\x0d', '\\x0a', '\\n', 'a\\x0d\\nb', '\\\r', '\\\n']) {
+      for (const style of ['\n', '\r\n'] as const) {
+        const written = encodePayload(literal, style);
+        expect(written).not.toMatch(/[\r\n]/);
+        expect(restoredPayload(decodePayload(written), style), JSON.stringify(literal)).toBe(
+          literal,
+        );
+      }
+    }
+  });
+
+  it('gives back a deleted literal \\x0d beside a CRLF in a mixed file byte for byte', () => {
+    for (const body of ['say \\x0d\r\nthen\nmore', 'say \\x0a\nthen\r\nmore', 'a\\\r\nb\nc']) {
+      const cut = edit(body, { from: 0, to: body.length - 1, insert: '' });
+      expect(rejected(cut, 'k3x9'), JSON.stringify(body)).toBe(body);
+    }
+  });
+
+  it('never gives LF_IN_CRLF to a view of the file', () => {
+    const body = 'one\r\ntwo\nthree\r\nfour';
+    const cut = edit(body, { from: 3, to: 12, insert: '' });
+    expect(newestView(cut).text).not.toContain(LF_IN_CRLF);
+    expect(originalView(cut).text).not.toContain(LF_IN_CRLF);
+  });
+});
