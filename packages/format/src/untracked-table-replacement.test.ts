@@ -124,3 +124,13 @@ describe('an edit in a table replacement lands in the same place of both copies'
     );
   });
 });
+
+describe('plain typing in a table whose file has CRLF line ends', () => {
+  it('reads the rows of the replacement and types in both views, and does not loop', () => {
+    const text = file('x y').replace(/\n/g, '\r\n');
+    const place = text.indexOf('| x y |') + 3;
+    const after = applyChanges(text, untrackedEdit(text, { from: place, to: place, insert: 'q' }));
+    expect(newestView(after).text).toContain('xq y');
+    expect(originalView(after).text.split('\n')[0]).toContain('q');
+  });
+});

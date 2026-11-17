@@ -509,7 +509,9 @@ function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[]
       for (let at = open.to; at < close.from;) {
         const end = Math.min(lineEnd(text, at), close.from);
         if (text.slice(at, end).trim() !== '') rows.push({ from: at, to: end });
-        at = end + 1;
+        // The next line starts after its `\n`; `lineEnd` stops before a `\r`, so `end + 1` would stay put.
+        const newline = text.indexOf('\n', end);
+        at = newline === -1 ? close.from : newline + 1;
       }
       // A table in both copies: a header, a delimiter row, and more.
       const isTable = (line: string | undefined) =>
