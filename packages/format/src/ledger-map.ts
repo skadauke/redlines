@@ -258,7 +258,8 @@ export function applyLedgerOp(map: LedgerMap, op: LedgerOp): LedgerMap {
     }
     case 'setField': {
       // The keys the ledger has its own entries for are not fields: they would be written twice.
-      if (RESERVED.has(op.name)) return map;
+      // (`version` is one of the keys a later version's number is kept in, in `extra`.)
+      if (RESERVED.has(op.name) && op.name !== 'version') return map;
       const copy = cloneMap(map);
       if (op.value === undefined) copy.extra.delete(op.name);
       else copy.extra.set(op.name, op.value);

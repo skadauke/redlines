@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
 import { rejectAll } from './decide.ts';
+import { applyLedgerOp, ledgerMapOf } from './ledger-map.ts';
+import { mergeLedgers } from './ledger-merge.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { ada, context, file } from './test-helpers.ts';
@@ -65,6 +67,27 @@ describe("#11: the ledger's YAML (format §5.5)", () => {
     const again = parse(`Hello\n\n${written}`);
     expect(again.warnings).toHaveLength(1);
     expect(serializeLedger(again.ledger)).toBe(written);
+  });
+
+  it('keeps the higher version of two sides, as numbers, and lets a version be set as a field', () => {
+    const side = (version: string) =>
+      ledgerMapOf({ version: 1, people: [], marks: {}, comments: [], extra: { version } });
+    const merged = mergeLedgers(side('2'), side('9'), side('10'));
+    expect(merged.ledger.extra.get('version')).toBe('10');
+    const set = applyLedgerOp(side('2'), { op: 'setField', name: 'version', value: '3' });
+    expect(set.extra.get('version')).toBe('3');
+    // A version that is not a whole number above 1 is never written.
+    const odd = ledgerMapOf({
+      version: 1,
+      people: [],
+      marks: {},
+      comments: [],
+      extra: { version: 'x' },
+    });
+    expect(
+      serializeLedger({ version: 1, people: [], marks: {}, comments: [], extra: { version: 'x' } }),
+    ).toContain('\nversion: 1\n');
+    expect(odd.extra.get('version')).toBe('x');
   });
 
   it.each([

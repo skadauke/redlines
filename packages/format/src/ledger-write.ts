@@ -230,7 +230,8 @@ function threadLines(thread: Thread): string[] {
 export function serializeLedger(ledger: Ledger): string {
   // A later version's number is kept in `extra` as it was read, and written back where it was (§5.2).
   const kept = ledger.extra?.['version'];
-  const lines = ['<!-- redlines', NOTE, `version: ${typeof kept === 'string' ? kept : 1}`];
+  const later = typeof kept === 'string' && /^[0-9]+$/.test(kept) && Number(kept) > 1;
+  const lines = ['<!-- redlines', NOTE, `version: ${later ? kept : 1}`];
   if (ledger.tracking) lines.push(`tracking: ${ledger.tracking}`);
   if (ledger.view) lines.push(`view: ${ledger.view}`);
   if (ledger.history === 'full') lines.push('history: full');
