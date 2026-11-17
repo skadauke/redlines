@@ -141,6 +141,25 @@ export const STYLE = `
   outline-offset: -2px;
 }
 
+/* The full text of a heading the card cuts off, beside it, after the title bar's delay. */
+.rl-outline-tip {
+  position: absolute;
+  z-index: 2;
+  max-width: 360px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--rl-page, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
+  font-size: var(--rl-size-ui);
+  line-height: 1.3;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.rl-outline-tip[hidden] {
+  display: none;
+}
+
 /* The page is what prints. */
 @media print {
   .rl-outline {
