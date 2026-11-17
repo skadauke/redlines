@@ -59,7 +59,7 @@ import {
   viewBreaks,
   withoutMarkers,
 } from './blocks.ts';
-import { sameBlocks } from './block-read.ts';
+import { readBlocks, sameBlocks } from './block-read.ts';
 import {
   assertRowsStay,
   checkTableEdits,
@@ -2891,6 +2891,7 @@ function plainBreakAt(
   quoteLines = false,
   skip?: SplitUnit,
   kept = '',
+  typed = '\n',
 ): number | undefined {
   const { text, markers } = plan;
   const after = skip ? skip.end : position;
@@ -2946,6 +2947,9 @@ function plainBreakAt(
   // list loose: there Enter is a split, or is refused, and never plain.
   if ([position, at, after].some((p) => blankLinesMatter(plan, p, p))) return undefined;
   if (quoteLines) return at;
+  // A blank line that is a visible change, a quote split in two or a paragraph ended in front of a
+  // line that went on it, is no plain break (#136): the break is a split, or is widened.
+  if (!skip && readsOtherwise(plan, at, at, typed, '')) return undefined;
   const read = skip ? text.slice(0, skip.marker.from) + text.slice(skip.end) : text;
   if (loosensList(read, at, skip ? markers.filter((m) => m.to <= at) : markers)) return undefined;
   return at;
@@ -3035,9 +3039,47 @@ const READ_LINES = 200;
  * from the top level.
  */
 function readsAlike(plan: Plan, from: number, to: number, blank: string, close: string): boolean {
+  const around = readAround(plan, from, to);
+  return around !== undefined && sameBlocks(around.head, blank, close, around.tail);
+}
+
+/**
+ * Whether the blocks around `[from, to)` are read, and are other blocks with `blank` there than
+ * with `close`: a blank line that splits a quote in two, or ends the paragraph that a line that
+ * only looks like a fence went on (#136). False where the reading gives up, which is not a
+ * difference, and where it finds none.
+ */
+function readsOtherwise(
+  plan: Plan,
+  from: number,
+  to: number,
+  blank: string,
+  close: string,
+): boolean {
+  const around = readAround(plan, from, to);
+  if (!around) return false;
+  const wide = readBlocks(around.head + blank + around.tail);
+  const narrow = readBlocks(around.head + close + around.tail);
+  if (!wide || !narrow) return false;
+  return (
+    wide.length !== narrow.length ||
+    wide.some((block, i) => {
+      const other = narrow[i];
+      return other?.path !== block.path || other.kind !== block.kind || other.text !== block.text;
+    })
+  );
+}
+
+/** The text around `[from, to)` that `readsAlike` reads: from the line at the top level above to the
+ * one below, with the markers of comments read through. Undefined where it can't be read. */
+function readAround(
+  plan: Plan,
+  from: number,
+  to: number,
+): { head: string; tail: string } | undefined {
   const { text, markers } = plan;
   // A carriage return alone ends a line for CommonMark, and not for the lines read here.
-  if (text.includes('\r') && /\r(?!\n)/.test(text)) return false;
+  if (text.includes('\r') && /\r(?!\n)/.test(text)) return undefined;
   const floor = plan.frontEnd >= 0 ? nextLineStart(text, plan.frontEnd) : 0;
   const end = textEnd(plan);
   const verbatim = (plan.verbatim ??= scan(text).verbatim);
@@ -3049,11 +3091,11 @@ function readsAlike(plan: Plan, from: number, to: number, blank: string, close: 
   for (let n = 0; top > floor; n++) {
     const above = lineStart(text, top - 1);
     if (/[^ \t\r\n]/.test(text[top] ?? '') && blankAt(above) && !inside(top)) break;
-    if (n === READ_LINES) return false;
+    if (n === READ_LINES) return undefined;
     top = above;
   }
   top = Math.max(top, floor);
-  if (htmlOpenAbove(text, top, floor)) return false;
+  if (htmlOpenAbove(text, top, floor)) return undefined;
   // The last line: one that blank lines follow, then a line at the first column or the end of the
   // body, in no block that goes on over blank lines.
   let bottom = lineEnd(text, to);
@@ -3063,7 +3105,7 @@ function readsAlike(plan: Plan, from: number, to: number, blank: string, close: 
       while (next <= end && blankAt(next)) next = nextLineStart(text, next);
       if (next > end || /[^ \t\r\n]/.test(text[next] ?? '')) break;
     }
-    if (n === READ_LINES) return false;
+    if (n === READ_LINES) return undefined;
     bottom = lineEnd(text, nextLineStart(text, bottom));
   }
   // No mark near but comments, whose markers are read through.
@@ -3071,15 +3113,15 @@ function readsAlike(plan: Plan, from: number, to: number, blank: string, close: 
   for (const marker of markers) {
     if (marker.role === 'ledger' || marker.to <= top || marker.from >= bottom) continue;
     if (from <= marker.from && marker.to <= to) continue;
-    if (marker.mark?.kind !== 'cmt') return false;
+    if (marker.mark?.kind !== 'cmt') return undefined;
     comments.push(marker);
   }
   const marked = (c: Container) =>
     c.mark.kind !== 'cmt' && c.content.from < bottom && top < c.content.to;
-  if (plan.containers.some(marked)) return false;
+  if (plan.containers.some(marked)) return undefined;
   const head = visibleText(text, comments, top, from);
   const tail = visibleText(text, comments, to, bottom);
-  return sameBlocks(head, blank, close, tail);
+  return { head, tail };
 }
 
 /**
@@ -4046,7 +4088,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
       });
     // Lines of a quote's markers are no blank lines of a list that the quote is in.
     const quoteLines = lines.length > 0 && lines.every((line) => line.includes('>'));
-    const at = plain ? plainBreakAt(plan, from, quoteLines) : undefined;
+    const at = plain ? plainBreakAt(plan, from, quoteLines, undefined, '', typed) : undefined;
     if (at !== undefined) {
       plan.changes.push({ from: at, to: at, insert: typed });
       plan.plain = true;
