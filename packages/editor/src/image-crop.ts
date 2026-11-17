@@ -6,6 +6,7 @@
 // original file stays where it is, so rejecting the change gets it back, and the copy is a plain image
 // that renders the same everywhere, GitHub included. The width and the alignment are not touched.
 
+import type { Text } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { imageAt, imageInSelection, setImageSrc } from './image-size.ts';
 import { localImageAt } from './preview/image.ts';
@@ -48,6 +49,8 @@ export const CROP_HINT =
 export const CROP_NO_IMAGE = 'Select an image to crop it.';
 export const CROP_REMOTE = 'Only a picture kept in a file can be cropped.';
 export const CROP_RAW = 'Crop works on the picture as it reads. Show Clean or Redlines first.';
+export const CROP_NOT_POINTED =
+  'The image could not be pointed at the cropped copy, so it was left as it was.';
 export const CROP_MOVED = 'The image moved before it was cropped, so it was left as it was.';
 
 const STYLE_ID = 'rl-crop-style';
@@ -75,6 +78,23 @@ const STYLE = `
 .rl-crop-button[data-primary] { color: var(--rl-ink); font-weight: 600; }
 .rl-crop-button[aria-disabled='true'] { opacity: 0.5; }
 `;
+
+/** The image written as `written`, nearest to `at`, in the text now; where the text is as it was, the one at `at`. */
+function findAgain(view: EditorView, before: Text, at: number, written: string) {
+  const state = view.state;
+  if (state.doc === before) return imageAt(state, Math.min(at + 1, state.doc.length));
+  const text = state.doc.toString();
+  let best: ReturnType<typeof imageAt> = null;
+  let bestDistance = Infinity;
+  for (let i = text.indexOf(written); i >= 0; i = text.indexOf(written, i + 1)) {
+    const found = imageAt(state, i + 1);
+    if (found?.from === i && Math.abs(i - at) < bestDistance) {
+      best = found;
+      bestDistance = Math.abs(i - at);
+    }
+  }
+  return best;
+}
 
 function addStyle(doc: Document): void {
   if (doc.getElementById(STYLE_ID)) return;
@@ -124,7 +144,8 @@ export function startCrop(
     notice(CROP_NO_IMAGE);
     return null;
   }
-  const { from: at, src: original } = image;
+  const { from: at, to: end } = image;
+  const written = view.state.sliceDoc(at, end);
   const path: string = local;
   const doc = view.dom.ownerDocument;
   const win = doc.defaultView ?? window;
@@ -289,11 +310,12 @@ export function startCrop(
     try {
       const copy = await crop(path, { ...f });
       if (gone) return;
-      const now = imageAt(view.state, Math.min(at + 1, view.state.doc.length));
-      // The text may have moved while the copy was written: the image is found again by its place
-      // when nothing was edited, and left alone when it is not the one that was cropped.
-      if (!now || (view.state.doc !== doc0 && now.src !== original)) notice(CROP_MOVED);
-      else setImageSrc(view, copy, now.from);
+      // The text may have moved while the copy was written (an edit above the image shifts it): the
+      // image is found again by what it was written as, the nearest one to where it was, and left
+      // alone when there is none.
+      const now = findAgain(view, doc0, at, written);
+      if (!now) notice(CROP_MOVED);
+      else if (!setImageSrc(view, copy, now.from)) notice(CROP_NOT_POINTED);
       close(true);
     } catch (error) {
       busy = false;
