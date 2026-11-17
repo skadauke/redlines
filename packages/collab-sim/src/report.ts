@@ -1,6 +1,8 @@
 // Cells of the matrix, and the tables that summarise them.
 
 import type { Strategy } from './authority.ts';
+import { runReplay } from './replay.ts';
+import type { ReplayResult } from './replay.ts';
 import { runSession } from './session.ts';
 import type { SessionConfig, SessionResult } from './session.ts';
 import { seedFor } from './rng.ts';
@@ -11,6 +13,8 @@ export interface Cell {
   name: string;
   workload: WorkloadName;
   strategy: Strategy;
+  /** `replay` is the no-host merge; its strategy is ignored. */
+  engine?: 'authority' | 'replay';
   clients?: number;
   ops?: number;
   guard?: boolean;
@@ -41,6 +45,16 @@ export interface SessionSummary {
   updates: number;
   latencies: number[];
   outages: number;
+  /** Only for the no-host replay. */
+  replay?: {
+    rewrites: number;
+    merges: number;
+    rewound: number;
+    vanished: number;
+    appeared: number;
+    intents: number;
+    applied: number;
+  };
 }
 
 export function configOf(cell: Cell, n: number, base = 7): SessionConfig {
@@ -84,9 +98,52 @@ export function summarize(result: SessionResult): SessionSummary {
   };
 }
 
+export function summarizeReplay(result: ReplayResult): SessionSummary {
+  const codes: Record<string, string> = {};
+  for (const v of result.violations) codes[v.code] ??= `v${v.version}: ${v.detail}`;
+  const s = result.stats;
+  return {
+    seed: result.config.seed,
+    corrupted: result.corruptedAtEnd,
+    invalid: result.invalidAtAnyPoint,
+    joined: 'joined' in codes,
+    converged: result.converged,
+    codes,
+    turnedAway: s.turnedAway,
+    intents: Object.values(s.byKind).reduce((a, b) => a + b, 0),
+    confirmed: s.applied,
+    pushes: 0,
+    rejected: 0,
+    rebased: 0,
+    stale: 0,
+    staleBody: 0,
+    staleLedgerOnly: 0,
+    staleWithLedger: 0,
+    staleLedgerCollides: 0,
+    ledgerUpdates: 0,
+    updates: s.applied,
+    latencies: s.latencies,
+    outages: s.outages,
+    replay: {
+      rewrites: s.rewrites,
+      merges: s.merges,
+      rewound: s.rewound,
+      vanished: s.vanished,
+      appeared: s.appeared,
+      intents: s.intents,
+      applied: s.applied,
+    },
+  };
+}
+
 export function runCell(cell: Cell, from: number, to: number, base = 7): SessionSummary[] {
   const out: SessionSummary[] = [];
-  for (let n = from; n < to; n++) out.push(summarize(runSession(configOf(cell, n, base))));
+  for (let n = from; n < to; n++) {
+    const config = configOf(cell, n, base);
+    out.push(
+      cell.engine === 'replay' ? summarizeReplay(runReplay(config)) : summarize(runSession(config)),
+    );
+  }
   return out;
 }
 

@@ -9,7 +9,9 @@ so that the authority synced plain text and collab rebased the tracked changes l
 text. These notes test that design in simulation and derive the rules that replace it. The first
 simulation covered insertions and deletions; a
 [second](#a-second-simulation-every-kind-of-change) covered every other kind of change, and a
-[third](#a-third-simulation-inserted-table-rows) inserted table rows.
+[third](#a-third-simulation-inserted-table-rows) inserted table rows. A
+[fourth](#a-fourth-simulation-todays-format-with-the-real-library) reran the sessions in this
+repository, over today's format and the real library.
 
 The code and data are in the project's lab, outside this repository. Running `npm run reproduce`
 there reruns each simulation.
@@ -207,6 +209,190 @@ oracle had none, so it never saw lost rows):
 - Not run: columns, moves and header changes (specified in the
   [format spec](../format.md#37-tables)), and the in-row marker in Word and in other Markdown
   editors.
+
+## A fourth simulation: today's format with the real library
+
+The earlier simulations ran in a lab, with their own tracking code and an older ledger layout. The
+fourth runs in this repository (`packages/collab-sim`, not shipped) over the code that exists:
+`trackedEdits`, `trackedFormat`, `addComment`, `reply`, `accept`, `reject`, `parse` and the views
+of `@redlines/format`, today's ledger, and the format as [format.md](../format.md) has it. It is
+the test bed that [multiuser §6](multiuser.md#6-how-wed-know-it-works) asks for.
+`pnpm --filter @redlines/collab-sim matrix` reruns it, and `REDLINES_FUZZ=<n>` runs the matrix in
+vitest.
+
+Method:
+
+- Sessions: 4 clients (3 and 5 where said), 20 operations each, one to three seconds apart. The
+  network is seeded: latency 5–225 ms, 2% of messages held up 0.4–3 s, a dropped connection for a
+  third of the clients, and an offline period of 2–8 s for 40%. Messages on a link arrive in order;
+  those in flight when it drops are lost. A client that comes back asks for what it missed.
+- The authority is a log with a snapshot after every update. It never reads a mark. Three rules:
+  - c1: a push made on an older version is rejected;
+  - c2: it is rebased, one logged update at a time, unless its footprint touches the footprint of
+    an update logged since (touching ends count), then it is rejected;
+  - c-naive: it is always rebased by mapping positions, which is what happens if the authority
+    keeps transforming text that has marks in it.
+
+  Footprints are derived from the changes `trackedEdits` returns: the ranges changed, every mark
+  with a marker in or touching them, whole, and the nearest visible character on each side.
+  The ledger's change is kept as a footprint of its own.
+- Clients keep intents: raw edits anchored to visible words, with fallback anchors, toggles with a
+  target state, and decisions that carry the mark as the person saw it (its kind, author and every
+  character from its first marker to its last). A deletion lists the words it means, so words that
+  someone typed between them since stay out of it. An intent's ids come from its own seed, so
+  deriving it again gives the same ids. A client derives again against the newest confirmed text
+  whenever its push is rejected, and a push waits until the client has seen the version the
+  authority said was newest.
+- Operations: typing, deleting and substituting (also across someone's insertion, which 30% of the
+  runs start on), bold, accept and reject by id with the guard, range and point comments,
+  and replies. Not modeled: blocks, tables, moves, links, resolve and likes, undo.
+- Workloads as before: hot (everyone in one paragraph), typical (80% in one's own paragraph),
+  spread (anywhere, now and then across a paragraph break) and review (the owner makes two thirds of
+  their operations decisions while the others edit).
+- The document is a heading and five paragraphs of twelve unique words. A typed word names its
+  author, so the oracle can say whose text survived.
+- The oracle runs on every confirmed state, and on every step from one to the next:
+  - the markup and the ledger are valid: `parse` has no warnings, and the body reads, in
+    micromark, as the newest view does;
+  - nothing is lost or swallowed: the words of the newest view are those before, plus the typed
+    ones, minus the deleted ones;
+  - nothing is left untracked: any edit but a decision leaves the original view as it was, to the
+    character;
+  - nothing is revived: no deleted word, decided mark or rejected text comes back;
+  - a decision moves only its own mark: accepting leaves the newest view as it was, rejecting the
+    original view;
+  - nothing is duplicated or misattributed: each word is in each view once, and a pending typed word
+    stands in a change of the person who typed it;
+  - every comment and reply is in the ledger once, with its author;
+  - every copy has the text of the authority's version at every version.
+- Scale: 200 sessions per row, the same seeds in every row. In each cell, the first number is the
+  share of sessions corrupted at the end (text lost, duplicated, left untracked, revived or
+  misattributed at any point, or invalid markup in the final text); the second, the share in which
+  invalid markup was confirmed at any point. Two words with no space between them are counted
+  apart as "joined" and are not corruption (below). The whole matrix takes about an hour on three
+  cores.
+
+| Workload | (c1)         | (c2)         | (c-naive)        | Pushes rejected, c1 / c2 |
+| -------- | ------------ | ------------ | ---------------- | ------------------------ |
+| hot      | 9.0% / 1.0%  | 8.5% / 1.5%  | 100.0% / 100.0%  | 40.1% / 36.2%            |
+| typical  | 14.5% / 18.5% | 15.0% / 18.5% | 100.0% / 100.0% | 41.7% / 30.3%            |
+| spread   | 7.5% / 6.0%  | 8.0% / 6.0%  | 100.0% / 100.0%  | 41.1% / 37.8%            |
+| review   | 10.0% / 3.0% | 10.0% / 4.0% | 100.0% / 100.0%  | 41.0% / 38.2%            |
+
+Strategies (a) and (b) of the earlier tables, where the clients rebase tracked changes
+themselves, are not rerun: the library has no tracking filter that runs on a rebase, which is the
+point of the design.
+
+### What the matrix shows
+
+**c1 and c2 are alike, and neither is the problem.** c-naive corrupts every session: its rebased
+pushes carry a whole-ledger replacement made on an older ledger, which overwrites other people's
+entries, and positions mapped through marked-up text. Every session confirms markup with no ledger
+entry, comments missing from the ledger or an edit left untracked. c1 and c2 corrupt 7.5–15% of sessions, the same share
+under both, and what they corrupt is not concurrency. **One person editing alone, 60 operations,
+100 sessions, with the same code:**
+
+| Workload | Corrupted at end / invalid at any point |
+| -------- | --------------------------------------- |
+| hot      | 10% / 17%                               |
+| typical  | 17% / 20%                               |
+| spread   | 10% / 14%                               |
+
+Every one of those is the body not reading as the newest view in micromark (`render`), with
+nobody else in the session. The format has gaps that only show with many pending changes of
+different people near each other, and a session's length matters more than who is in it. For
+example, a person deleting words inside bold text that another person typed leaves
+`**<!--del …--> ed007**`, in which the first `**` is followed by a space, so it opens no emphasis.
+Five clients in the typical workload corrupt 19% of sessions against 15% for four, and fewer
+clients fewer (hot: 7.0%, 8.5%, 9.5% for 3, 4, 5), so the part that concurrency adds is small.
+
+The failures that need two people:
+
+| Violation (sessions of 200, c2)        | hot | typical | spread | review |
+| -------------------------------------- | --- | ------- | ------ | ------ |
+| A pending typed word in someone else's change | 17  | 2       | 10     | 15     |
+| A decided mark came back                      | 0   | 1       | 0      | 0      |
+| An edit left untracked, a mark with no entry  | 0   | 1       | 1      | 0      |
+| Text lost, swallowed or duplicated            | 0   | 0       | 0      | 0      |
+
+- Typing next to someone's insertion can put the new word inside their change. It is the largest
+  count (8.5% of hot sessions) and it is the same under c1 and c2, so no rebase rule causes it:
+  in the sessions looked at, the edit is derived on the newest text and written inside the other
+  person's insertion, and the ledger then says that person typed it. Reject that insertion and the
+  word goes with it.
+- Two sessions out of 800 (the same seed, in the typical and spread rows) confirmed an edit that
+  left the original view changed and a mark without a ledger entry. They are rare, they happen under
+  c1 and c2 alike, and the seed reproduces them.
+- No session lost, swallowed or duplicated text under c1 or c2. The words a person deleted were
+  gone, and the words they didn't delete stayed.
+
+**Joined words.** In 25–52% of sessions two words end up with no space between them in a view
+(`u005ed002`). It happens alone as well: a word typed after a deleted word lands after the deletion
+and the deletion keeps the space, so deciding the two the other way round reads as one word. It is
+not corruption by the oracle (the text is all there), and it is the largest of the gaps that the
+format spec doesn't say anything about.
+
+**Turned-away edits.** Of what people did, 10–14% was turned away while deriving, and 86–90% was
+confirmed. The reasons, in every row:
+
+- A bold change near another person's pending format change: "decide the other change first"
+  (`no-legal-placement`). It is by far the largest (about 1,100–1,700 per 200 sessions, mostly in
+  the hot paragraph): once two people have bold changes in one paragraph, nobody else can bold there.
+- A deletion or substitution whose words someone else has deleted meanwhile: nothing left.
+- A deletion or typing next to a change that can't take it (`no-legal-placement`, `inside-code`).
+- A typed word whose anchors are all gone.
+
+Multiuser §4.2 asks that nothing be turned away; today's library turns away about one edit in ten.
+
+**Decisions and the guard.** Review sessions: 10.0% / 3.0% corrupted with the guard and 11.5% / 4.0%
+without it under c2 (c1: 10.0% / 3.0% and 9.5% / 3.5%), which is no difference at 200 sessions. The
+guard turned away 141 more decisions per 200 sessions under c2. The earlier study found the guard
+essential, because its accepts and rejects acted by inverse edits. Here they act on the mark by id,
+and the library decides the mark's current text, so a stale decision decides what is there now. The
+guard is still the only thing that stops a person deciding something they haven't seen.
+
+**Speed.** Pushes confirmed in a median 350–415 ms, p95 4.1–4.7 s (the spikes and offline periods).
+c2 was faster than c1 by 8–25% in the median.
+
+### The ledger
+
+The study predicts that every concurrent pair of edits collides in the ledger, because every edit
+that touches it writes it whole ([multiuser §4.3](multiuser.md#43-the-ledger-travels-as-entries)).
+Measured in the c2 rows (every stale push is classified whatever the rule, so this is the same
+under c1):
+
+| Workload | Updates that change the ledger | Pushes made on an older version | Of those with a ledger change, collide in the ledger | Of the older pushes, touch another body edit | Of the older pushes, collide only in the ledger |
+| -------- | ----- | ----- | ----- | ----- | ----- |
+| hot      | 85.6% | 39.7% | 89.4% | 50.8% | 40.4% |
+| typical  | 77.5% | 41.0% | 85.6% | 5.8%  | 68.1% |
+| spread   | 93.7% | 40.7% | 96.0% | 8.4%  | 84.6% |
+| review   | 94.7% | 40.7% | 96.6% | 8.8%  | 85.0% |
+
+- Four in five updates change the ledger (typing in one's own insertion is the exception), and 86–97%
+  of the pushes that do and were made on an older version collide with another push's ledger
+  change. The prediction holds.
+- In the typical, spread and review workloads, where people are mostly in different places, the
+  ledger is the only thing that stops a rebase for 68–85% of the older pushes. c2 rebased 2.5–10.7%
+  of pushes and rejected 30–38%, where c1 rejected 40–42%. Footprints on the body alone would
+  rebase most of the stale pushes of those workloads, but can't be used with today's ledger, since
+  the rebased push would replace the ledger with its own (c-naive).
+- Only in the hot workload do the bodies themselves touch (51% of the older pushes).
+- Not tried here: the ledger as entries, which the design proposes. This simulation says how much
+  there is to gain (c2 would rebase most of what c1 rejects outside the hot paragraph) and not
+  whether it holds.
+
+### Limits
+
+- The same seeds are used for every row, so rows are paired, but the random numbers an edit draws
+  depend on what has happened, so two rows of one seed are different sessions.
+- Unique words, paragraphs of plain words, bold as the only format, no tables, lists, links,
+  moves, undo, resolve or likes, three to five clients, about 20 operations each.
+- Every number is a share of 200 sessions, so a 0 means likely below 1.5%.
+- Offline periods are 2–8 s. Longer ones aren't tried.
+- The oracle checks words and markup. It can't say that a word was placed where the person meant,
+  only that it is where its author's change says.
+- Bold is refused so often that bold changes are rarely confirmed together with other changes, so
+  the format-change rules are tested far less than typing and deleting.
 
 ## One app as the authority
 
