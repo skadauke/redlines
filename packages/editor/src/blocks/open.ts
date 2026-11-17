@@ -484,6 +484,15 @@ function requested(tr: Transaction, request: OpenRequest): OpenBlock | null {
     const from = tr.changes.mapPos(request.pressedIn.from, 1);
     const to = tr.changes.mapPos(request.pressedIn.to, -1);
     if (from <= to && (to < line.from || from > line.to)) pressedIn = { from, to };
+    // A block the change replaced whole (a tracked Return at the start of an item's paragraph
+    // whose text begins with a space is written as a substitution of it: walk seed 201 of
+    // `REDLINES_FUZZ=300`) has no span to map, and the one mapped leaves the caret out: the
+    // caret's own line is where it may be.
+    const head = tr.newSelection.main.head;
+    if (!pressedIn || head < pressedIn.from || head > pressedIn.to) {
+      const caretLine = tr.newDoc.lineAt(head);
+      if (caretLine.number !== line.number) pressedIn = { from: caretLine.from, to: caretLine.to };
+    }
   }
   return { empty: { from: line.from, to: line.to }, pressedIn };
 }
