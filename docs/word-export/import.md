@@ -1,7 +1,8 @@
 # Importing Word (.docx) into Redlines
 
-Status: scope and plan, 2026-10-14. Nothing is implemented yet. The importer
-is planned together with the [exporter](README.md).
+Status: scope and plan, 2026-10-14. The reader (step 1 of the plan) is written, in
+`packages/word/src/import/`; the mapper to Markdown is not. The importer is planned together with
+the [exporter](README.md).
 
 ## What it is for
 
@@ -17,7 +18,7 @@ it. Case 2 has to cope with anything Word can express.
 
 ## Approach
 
-Write the importer in TypeScript, in the same `packages/docx` package as the
+Write the importer in TypeScript, in the same `packages/word` package as the
 exporter, so both run in the editor, the desktop app and the Syrus plugin.
 
 No existing library gives us what we need:
@@ -31,7 +32,8 @@ No existing library gives us what we need:
   Haskell, drops reply threads and resolved state, and loses Word's revision
   ids. It stays a test oracle, as for the exporter.
 
-So the importer reads the OOXML itself with JSZip and an XML parser:
+So the importer reads the OOXML itself, with `fflate` for the zip and a small XML reader of its
+own (`xml.ts`, which resolves namespaces, so the code never depends on a file's prefixes):
 
 ```text
 .docx ──unzip──▶ document.xml, styles.xml, numbering.xml,
@@ -160,9 +162,17 @@ gives it:
 
 ## Plan
 
-1. Reader: unzip and parse into the block/run model with revisions and
-   comments. Test against the exporter's own output and the sample in
-   [`samples/`](samples/).
+1. Reader (done): `readDocx(bytes)` unzips and parses into `DocxModel`
+   (`packages/word/src/import/model.ts`): blocks (paragraphs and tables) of inlines (runs, images,
+   note references, links, comment and bookmark markers). Revisions sit where Word puts them: on
+   runs (`inserted`, `deleted`, `moved`, `formatChange`), on paragraph marks (`mark`,
+   `propsChange`), and on rows and cells (`inserted`, `deleted`). Comments come with threads
+   (`commentsExtended.xml`), the resolved state, people, durable ids and the best time
+   (`dateUtc` first). Tested against the exporter's own output, the sample in
+   [`samples/`](samples/) and a file Google Docs wrote. It reads an `rPrChange` or `pPrChange` as a
+   change only when it changes something (Google Docs writes an empty one on every suggestion),
+   and a `HYPERLINK` field as a link. It drops what it can't hold, and lists a text box, an
+   equation or a shape in `report`. It doesn't yet read likes.
 2. Mapping for text, headings, lists, emphasis, code, links, images and GFM
    tables, with the import report.
 3. Revisions and comment threads as in the table above.
