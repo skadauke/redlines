@@ -1316,10 +1316,16 @@ interface FenceDiv {
 }
 
 /** The callout whose opening fence starts the paragraph, or undefined where the line is no fence. */
-function fenceAt(reader: BlockReader, paragraph: Range): FenceDiv | undefined {
+function fenceAt(reader: BlockReader, paragraph: Range, asked: Range): FenceDiv | undefined {
   const { text, parsed } = reader;
-  const line = lineStart(text, paragraph.from);
-  const found = readFenceLine(lineAt(text, line));
+  // The line asked on, which is the fence's where text goes on from the line above it (no blank
+  // line between them), and else the paragraph's first.
+  let line = lineStart(text, asked.from);
+  let found = readFenceLine(lineAt(text, line));
+  if (!found || line < paragraph.from) {
+    line = lineStart(text, paragraph.from);
+    found = readFenceLine(lineAt(text, line));
+  }
   if (!found) return undefined;
   const starts: number[] = [line];
   for (let at = nextLine(reader, line); at !== undefined; at = nextLine(reader, at))
@@ -1484,7 +1490,7 @@ export function planBlock(
   range: Range,
 ): BlockPlan | undefined {
   if (op.kind === 'callout' || op.kind === 'callout-title') {
-    const fence = isPandoc() ? fenceAt(reader, paragraph) : undefined;
+    const fence = isPandoc() ? fenceAt(reader, paragraph, range) : undefined;
     if (fence) {
       const change = op.kind === 'callout' ? { type: op.type } : { title: op.title };
       return planFence(reader, fence, change, tracked);

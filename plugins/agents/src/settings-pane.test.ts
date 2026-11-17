@@ -1332,7 +1332,7 @@ describe('the Redlines skill', () => {
     renderAgentsPane(container, deps);
     await settle();
     expect(words(container)).toContain(
-      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak.',
+      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak (or the next free SKILL.md.bak.1, .2 …), so no earlier backup is lost.',
     );
     expect(buttons(container)).toEqual(['Check Again', 'Update Skill']);
     press(container, 'Update Skill');

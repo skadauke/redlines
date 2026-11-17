@@ -44,7 +44,7 @@ function skillText(skill: SkillState, done: 'installed' | 'updated' | null): str
       return `Redlines skill ${done ?? 'installed'} in ${skill.folder}.`;
     case 'older':
       // Update replaces the file, whatever was written in it by hand, and keeps what was there.
-      return `Redlines skill installed in ${skill.folder}, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak.`;
+      return `Redlines skill installed in ${skill.folder}, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak (or the next free SKILL.md.bak.1, .2 …), so no earlier backup is lost.`;
     case 'newer':
     case 'other':
       // Left as it is, and the sentence says why.

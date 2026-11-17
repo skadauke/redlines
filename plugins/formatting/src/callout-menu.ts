@@ -9,19 +9,28 @@ export interface CalloutMenu {
   /** The button the menu hangs from: just below it, or above it with no room below. */
   anchor: HTMLElement;
   /** The types offered, in order, and the one the alert has now. */
-  types: readonly { type: string; name: string }[];
+  types: readonly { type: string; name: string; disabled?: string }[];
   current: string;
   /** Called with the type chosen, when it is not the current one. */
   choose(type: string): void;
   /** A Quarto callout has a title, set after the types: the title it has, and what sets it (null
    * takes it away). The menu names itself for a callout, not an alert. */
-  title?: { current: string | null; set(title: string | null): void };
+  title?: {
+    current: string | null;
+    /** Why the title can't be set, and why it can't be cleared, where it can't. */
+    disabled?: string;
+    clearDisabled?: string;
+    /** Why a title typed can't be written, or undefined where it can: the field stays open with it. */
+    check?(title: string | null): string | undefined;
+    set(title: string | null): void;
+  };
 }
 
 /** The menu that is open on a view, so that there is never more than one, and the button it hangs
  * from, which a second press of puts it away. */
 const open = new WeakMap<EditorView, { close: () => void; anchor: HTMLElement }>();
 
+let hintCount = 0;
 const GAP = 4;
 const MARGIN = 8;
 
@@ -76,6 +85,17 @@ export const calloutMenuTheme = EditorView.baseTheme({
     color: 'inherit',
     font: 'inherit',
   },
+  '.rl-callout-item[aria-disabled="true"]': { opacity: '0.55' },
+  // The reason a grayed item can't be used, said under the list while the item has the focus or the
+  // pointer, and read after it by a screen reader (aria-describedby).
+  '.rl-callout-hint': {
+    maxWidth: '220px',
+    padding: '4px 8px 2px',
+    color: 'var(--rl-ink-2)',
+    fontSize: 'var(--rl-size-ui-small)',
+    lineHeight: '1.3',
+  },
+  '.rl-callout-hint:empty': { display: 'none' },
   '.rl-callout-item-check': { width: '18px', flex: 'none', color: 'var(--rl-ink-2)' },
 });
 
@@ -98,11 +118,32 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
   list.setAttribute('role', 'menu');
   list.setAttribute('aria-label', menu.title ? 'Callout type and title' : 'Alert type');
   const items: HTMLButtonElement[] = [];
-  for (const { type, name } of menu.types) {
+  const hint = document.createElement('div');
+  hint.className = 'rl-callout-hint';
+  hint.id = `rl-callout-hint-${(hintCount += 1)}`;
+  hint.setAttribute('role', 'status');
+  /** A grayed item stays a button that the keys and the pointer can come to, and says why. */
+  const explain = (item: HTMLButtonElement, why: string) => {
+    item.setAttribute('aria-disabled', 'true');
+    item.setAttribute('aria-describedby', hint.id);
+    const say = () => {
+      hint.textContent = why;
+    };
+    item.addEventListener('focus', say);
+    item.addEventListener('mouseenter', say);
+    item.addEventListener('blur', () => {
+      if (hint.textContent === why) hint.textContent = '';
+    });
+    item.addEventListener('mouseleave', () => {
+      if (document.activeElement !== item && hint.textContent === why) hint.textContent = '';
+    });
+  };
+  for (const { type, name, disabled } of menu.types) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'rl-callout-item';
     item.dataset['type'] = type;
+    if (disabled) explain(item, disabled);
     item.setAttribute('role', 'menuitemradio');
     item.setAttribute('aria-checked', String(type === menu.current));
     const check = document.createElement('span');
@@ -124,6 +165,8 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
       item.type = 'button';
       item.className = 'rl-callout-item';
       item.dataset['action'] = id;
+      const why = id === 'clear' ? menu.title?.clearDisabled : menu.title?.disabled;
+      if (why) explain(item, why);
       item.setAttribute('role', 'menuitem');
       const gap = document.createElement('span');
       gap.className = 'rl-callout-item-check';
@@ -135,6 +178,7 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
     add(menu.title.current === null ? 'Set Title…' : 'Change Title…', 'title');
     if (menu.title.current !== null) add('Clear Title', 'clear');
   }
+  list.append(hint);
   view.dom.append(list);
 
   // The text it is for stays as it was while the menu is open; if it changed, the menu is for
@@ -173,6 +217,8 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
   menu.anchor.setAttribute('aria-expanded', 'true');
 
   const pick = (item: HTMLButtonElement) => {
+    // A disabled item says why on hover and does nothing.
+    if (item.getAttribute('aria-disabled') === 'true') return;
     const type = item.dataset['type'];
     const current = !stale();
     close(true);
@@ -192,7 +238,8 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
     field.value = title.current ?? '';
     field.setAttribute('aria-label', 'Callout title');
     field.placeholder = 'Title';
-    list.replaceChildren(field);
+    list.replaceChildren(field, hint);
+    field.setAttribute('aria-describedby', hint.id);
     place();
     field.focus();
     field.select();
@@ -201,13 +248,23 @@ export function openCalloutMenu(view: EditorView, menu: CalloutMenu): void {
         event.preventDefault();
         event.stopPropagation();
         const value = field.value.replace(/[\r\n]+/g, ' ').trim();
+        const asked = value === '' ? null : value;
+        // A title that can't be written is told here, in the field that was typed in.
+        const why = value === (title.current ?? '') ? undefined : title.check?.(asked);
+        if (why) {
+          field.setAttribute('aria-invalid', 'true');
+          hint.textContent = why;
+          place();
+          return;
+        }
         close(true);
-        if (current && value !== (title.current ?? '')) title.set(value === '' ? null : value);
+        if (current && value !== (title.current ?? '')) title.set(asked);
       }
     });
   };
   for (const item of titleItems) {
     item.addEventListener('click', () => {
+      if (item.getAttribute('aria-disabled') === 'true') return;
       if (item.dataset['action'] === 'title') editTitle();
       else {
         const current = !stale();
