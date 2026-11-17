@@ -68,7 +68,7 @@ pub struct Identity {
 impl Identity {
     /// From the key's 32 bytes as 64 hex digits (`connections.rs` keeps them).
     pub fn from_seed(hex: &str) -> Option<Self> {
-        if hex.len() != 64 || !hex.is_ascii() {
+        if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return None;
         }
         let mut seed = [0u8; 32];
@@ -292,14 +292,22 @@ fn tools_of(host: &dyn ToolHost) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// The most a call may carry, in text.
+const MAX_CALL: usize = 1024 * 1024;
+
 /// Answers a call: the MCP result as text, or why it can't be answered.
 fn answer_call(
     host: &dyn ToolHost,
+    published: &[String],
     command: &str,
     params_json: &str,
 ) -> Result<(String, String), String> {
     if command != COMMAND {
         return Err(format!("This node has no command {command}."));
+    }
+    // What a Gateway sends is bounded, and names only a tool that was published.
+    if params_json.len() > MAX_CALL {
+        return Err("The call is too large.".to_owned());
     }
     let params: Value =
         serde_json::from_str(params_json).map_err(|_| "The call isn’t JSON.".to_owned())?;
@@ -307,6 +315,9 @@ fn answer_call(
         .as_str()
         .ok_or("The call names no tool.")?
         .to_owned();
+    if !published.contains(&name) {
+        return Err(format!("There is no tool {name} here."));
+    }
     let request = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -371,9 +382,10 @@ fn run(
     let timing = config.timing;
     let until = || Instant::now() + timing.open;
 
-    // The greeting.
+    // The greeting, within one deadline: a Gateway that talks of other things doesn't extend it.
+    let greeting_until = until();
     let nonce = loop {
-        match next_frame(socket, until(), stop) {
+        match next_frame(socket, greeting_until, stop) {
             Ok(Some(text)) => {
                 if let Incoming::Challenge { nonce } = protocol::parse(&text) {
                     break nonce;
@@ -437,6 +449,10 @@ fn run(
 
     // The tools.
     let tools = tools_of(host);
+    let published: Vec<String> = tools
+        .iter()
+        .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+        .collect();
     if let Err(ended) = send(socket, protocol::plugin_tools_request("2", &tools)) {
         return ended;
     }
@@ -459,7 +475,7 @@ fn run(
                         command,
                         params_json,
                     } => {
-                        let answered = answer_call(host, &command, &params_json);
+                        let answered = answer_call(host, &published, &command, &params_json);
                         let frame = match &answered {
                             Ok((tool, result)) => {
                                 emit(Event::Called { tool: tool.clone() });
@@ -576,6 +592,7 @@ pub fn start(
                 },
             };
             let was_setup_code = matches!(credential, Credential::SetupCode(_));
+            let began = Instant::now();
             let mut keep = |token: Secret| tokens.keep(token);
             let mut connected = false;
             let mut report = |event: Event| {
@@ -592,7 +609,9 @@ pub fn start(
                 &mut keep,
                 &flag,
             );
-            if connected {
+            // A connection that held for a while starts the waits over; one that drops at once,
+            // again and again, does not.
+            if connected && began.elapsed() >= timing.backoff_max {
                 wait = timing.backoff_start;
                 pairing_since = None;
             }
@@ -607,9 +626,7 @@ pub fn start(
                     emit(Event::Status(Status::Reconnecting { detail }));
                     nap(&flag, wait);
                     wait = (wait * 2).min(timing.backoff_max);
-                    if let Credential::SetupCode(code) = credential {
-                        first = Some(Credential::SetupCode(code));
-                    }
+                    first = Some(credential);
                 }
                 Ended::Refused(Refusal::PairingRequired { request_id }) => {
                     let since = *pairing_since.get_or_insert_with(Instant::now);
@@ -622,9 +639,7 @@ pub fn start(
                         code: config.identity.short_code(),
                     }));
                     nap(&flag, timing.pairing_retry);
-                    if let Credential::SetupCode(code) = credential {
-                        first = Some(Credential::SetupCode(code));
-                    }
+                    first = Some(credential);
                 }
                 Ended::Refused(Refusal::CodeUsed) => {
                     emit(Event::Status(Status::Failed(Failure::CodeUsed)));

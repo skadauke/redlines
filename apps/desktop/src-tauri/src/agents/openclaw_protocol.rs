@@ -146,24 +146,23 @@ pub enum Refusal {
 /// What an error from `connect` means. It looks at the code and, failing that, the words, since
 /// neither is known exactly: see the header.
 pub fn classify(error: &WireError, offered_setup_code: bool) -> Refusal {
-    let code = error.code.to_ascii_lowercase();
-    let said = error.message.to_ascii_lowercase();
-    let text = format!("{code} {said}");
-    let has = |words: &[&str]| words.iter().any(|word| text.contains(word));
-    if has(&[
-        "not_paired",
-        "not-paired",
-        "not paired",
-        "pairing",
-        "pending approval",
-    ]) {
+    // Whole words, from the code and the message: "auth" in "too many auth attempts" is not a
+    // refusal of the token.
+    let text = format!("{} {}", error.code, error.message).to_ascii_lowercase();
+    let words: Vec<&str> = text
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let has = |wanted: &[&str]| wanted.iter().any(|word| words.contains(word));
+    let phrase = |wanted: &str| words.join(" ").contains(wanted);
+    if has(&["pairing"]) || phrase("not paired") || phrase("pending approval") {
         let request_id = ["requestId", "request_id"]
             .iter()
             .find_map(|key| error.details.get(key).and_then(Value::as_str))
             .map(str::to_owned);
         return Refusal::PairingRequired { request_id };
     }
-    if has(&["protocol"]) && has(&["mismatch", "unsupported", "newer", "version"]) {
+    if has(&["protocol"]) && has(&["mismatch", "unsupported", "newer", "version", "unknown"]) {
         let protocol = error
             .details
             .get("maxProtocol")
@@ -171,23 +170,14 @@ pub fn classify(error: &WireError, offered_setup_code: bool) -> Refusal {
             .and_then(Value::as_u64);
         return Refusal::TooNew { protocol };
     }
-    if has(&[
-        "bootstrap",
-        "setup code",
-        "setup_code",
-        "expired",
-        "already used",
-        "used",
-    ]) {
+    if has(&["bootstrap"]) || phrase("setup code") {
         return Refusal::CodeUsed;
     }
-    if has(&[
-        "unauthorized",
-        "invalid token",
-        "token",
-        "auth",
-        "forbidden",
-    ]) {
+    let refused = has(&["unauthorized", "unauthenticated", "forbidden"]);
+    let spent = has(&[
+        "expired", "used", "revoked", "invalid", "unknown", "mismatch", "missing",
+    ]);
+    if refused || (has(&["token"]) && spent) {
         return if offered_setup_code {
             Refusal::CodeUsed
         } else {
@@ -381,6 +371,16 @@ mod tests {
         assert_eq!(
             classify(&error("UNAUTHORIZED", "invalid token"), false),
             Refusal::BadToken
+        );
+        // A device token that has run out is a bad token, not a used code.
+        assert_eq!(
+            classify(&error("", "token expired"), false),
+            Refusal::BadToken
+        );
+        // Whole words only: this is a rate limit, which trying again later can fix.
+        assert_eq!(
+            classify(&error("RATE_LIMIT", "too many auth attempts"), false),
+            Refusal::Other("too many auth attempts".into())
         );
         assert_eq!(
             classify(&error("PROTOCOL_MISMATCH", "unsupported protocol"), false),
