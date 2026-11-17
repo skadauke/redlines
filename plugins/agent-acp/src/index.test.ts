@@ -641,6 +641,21 @@ describe('OpenClaw’s bridge', () => {
     expect(createAcpProvider(processes, bridgeConfig).readLimit).toBe('machine');
   });
 
+  it('names the relay of its tools in the session of a Gateway run, and in no other', async () => {
+    const processes = fakeHost(() => {}).processes;
+    expect(createAcpProvider(processes, { ...bridgeConfig, gateway: true })).toMatchObject({
+      toolbox: false,
+      nodeTools: true,
+    });
+    expect(createAcpProvider(processes, bridgeConfig)).not.toHaveProperty('nodeTools');
+    expect(bridgeSessionMessage('/p', 'k')).toMatchObject({
+      params: { mcpServers: [], _meta: { sessionKey: 'k' } },
+    });
+    expect(bridgeSessionMessage('/p', 'k', '/tmp/rl-1-0/s')).toMatchObject({
+      params: { mcpServers: [], _meta: { sessionKey: 'k', tools: '/tmp/rl-1-0/s' } },
+    });
+  });
+
   it('opens a session of its own for the document, with no MCP server, and no folder put in the prompt', async () => {
     const seen: { meta?: unknown; prompt?: Message } = {};
     const host = fakeHost(

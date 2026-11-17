@@ -49,6 +49,8 @@ interface Options {
   codex?: FakeScript;
   /** An agent that answers in text and has no toolbox, as an OpenClaw agent: absent unless given. */
   moby?: FakeScript;
+  /** Moby's tools reach it through a Gateway's node (`AgentProvider.nodeTools`). */
+  mobyNodeTools?: boolean;
   claudeReads?: 'folder' | 'machine';
   /** The folders of the home folder the host lists; none where the host can't, or fails to. */
   homeRoots?: readonly string[] | Error;
@@ -142,6 +144,7 @@ function setup(options: Options = {}): Setup {
         name: 'Moby',
         readLimit: 'machine',
         toolbox: false,
+        ...(options.mobyNodeTools === true ? { nodeTools: true as const } : {}),
         script: options.moby,
       })
     : undefined;
@@ -2094,6 +2097,24 @@ describe('an agent with no toolbox', () => {
     expect(s.doc.edits).toHaveLength(1);
     expect(s.editor.getDoc()).not.toMatch(/<!--(?:ins|del|sub) /);
     expect(s.claude.requests).toHaveLength(0);
+  });
+
+  it('is told of its tools, for as long as the run is live, when they reach it through a node', async () => {
+    const seen: { request?: AgentRequest } = {};
+    const s = setup({
+      moby: answering('Fixed.', seen),
+      mobyNodeTools: true,
+      consent: { 'moby|/repo': 'folder' },
+    });
+    ask(s, '@Moby fix the typo');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    const { request } = seen;
+    expect(request?.systemPrompt).toContain('`str_replace`');
+    expect(request?.systemPrompt).toContain('The tools work only while this run does');
+    expect(request?.systemPrompt).not.toContain("You have no tools of Redlines'");
+    // It is still sent the thread and the document, and a relay is opened for its run.
+    expect(request?.prompt).toContain('----- document -----');
+    expect(s.relay.counts()).toEqual({ opened: 1, closed: 1 });
   });
 
   it('has its longer answer folded behind More, as an agent that never called reply has', async () => {

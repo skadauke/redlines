@@ -89,6 +89,9 @@ pub enum Incoming {
         node_id: String,
         command: String,
         params_json: String,
+        /// The session of the agent run that made the call: the Gateway puts it in the request
+        /// when the agent's tool is a node's (`node.invoke` carries the run's `sessionKey`).
+        session_key: Option<String>,
     },
     /// A step of a chat run: what the agent said so far, or how it ended.
     Chat(ChatEvent),
@@ -196,6 +199,8 @@ pub fn parse(text: &str) -> Incoming {
                             node_id: string(&payload, "nodeId").unwrap_or_default(),
                             command,
                             params_json,
+                            session_key: string(&payload, "sessionKey")
+                                .filter(|key| !key.is_empty()),
                         },
                         _ => Incoming::Other,
                     }
@@ -521,9 +526,15 @@ mod tests {
                 id: "c1".into(),
                 node_id: "d1".into(),
                 command: "mcp.tools.call.v1".into(),
-                params_json: r#"{"server":"redlines","tool":"view"}"#.into()
+                params_json: r#"{"server":"redlines","tool":"view"}"#.into(),
+                session_key: None,
             }
         );
+        let scoped = r#"{"type":"event","event":"node.invoke.request","payload":{"id":"c2","nodeId":"d1","command":"mcp.tools.call.v1","paramsJSON":"{}","sessionKey":"agent:main:redlines-0"}}"#;
+        assert!(matches!(
+            parse(scoped),
+            Incoming::Invoke { session_key: Some(key), .. } if key == "agent:main:redlines-0"
+        ));
     }
 
     #[test]
