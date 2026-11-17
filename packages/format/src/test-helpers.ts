@@ -1,6 +1,8 @@
 // Helpers shared by the tests of the editing functions. They are not part of the package.
 
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   micromark,
   parse as micromarkParse,
@@ -30,8 +32,14 @@ import { fineEdit as trackedEdit } from './track.ts';
 import type { EditContext, Parsed, Person, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
-/** The example of format §1.2. */
-export const fixture = readFileSync(new URL('./fixtures/launch-plan.md', import.meta.url), 'utf8');
+/**
+ * The example of format §1.2. Read by a path, not a URL: under happy-dom `URL` is the DOM's class,
+ * which `node:fs` refuses (the session harness drives the editor there).
+ */
+export const fixture = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), 'fixtures/launch-plan.md'),
+  'utf8',
+);
 
 export const ada: Person = { handle: 'ada', name: 'Ada Lovelace', email: 'ada@example.org' };
 export const bo: Person = { handle: 'bo', name: 'Bo Chen', email: 'bo@example.org' };

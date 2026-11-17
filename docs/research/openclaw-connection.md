@@ -585,7 +585,8 @@ command, `{server, tool, arguments}` **and the run's `sessionKey`** (same file, 
 `buildNodeInvokeRequest`: `sessionKey`; `dist/node-registry-private-*.mjs`). So node tools *are*
 session-scoped: no run token in the prompt is needed. Two things seen live: the Gateway reports the
 canonical key (`agent:main:redlines-<hex>`) even when the run was started with the bare
-`redlines-<hex>`, so a call is matched on the part after the agent; and by default OpenClaw defers
+`redlines-<hex>`, so a call is matched on the whole key (a bare key's is learned from the run's `chat`
+events), never on the part after the agent; and by default OpenClaw defers
 tool schemas behind `tool_search`/`dispatch_action` (`tools.toolSearch`), which the live check turned
 off to let a stand-in model call the tool directly.
 
@@ -640,6 +641,22 @@ leaves its thread waiting for the full `SETTLE_TIMEOUT`; one that was reported o
   was stopped, and gives up at once. An edit already in flight when Stop is pressed may still land:
   the window had begun it, and Stop ends the run's tools, not the page's work in progress; the
   agent is told the call was refused only if it hadn't been answered yet.
+- **Keys are matched whole** (`canonical` in `openclaw_tools.rs`). A key that names an agent
+  (`agent:<id>:redlines-<hash>`) is matched exactly, so a call from one agent's session never acts
+  for another agent's session that shares the part after the agent
+  (`two_agents_sessions_that_share_the_name_after_the_agent_are_two_runs`). A bare key is filed by
+  the Gateway under its default agent, which isn't always `main`, so Redlines doesn't assume it:
+  the run's `chat` events carry the `sessionKey` the Gateway really filed it under (`ChatEvent` in
+  `openclaw_protocol.rs`), `ask_seen` passes it on, and `RunTools::adopt` registers the run under
+  it (only when it is the run's own session under some agent). Until the first event the run is
+  held under `agent:main:<key>`, a guess; once adopted, only the reported key reaches it
+  (`a_bare_key_run_is_found_by_the_key_its_gateway_files_it_under`). A model often calls a tool
+  before it writes a word, so the run's first call can come before any event: a call under
+  `agent:<any>:<the run's bare key>`, when no run is registered under exactly that key, gives the
+  run that key too (`a_first_call_before_any_chat_event_gives_a_bare_key_run_its_key`). A bare-key
+  run belongs to the first agent the Gateway reports for it, by event or by call; a later call under
+  another agent is refused, and a run that names its agent is never taken this way. The Gateway
+  states no default agent on connect that the code reads, so none is used.
 - **A follow-up prompt in the same run keeps the tools.** OpenClaw offers the node's tools to every
   run, resolved afresh from the connected nodes with that run's session key (`resolvePluginTools`
   and the loop over `listConnectedNodePluginTools()` in `openclaw-plugin-tools-*.mjs`), so a second

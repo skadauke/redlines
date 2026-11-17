@@ -106,7 +106,10 @@ function phantomCarriers(
   current: string,
   before: Parsed,
 ): Phantom[] {
-  const shown = current.slice(0, parse(current).ledgerRange?.from ?? current.length);
+  // Read once, and only when a mark gets as far as needing it: most edits have none that does.
+  let shown: string | undefined;
+  const shownText = () =>
+    (shown ??= current.slice(0, parse(current).ledgerRange?.from ?? current.length));
   const found: Phantom[] = [];
   for (const mark of before.marks) {
     for (const segment of mark.segments) {
@@ -122,7 +125,7 @@ function phantomCarriers(
       if (start === null) continue;
       const to = start + end - open.from;
       if (current.slice(start, to) !== text.slice(open.from, end)) continue;
-      const carrierTo = carrierEnd(shown, start, to);
+      const carrierTo = carrierEnd(shownText(), start, to);
       if (!carrier) {
         if (carrierTo > to)
           found.push({ kind: mark.kind, by: mark.entry.by, from: start, to, carrierTo });
