@@ -2423,7 +2423,11 @@ it, one per line:
   rejected (a moved row does not leave: it goes back with its comments, "Moving rows", below),
   becomes a point comment at the start of the text of the first cell of the row below, or at the end
   of the text of the last cell of the row above for the last row (and where the row below has no
-  pipe at its start, which could not hold the marker, there too). A comment with a part that stays
+  pipe at its start, which could not hold the marker, there too). A point at the end of a cell's text
+  that ends in an unescaped backslash goes in front of the backslash, since after it the backslash
+  would escape the marker and the file would read otherwise than its newest view: the comment moves
+  by one character, and nothing is escaped or added (#476; an escaped backslash, an even run of them,
+  stays in front of the point). A comment with a part that stays
   loses only the part in the row, and one with an end in the row keeps its other end, the end that
   left standing where the point goes. A highlight has no point form and goes.
 - **Rules 3 and 4 for columns.** A column with another person's pending change in it, and a column
@@ -2434,7 +2438,8 @@ it, one per line:
   delete fold into the deletion. A comment in a column that leaves the table, deleted or rejected,
   becomes a point comment at the start of the text of the cell after it in the same row, or at the
   end of the text of the cell before it for the last column (in front of the mark of an alignment
-  change that ends that cell, rule 5); a comment in a moved column moves with it, both ways. A
+  change that ends that cell, rule 5, and in front of an unescaped backslash that ends the text, as
+  for a row); a comment in a moved column moves with it, both ways. A
   comment that starts above the table, on a line of its own because a marker can't
   start the line of a header without a leading pipe, and ends in a column that moves or is deleted,
   would leave its end without its start: the operation with Track Changes on is a replacement of the
