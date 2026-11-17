@@ -442,9 +442,11 @@ function decide(
       }
       const now = parse(current);
       const left = marks.flatMap((mark) => now.marks.filter((m) => m.id === mark.id));
+      if (left.length !== marks.length) throw error;
       current = applyChanges(current, decideOnce(current, now, left, action));
       return changesBetween(text, current);
-    } catch {
+    } catch (again) {
+      if (!(again instanceof EditError)) throw again;
       throw error;
     }
   }

@@ -12,6 +12,7 @@ describe('rejecting a replacement beside the marks in its old text (#936)', () =
   it('is not refused, and the marks that came back with it are rejected', () => {
     const after = applyChanges(text, reject(text, 'b7cd'));
     expect(parse(after).marks.map((mark) => mark.id)).toEqual(['wpcp']);
+    expect(Object.keys(parse(after).ledger.marks)).toEqual(['wpcp']);
   });
 
   it('reject all is not refused either', () => {
