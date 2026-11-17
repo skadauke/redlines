@@ -272,6 +272,13 @@ Entries with different keys commute, and two replies to one thread are both kept
 authority's order. Footprints never include the ledger. The file doesn't change at all. The same map
 is what a merge driver needs to merge two ledgers (§4.8).
 
+Until the ledger travels as entries, a window places its own ledger write over another window's the
+same way (`plugins/sync/src/ledger.ts`, `ledgerOps`). What the edit did to the ledger is found by
+comparing the text it was made on with the text it made (a mark's entry added or removed, a reply, a
+like, a resolve), and is done again, key by key, on the ledger of the newest text. The body is
+mapped as text, and the ledger is never mapped: an Undo that removes a mark's entry, made while
+another window wrote the ledger, is placed and nothing is taken back.
+
 ### 4.4 Decisions are ordered and guarded
 
 - **One outcome.** Accept and reject go through the authority's order, and the first decision wins.

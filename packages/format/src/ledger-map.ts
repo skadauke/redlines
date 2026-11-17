@@ -132,6 +132,8 @@ export type LedgerOp =
   | { op: 'unlike'; thread: string; by: string }
   | { op: 'resolve'; thread: string; by: string; at: string }
   | { op: 'reopen'; thread: string }
+  /** A thread's own fields (its text, who it is assigned to) replaced; its replies, likes and state stay. */
+  | { op: 'setThread'; thread: Thread }
   /** A person whose handle is taken is ignored: the earlier one keeps it (format §5.3). */
   | { op: 'addPerson'; person: Person }
   | { op: 'setTracking'; value: 'everyone' | undefined }
@@ -230,6 +232,13 @@ export function applyLedgerOp(map: LedgerMap, op: LedgerOp): LedgerMap {
         delete next.resolved;
         return next;
       });
+    case 'setThread':
+      return withThread(map, op.thread.id, (thread) => ({
+        ...op.thread,
+        replies: thread.replies,
+        likes: thread.likes,
+        ...(thread.resolved ? { resolved: thread.resolved } : {}),
+      }));
     case 'addPerson': {
       if (map.people.has(op.person.handle)) return map;
       const copy = cloneMap(map);
@@ -261,4 +270,79 @@ export function applyLedgerOp(map: LedgerMap, op: LedgerOp): LedgerMap {
 /** The map after `ops`, applied in order. */
 export function applyLedgerOps(map: LedgerMap, ops: readonly LedgerOp[]): LedgerMap {
   return ops.reduce(applyLedgerOp, map);
+}
+
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/** A thread without what the collection operations carry (replies, likes, resolved state). */
+function ownFields(thread: Thread): unknown {
+  const rest: Partial<Thread> = { ...thread };
+  delete rest.replies;
+  delete rest.likes;
+  delete rest.resolved;
+  return rest;
+}
+
+/**
+ * The operations that turn the ledger `before` into `after`, one for each key that changed. Applied
+ * to another map (`applyLedgerOps`), they make the same changes there and leave every other key as
+ * it is: this is how an edit's ledger write is placed over a ledger that someone else wrote since
+ * (multiuser research §4.3). A mark or person that changed is set again; a thread changes by its
+ * own fields, its new and removed replies and likes, and its resolved state.
+ */
+export function ledgerOps(before: LedgerMap, after: LedgerMap): LedgerOp[] {
+  const ops: LedgerOp[] = [];
+  for (const id of before.marks.keys()) {
+    if (!after.marks.has(id)) ops.push({ op: 'removeMark', id });
+  }
+  for (const [id, entry] of after.marks) {
+    if (!same(before.marks.get(id), entry)) ops.push({ op: 'addMark', id, entry });
+  }
+  for (const [handle, person] of after.people) {
+    if (!before.people.has(handle)) ops.push({ op: 'addPerson', person });
+  }
+  for (const id of before.threads.keys()) {
+    if (!after.threads.has(id)) ops.push({ op: 'removeThread', id });
+  }
+  for (const [id, thread] of after.threads) {
+    const was = before.threads.get(id);
+    if (!was) {
+      ops.push({ op: 'addThread', thread });
+      continue;
+    }
+    if (!same(ownFields(was), ownFields(thread))) ops.push({ op: 'setThread', thread });
+    for (const reply of thread.replies) {
+      if (!was.replies.some((r) => r.id === reply.id)) {
+        ops.push({ op: 'reply', thread: id, reply });
+      }
+    }
+    for (const like of thread.likes) {
+      if (!was.likes.some((l) => l.by === like.by)) {
+        ops.push({ op: 'like', thread: id, by: like.by, at: like.at });
+      }
+    }
+    for (const like of was.likes) {
+      if (!thread.likes.some((l) => l.by === like.by)) {
+        ops.push({ op: 'unlike', thread: id, by: like.by });
+      }
+    }
+    if (thread.resolved && !same(was.resolved, thread.resolved)) {
+      ops.push({ op: 'resolve', thread: id, by: thread.resolved.by, at: thread.resolved.at });
+    } else if (!thread.resolved && was.resolved) {
+      ops.push({ op: 'reopen', thread: id });
+    }
+  }
+  for (const name of ['tracking', 'view', 'history'] as const) {
+    if (before.settings[name] !== after.settings[name]) {
+      const op = name === 'tracking' ? 'setTracking' : name === 'view' ? 'setView' : 'setHistory';
+      ops.push({ op, value: after.settings[name] } as LedgerOp);
+    }
+  }
+  for (const name of before.extra.keys()) {
+    if (!after.extra.has(name)) ops.push({ op: 'setField', name, value: undefined });
+  }
+  for (const [name, value] of after.extra) {
+    if (!same(before.extra.get(name), value)) ops.push({ op: 'setField', name, value });
+  }
+  return ops;
 }
