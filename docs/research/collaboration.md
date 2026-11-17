@@ -477,7 +477,8 @@ Limits, beyond those of the fourth simulation:
   day, and `git merge`, aren't tried. A replica never forgets an intent, and history would have to
   be pruned at some point for it to be kept for ever; nothing here says how.
 - An intent's anchors are words, as in the sessions with an authority. Ids a decision refers to are
-  those the intent's seed gives, which holds while ids don't collide (they didn't in 1,400 sessions).
+  those the intent's seed gives, which holds while ids don't collide (a collision isn't counted
+  separately).
 - No outside edit (a `git pull`, an agent writing the file) takes part. It would be an intent with
   no known place in the order.
 
