@@ -23,6 +23,8 @@ export interface MenuCommands {
   rename(): void;
   revealInFinder(): void;
   print(): void;
+  /** Saves the document as a Word file, through a save panel (File › Export to Word…). */
+  exportWord(): void;
   /** Quits after asking each window about its unsaved edits. */
   quit(): void;
   /** Opens the About Redlines window, or brings it forward. */
@@ -389,6 +391,9 @@ export function appMenuModel(
         SEPARATOR,
         // Closing asks about unsaved edits through the window's close request.
         { item: 'CloseWindow', text: 'Close' },
+        SEPARATOR,
+        // Import comes here, as "Open .docx…" into a new unsaved document, once the reader lands.
+        { text: 'Export to Word…', action: () => commands.exportWord() },
         SEPARATOR,
         { text: 'Print…', accelerator: 'CmdOrCtrl+P', action: () => commands.print() },
       ]),

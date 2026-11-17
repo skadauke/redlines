@@ -213,8 +213,10 @@ The window, on the desktop:
   page has said what it holds: a quit or a restart is refused then, as a Cancel would be, with a
   notice to try again (§8.5).
 - **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
-  in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close and
-  Print. Printing holds the whole document in light ink and prints the view as it shows, without
+  in the title bar becomes a field; so does a double-click on it), Reveal in Finder, Close,
+  Export to Word… (a save panel, then a notification, never a dialog, that says what Word can't hold; in the
+  development page the file downloads) and Print. `redlines export-docx <file> [-o out.docx]` does the same
+  from the command line. Printing holds the whole document in light ink and prints the view as it shows, without
   the rail: Redlines in its simple look prints the newest text with its change bars. Saving a
   document that has no file yet opens the Save dialog in the default folder for new documents
   (Preferences › General), when one is set and still there; otherwise where macOS last saved. Save
