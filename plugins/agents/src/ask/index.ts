@@ -7,7 +7,7 @@
 
 import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { type Editor, viewModeField } from '@redlines/editor';
+import { type Editor, pastHidden, viewModeField } from '@redlines/editor';
 import { EditError } from '@redlines/format';
 import type { PinnedElement } from '@redlines/review';
 import { copyText, exchangeAsMarkdown, keepAsComment } from './actions.ts';
@@ -144,7 +144,12 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
   const rangeOf = (): { from: number; to: number } | null => {
     const { main } = view.state.selection;
     if (!main.empty) return { from: main.from, to: main.to };
-    const word = view.state.wordAt(main.head);
+    // On screen, a caret beside a hidden marker is at the end of the word past it (as the rail's
+    // Add Comment reads it).
+    const word =
+      view.state.wordAt(main.head) ??
+      view.state.wordAt(pastHidden(view.state, main.head, true)) ??
+      view.state.wordAt(pastHidden(view.state, main.head, false));
     return word ? { from: word.from, to: word.to } : null;
   };
 
