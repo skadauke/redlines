@@ -89,7 +89,7 @@ type CompareRow = {
 
 export const compare = {
   title: `How ${name} compares`,
-  body: `What ${name} has built, and what it plans. Other products as of October 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions.`,
+  body: `What ${name} has built, and what it plans. Other products as of November 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The first three rows are the ones only ${name} has.`,
   /** Under the table. */
   note: `Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI’s edits count as yours. Until live sessions come, people share a ${name} file as they share any file. Word and Google Docs files open with their changes and comments, and export to Word keeps them.`,
   /** The table's scrolling box and the features column, named for screen readers only. */
