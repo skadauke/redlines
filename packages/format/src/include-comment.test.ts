@@ -91,8 +91,24 @@ describe('a comment on an include line', () => {
     const twice = applyChanges(once, second.changes);
     expect(newestView(twice).text).toBe(QMD);
     expect(originalView(twice).text).toBe(QMD);
-    const undone = applyChanges(twice, deleteThread(twice, second.id));
-    expect(applyChanges(undone, deleteThread(undone, first.id))).toBe(QMD);
+    const free = (text: string) => {
+      const line = text.split('\n').find((each) => each.includes('{{< include'));
+      expect(line).toBe('{{< include _protocol.qmd >}}');
+    };
+    free(twice);
+    // In either order of deleting the threads, the include line is free of markers.
+    for (const order of [
+      [second.id, first.id],
+      [first.id, second.id],
+    ] as const) {
+      let text = twice;
+      for (const id of order) {
+        text = applyChanges(text, deleteThread(text, id));
+        free(text);
+        expect(newestView(text).text).toBe(QMD);
+      }
+      expect(text).toBe(QMD);
+    }
   });
 
   it('puts a highlight around an include as it does a comment', () => {

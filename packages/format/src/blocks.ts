@@ -1441,9 +1441,7 @@ export const HTML_START_7 =
 export function closerRange(text: string, close: Range): Range {
   if (close.from === 0 || text[close.from - 1] !== '\n') return close;
   const next = text.indexOf('\n', close.to);
-  // Only more closers may follow on the line: the marks around a Quarto include are nested (include.ts).
-  const rest = text.slice(close.to, next === -1 ? text.length : next);
-  if (rest.replace(/<!--\/\w+-->/g, '').trim() !== '') return close;
+  if (text.slice(close.to, next === -1 ? text.length : next).trim() !== '') return close;
   const eol = text[close.from - 2] === '\r' ? 2 : 1;
   const lineEndAt = close.from - eol;
   const start = text.lastIndexOf('\n', lineEndAt - 1) + 1;
