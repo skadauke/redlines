@@ -646,13 +646,16 @@ const pointer: Check[] = [
       const drift = below ? below.getBoundingClientRect().top - rect.top : null;
       if (drift === null || Math.abs(drift) > 1) problems['drift'] = drift;
       if (editor.view.contentDOM.querySelector('.rl-struck')) problems['stillDrawn'] = true;
-      // And the bar of the block below switches back.
+      // And the bar of the block below, in Simple, opens the deleted block's card and stays in
+      // Simple (#716): the change is found on the line above, which the page hides.
       if (below) {
         const next = below.getBoundingClientRect();
         pressBar(editor, next.left - 23, next.top + 10);
         await frames();
-        if (editor.getUiState().view !== 'redlines') problems['back'] = editor.getUiState().view;
-        if (!blockWith(editor, 'This paragraph was deleted whole.')) problems['drawnAgain'] = false;
+        if (editor.getUiState().markupView !== 'simple') {
+          problems['back'] = editor.getUiState().markupView;
+        }
+        if (!editor.view.dom.querySelector('.rl-card-what')) problems['card'] = 'none opened';
       }
       return problemsOf(problems);
     },
