@@ -391,13 +391,16 @@ type FolderShown = Box<dyn Fn(&Path, bool) + Send + Sync>;
 #[derive(Default)]
 pub struct Projects {
     folders: Mutex<Vec<PathBuf>>,
+    /// The own folders of documents whose project is too broad: the preview may load their images
+    /// and nothing else there is shown (#451). Never listed, read or opened by a window.
+    image_only: Mutex<Vec<PathBuf>>,
     /// Told of each folder as it is first shown (`on_new_folder`).
     on_new: OnceLock<FolderShown>,
 }
 
 impl Projects {
     /// Calls `then` with each folder the first time it is shown, and whether all it holds is shown
-    /// (always: a folder too broad to show all of is not shown).
+    /// (`false` for the own folder of a document whose project is too broad: its files alone).
     /// The app uses it to let the preview load the images of a project and of no other folder
     /// (`images`). Only the first call counts.
     pub fn on_new_folder(&self, then: impl Fn(&Path, bool) + Send + Sync + 'static) {
@@ -415,8 +418,22 @@ impl Projects {
             return;
         }
         // Where the project is too broad, no folder is shown: `list_folder`, `real_path` and
-        // `open_default` give a window nothing of the home folder or what is above it.
+        // `open_default` give a window nothing of the home folder or what is above it. Only the
+        // document's own folder, where paste and crop write its images, loads them in the preview.
         let Some(folder) = sidebar_folder(file, home) else {
+            let own = file.parent().unwrap_or(file).to_path_buf();
+            let mut only = self
+                .image_only
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if only.contains(&own) {
+                return;
+            }
+            only.push(own.clone());
+            drop(only);
+            if let Some(then) = self.on_new.get() {
+                then(&own, false);
+            }
             return;
         };
         let mut folders = self
@@ -967,7 +984,8 @@ mod tests {
         });
         make(&home, &["note.md", "notes/plan.md", "Private/"]);
         projects.show_with(&home.join("note.md"), Some(&home));
-        assert!(told.lock().unwrap().is_empty());
+        // Only the document's own folder is told of, for its images alone; no sidebar has it.
+        assert_eq!(*told.lock().unwrap(), [(home.clone(), false)]);
         assert!(projects.folders().is_empty());
         // So nothing of it is listed, read or opened, as no sidebar shows it.
         assert!(list_shown(&projects.folders(), &home, &home).is_err());
@@ -975,6 +993,9 @@ mod tests {
         // Nor a folder above it.
         projects.show_with(&home.join("notes/plan.md"), Some(&home.join("notes")));
         assert!(projects.folders().is_empty());
+        // Shown twice, told of once.
+        projects.show_with(&home.join("note.md"), Some(&home));
+        assert_eq!(told.lock().unwrap().len(), 2);
         fs::remove_dir_all(&home).unwrap();
     }
 

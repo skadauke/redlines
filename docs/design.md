@@ -1387,7 +1387,7 @@ ordinary copy writes the HTML that Word and Docs draw well); File › Print and 
   is ever replaced: a taken name gets `-2`, `-3` and on, and an image that is there already, byte
   for byte, is linked and not copied again. A document that is in no project keeps an `images`
   folder beside it. A document in the home folder or at the disk's root has no project (#451): the
-  preview loads no images for it, and an image added to it is copied beside it. The setting can't
+  preview loads the images in its own folder alone, where an image added to it is copied. The setting can't
   name another place on the disk. Only image files go in, by their
   names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
   or in Plain while Track Changes is on, and the editor says why before anything is saved. Images

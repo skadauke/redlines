@@ -922,8 +922,9 @@ async function showImages(path: string | null): Promise<void> {
     const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
     // Another file may have opened meanwhile.
     if (!allowed || doc?.path !== path) return;
-    // The home folder and what is above it is no project: its images are not loaded (#451).
-    imageFolder = root.tooBroad ? null : root.folder;
+    // The home folder and what is above it is no project: only the document's own folder loads
+    // its images, which paste and crop write there (#451).
+    imageFolder = root.tooBroad ? dirname(path) : root.folder;
     editor.refreshImages();
     imageWatch.settle();
   } catch (error) {
