@@ -45,6 +45,21 @@ describe('systemSpelling', () => {
     expect(learned).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores a word, as written, in this window, and tells the page once it has', async () => {
+    invoke.mockResolvedValue(undefined);
+    const { spelling, learned } = make();
+    await spelling.ignore?.('Wrold');
+    expect(invoke).toHaveBeenCalledWith('spelling_ignore', { word: 'Wrold' });
+    expect(learned).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not say it ignored a word the app could not', async () => {
+    invoke.mockRejectedValue(new Error('no'));
+    const { spelling, learned } = make();
+    await expect(spelling.ignore?.('wrold')).rejects.toThrow('no');
+    expect(learned).not.toHaveBeenCalled();
+  });
+
   it('does not say it learned a word the app could not', async () => {
     invoke.mockRejectedValue(new Error('no'));
     const { spelling, learned } = make();

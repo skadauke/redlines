@@ -9,7 +9,5 @@ export const TOO_BROAD_NOTICE =
 
 /** The notice to show for the project of a document, or null when it is a project. */
 export function tooBroadNotice(root: ProjectRoot): NotificationOptions | null {
-  return root.tooBroad
-    ? { key: 'project-too-broad', text: TOO_BROAD_NOTICE, timeout: 8000 }
-    : null;
+  return root.tooBroad ? { key: 'project-too-broad', text: TOO_BROAD_NOTICE, timeout: 8000 } : null;
 }
