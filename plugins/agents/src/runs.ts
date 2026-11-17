@@ -115,7 +115,7 @@ export interface RunDeps {
     parsed(): Parsed;
     save(): Promise<boolean>;
     /** An edit of a run: a step of the run's (`step.group`), which Undo takes back. */
-    applyAgentEdit(next: string, step: AgentStep): Promise<void>;
+    applyAgentEdit(next: string, step: AgentStep, base?: string): Promise<void>;
   };
   projectRoot(path: string): Promise<ProjectRoot>;
   /**
@@ -193,6 +193,8 @@ interface Run {
   logPath?: string;
   /** The reads already told of, by cause and place, so that each is told once. */
   told?: Set<string>;
+  /** The text the run's tools last read: the base of the edit they write next. */
+  lastRead?: string;
 }
 
 interface ThreadState {
@@ -385,11 +387,18 @@ export function createRuns(deps: RunDeps): RunController {
     return {
       read() {
         check();
-        return deps.document.read();
+        run.lastRead = deps.document.read();
+        return run.lastRead;
       },
       write(next) {
         check();
-        return deps.document.applyAgentEdit(next, { group: run.id, agent: run.job.agent.name });
+        // What the tool read is the text it worked from: a document that moved on since keeps
+        // what was typed meanwhile (an edit is a push, not a whole-text write).
+        return deps.document.applyAgentEdit(
+          next,
+          { group: run.id, agent: run.job.agent.name },
+          run.lastRead,
+        );
       },
     };
   }

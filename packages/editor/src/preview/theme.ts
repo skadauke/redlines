@@ -400,6 +400,32 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-callout-title:hover .rl-callout-menu, .rl-callout-active .rl-callout-menu, .rl-callout-menu:focus-visible':
     { opacity: '1' },
+  // Quarto's callouts (decision 2 of docs/research/quarto.md) wear the same box. A callout that can
+  // fold has a chevron, shown for the pointer and the caret like the alert's menu.
+  '.rl-callout-fold': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    margin: '0 0 0 0.1em',
+    padding: '0.1em 0.2em',
+    border: 'none',
+    borderRadius: '4px',
+    background: 'transparent',
+    color: 'var(--rl-ink-2)',
+    cursor: 'pointer',
+    font: 'inherit',
+  },
+  '.rl-callout-fold svg': {
+    width: '0.8em',
+    height: '0.8em',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.5',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  },
+  '.rl-callout-fold:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
+  '.rl-callout-fold:focus': { outline: 'none' },
+  '.rl-callout-fold:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
   '.rl-callout-menu:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
   '.rl-callout-menu:focus': { outline: 'none' },
   '.rl-callout-menu:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
