@@ -97,13 +97,14 @@ export function suggestReplaceWith(
   join: (before: string, after: string, guards: JoinGuards) => Hunk[],
   guarded = true,
 ): TrackedEdits {
-  const edits = suggestForms(text, oldStr, newStr, ctx, join);
+  const ids = replayable(ctx.random);
+  const edits = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.first }, join);
   if (!guarded || keepsDecidable(text, edits)) return edits;
   // The marks next to the edit, written at the grain of the words, leave a decision that could be
   // made before it impossible (#251). Written as a replacement of the unit that holds them, they
   // may not; where that is no better, the edit is refused (#246).
   try {
-    const wide = suggestForms(text, oldStr, newStr, ctx, join, widenedEdits);
+    const wide = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.again }, join, widenedEdits);
     if (keepsDecidable(text, wide)) return wide;
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
@@ -228,14 +229,41 @@ function readsAs(got: string, expected: string): boolean {
   return plain(got) === plain(expected);
 }
 
-/** Whether deciding the mark with `id`, accepting or rejecting it, can be done. */
-function canDecide(text: string, id: string, decide: typeof accept): boolean {
+/** Whether deciding the mark with `id` can be done at once. */
+function decidesAtOnce(text: string, id: string, decide: typeof accept): boolean {
   try {
     decide(text, id);
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether deciding the mark with `id` can be done at once, or after deciding one other change of
+ * `ids`, either way: some decisions wait for another (a deletion's marker alone on its line), and
+ * every mark is decidable in some order (format §3.4).
+ */
+function canDecide(
+  text: string,
+  id: string,
+  decide: typeof accept,
+  ids: readonly string[],
+): boolean {
+  if (decidesAtOnce(text, id, decide)) return true;
+  for (const other of ids) {
+    if (other === id) continue;
+    for (const first of [accept, reject]) {
+      let next: string;
+      try {
+        next = applyChanges(text, first(text, other));
+      } catch {
+        continue;
+      }
+      if (decidesAtOnce(next, id, decide)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -253,8 +281,7 @@ function keepsDecidable(text: string, edits: TrackedEdits): boolean {
   const to = next === -1 ? text.length : next;
   const marks = parse(text).marks.filter(
     (mark) =>
-      mark.kind !== 'cmt' &&
-      mark.kind !== 'hl' &&
+      (mark.kind === 'ins' || mark.kind === 'sub' || mark.kind === 'del') &&
       mark.segments.some(
         (segment) => segment.open.from <= to && (segment.close?.to ?? segment.content.to) >= from,
       ),
@@ -263,10 +290,13 @@ function keepsDecidable(text: string, edits: TrackedEdits): boolean {
   const result = applyChanges(text, edits.changes);
   // A mark that the edit takes back is gone, and has nothing left to decide.
   const left = new Set(parse(result).marks.map((mark) => mark.id));
+  const ids = marks.map((mark) => mark.id);
+  const idsAfter = [...left];
   for (const mark of marks) {
     if (!left.has(mark.id)) continue;
     for (const decide of [accept, reject]) {
-      if (canDecide(text, mark.id, decide) && !canDecide(result, mark.id, decide)) return false;
+      if (canDecide(text, mark.id, decide, ids) && !canDecide(result, mark.id, decide, idsAfter))
+        return false;
     }
   }
   return true;
