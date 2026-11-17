@@ -376,7 +376,8 @@ export function runReplay(config: ReplayConfig): ReplayResult {
       world.clock.at(start + length, () => mine.forEach((l) => l.connect()));
     };
     const plan = rng.fork();
-    if (plan.chance(config.offlineP ?? 0.4)) outage(plan.next() * span * 0.8, 2000 + plan.next() * 6000);
+    if (plan.chance(config.offlineP ?? 0.4))
+      outage(plan.next() * span * 0.8, 2000 + plan.next() * 6000);
     if (plan.chance(0.3)) outage(plan.next() * span, 100 + plan.next() * 900);
     let t = plan.next() * 500;
     for (let n = 0; n < ops; n++) {
