@@ -1378,16 +1378,13 @@ class HistoryState {
       };
       // A step whose ledger changes another person's edit has made stale is made again, on the
       // body, with its ledger from its notes.
-      // So is one that, as recorded, would break the file there: its ledger changes were made for a
-      // ledger that is not the one that stands now (another window's write that hasn't reached the
-      // history yet), and would leave a second ledger.
+      // So is one that, as recorded, would leave a second ledger there: its ledger changes were made
+      // for a ledger that is not the one that stands now (another window's write that hasn't reached
+      // the history yet). Only that: the text it gives back is otherwise exactly what it recorded.
+      const ledgers = (text: string) => text.match(/^<!-- redlines/gm)?.length ?? 0;
       const breaks = (): boolean => {
-        try {
-          const now = state.field(parsedField, false)?.warnings.length ?? 0;
-          return parse(event.changes!.apply(state.doc).toString()).warnings.length > now;
-        } catch {
-          return true;
-        }
+        const was = state.doc.toString();
+        return ledgers(event.changes!.apply(state.doc).toString()) > Math.max(1, ledgers(was));
       };
       const changes =
         event.meta.entries && !personal && (event.meta.ledgerStale || breaks())
