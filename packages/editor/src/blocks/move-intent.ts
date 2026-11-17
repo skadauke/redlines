@@ -99,12 +99,16 @@ export function deriveMove(
   run: BlockRun = intent.run,
   gap: BlockGap = intent.gap,
 ): ChangeSet {
-  const revert = intent.revert
-    ? ChangeSet.of(
-        intent.revert.map(({ from, to, insert }) => ({ from, to, insert })),
-        state.doc.length,
-      )
-    : null;
+  // On newer text (the run or the gap named as they read there) there is no open paragraph to take
+  // back: the revert is of the text the move was made on.
+  const newer = run !== intent.run || gap !== intent.gap;
+  const revert =
+    intent.revert && !newer
+      ? ChangeSet.of(
+          intent.revert.map(({ from, to, insert }) => ({ from, to, insert })),
+          state.doc.length,
+        )
+      : null;
   const text = revert ? revert.apply(state.doc).toString() : state.doc.toString();
   const done = writeMove(text, {
     run,
@@ -114,8 +118,10 @@ export function deriveMove(
     ...(intent.dialect === undefined ? {} : { dialect: intent.dialect }),
     random: replaying(intent),
   });
+  // The run is gone: nothing is done, not even the paragraph taken back.
+  if (!done) return ChangeSet.empty(state.doc.length);
   const made = ChangeSet.of(
-    (done?.changes ?? []).map(({ from, to, insert }) => ({ from, to, insert })),
+    done.changes.map(({ from, to, insert }) => ({ from, to, insert })),
     text.length,
   );
   return revert ? revert.compose(made) : made;
