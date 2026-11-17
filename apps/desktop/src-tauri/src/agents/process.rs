@@ -105,6 +105,17 @@ pub(super) fn command_for(
         .envs(environment.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
         .process_group(0);
+    // SIGINT is what a stop sends first. A signal ignored here stays ignored across `exec`, so an app
+    // started in the background (`nohup`, a script's `&`, a service) would hand every agent a
+    // SIGINT that does nothing, and the stop would wait out its grace and fall to SIGTERM (#929).
+    // SAFETY: the closure only calls `signal`, which is async-signal-safe, between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGINT, libc::SIG_DFL);
+            libc::signal(libc::SIGTERM, libc::SIG_DFL);
+            Ok(())
+        });
+    }
     command
 }
 
@@ -1267,15 +1278,25 @@ mod tests {
         assert_eq!(last["redlines"], "end");
         assert_eq!(last["stopped"], true);
         assert_eq!(last["code"], serde_json::Value::Null);
-        // A stop sends SIGINT, and SIGTERM when that doesn't end the run in the grace. Which of the
-        // two ends it was seen to depend on the system (on Ubuntu 26.04 the run ended by SIGTERM; the
-        // cause was not found), so the test holds to what a stop guarantees: the run ends by one of
-        // the two, never by SIGKILL.
-        let signal = last["signal"].as_i64().unwrap();
-        assert!(
-            signal == i64::from(libc::SIGINT) || signal == i64::from(libc::SIGTERM),
-            "{signal}"
-        );
+        // A stop sends SIGINT first, and a program that doesn't ignore it ends by it. On Ubuntu 26.04
+        // this was seen ending by SIGTERM: a SIGINT ignored by the app is inherited (#929).
+        assert_eq!(last["signal"].as_i64(), Some(i64::from(libc::SIGINT)));
+    }
+
+    #[test]
+    fn a_stop_ends_a_run_by_sigint_though_the_app_ignores_sigint() {
+        // An app started in the background ignores SIGINT, and a program inherits that (#929).
+        let folder = TempFolder::new("run-ignored-sigint");
+        let runs = Runs::default();
+        let before = unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
+        let (started, receiver) = start(&runs, folder.path(), &script("echo up; sleep 300", ""));
+        unsafe { libc::signal(libc::SIGINT, before) };
+        assert_eq!(next_line(&receiver), "up");
+        runs.stop("main", started.id).unwrap();
+        to_the_end(&receiver);
+        let log = fs::read_to_string(&started.log_path).unwrap();
+        let last: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+        assert_eq!(last["signal"].as_i64(), Some(i64::from(libc::SIGINT)));
     }
 
     #[test]

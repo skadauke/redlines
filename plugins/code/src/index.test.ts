@@ -7,7 +7,9 @@ import {
   codeFileHighlight,
   codeFileLanguage,
   codeHighlight,
+  chunkLanguage,
   codeLanguages,
+  codeLanguagesFor,
   codeSpans,
 } from './index.ts';
 import { loadCodeLanguage } from './highlight.ts';
@@ -177,4 +179,22 @@ describe('code files', () => {
     remove();
     expect(drawn(editor)).toEqual([]);
   }, 60_000);
+});
+
+describe('a chunk in a pandoc file (#1029)', () => {
+  it('reads the language out of the braces', () => {
+    for (const info of ['{r}', '{r, echo=FALSE}', '{r label, opt=1}', '{.r}']) {
+      expect(chunkLanguage(info)?.name).toBe('R');
+    }
+    expect(chunkLanguage('{python}')?.name).toBe('Python');
+    expect(chunkLanguage('python')?.name).toBe('Python');
+    expect(chunkLanguage('{nosuchlang}')).toBeNull();
+  });
+
+  it('only in a .qmd or .Rmd file', () => {
+    expect(codeLanguagesFor(() => 'a/b.Rmd')('{r}')?.name).toBe('R');
+    expect(codeLanguagesFor(() => 'b.qmd')('{python}')?.name).toBe('Python');
+    expect(codeLanguagesFor(() => 'b.md')('{r}')).toBe(codeLanguages('{r}'));
+    expect(codeLanguagesFor(() => null)('{r, echo=FALSE}')).toBe(codeLanguages('{r, echo=FALSE}'));
+  });
 });

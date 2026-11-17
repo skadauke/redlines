@@ -710,6 +710,21 @@ describe('random keys next to backslashes read as micromark reads them (#223, #2
             marks['b2zz'] = 'bo';
           }
         }
+        // A quarter more have Bo's pending deletion of a backslash, or of the break between two blocks
+        // (a join), which a change that takes in the text after a backslash can go on over (#265).
+        if (marks['b2zz'] === undefined && below(4) === 0) {
+          const slashes = [...body.matchAll(/\\/g)].map((m) => m.index);
+          const breaks = [...body.matchAll(/\n\n/g)].map((m) => m.index);
+          if (below(2) === 0 && slashes.length > 0) {
+            const at = slashes[below(slashes.length)] as number;
+            body = `${body.slice(0, at)}<!--del b2zz \\\\-->${body.slice(at + 1)}`;
+            marks['b2zz'] = 'bo';
+          } else if (breaks.length > 0) {
+            const at = breaks[below(breaks.length)] as number;
+            body = `${body.slice(0, at)}<!--del b2zz \\n\\n-->${body.slice(at + 2)}`;
+            marks['b2zz'] = 'bo';
+          }
+        }
         let text = file(body, marks);
         if (!readsAsNewest(text)) continue;
         for (let step = 0; step < 4; step++) {
