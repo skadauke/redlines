@@ -690,7 +690,13 @@ function mapEvent(
 function mappedMeta(meta: StepMeta, mapping: ChangeDesc): StepMeta {
   if (!meta.deleted?.length && !meta.reinstated?.length) return meta;
   const at = (list: readonly DeletedText[] | undefined) =>
-    list?.map((entry) => ({ ...entry, at: mapping.mapPos(entry.at, -1) }));
+    // An event that went to the redo side keeps places of the text it was made on, which the text
+    // that stands now (after the Undo) may be shorter than: such a place isn't mapped (it throws),
+    // and the step is placed by its marks, as it is for a mark that is gone.
+    list?.map((entry) => ({
+      ...entry,
+      at: entry.at <= mapping.length ? mapping.mapPos(entry.at, -1) : entry.at,
+    }));
   return { ...meta, deleted: at(meta.deleted), reinstated: at(meta.reinstated) };
 }
 

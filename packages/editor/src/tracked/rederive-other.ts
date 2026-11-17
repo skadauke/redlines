@@ -19,7 +19,7 @@ import { best, CONTEXT, occurrences, placeInsertion, score, WINDOW } from './red
 import type { Part, Rederived } from './rederive.ts';
 
 /** The words around `from` to `to` (source offsets of `text`), among its visible text. */
-function partOf(text: string, view: DocView, from: number, to: number): Part {
+export function partOf(text: string, view: DocView, from: number, to: number): Part {
   const a = view.map.fromSource(from);
   const b = Math.max(a, view.map.fromSource(to));
   const start = Math.max(0, from - WINDOW);
@@ -37,7 +37,7 @@ function partOf(text: string, view: DocView, from: number, to: number): Part {
  * A range with words is the only place that has them, or the one whose neighbours fit best. A range
  * with none (a caret) is placed among its neighbours, and null when they are gone too.
  */
-function placed(view: DocView, part: Part): { from: number; to: number } | null {
+export function placed(view: DocView, part: Part): { from: number; to: number } | null {
   if (!part.removed) {
     const near = placeInsertion(view.text, part);
     return near.found ? { from: near.at, to: near.at } : null;

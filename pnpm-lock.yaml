@@ -573,6 +573,9 @@ importers:
       '@redlines/formatting':
         specifier: workspace:*
         version: link:../formatting
+      '@redlines/tables':
+        specifier: workspace:*
+        version: link:../tables
 
   plugins/tables:
     dependencies:

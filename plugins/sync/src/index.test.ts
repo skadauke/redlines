@@ -11,6 +11,7 @@ import type { Editor } from '@redlines/editor';
 import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from '@redlines/formatting';
+import { createTables } from '@redlines/tables';
 import { peersShown, syncEditor } from './index.ts';
 import type { SyncBinding } from './index.ts';
 
@@ -88,17 +89,17 @@ async function settle(...bindings: SyncBinding[]): Promise<void> {
   }
 }
 
-async function session() {
+async function session(base = BASE) {
   const hub = new Hub(
     new Authority({
-      base: BASE,
+      base,
       authenticate: (credential) =>
         'key' in credential
           ? (people[credential.key] ?? { error: 'forbidden' })
           : { error: 'forbidden' },
     }),
   );
-  const ada = window(hub, 'ada', BASE, true);
+  const ada = window(hub, 'ada', base, true);
   const bo = window(hub, 'bo', '', false);
   // A joining window starts as a file is opened; each person switches Track Changes on for themselves.
   await settle(ada.binding, bo.binding);
@@ -594,5 +595,178 @@ describe('commands over another window’s edit', () => {
     expect(text).not.toContain('Third');
     expect(parse(text).warnings).toEqual([]);
     expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  const TBL = 'Intro.\n\n| a | b |\n| - | - |\n| one | two |\n| three | four |\n\nAfter.\n';
+
+  it('places a row deletion after the other window added a row above', async () => {
+    const { hub, ada, bo } = await session(TBL);
+    const removes = [createTables(ada.editor), createTables(bo.editor)];
+    const doc = bo.editor.view.state.doc.toString();
+    ada.editor.view.dispatch({ selection: { anchor: doc.indexOf('one') + 1 } });
+    bo.editor.view.dispatch({ selection: { anchor: doc.indexOf('three') + 1 } });
+    expect(ada.editor.commands.run('table.insertRowAbove')).toBe(true);
+    expect(bo.editor.commands.run('table.deleteRow')).toBe(true);
+    await settle(ada.binding, bo.binding);
+    for (const remove of removes) remove();
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(parse(text).warnings).toEqual([]);
+    // The row Bo meant is the one that is deleted: "three" is gone from the newest text, "one" stays.
+    expect(newestView(text).text).toContain('| one |');
+    expect(newestView(text).text).not.toContain('three');
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('tells a person that the row they deleted is gone', async () => {
+    const { hub, ada, bo } = await session(TBL);
+    const removes = [createTables(ada.editor), createTables(bo.editor)];
+    ada.editor.setTracking(false, { inFile: false });
+    const doc = bo.editor.view.state.doc.toString();
+    bo.editor.view.dispatch({ selection: { anchor: doc.indexOf('three') + 1 } });
+    ada.editor.view.dispatch({ selection: { anchor: doc.indexOf('three') + 1 } });
+    expect(ada.editor.commands.run('table.deleteRow')).toBe(true);
+    expect(bo.editor.commands.run('table.deleteRow')).toBe(true);
+    await settle(ada.binding, bo.binding);
+    for (const remove of removes) remove();
+    const text = hub.authority.text;
+    expect(parse(text).warnings).toEqual([]);
+    expect(newestView(text).text).toContain('| one |');
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it.each([
+    ['one', 'table.insertRowAbove', 'three', 'table.insertRowBelow'],
+    ['one', 'table.deleteRow', 'three', 'table.deleteRow'],
+    ['one', 'table.insertRowAbove', 'three', 'table.moveRowUp'],
+    ['a', 'table.insertColumnLeft', 'two', 'table.deleteColumn'],
+    ['a', 'table.insertColumnLeft', 'four', 'table.alignRight'],
+    ['two', 'table.deleteColumn', 'three', 'table.insertRowAbove'],
+    ['three', 'table.deleteRow', 'one', 'table.moveRowDown'],
+  ])('keeps both windows’ table commands: Ada %s %s, Bo %s %s', async (aw, ac, bw, bc) => {
+    const { hub, ada, bo } = await session(TBL);
+    const removes = [createTables(ada.editor), createTables(bo.editor)];
+    const doc = bo.editor.view.state.doc.toString();
+    ada.editor.view.dispatch({ selection: { anchor: doc.indexOf(aw, doc.indexOf('| a')) + 1 } });
+    bo.editor.view.dispatch({ selection: { anchor: doc.indexOf(bw, doc.indexOf('| a')) + 1 } });
+    const r1 = ada.editor.commands.run(ac);
+    const r2 = bo.editor.commands.run(bc);
+    await settle(ada.binding, bo.binding);
+    for (const remove of removes) remove();
+    const text = hub.authority.text;
+    expect(r1 && r2).toBe(true);
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
+    // Nothing is taken back without a sentence that says what happened.
+    for (const notice of bo.notices) expect(notice).toMatch(/table|rows|someone else/i);
+  });
+
+  /** Waits out the history's grouping, so that the next edit is a step of its own. */
+  const later = () => new Promise((resolve) => setTimeout(resolve, 650));
+
+  it('undoes and redoes a bold while the other window types in the paragraph', async () => {
+    const { hub, ada, bo } = await session();
+    const remove = createFormatting(bo.editor, {
+      author: { handle: 'bo', name: 'Bo' },
+      notice: (message) => bo.notices.push(message),
+    });
+    const at = bo.editor.view.state.doc.toString().indexOf('Second paragraph');
+    bo.editor.view.dispatch({ selection: { anchor: at + 7, head: at + 16 } });
+    expect(bo.editor.commands.run('format.bold')).toBe(true);
+    await settle(ada.binding, bo.binding);
+    await later();
+    type(ada.editor, 'Second', ' ADA');
+    bo.editor.undo();
+    await settle(ada.binding, bo.binding);
+    expect(bo.notices).toEqual([]);
+    expect(bo.said).toEqual([]);
+    expect(newestView(hub.authority.text).text).toContain('Second ADA paragraph');
+    expect(newestView(hub.authority.text).text).not.toContain('**');
+    type(ada.editor, 'Third', ' MORE');
+    await settle(ada.binding, bo.binding);
+    bo.editor.redo();
+    await settle(ada.binding, bo.binding);
+    remove();
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(bo.said).toEqual([]);
+    expect(newestView(text).text).toContain('**paragraph**');
+    expect(newestView(text).text).toContain(' MORE');
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('undoes and redoes a move while the other window types in the moved paragraph', async () => {
+    const { hub, ada, bo } = await session();
+    const at = bo.editor.view.state.doc.toString().indexOf('Third paragraph');
+    bo.editor.view.dispatch({ selection: { anchor: at + 2 } });
+    moveBlocks(bo.editor.view, true);
+    await settle(ada.binding, bo.binding);
+    await later();
+    type(ada.editor, 'Third para', 'X');
+    await settle(ada.binding, bo.binding);
+    bo.editor.undo();
+    await settle(ada.binding, bo.binding);
+    expect(bo.notices).toEqual([]);
+    expect(newestView(hub.authority.text).text.split('\n\n').slice(0, 3)).toEqual([
+      'First paragraph here.',
+      'XSecond paragraph here.',
+      'Third paragraph here.\n',
+    ]);
+    type(ada.editor, 'First', ' MORE');
+    await settle(ada.binding, bo.binding);
+    bo.editor.redo();
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(bo.said).toEqual([]);
+    expect(newestView(text).text.split('\n\n').slice(0, 3)).toEqual([
+      'First MORE paragraph here.',
+      'Third paraXgraph here.',
+      'Second paragraph here.\n',
+    ]);
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('applies an accept of the other window’s suggestion while it types nearby', async () => {
+    const { hub, ada, bo } = await session();
+    type(ada.editor, 'First', ' ADA');
+    await settle(ada.binding, bo.binding);
+    const id = parse(bo.editor.view.state.doc.toString()).marks[0]!.id;
+    // Ada types in the next paragraph while Bo's accept is still on its way.
+    type(ada.editor, 'Second', ' NEAR');
+    bo.editor.accept(id);
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(bo.notices).toEqual([]);
+    expect(bo.said).toEqual([]);
+    expect(newestView(text).text).toContain('First ADA paragraph');
+    // Bo's accept took ADA into the text; NEAR is Ada's, still a suggestion of hers.
+    expect(parse(text).marks.map((mark) => mark.id)).not.toContain(id);
+    expect(parse(text).marks).toHaveLength(1);
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    expect(ada.editor.view.state.doc.toString()).toBe(text);
+  });
+
+  it('says why a decision was not applied when the other window changed the suggestion', async () => {
+    const { hub, ada, bo } = await session();
+    type(ada.editor, 'First', ' ADA');
+    await settle(ada.binding, bo.binding);
+    const id = parse(bo.editor.view.state.doc.toString()).marks[0]!.id;
+    // Ada goes on typing inside her own suggestion, which changes it, while Bo's reject is on its way.
+    type(ada.editor, ' ADA', ' MORE');
+    bo.editor.reject(id);
+    await settle(ada.binding, bo.binding);
+    const text = hub.authority.text;
+    expect(parse(text).warnings).toEqual([]);
+    expect(bo.editor.view.state.doc.toString()).toBe(text);
+    // Either the reject was placed on the suggestion as it is now, or Bo is told it wasn't.
+    const gone = !newestView(text).text.includes('ADA');
+    expect(gone || bo.notices.some((notice) => /suggestion/.test(notice))).toBe(true);
   });
 });
