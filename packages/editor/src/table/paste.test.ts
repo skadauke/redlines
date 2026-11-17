@@ -4,7 +4,15 @@
 // top left, adding rows when it needs them, tracked or not. Each tracked paste reads the same in every
 // decision order and gives the original's bytes back when rejected.
 import { forceParsing } from '@codemirror/language';
-import { acceptAll, applyChanges, newestView, rejectAll } from '@redlines/format';
+import {
+  acceptAll,
+  applyChanges,
+  newestView,
+  reject,
+  rejectAll,
+  tableEdit,
+  type TableOp,
+} from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { undo } from '../history/index.ts';
 import { plainPastes } from '../tracked/clipboard.ts';
@@ -422,24 +430,69 @@ describe('a paste that needs more of a table while it has changes pending', () =
     '\n<!-- redlines\nversion: 1\nmarks:\n  g5nb: {by: bo, at: 2026-11-01T10:00Z}\n-->\n';
   const DELETED = `| a | c |\n| - | - |\n| 11 | 13 |\n| 21 | 23 |\n\n<!--del g5nb col=2 b\\n-\\n12\\n22-->\n${LEDGER}`;
 
-  it('refuses, whole and with its reason, a paste that needs rows while a column is deleted', () => {
+  it('is written as a replacement of the table, for a paste that needs rows while a column is deleted', () => {
     const editor = load(DELETED, true);
     editor.view.dispatch({ selection: { anchor: DELETED.indexOf('21') + 1 } });
     expect(paste(editor, 'x\ty\nz\tw')).toBe(true);
-    expect(editor.getDoc()).toBe(DELETED);
-    expect(notices).toEqual(['Accept or reject the column changes in this table first.']);
+    expect(notices).toEqual([]);
+    const done = reads(editor);
+    expect(done.file).toContain('<!--sub ');
+    expect(done.newest).toContain('| z | w |');
+    const id = /<!--sub (\w{4}) /.exec(done.file)?.[1] ?? '';
+    expect(applyChanges(done.file, reject(done.file, id)).split('<!-- redlines')[0]).toBe(
+      DELETED.split('<!-- redlines')[0],
+    );
   });
 
-  it('refuses a paste that needs columns while a row is deleted, tracked or not', () => {
+  it('is written as a replacement of the table, for a paste that needs columns while a row is deleted', () => {
     const rows = `| a | b |\n| - | - |\n| 11 | 12 |\n\n<!--del g5nb row=2 \\| 21 \\| 22 \\|-->\n${LEDGER}`;
-    for (const tracking of [true, false]) {
-      const editor = load(rows, tracking);
-      editor.view.dispatch({ selection: { anchor: rows.indexOf('12') + 1 } });
-      expect(paste(editor, 'x\ty')).toBe(true);
-      expect(editor.getDoc()).toBe(rows);
-      expect(notices).toEqual(['Accept or reject the row changes in this table first.']);
-    }
+    const editor = load(rows, true);
+    editor.view.dispatch({ selection: { anchor: rows.indexOf('12') + 1 } });
+    expect(paste(editor, 'x\ty')).toBe(true);
+    expect(notices).toEqual([]);
+    const done = reads(editor);
+    expect(done.file).toContain('<!--sub ');
+    expect(done.newest).toContain('| 11 | x | y |');
+    // Track Changes off keeps the table's rule: the plain paste is refused.
+    const plain = load(rows, false);
+    plain.view.dispatch({ selection: { anchor: rows.indexOf('12') + 1 } });
+    expect(paste(plain, 'x\ty')).toBe(true);
+    expect(plain.getDoc()).toBe(rows);
+    expect(notices).toEqual(['Accept or reject the row changes in this table first.']);
   });
+});
+
+describe('a paste that needs more of a table while another person has changes pending in it', () => {
+  const bo = { handle: 'bo', name: 'Bo Chen' };
+  const LEDGER =
+    '\n<!-- redlines\nversion: 1\npeople:\n  bo: {name: Bo Chen}\nmarks:\n  g5nb: {by: bo, at: 2026-11-01T10:00Z}\n-->\n';
+  const CELL = `| a | b |\n| - | - |\n| 11 | 1<!--ins g5nb-->2<!--/g5nb--> |\n| 21 | 22 |\n${LEDGER}`;
+  let c = 3;
+  const counted = () => (n: number) =>
+    Uint8Array.from({ length: n }, () => (c = (c * 73 + 41) % 251));
+  /** Bo's pending move of a row of the table of `BASE`, written by the format. */
+  const MOVED = (() => {
+    const base = `${BASE}\n`;
+    const file = base;
+    const op: TableOp = { kind: 'moveRows', table: 0, rows: [2], to: 1 };
+    return applyChanges(
+      file,
+      tableEdit(file, op, { author: bo, time: '2026-11-01T10:00Z', random: counted() }).changes,
+    );
+  })();
+
+  for (const [name, doc, pasted] of [
+    ['a change in a cell', CELL, 'x\ty\nz\tw\nu\tv'],
+    ['a pending move of a row', MOVED, 'x\ty\tz\nz\tw\tq\nu\tv\tr\nm\tn\to'],
+  ] as const) {
+    it(`is made, never refused, with ${name}: as tracked changes, or asked about first`, () => {
+      const editor = load(doc, true);
+      editor.view.dispatch({ selection: { anchor: doc.indexOf('21') + 1 } });
+      expect(paste(editor, pasted)).toBe(true);
+      expect(notices, name).toEqual([]);
+      expect(editor.getDoc(), name).not.toBe(doc);
+    });
+  }
 });
 
 describe('pasting at the caret in an empty cell with one space of padding', () => {

@@ -32,6 +32,7 @@ import {
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import {
   type DeletedBlockKind,
+  closerRange,
   deletedBlocks,
   isAlignMark,
   type MarkRange,
@@ -661,7 +662,8 @@ function analyze(state: EditorState, kept: number | null, zone?: Zone): Model {
         parts,
         ...(mark.kind === 'split' ? { split: true } : {}),
       });
-      if (segment.close) model.hidden.push({ ...segment.close, opener: false, parts: [] });
+      if (segment.close)
+        model.hidden.push({ ...closerRange(parsed.text, segment.close), opener: false, parts: [] });
     }
   }
   model.hidden.sort((a, b) => a.from - b.from);

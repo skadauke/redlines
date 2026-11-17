@@ -4,7 +4,7 @@
 import { applyChanges, eolOf } from './changes.ts';
 import type { Eol } from './changes.ts';
 import { EditError } from './errors.ts';
-import { findLedger, readSpan } from './ledger-read.ts';
+import { findLedger, ledgerHidden, readSpan } from './ledger-read.ts';
 import { encodePayload } from './payload.ts';
 import type {
   ExtraFields,
@@ -304,11 +304,24 @@ export function setLedger(
   ];
   // At the end of a code block or a comment that is never closed, the ledger would be code or
   // comment text, and the next save would add another one.
-  if (!findLedger(applyChanges(text, added))) {
-    throw new EditError(
-      "The end of this file is inside a code block or a comment that is never closed, so Redlines can't add its ledger. Close it first.",
-      'unclosed-end',
-    );
-  }
+  if (!findLedger(applyChanges(text, added))) throw unclosedEnd();
   return added;
+}
+
+/**
+ * Refuses a file whose ledger a lone `<!--` hides (format §5.1): an edit would write a second
+ * ledger, or none, beside the one that nothing reads. Close or remove the `<!--`, and the ledger is
+ * read again.
+ *
+ * @throws EditError (`unclosed-end`) when a comment that is never closed covers the ledger.
+ */
+export function assertLedgerVisible(text: string): void {
+  if (ledgerHidden(text)) throw unclosedEnd();
+}
+
+function unclosedEnd(): EditError {
+  return new EditError(
+    "The end of this file is inside a code block or a comment that is never closed, or a `<!--` with no `-->` of its own hides its ledger, so Redlines can't write the ledger. Close or remove the `<!--` first.",
+    'unclosed-end',
+  );
 }

@@ -6,7 +6,7 @@
 // hidden and their content is kept, so the newest and the original view show them the same. The
 // original view leaves out the break a `split` stands for (format §3.4).
 
-import { openerRange, splitEnd } from './blocks.ts';
+import { closerRange, openerRange, splitEnd } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
 import { EditError } from './errors.ts';
 import { decidesFormat, isAlignOps, opsOf, parseFormatOps } from './format-ops.ts';
@@ -71,9 +71,9 @@ function ledgerChanges(parsed: Parsed): TextChange[] {
 }
 
 /** Changes that hide every marker of a segment and keep what lies between them. */
-function hideMarkers(segment: Segment): TextChange[] {
+function hideMarkers(text: string, segment: Segment): TextChange[] {
   const changes = [{ ...openerRange(segment), insert: '' }];
-  if (segment.close) changes.push({ ...segment.close, insert: '' });
+  if (segment.close) changes.push({ ...closerRange(text, segment.close), insert: '' });
   return changes;
 }
 
@@ -83,7 +83,7 @@ function hiddenBy(text: string, mark: MarkRange): (segment: Segment) => TextChan
   return (segment) =>
     mark.kind === 'fmt' && isAlignOps(opsOf(mark, segment))
       ? alignHide(text, segment)
-      : hideMarkers(segment);
+      : hideMarkers(text, segment);
 }
 
 /**
@@ -379,7 +379,7 @@ function holds(outer: MarkRange, inner: MarkRange): boolean {
 /** The changes that undo one segment of a format change, or that hide its markers when it can't
  * be undone. */
 function undoneFormat(reader: FormatReader, mark: MarkRange, segment: Segment): TextChange[] {
-  if (!decidesFormat(mark)) return hideMarkers(segment);
+  if (!decidesFormat(mark)) return hideMarkers(reader.text, segment);
   try {
     return formatDecision(reader, mark, segment, 'reject');
   } catch (error) {
@@ -541,7 +541,7 @@ export function reviewView(text: string): string {
       if (inside)
         close = close.replace(/<<}$/, `; ${inside.map((m) => noteOf(m, parsed)).join('; ')}<<}`);
       changes.push({ ...openerRange(segment), insert: open });
-      if (segment.close) changes.push({ ...segment.close, insert: close });
+      if (segment.close) changes.push({ ...closerRange(text, segment.close), insert: close });
     }
   }
   // An inserted row's cells are inserted text, and a note follows the row (format §8).

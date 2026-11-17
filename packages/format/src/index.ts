@@ -1,7 +1,7 @@
 export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
-export { frontMatterEnd, openerRange } from './blocks.ts';
+export { closerRange, frontMatterEnd, openerRange } from './blocks.ts';
 export { deletedBlocks, deletedTable } from './deleted-blocks.ts';
 export type {
   DeletedBlock,
@@ -78,7 +78,16 @@ export type {
   TableRead,
   TableRowRead,
 } from './table.ts';
-export { fineTableEdit, pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+export { widenedPaste } from './table-widen.ts';
+export type { PasteOnTable } from './table-widen.ts';
+export {
+  askedTableEdit,
+  fineTableEdit,
+  pendingOf,
+  ruleTwo,
+  tableEdit,
+  untrackedTableEdit,
+} from './table-ops.ts';
 export type { TableOp, TablePending } from './table-ops.ts';
 export { alignLabel, alignWas, isAlignMark, isAlignPoint } from './table-align.ts';
 export { blankTrailingMarkers, readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';

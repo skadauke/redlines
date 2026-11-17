@@ -16,6 +16,7 @@ import { parse } from './parse.ts';
 import { fineEdits as trackedEdits } from './track.ts';
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Parsed, Range, TextChange } from './types.ts';
+import { closerRange } from './blocks.ts';
 import { newestView, originalView } from './views.ts';
 
 export type { Hunk } from './join.ts';
@@ -283,7 +284,7 @@ function joinGuards(text: string, view: ReturnType<typeof newestView>, start: nu
     for (const mark of parsed.marks) {
       for (const segment of mark.segments) {
         markers.push(segment.open);
-        if (segment.close) markers.push(segment.close);
+        if (segment.close) markers.push(closerRange(text, segment.close));
         if (segment.carrier) markers.push(segment.carrier);
         if (!ANCHORS.has(mark.kind)) changed.push(segment.content);
       }

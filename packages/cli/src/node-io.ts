@@ -68,4 +68,22 @@ export const nodeIo: CliIo = {
   },
   now: () => new Date(),
   randomHex: (n) => randomBytes(n).toString('hex'),
+  writeBytes: (path, bytes) => writeFile(path, bytes),
+  readBytes: async (path) => new Uint8Array(await readFile(path)),
+  async importDocx(bytes) {
+    const { importDocx } = await import('@redlines/word');
+    const result = importDocx(bytes);
+    const notes = result.report.entries.map((entry) => entry.message);
+    const pictures = Object.keys(result.media).length;
+    if (pictures > 0) notes.push(`${pictures} picture(s) in the file are not in the Markdown.`);
+    return { markdown: result.markdown, notes };
+  },
+  async exportDocx(text) {
+    // Loaded here and not in `run.ts`, so the program in the app, which has no Node, never holds it.
+    const { exportDocx, exportReport } = await import('@redlines/word');
+    return {
+      bytes: await exportDocx(text),
+      notes: exportReport(text).entries.map((entry) => entry.message),
+    };
+  },
 };

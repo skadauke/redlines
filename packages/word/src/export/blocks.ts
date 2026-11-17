@@ -15,6 +15,8 @@ export interface Fmt {
   italic: boolean;
   strike: boolean;
   code: boolean;
+  sub: boolean;
+  sup: boolean;
 }
 
 export type Atom =
@@ -28,6 +30,17 @@ export type Atom =
       exact: boolean;
       fmt: Fmt;
       link: string | null;
+      /** The `[ ]` or `[x]` of a task item. */
+      task?: boolean;
+    }
+  /** An image: its alt text and the address that stood in its parentheses. */
+  | {
+      kind: 'image';
+      alt: string;
+      src: string | null;
+      title: string | null;
+      from: number;
+      to: number;
     }
   /** `para`: the break between two blocks of a deleted text, not a line break in one. */
   | { kind: 'break'; from: number; to: number; para?: boolean };
@@ -94,7 +107,14 @@ export function decodeReference(reference: string): string {
   return NAMED[body] ?? reference;
 }
 
-const PLAIN: Fmt = { bold: false, italic: false, strike: false, code: false };
+export const PLAIN: Fmt = {
+  bold: false,
+  italic: false,
+  strike: false,
+  code: false,
+  sub: false,
+  sup: false,
+};
 
 /** The events of a text, with GitHub's extensions. */
 function eventsOf(text: string): Event[] {
@@ -124,6 +144,33 @@ function linkAddress(events: Event[], start: number, text: string): string | nul
   return found;
 }
 
+/** The alt text and the address of the image entered at `start`. */
+function imageParts(
+  events: Event[],
+  start: number,
+  text: string,
+): { alt: string; src: string | null; title: string | null; end: number } {
+  let depth = 0;
+  let alt = '';
+  let src: string | null = null;
+  let title: string | null = null;
+  for (let i = start; i < events.length; i++) {
+    const [kind, token] = events[i] as Event;
+    if (token.type === 'image') {
+      depth += kind === 'enter' ? 1 : -1;
+      if (depth === 0) return { alt, src, title, end: token.end.offset };
+    } else if (kind === 'enter' && depth === 1) {
+      if (token.type === 'labelText') alt = text.slice(token.start.offset, token.end.offset);
+      else if (token.type === 'resourceDestinationString') {
+        src = text.slice(token.start.offset, token.end.offset);
+      } else if (token.type === 'resourceTitleString') {
+        title = text.slice(token.start.offset, token.end.offset);
+      }
+    }
+  }
+  return { alt, src, title, end: text.length };
+}
+
 /** The HTML comments in a piece of raw HTML take no text; what is between them does (a line that
  * starts with a marker is an HTML block, and its words are text). */
 function outsideComments(html: string, from: number): { text: string; from: number }[] {
@@ -147,6 +194,10 @@ export function markdownBlocks(text: string): Block[] {
   let italic = 0;
   let strike = 0;
   let code = 0;
+  let sub = 0;
+  let sup = 0;
+  let resources = 0;
+  let images = 0;
   const links: (string | null)[] = [];
   let sink: Atom[] | null = null;
   let leaf: Leaf | null = null;
@@ -166,6 +217,8 @@ export function markdownBlocks(text: string): Block[] {
     italic: italic > 0,
     strike: strike > 0,
     code: code > 0,
+    sub: sub > 0,
+    sup: sup > 0,
   });
   const context = (): ListContext | null => {
     const list = lists[lists.length - 1];
@@ -189,6 +242,29 @@ export function markdownBlocks(text: string): Block[] {
 
   events.forEach(([kind, token, ctx], index) => {
     const slice = () => ctx.sliceSerialize(token);
+    // An image is one atom: what is inside it (its alt text) is read once, by `imageParts`.
+    if (token.type === 'image') {
+      if (kind === 'enter') {
+        if (images++ === 0 && sink) {
+          const found = imageParts(events, index, text);
+          sink.push({
+            kind: 'image',
+            alt: found.alt,
+            src: found.src,
+            title: found.title,
+            from: token.start.offset,
+            to: found.end,
+          });
+        }
+      } else images--;
+      return;
+    }
+    // What stands in a link's parentheses, its address and title, is no text of the document.
+    if (token.type === 'resource') {
+      resources += kind === 'enter' ? 1 : -1;
+      return;
+    }
+    if (images > 0 || resources > 0) return;
     if (kind === 'enter') {
       switch (token.type as string) {
         case 'blockQuote':
@@ -305,8 +381,36 @@ export function markdownBlocks(text: string): Block[] {
             exact: false,
             fmt: fmt(),
             link: null,
+            task: true,
           });
           break;
+        case 'autolinkProtocol':
+        case 'autolinkEmail':
+        case 'literalAutolink': {
+          // An address that is its own text: written as a link whose text is the address.
+          const shown = slice();
+          const mail = /^[^/:\s]+@/.test(shown);
+          const link = mail ? `mailto:${shown}` : /^www\./i.test(shown) ? `http://${shown}` : shown;
+          sink?.push({
+            kind: 'text',
+            text: shown,
+            from: token.start.offset,
+            to: token.end.offset,
+            exact: true,
+            fmt: fmt(),
+            link,
+          });
+          break;
+        }
+        case 'htmlText': {
+          const tag = /^<(\/?)(sub|sup)>$/.exec(slice());
+          if (tag) {
+            const step = tag[1] ? -1 : 1;
+            if (tag[2] === 'sub') sub = Math.max(0, sub + step);
+            else sup = Math.max(0, sup + step);
+          }
+          break;
+        }
         case 'data':
         case 'codeTextData':
           if (sink && !inCode) {

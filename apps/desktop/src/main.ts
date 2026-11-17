@@ -25,6 +25,7 @@ import {
   editorDocumentHtml,
   PLAIN_ONLY_TRACKING,
   type Author,
+  type CropRect,
   type EditorTyping,
   type EditorUiState,
   type ImageSpot,
@@ -48,6 +49,7 @@ import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from '.
 import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
+import { croppedFile } from './image-crop.ts';
 import { createImageWatch } from './image-watch.ts';
 import { createImageSizes } from './image-sizes.ts';
 import { localImagePath, localImageUrl, relativeImagePath } from './images.ts';
@@ -67,6 +69,8 @@ import {
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { requestPane } from './preferences/pane-request.ts';
 import { fillPrintPage, plainPageHtml, printPage } from './print.ts';
+import { exportToWord } from './word-export.ts';
+import { openWord } from './word-import.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import { createShortcutBook, shortcutEntries } from './shortcut-book.ts';
 import { publishShortcutEntries } from './shortcuts-published.ts';
@@ -238,6 +242,45 @@ function openImageInPreview(src: string): void {
 }
 
 /**
+ * Crop… (`image.crop`, #624): writes the part `crop` of the local image `src` as a copy in the
+ * project's folder for images, beside the others, and answers with the path the document links the
+ * copy by. The original file stays. The app reads the picture (`image_for_crop`), under the rules
+ * that hold what the page may load; a plain page in development reads it from its own memory.
+ */
+async function cropLocalImage(src: string, crop: CropRect): Promise<string> {
+  const document = imageDocument;
+  const root = imageFolder;
+  const path = document && root !== null ? localImagePath(src, document, root) : null;
+  if (document === null || path === null) {
+    throw new Error('Only an image in this document’s folder can be cropped.');
+  }
+  let blob: Blob;
+  if (isTauri) {
+    const read = await invoke<{ mimeType: string; data: string }>('image_for_crop', { path }).catch(
+      (error: unknown) => {
+        throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
+      },
+    );
+    const bytes = Uint8Array.from(atob(read.data), (char) => char.charCodeAt(0));
+    blob = new Blob([bytes], { type: read.mimeType });
+  } else {
+    const url = host.imageUrl(path);
+    const response = url === null ? null : await fetch(url).catch(() => null);
+    if (!response?.ok) throw new Error('The image file isn’t there.');
+    blob = await response.blob();
+  }
+  const file = await croppedFile(blob, path, crop);
+  const added = await host.addImages(document, loadSettings().imageFolderName, {
+    kind: 'files',
+    files: [file],
+    pasted: false,
+  });
+  const copy = added.paths[0];
+  if (copy === undefined) throw new Error(added.refused[0] ?? 'Couldn’t save the cropped image.');
+  return copy;
+}
+
+/**
  * The person comes back from Preview, where an image was saved: the images whose files changed are
  * drawn again from the file, the others as they are, and the document's text is not touched.
  */
@@ -341,6 +384,8 @@ const editor = createEditor(element('#editor'), {
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).
   openImage: isTauri || import.meta.env.DEV ? (src) => openImageInPreview(src) : undefined,
+  // Crop… (#624): a cropped copy of the picture goes in the project's folder for images.
+  cropImage: isTauri || import.meta.env.DEV ? (src, crop) => cropLocalImage(src, crop) : undefined,
   typing: typingOf(settings),
   // A word ended with Return gets the system's correction, which only the app can ask for; a plain
   // browser has none. Asked only while Preferences' spell check is on (the editor sees to that).
@@ -1344,6 +1389,32 @@ const commands: MenuCommands = {
       notice.flash('Couldn’t export the PDF.');
     });
   },
+  openDocx: () =>
+    void openWord({
+      host,
+      // An untouched window takes it; another window is opened for it where the app can (a browser
+      // tab can't be given text, and asks before it replaces what it has).
+      open: (markdown) =>
+        controller.untouched || !isTauri
+          ? controller.createWith(markdown)
+          : host.openWindow(undefined, undefined, markdown),
+      show: (options) => void notifications.show(options),
+    }).catch((error: unknown) => {
+      console.error('Could not open the Word file', error);
+      notice.flash('Couldn’t open the Word file.');
+    }),
+  exportWord: () =>
+    void exportToWord({
+      host,
+      text: editor.getDoc(),
+      name: doc?.name ?? 'Untitled',
+      path: doc?.path ?? null,
+      show: (options) => void notifications.show(options),
+      canReveal: isTauri,
+    }).catch((error: unknown) => {
+      console.error('Could not export to Word', error);
+      notice.flash('Couldn’t export to Word.');
+    }),
   quit: () => void windows?.quit(),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),

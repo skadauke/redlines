@@ -129,6 +129,12 @@ class FakeHost implements Host {
   exportPdf() {
     return Promise.resolve(null);
   }
+  openDocx() {
+    return Promise.resolve(null);
+  }
+  exportWord() {
+    return Promise.resolve(null);
+  }
   openDefault() {
     return Promise.resolve();
   }

@@ -1,6 +1,6 @@
 // The markers of a file and its ledger, as stretches that are not text.
 
-import { openerRange } from './blocks.ts';
+import { closerRange, openerRange } from './blocks.ts';
 import type { MarkRange, Parsed, Segment } from './types.ts';
 
 /** A stretch of the file that is not text: one marker, or the ledger with the blank line before it. */
@@ -19,7 +19,8 @@ export function markerRanges(parsed: Parsed): MarkerRange[] {
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
       ranges.push({ ...openerRange(segment), mark, segment, role: 'open' });
-      if (segment.close) ranges.push({ ...segment.close, mark, segment, role: 'close' });
+      if (segment.close)
+        ranges.push({ ...closerRange(parsed.text, segment.close), mark, segment, role: 'close' });
     }
   }
   if (parsed.ledgerRange) ranges.push({ ...parsed.ledgerRange, role: 'ledger' });

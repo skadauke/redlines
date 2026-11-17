@@ -1,8 +1,9 @@
 # Importing Word (.docx) into Redlines
 
 Status: scope and plan, 2026-10-14. The reader (step 1 of the plan) is written, in
-`packages/word/src/import/`; the mapper to Markdown is not. The importer is planned together with
-the [exporter](README.md).
+`packages/word/src/import/`, and so is the mapper to Markdown (`map.ts`, entered through
+`importDocx(bytes)` in `import.ts`). The importer is planned together with the [exporter](README.md), which is written too; File › Export
+to Word… calls the exporter, and no command of the app calls the importer yet.
 
 ## What it is for
 
@@ -159,6 +160,36 @@ gives it:
    ([Word lab](../research/word.md#comments-on-deleted-text)). Redlines keeps
    such a comment as a [point comment](../format.md#4-comments).
 8. **Whole-block substitution** as the fallback for tangled edits.
+
+## How the mapper writes it
+
+`mapDocx(model)` writes Markdown, marks and a ledger, and an `ImportReport`; `importDocx(bytes)`
+adds the Google Docs normalizer (`normalizeGoogleBytes`) and the source part.
+
+- Ids are new, and a handle comes from the name (`ada-lovelace`, `-2` on a clash). A person the
+  source part's ledger knows keeps the handle, email and organization it had there. Word's
+  `presenceInfo` becomes `accounts`.
+- Text with revisions: `w:ins` is `ins`, `w:del` is `del` with the old text as its payload, a `w:del`
+  followed by a `w:ins` by the same person is `sub`. A moved pair is a deletion and an insertion
+  with `move:` in the ledger. Text that one person added and another deleted is left out (the
+  report says so).
+- Paragraph marks follow Word's meaning: an inserted mark is a `split`, or, when the next paragraph
+  is all the same person's insertion, one `ins` that holds the break and the paragraph; a deleted
+  mark is a join (`del` of `\n\n` and the next block's prefix), and a paragraph deleted whole,
+  mark and text, is one `del` at the end of the block before it.
+- A mark that would start a block goes on a line of its own (format §3.3).
+- A run's changed format is `fmt` with `+bold`, `-italic` and so on; a paragraph that changed
+  between body and heading is a block `fmt was=`. Any other property change keeps the new form and
+  is listed.
+- A table with a changed row, cell or property is a substitution of the whole table (format
+  §3.12), the old table in the payload. Merged cells are split, and the report says so.
+- A comment thread is one ledger entry, anchored to its range (a range across paragraphs is one
+  segment in each); a comment with no anchor is a point at the end. Resolved is kept; likes are not
+  read yet.
+- Restore: a paragraph whose `_rl_<id>` bookmark survived, with no revision or comment in it, and
+  whose words (letters and digits) are those of the source block, is written as the source had it,
+  with its list marker or quote mark. A file Google Docs saved has no source part, so it is
+  converted whole, and the report says so.
 
 ## Plan
 
