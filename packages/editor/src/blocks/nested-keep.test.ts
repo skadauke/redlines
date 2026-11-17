@@ -146,9 +146,11 @@ scriptRows(
   60_000,
 );
 
-/** What is left of those two refusals in Track Changes on: the block lane's (R4), not the code's. */
-const STARTS_WITH_CHANGE =
-  'This line starts with a pending change, which would be left at the start of the line. Accept or reject it first, or take the marker out with Track Changes off.';
+/** What is left of those two refusals in Track Changes on: main's, which the guard of #808 keeps. */
+const CODE_WHOLE =
+  "This code block can't be added as a tracked change here. Add it whole, from its opening fence to its closing one, and with a blank line after it in a list or a quote.";
+const NO_MARKER_THERE =
+  "A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.";
 /** Other shapes of what is under the item: tabs, a quote, a fence, code, a task item, a quote around it. */
 scriptRows(
   rows([
@@ -166,14 +168,14 @@ scriptRows(
       '- ‸a⏎⏎    ```⏎    x⏎    ```',
       ['Backspace'],
       'a⏎⏎  ```⏎  x⏎  ```',
-      { refusal: STARTS_WITH_CHANGE },
+      { refusal: CODE_WHOLE },
     ],
     [
       'indented code beside a nested list',
       '- ‸a⏎⏎      code⏎⏎    - b',
       ['Backspace'],
       'a⏎⏎    code⏎⏎  - b',
-      { refusal: STARTS_WITH_CHANGE },
+      { refusal: NO_MARKER_THERE },
     ],
     [
       'indented code alone keeps its content untracked, as it was tracked',

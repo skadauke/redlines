@@ -328,14 +328,16 @@ describe('a block that a pending change holds, and front matter', () => {
     expect(back(text).replace(/\n{3,}/g, '\n\n')).toBe('Intro.\n\nAfter.');
   });
 
-  it('is widened, keeping the other person’s change, when it holds the block', () => {
+  it('keeps main’s refusal when another person’s change holds the block (#808)', () => {
     const insertion =
       'Intro.\n\n<!--ins m3bd-->\n\n```js\nline one\nline two\n```\n<!--/m3bd-->\n\nAfter.';
     const text = file(insertion, { m3bd: 'bo' });
     const at = text.indexOf('one') + 3;
-    const after = widened(text, at, at, 'X');
-    // His insertion is still to decide, in the block's old text, which the replacement holds.
-    expect(parse(after).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    const refused = attempt(text, at, at, 'X');
+    expect(refused.error).toBe(
+      "This would change how Bo Chen's insertion reads. Decide it first, or turn off Track Changes.",
+    );
+    expect(refused.code).toBe('no-legal-placement');
   });
 
   it('is widened for another person in a block that your substitution holds', () => {
