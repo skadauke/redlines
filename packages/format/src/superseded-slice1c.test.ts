@@ -14,6 +14,7 @@ import type { Person } from './types.ts';
 import { trackedEdits } from './track.ts';
 
 const IDS = ['m2bd', 'n8fx', 'p5qm', 'q6rs', 'r7st'];
+const MORE = [...IDS, 's8tu', 't9uv', 'u2vw'];
 
 /** A tracked edit of `text` by `who`, as the editor writes it; the new file. */
 function press(text: string, from: number, to: number, insert: string, who: Person = ada): string {
@@ -101,6 +102,51 @@ describe('#276 M2: a cluster of four or more adjacent marks is read to the end',
       expect(emphasisReadsAlike(before, new Set([ids[Math.floor(n / 2)] ?? '']))).toBe(true);
     }
   });
+});
+
+describe('#1071: the walk of states is bounded by time', () => {
+  const chainOf = (n: number) => {
+    const ids = MORE.slice(0, n);
+    const chain = ids.map((id, i) => `<!--ins ${id}-->${'abcdefgh'[i]}<!--/${id}-->`).join('');
+    return {
+      ids,
+      before: file(`one *${chain} two`, Object.fromEntries(ids.map((id) => [id, 'bo']))),
+    };
+  };
+
+  it('gives up when its time is spent, and a key beside the chain is still written', () => {
+    const { ids, before } = chainOf(5);
+    expect(emphasisReadsAlike(before, new Set(ids), 0)).toBe(false);
+    expect(emphasisReadsAlike(before, new Set(ids))).toBe(true);
+    const two = at(before, 'two');
+    const done = trackedEdits(
+      before,
+      [{ from: two, to: two, insert: '*' }],
+      context(ada, ['v2bd', 'w8fx', 'x5qm', 'y6rs', 'z7st', 'k3x9', 'k4x9', 'k5x9']),
+    );
+    held('1071 star', before, applyChanges(before, done.changes));
+  }, 60_000);
+
+  // The timing runs with REDLINES_COST=check, as the other cost tests do: a chain of 8 costs about
+  // what a chain of 5 does (the cluster reaches two steps), so a ratio holds it, not milliseconds.
+  it.skipIf(!process.env['REDLINES_COST'])(
+    'reads a chain of 8 of Bo’s marks in at most 3 times what a chain of 5 takes',
+    () => {
+      const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1]!;
+      const time = (n: number) => {
+        const { ids, before } = chainOf(n);
+        const samples: number[] = [];
+        for (let i = 0; i < 7; i++) {
+          const start = performance.now();
+          emphasisReadsAlike(before, new Set(ids));
+          samples.push(performance.now() - start);
+        }
+        return median(samples);
+      };
+      time(5);
+      expect(time(8)).toBeLessThan(time(5) * 3 + 5);
+    },
+  );
 });
 
 describe('#142: a line break typed after a file’s final line break, in a file with mixed endings', () => {
