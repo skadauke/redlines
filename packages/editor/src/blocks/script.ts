@@ -1019,11 +1019,20 @@ export function decisionProblems(
       problems.push(`${set || 'no decisions'} reads ${[...results].map(notation).join(' or ')}`);
     }
   }
-  const allOf = (how: string) =>
-    all
-      .map((id) => `${how}${id}`)
-      .toSorted()
-      .join(' ');
+  // The outcomes of every decision made the one way, whatever marks the decisions freed.
+  const allWays = (how: 'a' | 'r') => {
+    const found: string[] = [];
+    for (const [set, results] of outcomes) {
+      const tokens = set.split(' ').filter(Boolean);
+      if (
+        tokens.every((token) => token.startsWith(how)) &&
+        all.every((id) => tokens.includes(`${how}${id}`))
+      ) {
+        found.push(...results);
+      }
+    }
+    return found;
+  };
   // acceptAll and rejectAll, over every mark, comments and highlights too.
   const everything = (changes: () => ReturnType<typeof acceptAll>) => {
     try {
@@ -1039,8 +1048,8 @@ export function decisionProblems(
   if (everything(() => rejectAll(file)) !== originalView(file).text) {
     problems.push('rejectAll does not give the original view');
   }
-  const accepted = [...(outcomes.get(allOf('a')) ?? [])];
-  const rejected = [...(outcomes.get(allOf('r')) ?? [])];
+  const accepted = allWays('a');
+  const rejected = allWays('r');
   const newest = newestView(file).text;
   const original = originalView(file).text;
   if (accepted.length === 0) problems.push('no order of decisions accepts every mark');
