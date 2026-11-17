@@ -40,7 +40,11 @@ describe('#284: code that starts a list item, and indented code in an item or a 
 describe('#429: a tracked _ at the start of a bare header that begins with **', () => {
   it('writes the leading pipe plain, and reads alike in every order of decisions', () => {
     const text = file('**b** | c\n--- | ---\nx | y');
-    const result = trackedEdits(text, [{ from: 0, to: 0, insert: '_' }], context(ada, ['m2bd', 'n8fx']));
+    const result = trackedEdits(
+      text,
+      [{ from: 0, to: 0, insert: '_' }],
+      context(ada, ['m2bd', 'n8fx']),
+    );
     for (const change of result.changes) expect(change.from).toBeLessThanOrEqual(change.to);
     const after = applyChanges(text, result.changes);
     expectEveryOrderAlike('429', after);
