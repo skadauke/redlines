@@ -316,7 +316,8 @@ select:focus-visible {
   background: var(--rl-pressed);
 }
 
-.rl-pref-button:disabled {
+.rl-pref-button:disabled,
+.rl-pref-button[aria-disabled='true'] {
   color: var(--rl-ink-3);
 }
 
@@ -509,6 +510,7 @@ button.rl-pref-key:focus-visible {
   margin-top: 0;
 }
 
-.rl-pref-button:disabled {
+.rl-pref-button:disabled,
+.rl-pref-button[aria-disabled='true'] {
   opacity: 0.5;
 }

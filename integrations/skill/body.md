@@ -26,6 +26,9 @@ person to install it there. Give the file as an absolute path.
 
 {{who}}
 
+If the file's `people:` list already has you as an agent for your person, give that handle as
+`--as`, not a new one: the command refuses a handle that the file has for someone else.
+
 ## Read
 
 - `redlines view <file> --review`: the text with the pending changes and comments in CriticMarkup,
