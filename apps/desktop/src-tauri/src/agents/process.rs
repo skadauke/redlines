@@ -458,6 +458,10 @@ impl Runs {
             over: Over::default(),
         });
         self.running().insert(id, Arc::clone(&run));
+        // `stop_all` says it's closing before it looks, so it can't miss this and this not see that.
+        if self.closing.load(Ordering::SeqCst) {
+            run.stopping.store(true, Ordering::SeqCst);
+        }
         let started = Started {
             id,
             log_path: log.path().to_string_lossy().into_owned(),

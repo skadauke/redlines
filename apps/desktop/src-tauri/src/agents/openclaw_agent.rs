@@ -148,14 +148,26 @@ pub fn serve(lines: Receiver<String>, link: &ThreadRun, talk: &Talk) {
                         continue;
                     }
                     busy = true;
+                    cancel.store(false, Ordering::Relaxed);
                     let (text, done_in, cancel) =
                         (prompt_text(&message["params"]), done_in.clone(), &cancel);
                     scope.spawn(move || {
-                        let outcome = talk(&session, &text, cancel);
+                        // A panic in the talk is a failure of the prompt, not a run that never ends.
+                        let outcome =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                talk(&session, &text, cancel)
+                            }))
+                            .unwrap_or_else(|_| Err("The chat failed unexpectedly.".to_owned()));
                         let _ = done_in.send((id, outcome));
                     });
                 }
-                (Some("session/cancel"), None) => cancel.store(true, Ordering::Relaxed),
+                (Some("session/cancel"), None) => {
+                    // Only a prompt that is running is cancelled: a cancel with none would stop the
+                    // next one before it began.
+                    if busy {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                }
                 (Some(_), Some(id)) => link.say(failure(&id, -32601, "Method not found")),
                 _ => {}
             }

@@ -249,8 +249,16 @@ pub fn chat_for(app: &AppHandle, handle: &str) -> Option<(Bridge, Talk)> {
         };
         let credential =
             Credential::Token(Secret::new(token.expose()).map_err(|_| "The token is damaged.")?);
-        let (mut socket, _) =
+        let (mut socket, issued) =
             connect_operator(&config, &credential, stop).map_err(|error| error.message())?;
+        // A Gateway that rotates the device's token says so in the answer to connect.
+        if let Some(fresh) = issued
+            && fresh.expose() != token.expose()
+        {
+            let _ = owner
+                .state::<Connections>()
+                .keep(&name, Kind::OperatorToken, &fresh);
+        }
         let outcome = ask(&mut socket, &config, session, text, &run_key(), stop);
         let _ = socket.close(None);
         if matches!(outcome, Ok(Outcome::Done(_))) {
