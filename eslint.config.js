@@ -13,6 +13,9 @@ export default defineConfig(
     'apps/desktop/src-tauri/gen/',
     'apps/desktop/src-tauri/permissions/',
     'apps/desktop/redlines/bundle/',
+    // Upstream's source, as its author formats it (packages/collab/src/vendor/README.md)
+    'packages/collab/src/vendor/collab.ts',
+    'packages/collab/src/vendor/upstream.ts',
     'apps/desktop/redlines/target/',
     'apps/desktop/quicklook/build/',
   ]),
