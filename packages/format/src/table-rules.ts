@@ -426,6 +426,19 @@ export function ruleThree(
 }
 
 /**
+ * Where a comment's point is written at the end of a cell's text (`at`): in front of an unescaped
+ * backslash that ends the text, not after it, where the backslash would escape the marker and the file
+ * would read otherwise than its newest view (#476, format §3.7, rule 4). The comment moves by one
+ * character and nothing is escaped or added; a backslash that is itself escaped (an even run) stays
+ * in front of the point.
+ */
+export function beforeBackslash(text: string, at: number): number {
+  let run = 0;
+  while (text[at - 1 - run] === '\\') run++;
+  return run % 2 === 1 ? at - 1 : at;
+}
+
+/**
  * Rule 4 (format §3.7): comments in rows that leave the table become point comments where the rows
  * were: at the start of the text of the first cell of the next row that stays, or the end of the text
  * of the last cell of the one before it, for the last. A comment with a part that stays loses only the
@@ -445,7 +458,7 @@ export function commentsOf(
     for (let i = row - 1; i >= 0; i--) {
       const cells = table.rows[i]?.cells;
       const cell = cells?.[Math.min(cells.length, columns) - 1];
-      if (stays(i) && cell) return cell.textTo;
+      if (stays(i) && cell) return beforeBackslash(parsed.text, cell.textTo);
     }
     return null;
   };
@@ -576,7 +589,7 @@ export function commentsOfCols(
     }
     for (let i = Math.min(col, row.cells.length) - 1; i >= 0; i--) {
       const cell = row.cells[i];
-      if (!leaving.has(i) && cell) return cell.textTo;
+      if (!leaving.has(i) && cell) return beforeBackslash(parsed.text, cell.textTo);
     }
     return null;
   };
