@@ -112,6 +112,31 @@ describe('the include block', () => {
     expect(editor.view.state.doc.toString()).toBe(DOC);
   });
 
+  it('reads the file again when it is expanded, and keeps the block for Select All', async () => {
+    let text = PART;
+    const read = vi.fn(() => Promise.resolve(text));
+    const editor = editorAt(DOC, 0, { read, open: vi.fn() });
+    await settle();
+    text = 'Changed elsewhere.\n';
+    editor.view.contentDOM
+      .querySelector('.rl-include-toggle')!
+      .dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+    await settle();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(editor.view.contentDOM.querySelector('.rl-include-preview')?.textContent).toBe(
+      'Changed elsewhere.',
+    );
+    editor.view.dispatch({ selection: { anchor: 0, head: DOC.length } });
+    expect(includeDecorations(editor.view.state).size).toBe(1);
+  });
+
+  it('draws none in front matter or in a math block', () => {
+    const front = editorAt('---\ninclude: {{< include a.qmd >}}\n{{< include b.qmd >}}\n---\n', 0);
+    expect(includeDecorations(front.view.state).size).toBe(0);
+    const math = editorAt('$$\n{{< include c.qmd >}}\n$$\n', 0);
+    expect(includeDecorations(math.view.state).size).toBe(0);
+  });
+
   it('says so when the file can’t be read, and has no buttons without a host', async () => {
     const missing = editorAt(DOC, 0, { read: () => Promise.resolve(null), open: vi.fn() });
     await settle();

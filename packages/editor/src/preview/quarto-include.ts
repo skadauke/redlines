@@ -10,7 +10,7 @@ import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemir
 import { newestView, parse } from '@redlines/format';
 import type { IncludeHost } from '../api.ts';
 import { dialectFacet } from '../dialect.ts';
-import { isChange, viewModeField } from '../tracked/field.ts';
+import { isChange, parsedField, viewModeField } from '../tracked/field.ts';
 
 /** The host's way to reach included files; without it the block names the file and does no more. */
 export const includeFacet = Facet.define<IncludeHost, IncludeHost | null>({
@@ -34,9 +34,13 @@ export function summaryOf(text: string): { pending: number; newest: string } {
   return { pending, newest: newestView(text).text };
 }
 
+/** The text of each file as it was last read, for a block that is drawn again. */
+const seen = new Map<string, string | null>();
+
 class IncludeWidget extends WidgetType {
   readonly path: string;
   readonly host: IncludeHost | null;
+  #reload: () => void = () => {};
 
   constructor(path: string, host: IncludeHost | null) {
     super();
@@ -77,26 +81,31 @@ class IncludeWidget extends WidgetType {
     preview.hidden = true;
     block.append(head, preview);
 
-    let loaded: Promise<void> | null = null;
+    const show = (text: string | null) => {
+      if (text === null) {
+        count.textContent = 'not found';
+        preview.textContent = 'This file can’t be read.';
+        return;
+      }
+      const { pending, newest } = summaryOf(text);
+      count.textContent =
+        pending === 0 ? '' : `${pending} ${pending === 1 ? 'change' : 'changes'} pending`;
+      preview.textContent = newest.trim().replace(/\n{3,}/g, '\n\n');
+    };
+    // The file is read again whenever the block is looked at again (it is another file, and changes
+    // while its own window is open), and the last text is drawn at once, so that a block that
+    // scrolls back into view doesn't flash empty.
     const load = (): Promise<void> => {
       if (!host) return Promise.resolve();
-      loaded ??= host.read(path).then((text) => {
-        if (text === null) {
-          count.textContent = 'not found';
-          preview.textContent = 'This file can’t be read.';
-          return;
-        }
-        const { pending, newest } = summaryOf(text);
-        count.textContent =
-          pending === 0 ? '' : `${pending} ${pending === 1 ? 'change' : 'changes'} pending`;
-        preview.textContent = newest.trim().replace(/\n{3,}/g, '\n\n');
+      return host.read(path).then((text) => {
+        seen.set(`${path}`, text);
+        show(text);
       });
-      return loaded;
     };
+    if (host && seen.has(path)) show(seen.get(path) ?? null);
+    this.#reload = () => void load().catch(() => show(null));
     if (host) {
-      void load().catch(() => {
-        count.textContent = 'not found';
-      });
+      this.#reload();
       const open = document.createElement('button');
       open.type = 'button';
       open.className = 'rl-include-open';
@@ -114,12 +123,17 @@ class IncludeWidget extends WidgetType {
         preview.hidden = !shown;
         toggle.setAttribute('aria-expanded', String(shown));
         toggle.textContent = shown ? '▾' : '▸';
-        if (shown) void load();
+        if (shown) this.#reload();
       });
     } else {
       toggle.hidden = true;
     }
+    if (host) window.addEventListener('focus', this.#reload);
     return block;
+  }
+
+  override destroy(): void {
+    window.removeEventListener('focus', this.#reload);
   }
 
   override ignoreEvent(event: Event): boolean {
@@ -135,9 +149,23 @@ export function includeDecorations(state: EditorState): DecorationSet {
   if (!doc.sliceString(0).includes('{{<')) return Decoration.none;
   const host = state.facet(includeFacet);
   const ranges: Range<Decoration>[] = [];
+  const ledger = state.field(parsedField, false)?.ledgerRange;
   let code: string | null = null;
-  for (let n = 1; n <= doc.lines; n++) {
+  let math = false;
+  let n = 1;
+  if (doc.lines > 1 && /^---[ \t]*$/.test(doc.line(1).text)) {
+    for (let i = 2; i <= doc.lines; i++) {
+      if (/^(?:---|\.\.\.)[ \t]*$/.test(doc.line(i).text)) {
+        n = i + 1;
+        break;
+      }
+    }
+  }
+  for (; n <= doc.lines; n++) {
     const line = doc.line(n);
+    if (ledger && line.from >= ledger.from) break;
+    if (/^[ \t]*\$\$[ \t]*$/.test(line.text)) math = !math;
+    if (math) continue;
     const fence = /^ {0,3}(`{3,}|~{3,})/.exec(line.text);
     if (code !== null) {
       if (fence?.[1] && fence[1][0] === code[0] && fence[1].length >= code.length) code = null;
@@ -149,7 +177,11 @@ export function includeDecorations(state: EditorState): DecorationSet {
     }
     const path = includePath(line.text);
     if (path === null) continue;
-    if (state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from)) continue;
+    // The source shows for a caret on the line or a selection inside it; a selection that spans
+    // the block (Select All) leaves it drawn.
+    const spans = state.selection.ranges.some((r) => r.from < line.from && r.to > line.to);
+    const touches = state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from);
+    if (touches && !spans) continue;
     ranges.push(
       Decoration.replace({ widget: new IncludeWidget(path, host), block: true }).range(
         line.from,
