@@ -957,6 +957,13 @@ describe('line breaks and blocks (format §3.4)', () => {
     expect(editor.getParsed().marks.length).toBeGreaterThan(0);
   });
 
+  it('replaces only the selected spaces on Enter, when more spaces follow (#1030)', () => {
+    const editor = load('One   two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
+    editor.view.dispatch({ selection: { anchor: 3, head: 5 } });
+    press(editor, 'Enter');
+    expect(newestView(editor.getDoc()).text).toBe('One\n two.\n');
+  });
+
   it('keeps the spaces before the caret when Enter continues a list', () => {
     const editor = load('- one \n- two\n', { ids: ['q4gt', 'r5tw'] });
     caret(editor, '- one '.length);

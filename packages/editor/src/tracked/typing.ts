@@ -385,11 +385,20 @@ function keepingSpaces(tr: Transaction, edits: Edit[]): Edit[] {
   if (tr.annotation(Transaction.userEvent) !== 'input') return edits;
   const { doc, selection } = tr.startState;
   return edits.map((edit) => {
-    // A selection that is the spaces is Enter's to replace, as any key replaces it (#1030): only the
-    // spaces that Enter itself takes, after or before the caret, are kept.
-    const selected = selection.ranges.some((r) => r.from === edit.from && r.to === edit.to);
-    const spaces =
-      !selected && edit.from < edit.to && /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to));
+    // Spaces that are selected are Enter's to replace, as any key replaces them (#1030): only the
+    // spaces that Enter itself takes besides, after or before the caret, are kept. Enter's edit may
+    // reach past the selection (to the spaces after it, or back to the line's start).
+    const range = selection.ranges.find(
+      (r) => r.from < r.to && r.from >= edit.from && r.to <= edit.to,
+    );
+    if (
+      range &&
+      edit.insert.startsWith('\n') &&
+      /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to))
+    ) {
+      return { ...edit, from: range.from, to: range.to };
+    }
+    const spaces = edit.from < edit.to && /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to));
     return spaces && edit.insert.startsWith('\n') ? { ...edit, from: edit.to } : edit;
   });
 }
