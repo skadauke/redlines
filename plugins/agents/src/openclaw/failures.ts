@@ -91,7 +91,7 @@ export function failure(id: FailureId, subject: Subject = {}): Failure {
       return {
         id,
         title: `No OpenClaw found on ${computer}`,
-        body: 'The computer is there, but no Gateway answered. Your agent can switch on remote access.',
+        body: 'The computer is there, but nothing answered as OpenClaw. Your agent can switch on remote access.',
         step: 'Step 2',
         action: 'copy-setup-prompt',
         label: 'Copy a prompt for your agent',
@@ -118,7 +118,7 @@ export function failure(id: FailureId, subject: Subject = {}): Failure {
       return {
         id,
         title: `Connected, but ${agent} can’t use the Redlines tools`,
-        body: 'The Gateway may have tools from other computers turned off, or they weren’t approved. Your agent can fix both.',
+        body: 'OpenClaw may have tools from other computers turned off, or they weren’t approved. Your agent can fix both.',
         step: 'Step 5',
         action: 'copy-tools-prompt',
         label: 'Copy a prompt for your agent',

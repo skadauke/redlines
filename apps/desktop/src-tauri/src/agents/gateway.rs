@@ -68,19 +68,17 @@ fn is_private_host(host: &str) -> bool {
     if host == "::1" {
         return true;
     }
-    let octets: Vec<u8> = host
-        .split('.')
-        .filter_map(|part| part.parse().ok())
-        .collect();
-    if octets.len() != 4 || host.split('.').count() != 4 {
+    // `Ipv4Addr` takes only plain dotted decimals: `010.0.0.1`, which macOS reads as octal, is not
+    // an address here, and is judged as the name it is (public).
+    let Ok(address) = host.parse::<std::net::Ipv4Addr>() else {
         return false;
-    }
-    match (octets[0], octets[1]) {
-        (127, _) | (10, _) | (192, 168) | (169, 254) => true,
-        (172, second) => (16..=31).contains(&second),
-        (100, second) => (64..=127).contains(&second),
-        _ => false,
-    }
+    };
+    let [first, second, ..] = address.octets();
+    address.is_loopback()
+        || address.is_private()
+        || address.is_link_local()
+        // Tailscale's own range, 100.64.0.0/10.
+        || (first == 100 && (64..=127).contains(&second))
 }
 
 fn is_tailscale_name(host: &str) -> bool {
@@ -111,7 +109,11 @@ pub fn target(input: &str, suffix: Option<&str>) -> Result<Target, String> {
     // The host, and its port if any: an IPv6 address is in brackets.
     let (host, port) = match authority.strip_prefix('[') {
         Some(inside) => match inside.split_once(']') {
-            Some((host, after)) => (host.to_string(), after.strip_prefix(':')),
+            Some((host, "")) => (host.to_string(), None),
+            Some((host, after)) => match after.strip_prefix(':') {
+                Some(port) => (host.to_string(), Some(port)),
+                None => return bad("That address doesn’t look right."),
+            },
             None => return bad("That address doesn’t look right."),
         },
         None => match authority.split_once(':') {
@@ -198,6 +200,13 @@ fn timed_out(error: &io::Error) -> bool {
     )
 }
 
+/// No way to the computer: the network is down or blocks the way, which is "not answering", not a
+/// computer that has no Gateway.
+fn no_route(error: &io::Error) -> bool {
+    // ENETUNREACH 51 and EHOSTUNREACH 65 on macOS, 101 and 113 on Linux.
+    matches!(error.raw_os_error(), Some(51 | 65 | 101 | 113))
+}
+
 /// Connects to a target and finishes the WebSocket handshake, every wait within `timeout`. The
 /// stream's timeouts stay set, so that a later read never waits forever.
 pub fn open(target: &Target, timeout: Duration) -> Result<Socket, OpenError> {
@@ -224,7 +233,7 @@ pub fn open(target: &Target, timeout: Duration) -> Result<Socket, OpenError> {
                     }
                 };
             }
-            Err(error) if timed_out(&error) => last = OpenError::TimedOut,
+            Err(error) if timed_out(&error) || no_route(&error) => last = OpenError::TimedOut,
             Err(error) => last = OpenError::Unreachable(error.to_string()),
         }
     }
@@ -257,7 +266,16 @@ pub fn probe(target: &Target, timeout: Duration) -> Probe {
             return Probe::NoGateway { url, host, detail };
         }
     };
+    let deadline = std::time::Instant::now() + timeout;
     let found = loop {
+        if std::time::Instant::now() >= deadline {
+            let _ = socket.close(None);
+            return Probe::NotAnswering {
+                url,
+                host,
+                detail: "It answered, but sent no greeting in time.".to_string(),
+            };
+        }
         match socket.read() {
             Ok(Message::Text(text)) => break is_challenge(text.as_str()),
             Ok(Message::Ping(_) | Message::Pong(_)) => continue,
@@ -480,6 +498,38 @@ mod tests {
         });
         let result = probe(&found, Duration::from_millis(300));
         assert!(matches!(result, Probe::NotAnswering { .. }), "{result:?}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn an_octal_looking_address_is_not_private() {
+        // macOS reads 010.0.0.1 as 8.0.0.1.
+        assert!(target("ws://010.0.0.1", None).is_err());
+        assert!(target("ws://+10.0.0.1", None).is_err());
+        assert!(target("ws://[::1]x", None).is_err());
+        assert!(target("ws://[::1]", None).is_ok());
+    }
+
+    #[test]
+    fn a_secure_open_to_a_server_that_isnt_tls_fails_cleanly() {
+        // Builds the TLS client (its crypto provider and the system's roots) and fails the
+        // handshake; it must not panic.
+        let (found, server) = gateway(|mut stream| {
+            use io::{Read, Write};
+            let mut buffer = [0u8; 1024];
+            let _ = stream.read(&mut buffer);
+            let _ = stream.write_all(b"not tls\r\n");
+        });
+        let secure = Target {
+            url: found.url.replace("ws://", "wss://"),
+            tls: true,
+            ..found
+        };
+        let result = probe(&secure, Duration::from_secs(5));
+        assert!(
+            matches!(result, Probe::NoGateway { .. } | Probe::NotAnswering { .. }),
+            "{result:?}"
+        );
         server.join().unwrap();
     }
 

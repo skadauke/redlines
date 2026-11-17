@@ -32,7 +32,7 @@ export function gatewayView(probe: GatewayProbe, computer: string): GatewayView 
         found: true,
         title: `Found an OpenClaw Gateway on ${computer}.`,
         line:
-          'It answers over Tailscale and asks for a login, which the next steps set up. ' +
+          'It answers and asks for a login, which the next steps set up. ' +
           'Redlines only said hello; nothing was sent to it.',
         failure: null,
         detail: null,
@@ -49,7 +49,7 @@ export function gatewayView(probe: GatewayProbe, computer: string): GatewayView 
       return {
         found: false,
         title: `No OpenClaw found on ${computer}.`,
-        line: 'The computer is there, but no Gateway answered.',
+        line: 'The computer is there, but nothing answered as OpenClaw.',
         failure: 'no-gateway',
         detail: probe.detail,
       };
