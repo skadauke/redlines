@@ -537,6 +537,9 @@ mod tests {
             canonical("agent:moby:redlines-0a"),
             "agent:moby:redlines-0a"
         );
+        // A malformed key names no agent: it is a bare name, and matches no agent's run.
+        assert_eq!(canonical("agent:moby"), "agent:main:agent:moby");
+        assert_eq!(canonical("agent::x"), "agent:main:agent::x");
         let temp = folder("bare");
         let (socket, _window) = window(&temp);
         let tools = Arc::new(RunTools::default());
