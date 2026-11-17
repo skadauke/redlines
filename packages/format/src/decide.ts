@@ -373,10 +373,10 @@ function emptiedAnnotations(
     // the first of them (format §4). A highlight has no point form and goes.
     const [point] = live.length === 0 && mark.kind === 'cmt' ? emptied : [];
     for (const segment of emptied) {
-      if (segment === point && segment.close) remove(segment.close);
+      if (segment === point && segment.close) remove(closerRange(text, segment.close));
       else {
         remove(openerRange(segment));
-        if (segment.close) remove(segment.close);
+        if (segment.close) remove(closerRange(text, segment.close));
       }
     }
   }
