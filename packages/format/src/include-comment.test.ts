@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment, deleteThread } from './comments.ts';
 import { ada, context } from './test-helpers.ts';
-import { newestView } from './views.ts';
+import { addHighlight } from './highlights.ts';
+import { newestView, originalView } from './views.ts';
 
 const QMD = [
   '---',
@@ -74,5 +75,37 @@ describe('a comment on an include line', () => {
     const md = context(ada, ['c2bd']);
     const { changes } = addComment(QMD, at('{{< include _protocol.qmd >}}'), 'Note.', md);
     expect(applyChanges(QMD, changes)).toContain('{{< include _protocol.qmd >}}<!--/c2bd-->');
+  });
+
+  it('reads right with a second comment on the same include, and gives the bytes back', () => {
+    const first = addComment(QMD, at('{{< include _protocol.qmd >}}'), 'one', ctx());
+    const once = applyChanges(QMD, first.changes);
+    const wide = once.indexOf('<!--cmt');
+    const end = once.indexOf('<!--/c2bd-->') + '<!--/c2bd-->'.length;
+    const second = addComment(
+      once,
+      { from: wide, to: end },
+      'two',
+      context(ada, ['d3cm'], { dialect: 'pandoc' }),
+    );
+    const twice = applyChanges(once, second.changes);
+    expect(newestView(twice).text).toBe(QMD);
+    expect(originalView(twice).text).toBe(QMD);
+    const undone = applyChanges(twice, deleteThread(twice, second.id));
+    expect(applyChanges(undone, deleteThread(undone, first.id))).toBe(QMD);
+  });
+
+  it('puts a highlight around an include as it does a comment', () => {
+    const { changes } = addHighlight(QMD, at('{{< include _protocol.qmd >}}'), ctx());
+    const after = applyChanges(QMD, changes);
+    const lines = after.split('\n');
+    const line = lines.findIndex((each) => each.includes('{{< include'));
+    expect(lines[line]).toBe('{{< include _protocol.qmd >}}');
+    expect(newestView(after).text).toBe(QMD);
+  });
+
+  it('reads a closer after an include line in a .md file as before', () => {
+    const md = '<!--ins k3x9-->new\n{{< include _a.qmd >}}\n<!--/k3x9-->\n\nNext\n';
+    expect(newestView(md).text).toContain('{{< include _a.qmd >}}\n\n\nNext');
   });
 });

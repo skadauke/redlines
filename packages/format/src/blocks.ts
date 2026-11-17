@@ -1441,14 +1441,28 @@ export const HTML_START_7 =
 export function closerRange(text: string, close: Range): Range {
   if (close.from === 0 || text[close.from - 1] !== '\n') return close;
   const next = text.indexOf('\n', close.to);
-  if (text.slice(close.to, next === -1 ? text.length : next).trim() !== '') return close;
+  // Only more closers may follow on the line: the marks around a Quarto include are nested (include.ts).
+  const rest = text.slice(close.to, next === -1 ? text.length : next);
+  if (rest.replace(/<!--\/\w+-->/g, '').trim() !== '') return close;
   const eol = text[close.from - 2] === '\r' ? 2 : 1;
   const lineEndAt = close.from - eol;
   const start = text.lastIndexOf('\n', lineEndAt - 1) + 1;
-  // A Quarto include line is such a line too: no marker shares it (include.ts).
   const tagLine = text.slice(start, lineEndAt);
-  if (INCLUDE_LINE.test(tagLine.replace(/\r$/, '')))
-    return { from: close.from - eol, to: close.to };
+  // A Quarto include line, in the opener and the closers of the marks around it, each on a line of
+  // its own: the closer takes its line break, so that no view reads them as text (include.ts).
+  if (/^<!--\/\w+-->$/.test(tagLine.replace(/\r$/, '')) || INCLUDE_LINE.test(tagLine)) {
+    let at = start;
+    let line = tagLine;
+    while (/^<!--\/\w+-->\r?$/.test(line) && at > 0) {
+      const to = at - 1 - (text[at - 2] === '\r' ? 1 : 0);
+      at = text.lastIndexOf('\n', to - 1) + 1;
+      line = text.slice(at, to);
+    }
+    const before = at === 0 ? '' : text.slice(text.lastIndexOf('\n', at - 2) + 1, at - 1);
+    if (INCLUDE_LINE.test(line.replace(/\r$/, '')) && /^<!--[^/].*-->\r?$/.test(before)) {
+      return { from: close.from - eol, to: close.to };
+    }
+  }
   if (!HTML_START_7.test(tagLine)) return close;
   const above = start === 0 ? '' : text.slice(text.lastIndexOf('\n', start - 2) + 1, start - 1);
   return start === 0 || above.trim() === '' ? { from: close.from - eol, to: close.to } : close;
