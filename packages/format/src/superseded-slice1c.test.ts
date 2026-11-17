@@ -132,18 +132,23 @@ describe('#1071: the walk of states in a chain of marks', () => {
     'reads a chain of 8 of Bo’s marks in at most 3 times what a chain of 5 takes',
     () => {
       const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1]!;
-      const time = (n: number) => {
+      const run = (n: number) => {
         const { ids, before } = chainOf(n);
-        const samples: number[] = [];
-        for (let i = 0; i < 7; i++) {
-          const start = performance.now();
-          emphasisReadsAlike(before, new Set(ids));
-          samples.push(performance.now() - start);
-        }
-        return median(samples);
+        const start = performance.now();
+        // The walk reads to the end (true), so that a walk that gave up early can't pass fast.
+        expect(emphasisReadsAlike(before, new Set(ids))).toBe(true);
+        return performance.now() - start;
       };
-      time(5);
-      expect(time(8)).toBeLessThan(time(5) * 3 + 5);
+      run(5);
+      run(8);
+      // The two chains take turns, five of each, so that a slow moment slows both.
+      const five: number[] = [];
+      const eight: number[] = [];
+      for (let turn = 0; turn < 5; turn++) {
+        five.push(run(5));
+        eight.push(run(8));
+      }
+      expect(median(eight)).toBeLessThan(median(five) * 3 + 5);
     },
   );
 });
