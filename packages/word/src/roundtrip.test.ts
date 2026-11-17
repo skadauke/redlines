@@ -60,15 +60,14 @@ const SOURCE = `${BODY}${LEDGER}`;
 
 /**
  * The comments as a reader sees them, with no id (Word has none to keep). Who resolved a thread and
- * when are not kept either: Word marks a thread done and says no more (the resolver comes back as the
- * thread's author).
+ * when come back from the source part, as Word marks a thread done and says no more (#1040).
  */
 const commentsOf = (text: string) =>
   Object.values(parse(text).ledger.comments).map((c) => ({
     by: c.by,
     at: c.at,
     text: c.text,
-    resolved: c.resolved !== undefined,
+    resolved: c.resolved,
     replies: (c.replies ?? []).map((r) => ({ by: r.by, at: r.at, text: r.text })),
   }));
 
@@ -104,7 +103,8 @@ describe('the round trip, .md to .docx to .md', () => {
     await exportDocx(withPicture, { report: notes });
     expect(notes.map((entry) => entry.kind)).toEqual(['image']);
     expect(notes[0]?.message).toContain('media/none.png');
-    // A picture the export could not embed comes back as its description, as the note said.
-    expect(importDocx(await exportDocx(withPicture)).markdown).toContain('*\\[Image: Gone\\]*');
+    // A picture the export could not embed is written as its description, and comes back as the
+    // link it was (#1041).
+    expect(importDocx(await exportDocx(withPicture)).markdown).toContain('![Gone](media/none.png)');
   });
 });

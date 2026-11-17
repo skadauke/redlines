@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { fontStack, markdownToHtml } from './copy-html.ts';
+import { DEFAULT_FONTS, fontStack, markdownToDocumentHtml, markdownToHtml } from './copy-html.ts';
 
 const html = (markdown: string) => markdownToHtml(markdown);
 
@@ -167,5 +167,16 @@ describe('emoji shortcodes in a copy (#388)', () => {
   });
   it('keeps the shortcode as text without a lookup', () => {
     expect(html('Camp :tent:')).toContain('Camp :tent:');
+  });
+});
+
+describe('fonts a program that pastes can use (#1041 follow-up)', () => {
+  it('never writes a CSS variable, which Word cannot resolve', () => {
+    expect(fontStack('var(--rl-font-body)')).not.toContain('var(');
+  });
+  it('gives a table cell the body font, since Word starts a cell in its own default', () => {
+    const fonts = { ...DEFAULT_FONTS, body: 'Georgia, serif' };
+    const out = markdownToDocumentHtml('| a |\n|---|\n| 1 |\n', fonts, undefined, { office: true });
+    expect(out.match(/<t[dh] style="[^"]*font-family:Georgia, serif/g)).toHaveLength(2);
   });
 });

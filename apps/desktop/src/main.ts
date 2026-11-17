@@ -1095,6 +1095,36 @@ createAltText(editor, {
   }),
 });
 
+/**
+ * The bytes of the local picture `src` for Export to Word: only one inside the document's project
+ * folder (`localImagePath`), read by the app under the rules that hold what the page may load
+ * (`image_for_crop`). Undefined for any other address or a file the app won't give.
+ */
+async function readImageForWord(src: string): Promise<Uint8Array | undefined> {
+  const document = imageDocument;
+  const root = imageFolder;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(src) || document === null || root === null) return undefined;
+  let relative: string;
+  try {
+    relative = decodeURIComponent(src.replace(/[?#].*$/s, ''));
+  } catch {
+    return undefined;
+  }
+  const path = localImagePath(relative, document, root);
+  if (path === null) return undefined;
+  try {
+    if (isTauri) {
+      const read = await invoke<{ mimeType: string; data: string }>('image_for_crop', { path });
+      return Uint8Array.from(atob(read.data), (char) => char.charCodeAt(0));
+    }
+    const url = host.imageUrl(path);
+    const response = url === null ? null : await fetch(url);
+    return response?.ok ? new Uint8Array(await response.arrayBuffer()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The most bytes of a picture an agent is shown, as the app's own command holds it to. */
 const AGENT_IMAGE_BYTES = 3_670_016;
 
@@ -1551,6 +1581,7 @@ const commands: MenuCommands = {
       text: editor.getDoc(),
       name: doc?.name ?? 'Untitled',
       path: doc?.path ?? null,
+      images: readImageForWord,
       show: (options) => void notifications.show(options),
       canReveal: isTauri,
     }).catch((error: unknown) => {
