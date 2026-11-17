@@ -615,13 +615,15 @@ function trackEdits(
           ? trackedEdit
           : (at: string, change: TextChange, made: typeof ctx) => {
               const fine = fineEdit(at, change, made);
-              // A fine write that micromark reads otherwise than the newest view is taken back,
-              // for the replacement of the unit (#597, #601, #588).
+              // A fine write that micromark reads otherwise than the newest view is replaced by the
+              // write of the whole unit (#597, #601, #588); where no unit holds it, the fine write
+              // stays, as it was.
               if (readsOtherAtBoundary(at, [change], fine)) {
-                throw new EditError(
-                  'This change reads differently in the file than in the document.',
-                  'no-legal-placement',
-                );
+                try {
+                  return trackedEdit(at, change, made);
+                } catch {
+                  return fine;
+                }
               }
               return fine;
             };

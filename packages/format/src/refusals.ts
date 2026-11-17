@@ -279,12 +279,6 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   [
     'packages/editor/src/tracked/typing.ts',
-    'This change reads differently in the file than i',
-    'widen',
-    'a fine write that micromark reads otherwise is taken back and written as a replacement of its unit (#597, #601, #588)',
-  ],
-  [
-    'packages/editor/src/tracked/typing.ts',
     'Track Changes needs to know who is editing.',
     'disable',
     'inventory #75',

@@ -5211,7 +5211,12 @@ function editsWidening(
           // A write the format accepts that a reader of the file reads otherwise than the newest
           // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
           // can't be.
-          const whole = widenedAtOnce(text, edits, again());
+          let whole: ReturnType<typeof widenedAtOnce>;
+          try {
+            whole = widenedAtOnce(text, edits, again());
+          } catch {
+            // no unit holds it: the fine write stays
+          }
           return whole && !readsOtherMicromark(text, whole.changes) ? whole : written;
         }
         return written;

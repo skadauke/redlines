@@ -470,7 +470,7 @@ function tryRung(
   const html = HTML_LINE.test(lastLineOf(now, rung.prefix));
   // (a setext underline or a rule is a line of its own, which the closer cannot join)
   const bare = endsInBare(now) && !/(?:^|\n)[ \t>]*(?:-{2,}|={2,})[ \t]*$/.test(now);
-  if (html && rung.prefix !== '') return giveUp('html');
+  if (html && (rung.prefix !== '' || rung.kind === 'table')) return giveUp('html');
   const atomic =
     html ||
     rung.atomic ||
@@ -716,7 +716,8 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     if (
       prefix !== '' &&
       SYNTAX_PREFIX.test(prefix) &&
-      (edit.insert.includes('\n') || !/[ \t]$/.test(prefix))
+      ((edit.insert.includes('\n') && (edit.from < edit.to || !/[ \t]$/.test(prefix))) ||
+        !/[ \t]$/.test(prefix))
     ) {
       return true;
     }
