@@ -6,8 +6,7 @@
 // the header's last cell, in every state, and the original view has its old delimiter row. Some tables
 // hold the unbalanced halves of code spans and raw comments, which the scan pairs across the cells and
 // rows of a table. What the alignment change is not the cause of is left out, counted by the mechanism
-// that left it out: a step that leaves a pending mark unread beside a half that pairs across cells
-// (#480), a step that hides the file's ledger or brings a hidden one back (#483), and a file that fails
+// that left it out: a step that hides the file's ledger or brings a hidden one back (#483), and a file that fails
 // the same first check without the mark (the file with the mark cut out fails the check that the file
 // fails first, as the alignment suite holds it). A merge can leave a column change and an alignment
 // change together, which no operation writes: Ada's mark is joined by hand to the columns that are
@@ -297,13 +296,11 @@ describe('rows and columns, random', () => {
     let withColumns = 0;
     let withAlign = 0;
     // The tables that hold halves of code spans or comments, and the same with an alignment change pending at the end;
-    // those left out, by the mechanism that left them out, none of them the alignment change's: a step that left a
-    // pending mark unread beside a half that pairs across cells (#480), a step that hid the file's ledger or brought a
+    // those left out, by the mechanism that left them out, none of them the alignment change's: a step that hid the file's ledger or brought a
     // hidden one back (#483), and a file that fails the same first check without its mark (by check, the merges
     // apart); the merges drawn, the states they were decided in, and the rejections of the mark that they refused.
     let withHalves = 0;
     let halvesWithAlign = 0;
-    let olderUnread = 0;
     let olderLedger = 0;
     let olderControl = 0;
     let olderMerges = 0;
@@ -610,17 +607,20 @@ describe('rows and columns, random', () => {
         // of the table at the step that shows it, counted:
         // - #483: a lone `<!--` hides the file's ledger: a tracked row or column operation loses it or writes a second
         //   one, and a deletion that takes the half away revives a stale one (the count of ledgers read changes);
-        // - #480: a lone backtick or comment half that pairs across cells leaves a pending mark unread (a plain column
-        //   deletion or move writes what the half hides, and a change is lost with its entry).
+        // - #480, once the third: a lone backtick or comment half that pairs across cells left a pending mark unread (a
+        //   plain column deletion or move wrote what the half hides, and a change was lost with its entry); a step that
+        //   would do it is refused now, and a state that has one fails the test.
         if (halves && ledgersRead(text) !== ledgersRead(prev)) {
           olderLedger++;
           abandoned = true;
           break;
         }
-        if (halves && unreadMarkers(text) > unreadMarkers(prev)) {
-          olderUnread++;
-          abandoned = true;
-          break;
+        // #480 is not one of them: a plain column move or deletion that would leave a pending mark unread is refused
+        // (the cells that move are held to the check that the cells that stay are), so none writes a state with one.
+        if (halves && /^plain \{"kind":"(?:moveCols|deleteCols)"/.test(steps.at(-1) ?? '')) {
+          named('a step left a pending mark unread beside a half', () =>
+            expect(unreadMarkers(text), label).toBeLessThanOrEqual(unreadMarkers(prev)),
+          );
         }
         const sound = (state: string) => {
           if (parse(state).marks.length > 0) {
@@ -807,11 +807,11 @@ describe('rows and columns, random', () => {
         olderFor(error);
       }
     }
-    const older = olderUnread + olderLedger + olderControl;
+    const older = olderLedger + olderControl;
     if (process.env['REDLINES_FUZZ_STATS']) {
       const byCheck = [...olderBy].map(([check, count]) => `${check} ${count}`).join(', ');
       console.log(
-        `tables ${used}, with columns pending ${withColumns}, with an alignment change pending ${withAlign}, with halves ${withHalves} (${halvesWithAlign} with an alignment change), left out as older ${older} (a step left a pending mark unread beside a half, #480: ${olderUnread}; a step hid the ledger or brought a hidden one back, #483: ${olderLedger}; the same first check fails without the mark, #480 and #483: ${olderControl}${byCheck === '' ? '' : ` (${byCheck})`}), merges left out the same way ${olderMerges}, merges ${merges} (${mergesWithHalves} in a table with halves, ${mergeStates} states, ${mergeLost + mergeKept} rejections of the mark refused (${mergeLost} for columns that its old row has not, ${mergeKept} for the original text beside a column change pending), ${mergeHidden} decisions refused for hiding the mark in code, ${mergeWithout} refused without the mark too, ${mergeNoOriginals} of them for a table with no column of its original left, #477), decisions refused that the file without its alignment change refuses too ${refusedWithout.count}`,
+        `tables ${used}, with columns pending ${withColumns}, with an alignment change pending ${withAlign}, with halves ${withHalves} (${halvesWithAlign} with an alignment change), left out as older ${older} (a step hid the ledger or brought a hidden one back, #483: ${olderLedger}; the same first check fails without the mark, #480 and #483: ${olderControl}${byCheck === '' ? '' : ` (${byCheck})`}), merges left out the same way ${olderMerges}, merges ${merges} (${mergesWithHalves} in a table with halves, ${mergeStates} states, ${mergeLost + mergeKept} rejections of the mark refused (${mergeLost} for columns that its old row has not, ${mergeKept} for the original text beside a column change pending), ${mergeHidden} decisions refused for hiding the mark in code, ${mergeWithout} refused without the mark too, ${mergeNoOriginals} of them for a table with no column of its original left, #477), decisions refused that the file without its alignment change refuses too ${refusedWithout.count}`,
       );
     }
     expect(used).toBeGreaterThan(10);

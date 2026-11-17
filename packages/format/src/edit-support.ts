@@ -223,6 +223,31 @@ export function hiddenError(removing: boolean, comment = false): EditError {
 }
 
 /**
+ * Whether a marker that a change cuts out and writes again, as a column operation does with the
+ * cells that move, is read where it is written again: false when the changes write the marker's text
+ * and the scan reads it at none of the places where it stands. A marker no change writes again
+ * is gone, and counts as read.
+ */
+function carriedRead(
+  text: string,
+  range: Range,
+  changes: readonly TextChange[],
+  read: ReadonlySet<number>,
+): boolean {
+  const marker = text.slice(range.from, range.to);
+  let delta = 0;
+  let found = false;
+  for (const change of changes) {
+    for (let i = change.insert.indexOf(marker); i >= 0; i = change.insert.indexOf(marker, i + 1)) {
+      found = true;
+      if (read.has(change.from + delta + i)) return true;
+    }
+    delta += change.insert.length - (change.to - change.from);
+  }
+  return !found;
+}
+
+/**
  * Throws when a marker the file had is no longer read after the changes, although the changes did
  * not remove it. An edit can do that without touching the marker: a backtick that changes which
  * backticks pair, or a `<!--` that opens a comment, turns every marker after it into code or
@@ -252,7 +277,10 @@ function assertMarksKept(
       const { close } = segment;
       const opener = openerRange(segment);
       for (const range of close ? [opener, close] : [opener]) {
-        if (removed(range)) continue;
+        if (removed(range)) {
+          if (!carriedRead(before.text, range, changes, read)) hidden();
+          continue;
+        }
         const at = forward(changes, range.from);
         if (at === null || !read.has(at)) hidden();
       }
