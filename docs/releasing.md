@@ -71,7 +71,8 @@ read at "This folder and my home folder" still holds with the current versions o
 
 1. Install, or update to, the version each provider names as its minimum
    (`MIN_VERSION` in `plugins/agent-claude/src/index.ts` and `plugins/agent-codex/src/index.ts`)
-   and, as a second run, the newest version.
+   and, as a second run, the newest version. The test looks for the programs at
+   `/opt/homebrew/bin/codex` and `~/.local/bin/claude`.
 2. From the repository root, run:
 
    ```sh
