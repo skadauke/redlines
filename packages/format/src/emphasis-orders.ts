@@ -239,6 +239,7 @@ export function hardBreakBesideDeletionReadsOtherwise(
         (segment) => segment.open.to >= first - 400 && segment.open.from <= last + 400,
       ),
   );
+  // Any author's: a deletion of one's own can be decided apart from the edit as well.
   const theirs = near.some(
     (mark) =>
       mark.kind === 'del' &&

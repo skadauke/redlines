@@ -1736,6 +1736,15 @@ change leaves the other as it was, in every order, so that the original view is 
 and the newest `one alph\⏎x café`. The same typed in front of the marker would put the line break
 inside the text it ends, in front of the deletion, and is not written.
 
+A hard break beside another person's pending deletion of a block break or a backslash is read in
+every order of decisions of the marks within 400 characters of it (`hardBreakBesideDeletionReadsOtherwise`
+in `emphasis-orders.ts`): the text each set of decisions comes to must be one, and micromark must read
+every state as its newest view. Where some order reads otherwise (rejecting the typed break takes a list
+item's indent in one order and not in another, or the quote after it reads otherwise), the unit is
+replaced whole (§3.12). The reading has caps, and over them the unit is replaced: more than six marks
+near the break, or more than 600 states. A pending deletion of one's own is read the same way, since it
+too can be decided apart from the edit (#265).
+
 **A backslash typed at the end of the document.** Where nothing follows, the change takes the
 line break that ends the block, and its closer stands alone on the line after the backslash, where
 no block follows to read it with, as after a closing fence (§3.3): `One two<!--sub k3x9 \n-->\⏎<!--/k3x9-->`.
@@ -3442,6 +3451,12 @@ meaning, the refusal is **kept**. The kept ones are an unreadable ledger, a file
 comment that is never closed, new text that holds Redlines markup, an unknown id, and an agent's text
 that matches nothing or several places, and, under the guard below, an edit whose unit holds another
 person's pending mark.
+
+**A hard break next to a deleted break.** A line break typed after a backslash, in a block that holds a
+pending deletion of a block break or of a backslash, is written as a replacement of the unit where some
+order of decisions reads otherwise (the reading and its caps are in §3.4, "A hard break typed behind a
+pending deletion"). The editor writes it so, and so does an agent's edit (`suggestReplace`), which
+retries the unit when the fine form says no way of writing reads alike. No refusal is added (#265).
 
 **Block syntax.** A fine write at a block's syntax (a tag's `>`, a heading's space, right behind a
 bare marker) or in indented code above a list line is read with micromark first. If the file would

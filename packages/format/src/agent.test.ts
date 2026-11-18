@@ -13,6 +13,7 @@ import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, acceptMarks, reject, rejectAll, rejectMarks } from './decide.ts';
 import { EditError } from './errors.ts';
+import { expectSound, readsAsNewest } from './oracle.ts';
 import { fineFormat as trackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
@@ -1202,5 +1203,24 @@ describe('an agent that deletes all the text of a format', () => {
     const { changes } = suggestReplace(text, 'text', '', context(claudeAda, ['k3x9', 'm4p2']));
     const written = applyChanges(text, changes);
     expect(applyChanges(written, acceptAll(written))).not.toContain('*');
+  });
+});
+
+describe("an agent's hard break beside another person's pending deletion of a block break (#265)", () => {
+  // Seed 5456 of the backslash walk: the fine form reads otherwise in some order, and the editor
+  // writes the unit as a replacement; the agent's edit does too, and is not refused.
+  const body =
+    'path\\ One<!--ins f4z2-->\\\\<!--/f4z2-->\ntwo<!--del b2zz \\n\\n-->> bold a bold path\\\n';
+  it.each(['path\\\n One', 'path\\\n\nOne'])('writes %j as a replacement', (newStr) => {
+    const text = file(body, { f4z2: 'ada', b2zz: 'bo' });
+    const { changes } = suggestReplace(
+      text,
+      'path\\ One',
+      newStr,
+      context(claudeAda, ['m4z2', 'n8fx', 'p7qd']),
+    );
+    const written = applyChanges(text, changes);
+    expect(readsAsNewest(written)).toBe(true);
+    expectSound('agent hard break', written);
   });
 });

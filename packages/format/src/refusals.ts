@@ -888,7 +888,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   [
     'packages/format/src/track.ts',
-    'This change could not be written so that every o',
+    'NO_FINE_FORM',
     'widen',
     'inventory #76',
   ],

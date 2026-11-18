@@ -5536,10 +5536,7 @@ function editsWidening(
       // Each way of writing the change is tried once; a change that reads otherwise in all of them
       // is refused, never tried again.
       if (mode > MOST_MODES) {
-        throw new EditError(
-          'This change could not be written so that every order of decisions reads alike. Make smaller changes.',
-          'no-legal-placement',
-        );
+        throw new EditError(NO_FINE_FORM, 'no-legal-placement');
       }
       try {
         const written = editsOnce(text, edits, mode === 0 ? first : again(), mode);
@@ -5773,6 +5770,11 @@ function codeEdits(
   );
   return { changes, markIds: [id], extendedIds: [] };
 }
+
+/** The words of the fine form's refusal where no way of writing a change reads alike in every order of
+ * decisions: the editor and an agent's edit then write the unit as a replacement (format §3.12). */
+export const NO_FINE_FORM =
+  'This change could not be written so that every order of decisions reads alike. Make smaller changes.';
 
 /** How many ways of writing a change next to a mark are tried (as typed, then by a character). */
 const MOST_MODES = 8;
