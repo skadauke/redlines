@@ -88,3 +88,53 @@ describe('the untracked path accepts pending changes after an alert (design §3.
     expect(editor.getDoc()).toBe(DOC);
   });
 });
+
+// Bo's pending bold, `**1**` after a `1`: taking one `*` out would leave `*1**` between the marks,
+// which a reader of the file reads other than the newest view (#265). The format throws, and the
+// editor asks (design §3.4).
+const BOLD = [
+  'See 1<!--fmt k3x9 +bold-->**1**<!--/k3x9--> here.',
+  '',
+  '<!-- redlines',
+  'version: 1',
+  'people:',
+  '  ada: {name: Ada Lovelace}',
+  '  bo: {name: Bo Chen}',
+  'marks:',
+  '  k3x9: {by: bo, at: 2026-10-13T22:30Z}',
+  '-->',
+  '',
+].join('\n');
+const STAR = BOLD.indexOf('**1') + 1;
+
+const deleteStar = (editor: Editor) =>
+  editor.view.dispatch({
+    changes: { from: STAR, to: STAR + 1, insert: '' },
+    userEvent: 'delete.backward',
+  });
+
+describe("a delimiter of another person's pending bold, with Track Changes off (#265)", () => {
+  it('asks with Bo’s name and count, and on Make Edit accepts the bold and makes the edit', async () => {
+    const { editor, asked } = load(BOLD, ['make']);
+    deleteStar(editor);
+    expect(editor.getDoc()).toBe(BOLD);
+    await tick();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.reason).toBe('accept-pending');
+    expect(asked[0]!.words?.title).toBe(
+      "This edit can't be made without accepting Bo Chen's 1 pending change in this paragraph. Make the edit?",
+    );
+    expect(editor.getDoc()).toContain('See 1*1** here.');
+    expect(editor.getParsed().marks).toEqual([]);
+    editor.undo();
+    expect(editor.getDoc()).toBe(BOLD);
+  });
+
+  it('leaves the text as it was on Cancel', async () => {
+    const { editor, asked } = load(BOLD, ['cancel']);
+    deleteStar(editor);
+    await tick();
+    expect(asked).toHaveLength(1);
+    expect(editor.getDoc()).toBe(BOLD);
+  });
+});

@@ -950,6 +950,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/format/src/untracked.ts', 'HIDES', 'widen', 'inventory #133'],
   [
     'packages/format/src/untracked.ts',
+    'ACCEPT_FIRST',
+    'alert',
+    "Track Changes off: the fine write of a delimiter reads otherwise than the newest view beside another person's pending change; the editor asks to accept those changes first (design §3.4, #265)",
+  ],
+  [
+    'packages/format/src/untracked.ts',
     "Text can't be typed here with Track Changes off:",
     'widen',
     'inventory #173',

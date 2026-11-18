@@ -398,7 +398,7 @@ function verbatimChunk(
   for (const mark of parse(text).marks) {
     for (const segment of mark.segments) {
       const low = segment.open.from;
-      const high = segment.carrier?.to ?? segment.close?.to ?? segment.open.to;
+      const high = Math.max(segment.carrier?.to ?? 0, segment.close?.to ?? segment.open.to);
       const touches = low < cut.to && high > cut.from;
       if (touches && !(low >= from && high <= to)) return undefined;
     }

@@ -3293,7 +3293,12 @@ backslash typed, or left by a deletion, right in front of a marker, which would 
 refused with Track Changes off, as it is with it on (§3.1, rule 4), in words that name the change
 ("A backslash can't stand right in front of the marker of Bo Chen's insertion while Track Changes
 is off: other Markdown readers would show the marker as text. Decide Bo Chen's insertion first, or
-turn on Track Changes."). In Plain, with Track Changes off, the editor edits the source as written,
+turn on Track Changes."). An emphasis delimiter (`*`, `_` or `~`) taken out or typed in a paragraph
+that holds marks is held to the same reading: where the fine write would make a file that micromark
+reads otherwise than its newest view (a marker between a `*` and the text it flanks, as in Bo's
+pending `**1**` after a `1` when one `*` is deleted, #265), it is refused with `no-legal-placement`,
+and the editor answers with the question of §3.13 (accepting the pending changes in the unit, then
+making the edit). In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
@@ -3460,7 +3465,13 @@ in `widen.ts`). Typing over one `*` of another person's pending bold `**`, or a 
 pending split, can write a file that micromark reads otherwise than the newest view; the paragraph is
 replaced whole instead (#299, #265). Where another person's mark ends at the unit's edge (a pending
 split's break or deletion of one), the unit is tried with the block beside it, which holds the mark
-whole, before the refusal below applies.
+whole, before the refusal below applies. The edge is the unit's with the line breaks, white space and
+quote marks (`>`) that carry no text beside it, so that a quote's blank line `>` between the split and
+the unit is no gap; and a unit that can't be written in an item's first line (a quote's paragraphs,
+which start on the item's marker line) is tried again as the quote whole. Typing at the start of the
+line after another person's split (`## x`, `- x`, `> x`, `1. x`, a letter or a space), and a block
+change of that line (heading, bullet, quote, number), are written this way: the substitution holds
+the split in its old text, and every order of decisions reads alike (#107, #276).
 
 In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that stands
 against a delimiter, in a table that holds changes, is read in the file as it stands and after each

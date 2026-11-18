@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { accept } from './decide.ts';
+import { expectSound } from './oracle.ts';
 import { breakEnd, openerRange, splitEnd } from './blocks.ts';
 import { markerRanges } from './edit-support.ts';
 import { applyChanges } from './changes.ts';
@@ -1034,5 +1036,53 @@ describe('on random documents (format §3.10)', { timeout: 600_000 }, () => {
       'x before the start of',
       'x in the middle of',
     ]);
+  });
+});
+
+describe("a delimiter taken out beside another person's pending format, Track Changes off (#265)", () => {
+  /** The accept plan of the editor (design §3.4): Bo's change decided, and the edit made on what is left. */
+  function afterAccepting(text: string, id: string, needle: string, offset: number) {
+    const accepted = applyChanges(text, accept(text, id));
+    const at = bodyOf(accepted).indexOf(needle) + offset;
+    return applyChanges(accepted, untrackedEdit(accepted, remove(at, at + 1)));
+  }
+
+  it('throws in a paragraph, and the accepted plan reads alike in every order', () => {
+    const body = '1<!--fmt k3x9 +bold-->**1**<!--/k3x9-->';
+    const text = file(body, { k3x9: 'bo' });
+    for (const [offset, edited] of [
+      [1, '1*1**'],
+      [0, '1*1**'],
+      [3, '1**1*'],
+    ] as const) {
+      const at = body.indexOf('**1') + offset;
+      const label = `delete at ${offset}`;
+      // The fine write is held back, with the code the editor asks about...
+      expect(refusal(text, remove(at, at + 1)), label).toBe('no-legal-placement');
+      // ...and what the editor makes instead reads as the plain edit of the text, in every order.
+      const after = afterAccepting(text, 'k3x9', '**1', offset);
+      expect(newest(after), label).toBe(edited);
+      expectSound(label, after);
+    }
+  });
+
+  it('throws in a cell of a table, and the accepted plan reads alike', () => {
+    const body = '| a |\n| --- |\n| 1<!--fmt k3x9 +bold-->**1**<!--/k3x9--> |';
+    const text = file(body, { k3x9: 'bo' });
+    const at = body.indexOf('**1') + 1;
+    expect(refusal(text, remove(at, at + 1))).toBe('no-legal-placement');
+    const after = afterAccepting(text, 'k3x9', '**1', 1);
+    expect(newest(after)).toBe('| a |\n| --- |\n| 1*1** |');
+    expectSound('cell', after);
+  });
+
+  it('keeps the fine write where it reads alike, and away from other changes', () => {
+    const body = 'A <!--fmt k3x9 +bold-->**word**<!--/k3x9--> b.';
+    const text = file(body, { k3x9: 'bo' });
+    // A letter typed far from the delimiters, and a delimiter in a paragraph without marks.
+    const at = body.indexOf(' b.');
+    expect(refusal(text, type(at, 'x'))).toBeUndefined();
+    const plain = file('A *b* c.\n\nD <!--ins k3x9-->e<!--/k3x9-->', { k3x9: 'bo' });
+    expect(refusal(plain, remove(2, 3))).toBeUndefined();
   });
 });

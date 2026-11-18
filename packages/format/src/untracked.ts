@@ -56,6 +56,7 @@ import {
 } from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
+import { atDelimiter, readsOtherMicromark } from './widen.ts';
 import { wrappedLineStart } from './wrapped-line.ts';
 
 /**
@@ -77,6 +78,12 @@ export const UNTRACKED_SELF_CHECK =
 
 const HIDES =
   'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Plain.';
+
+/** The error of an edit at a delimiter that another person's pending change leaves reading otherwise
+ * than the newest view (#265): the editor asks to accept those changes, then makes the edit (design
+ * §3.4); a caller that can't ask has nothing to offer but the words. */
+const ACCEPT_FIRST =
+  "This edit can't be made with Track Changes off without accepting the pending changes next to it, which would make the file read otherwise than it does now. Accept or reject them first, or turn on Track Changes.";
 
 /** The way around a refusal next to a mark: decide it, or for a comment, which has nothing to
  * decide, work on the source. */
@@ -583,7 +590,23 @@ function edited(
   ctx: UntrackedContext,
   half: boolean,
 ): TextChange[] {
-  return withDialect(ctx.dialect, () => editedIn(text, edit, ctx, half));
+  return withDialect(ctx.dialect, () => {
+    const changes = editedIn(text, edit, ctx, half);
+    // A delimiter (`*`, `_`, `~`) taken out or put in a paragraph that holds marks can leave a run that
+    // a reader of the file reads otherwise than the newest view, where the same edit in the plain text
+    // would not (a marker between a `*` and its neighbor, #265). The format has no fine write then,
+    // and the unit's rewrite takes the other person's changes in (design §3.4), which the person is
+    // asked about: the error is the editor's cue. Read only where an edit touches a delimiter.
+    if (
+      !half &&
+      changes.length > 0 &&
+      atDelimiter(text, changes) &&
+      readsOtherMicromark(text, changes)
+    ) {
+      throw new EditError(ACCEPT_FIRST, 'no-legal-placement');
+    }
+    return changes;
+  });
 }
 
 /** A key as pandoc reads it, `@fig-x` or `@smith2020` (the same as inline.ts's). */
