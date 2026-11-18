@@ -462,14 +462,8 @@ function decide(
 function keysAgainstWord(text: string): Set<string> {
   const found = new Set<string>();
   const body = text.slice(0, parse(text).ledgerRange?.from ?? text.length);
-  const marker = '<!--[^>]*-->';
-  for (const m of body.matchAll(
-    new RegExp(
-      `([\\p{L}\\p{N}_])((?:${marker})*)<!--(?:ins|sub) (\\w+)[^>]*-->(?:${marker})*@\\w`,
-      'gu',
-    ),
-  )) {
-    found.add(m[3]!);
+  for (const run of body.matchAll(/[\p{L}\p{N}_]((?:<!--[^>]*-->)+)@\w/gu)) {
+    for (const opener of run[1]!.matchAll(/<!--(?:ins|sub) (\w+)/g)) found.add(opener[1]!);
   }
   return found;
 }
@@ -1002,14 +996,28 @@ function rejectTogether(text: string, parsed: Parsed, marks: readonly MarkRange[
  *
  * @throws EditError when the ledger can't be read.
  */
-export function acceptAll(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
-  const parsed = parse(text);
-  return decide(text, parsed, selected(parsed, filter), 'accept');
+export function acceptAll(
+  text: string,
+  filter?: (mark: MarkRange) => boolean,
+  dialect?: MarkdownDialect,
+): TextChange[] {
+  return withDialect(dialect, () => {
+    const parsed = parse(text);
+    return decide(text, parsed, selected(parsed, filter), 'accept');
+  });
 }
 
 /** Rejects every tracked change that passes `filter` (all by default). See `acceptAll`. A format
  * change that can't be undone stays pending. */
-export function rejectAll(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
+export function rejectAll(
+  text: string,
+  filter?: (mark: MarkRange) => boolean,
+  dialect?: MarkdownDialect,
+): TextChange[] {
+  return withDialect(dialect, () => rejectAllIn(text, filter));
+}
+
+function rejectAllIn(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
   const parsed = parse(text);
   const marks = selected(parsed, filter);
   let changes = rejectTogether(text, parsed, marks);

@@ -212,7 +212,11 @@ function decide(
   if (bulk) {
     // Each on its own, as Accept All has always decided them: the same bytes as before.
     const wanted = new Set(ids);
-    return (decision === 'accept' ? acceptAll : rejectAll)(text, (mark) => wanted.has(mark.id));
+    return (decision === 'accept' ? acceptAll : rejectAll)(
+      text,
+      (mark) => wanted.has(mark.id),
+      dialect,
+    );
   }
   if (ids.length === 1 && !many)
     return (decision === 'accept' ? accept : reject)(text, ids[0]!, dialect);
