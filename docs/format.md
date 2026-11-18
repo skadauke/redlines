@@ -1821,11 +1821,21 @@ of a comment stands in it, which stays, the deletion is placed as any change is.
 
 **Typing under a bullet that the view reads as an underline.** A line break typed at the start of
 the text of a bullet item that stands under a line of text, or under the line of the item it is in,
-writes its split on the bullet's line (`- one⏎  - <!--split w8nn-->⏎    café 42`). The file reads
-that line as an item; the newest view reads it as the underline of the text above it, a heading,
-since an empty item can't interrupt a paragraph (§3.1, rule 7). The two readings differ before
-anything is typed (the file and the newest view of the first raw break are not read alike: #443), and
-every order of deciding the changes still reads alike. Words that the author of the breaks types on a
+is never written with its split's marker on the bullet's line (`- one⏎  - <!--split w8nn-->⏎    café 42`):
+the file reads that line as an item, and the newest view reads it as the underline of the text above
+it, a heading, since an empty item can't interrupt a paragraph (§3.1, rule 7), so the file and the
+view would read differently before anything is decided (#443). No placement of the marker fixes that
+(any marker on the bullet's line makes it an item for a reader of the file) and the typed break
+stays where it was typed. Where a unit holds the change, it is written as a replacement of it (§3.12:
+the list, with the text of the break as typed, which reads alike in the file and the view); where none
+does, the person is told, in words that say why and what to do: "A line break at the start of this
+bullet would read differently in the file than in the document: the empty bullet would turn the text
+above it into a heading. Type the text first and then the line break, or decide the other person's
+change first." The editor's Return does not write this break either: it writes the empty item above
+the list, with a blank line in front of it where the list stands under text (*A blank line and an
+item in an item's text*); the break comes from a paste or an agent. A bullet of this kind that a file
+already has (another person's split, or a file written before) is read as it was: every order of
+deciding the changes reads alike. Words that the author of the breaks types on a
 blank line of them are written as at any other item: one insertion that starts on the bullet's line,
 in front of the split's marker, which is typed again in it
 (`- one⏎  - <!--ins k3x9--><!--split p7qd-->⏎    new words<!--/k3x9--><!--split d3x9-->⏎    ⏎    café 42`,
