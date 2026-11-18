@@ -194,6 +194,15 @@ describe("another person's pending marks around the change (#81)", () => {
       'Start ‸<!--del k3x9 \\n\\n-->middle End',
       '**Start<!--del k3x9 \\n\\n-->‸middle** End',
       'Start<!--del k3x9 \\n\\n-->middle ‸End',
+      // A run typed before or after a word that holds his pending emphasis, across a letter (#265).
+      // Left out, each with a paste that holds an HTML tag: 'x ca<!--ins k3x9-->_f_<!--/k3x9-->é‸z' (#1135) and
+      // 'x ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->‸éz' (#1135).
+      'x ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->é‸z',
+      'x ‸ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->é',
+      'x ‸a<!--fmt k3x9 +italic-->*f*<!--/k3x9-->é y',
+      'x ‸ca<!--ins k3x9-->**f**<!--/k3x9-->é',
+      'x a<!--ins k3x9-->*f*<!--/k3x9-->é‸ y',
+      'x ‸ca<!--ins k3x9-->~~f~~<!--/k3x9-->é',
       '**one ‸<!--split k3x9-->\n\ntwo** End',
       '**one <!--split k3x9-->\n\n‸two** End',
       '~~one ‸<!--split k3x9-->\n\ntwo~~ End',
