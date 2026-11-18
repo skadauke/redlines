@@ -124,8 +124,11 @@ describe('the linked issues', () => {
         others: 'bo',
         keys: [{ type: '## x' }],
         // Tracked, a replacement of the paragraph before the break and the block after it, which
-        // holds bo's break in its old text (#107, #265); untracked, refused.
-        off: { refusal: SELF_CHECK },
+        // holds bo's break in its old text (#107, #265); untracked, refused in words that say why.
+        off: {
+          refusal:
+            "This edit can't be made with Track Changes off: it would turn the start of the paragraph after bo's line break into a heading, and deciding that line break would then read it otherwise. Accept or reject the line break first, or turn on Track Changes.",
+        },
       },
       {
         name: "#109: Delete twice at the end of the line above another person's split",

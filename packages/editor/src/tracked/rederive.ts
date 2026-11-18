@@ -12,6 +12,7 @@ import type { EditorState } from '@codemirror/state';
 import { EditError, newestView } from '@redlines/format';
 import type { IntentEdit, TypingIntent } from './intent.ts';
 import { deriveIntent } from './typing.ts';
+import type { BreakStyle } from '../line-breaks.ts';
 
 /** How much visible text on each side of an edit is kept to find its place again. */
 export const CONTEXT = 24;
@@ -65,6 +66,8 @@ export type Rederived =
       notices: string[];
       /** Whether any edit is placed other than where it was made. */
       moved: boolean;
+      /** The line breaks of another kind than the file's that the changes bring (#924). */
+      styles?: readonly BreakStyle[];
     }
   | { ok: false; reason: string };
 

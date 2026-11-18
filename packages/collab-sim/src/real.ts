@@ -7,7 +7,7 @@
 // The editor needs a DOM: this file is for Vitest's happy-dom environment, and is no part of the
 // command line's workers.
 
-import { EditorState } from '@codemirror/state';
+import { EditorSelection, EditorState } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import {
   createEditor,
@@ -70,6 +70,16 @@ export function realWriters(): RealWriters {
   const writers: RealWriters = {
     edits(text, edits, ctx, how) {
       return withContext(text, ctx, () => {
+        // A replacement is typed over a selection of the text it replaces, as a person types it.
+        const replaced = edits.filter((edit) => edit.from < edit.to);
+        if (replaced.length) {
+          editor.view.dispatch({
+            selection: EditorSelection.single(
+              Math.min(...replaced.map((edit) => edit.from)),
+              Math.max(...replaced.map((edit) => edit.to)),
+            ),
+          });
+        }
         const state: EditorState = editor.view.state;
         const tr = state.update({
           changes: edits,

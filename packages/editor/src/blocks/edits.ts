@@ -1141,7 +1141,19 @@ export function planReturn(state: EditorState): KeyEdit | null {
     // Before a block that takes no text (a fence, a table, an HTML block): an empty paragraph above
     // it, as Word does above a table at the top of a document.
     // The caret goes into it: typed at the block's start, text would land in the fence or the row.
-    if (['code', 'table', 'html', 'rule'].includes(block.kind) && head === block.text.from) {
+    // The caret in the indentation of an indented code block's first line is at its start too
+    // (walk seed 276 of `REDLINES_FUZZ=300`): a line break there wrote a blank line above the code.
+    const lineOfHead = state.doc.lineAt(head);
+    const inIndent =
+      block.kind === 'code' &&
+      head < block.text.from &&
+      lineOfHead.number === state.doc.lineAt(block.lines.from).number &&
+      lineOfHead.number === state.doc.lineAt(block.text.from).number &&
+      !/\S/.test(state.sliceDoc(lineOfHead.from, block.text.from));
+    if (
+      ['code', 'table', 'html', 'rule'].includes(block.kind) &&
+      (head === block.text.from || inIndent)
+    ) {
       const above: KeyEdit = { ...returnAtStart(state, block, head), caretInOpen: true };
       delete above.caretAt;
       return above;
@@ -1444,9 +1456,13 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
     return inside ? refuse(HEADING_ONE_LINE) : planReturn(state);
   }
   // In front of a block that takes no text, and at an HTML block's end: what Return does.
-  if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
+  // A thematic break is one (walk seed 281 of `REDLINES_FUZZ=300`): CodeMirror's line break
+  // wrote a stray blank line in front of it.
+  if (['code', 'table', 'html', 'rule'].includes(block.kind) && head === block.text.from) {
     return planReturn(state);
   }
+  if (block.kind === 'rule' && head === state.doc.lineAt(block.lines.to).to)
+    return planReturn(state);
   if (block.kind !== 'paragraph') {
     return ['html', 'code', 'math', 'front-matter'].includes(block.kind) ? planReturn(state) : null;
   }
