@@ -1100,3 +1100,32 @@ export function readsOtherMicromark(
   const [viewA, viewB] = alike(read(oldNewest), read(afterNewest));
   return markedA !== viewA || markedB !== viewB;
 }
+
+/**
+ * Whether micromark reads the body of `text` otherwise than its newest view: the file as it stands, with no
+ * change in question. A paragraph that begins with a marker is read so before any edit (#1092), which is no
+ * cell's doing: only the table blocks are compared by callers that mean cells (`table-settle.ts`).
+ */
+export function readsOtherAsIs(text: string): boolean {
+  const parsed = parse(text);
+  const ledger = parsed.ledgerRange;
+  const body = ledger ? text.slice(0, ledger.from) : text;
+  return micromarkText(body) !== micromarkText(newestView(text).text);
+}
+
+function micromarkText(source: string): string {
+  return micromark(source, {
+    allowDangerousHtml: true,
+    extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+    htmlExtensions: [
+      gfmAutolinkLiteralHtml(),
+      gfmStrikethroughHtml(),
+      gfmTableHtml(),
+      gfmTaskListItemHtml(),
+    ],
+  })
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
+}

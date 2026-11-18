@@ -3462,6 +3462,15 @@ replaced whole instead (#299, #265). Where another person's mark ends at the uni
 split's break or deletion of one), the unit is tried with the block beside it, which holds the mark
 whole, before the refusal below applies.
 
+In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that stands
+against a delimiter, in a table that holds changes, is read in the file as it stands and after each
+accept and reject of the table's changes (`readsOtherInDecisions`, `table-delimiter.ts`); where one of
+them reads otherwise than the newest view and the file before the edit had none, the cell is replaced.
+A comment or a highlight whose end stands against a delimiter is placed the same way as beside a pending
+row change: at the nearest range whose ends cut no delimiter run in any decision (`besideDelimiter` in
+`table-settle.ts`), and as asked when none does. An untracked edit that cuts a delimiter of a pending
+bold is not widened: it is no tracked write.
+
 **The old text holds other people's marks.** The old text of a replacement may hold another
 person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every
 order of accepting and rejecting the replacement and the marks in it reads alike (#808). The one
