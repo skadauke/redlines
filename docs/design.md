@@ -792,8 +792,8 @@ mode has no counterpart in the desktop app.
   quote with its bar) and its own change bar. A table deleted whole is one of these, drawn as a
   ghost table (§5.8). A block rewritten whole, by an agent or by typing over it, is not deleted: the
   old text is struck above the new, in the same block (a rewritten heading at the heading's size, an
-  item beside its one bullet), and a rewritten table cell shows its old text struck above the new
-  inside the cell. Words deleted inside a block, a substitution of part of one, and a deletion that
+  item beside its one bullet), a table rewritten whole is drawn as a struck ghost table above the new
+  table, and a rewritten table cell shows its old text struck above the new inside the cell. Words deleted inside a block, a substitution of part of one, and a deletion that
   runs from one block into another stay inline. The caret steps over a struck block, as over deleted
   text, and its card opens on hover and pins on a click; a click on its bar switches to the simple
   look, which doesn't draw it, and the block below keeps the place. The simple look and Clean show

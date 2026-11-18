@@ -61,7 +61,7 @@ repo root.
 - `pnpm install` (CI uses `pnpm install --frozen-lockfile`)
 - `pnpm typecheck`: `tsc` at the root, then `pnpm -r typecheck`
 - `pnpm lint`: ESLint (`eslint.config.js`)
-- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`, the keystroke in a file without indented code in `packages/format/src/indented-code.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it in full runs: pushes to main, the schedule, a dispatch and the one Epic-to-main pull request; other pull requests and pushes to an Epic branch skip them until #432), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
+- `pnpm test`: `vitest run`. The timing tests (every test file that reads `REDLINES_COST`, as `cost.test.ts` and `hidden.test.ts` in `packages/editor/src/blocks` do) run only with `REDLINES_COST=check` (CI's check job sets it in full runs: pushes to main, the schedule, a dispatch and the one Epic-to-main pull request; other pull requests and pushes to an Epic branch skip them until #432), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
   `plugins/*`, next to the code they test, run in Node. A test that needs a DOM starts with a
   `@vitest-environment happy-dom` comment.
 - `pnpm format` / `pnpm format:check`: Prettier
