@@ -22,4 +22,12 @@ describe('a deletion that empties a format', () => {
     const plain = 'a ** b ** c\n';
     expect(emptiedFormats(plain, [del(plain, ' b ')])).toEqual([del(plain, ' b ')]);
   });
+
+  it('takes the delimiters of a format that holds an insertion, as the editor reads it (#1094)', () => {
+    const text = 'one **two<!--ins k3x9--> new<!--/k3x9--> three** four\n';
+    const inside = 'two<!--ins k3x9--> new<!--/k3x9--> three';
+    const from = text.indexOf(inside);
+    const edit = { from, to: from + inside.length, insert: '' };
+    expect(emptiedFormats(text, [edit])).toEqual([{ ...edit, from: from - 2, to: edit.to + 2 }]);
+  });
 });

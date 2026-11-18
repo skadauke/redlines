@@ -36,6 +36,11 @@ tauri-plugin-updater = "2.14.1"
 # The app's own update checks run on Tauri's runtime, which is tokio's, and wait with its timers
 # (updates/checks.rs). Tauri's own dependency, with its timers turned on.
 tokio = { version = "1", features = ["rt", "sync", "time"] }
+# Fetches the pictures of a paste from Google Docs (remote_image.rs). The updater's own HTTP client,
+# with the same features, so nothing more is built for it; the updater's `ring` provider is
+# installed the way it installs it.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Reads what `hdiutil` says about disk images, and app versions, when installing from a disk image.
 plist = "1.10.1"
 tauri-plugin-clipboard-manager = "2"

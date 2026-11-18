@@ -4096,8 +4096,8 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
       // A pending deletion empties the item below: the file reads it as an item with text, the view
       // as an empty one, which can't interrupt a paragraph (#248 review C1).
       ['- one\n- <!--del k3x9 two-->', 2],
-      ['1. one\n1. <!--del k3x9 two-->', 3],
       ['- one\n- <!--del k3x9 two-->\n- three', 2],
+      ['1. one\n1. <!--del k3x9 two-->', 3],
       ['- one\n- <!--ins k3x9-->two<!--/k3x9-->\n- ', 2],
       // An underline below would make a heading of the text.
       ['- one\n---', 2],
@@ -4109,6 +4109,45 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
         () => trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd'])),
         body,
       ).toThrow(EditError);
+    }
+  });
+});
+
+describe("an edit of the prefix of an empty item inside another person's substitution (#430)", () => {
+  it('is not written with the line break after the prefix lost', () => {
+    // Ada's substitution holds `⏎2. ⏎> beta`; cutting it after the prefix would start its next
+    // segment with a line break, which a reader takes for the opener's carrier: in no view.
+    const body =
+      '> beta <!--del mb2x beta--> <!--del mb3x 7--><!--sub dnwg \\n>\\n> beta-->\n2. \n> beta<!--/dnwg--> <!--ins mb4x-->café<!--/mb4x--> <!--ins mb5x--><!--del mb6x 7--><!--/mb5x-->\n>\n> 42 <!--del mc2x x--> 42';
+    const before = file(body, {
+      mb2x: 'bo',
+      mb3x: 'ada',
+      mb4x: 'ada',
+      mb5x: 'bo',
+      mb6x: 'ada',
+      mc2x: 'bo',
+      dnwg: 'ada',
+    });
+    const view = newestView(before);
+    const from = view.text.indexOf('2. ');
+    for (const insert of ['2. ', '3. ']) {
+      const edit = {
+        from: view.map.toSource(from, 1),
+        to: view.map.toSource(from + 3, -1),
+        insert,
+      };
+      let after: string | undefined;
+      try {
+        after = applyChanges(
+          before,
+          trackedEdits(before, [edit], context(bo, ['fpxh', 'scmv', 'q2zr'])).changes,
+        );
+      } catch (error) {
+        // Refused in words (the unit's range holds another person's marks, #808).
+        expect(error).toBeInstanceOf(EditError);
+      }
+      // Written only where the newest view is what was typed.
+      if (after) expect(newestView(after).text).toBe(view.text.replace('2. ', insert));
     }
   });
 });

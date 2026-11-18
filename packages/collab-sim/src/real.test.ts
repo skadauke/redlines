@@ -14,6 +14,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { derive, formatWriters, useWriters } from './intents.ts';
 import { replayTable, mainTable, MATRIX } from './matrix.ts';
 import type { Results } from './matrix.ts';
+import { REAL_CASES } from './real-cases.ts';
 import { realWriters } from './real.ts';
 import type { RealWriters } from './real.ts';
 import { runCell } from './report.ts';
@@ -171,4 +172,21 @@ test.runIf(deep > 0)('the matrix over the editor', { timeout: 24 * 3_600_000 }, 
   console.log(replayTable(results));
   const out = process.env['REDLINES_REAL_OUT'];
   if (out) writeFileSync(out, JSON.stringify(results));
+});
+
+// Cases the fuzz found (#1094), kept by hand: the editor writes the library's file on each, and
+// where the library writes, the editor does not refuse.
+test.each(REAL_CASES)('the editor writes what the library writes: $label', ({ text, intent }) => {
+  useWriters(formatWriters);
+  const expected = derive(text, intent);
+  useWriters(real);
+  const actual = derive(text, intent);
+  useWriters(formatWriters);
+  expect(expected.ok).toBe(true);
+  if (!expected.ok) return;
+  expect(actual.ok).toBe(true);
+  if (!actual.ok) return;
+  expect(withoutIds(applyChanges(text, actual.changes))).toBe(
+    withoutIds(applyChanges(text, expected.changes)),
+  );
 });

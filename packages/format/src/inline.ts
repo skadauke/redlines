@@ -203,12 +203,11 @@ const SUPERSCRIPT = /(?<!\\)\^[^\s^\\]+(?<!\\)\^/g;
 const SUBSCRIPT = /(?<![\\~])~[^\s~\\]+(?<!\\)~(?!~)/g;
 /**
  * A cross-reference or a citation of Quarto and pandoc (format §3.1, rule 9): `@fig-x`, `@sec-x`,
- * `@tbl-x`, `@eq-x` and the other kinds Quarto numbers, and a bracket of citations, `[@a; @b, p. 4]`
- * or `[-@a]`. A marker inside changes the key, so each is atomic. The label's characters are
+ * `@tbl-x`, `@eq-x` and the other kinds Quarto numbers, which are keys like any other (`@smith2020`,
+ * the author in the text), and a bracket of citations, `[@a; @b, p. 4]` or `[-@a]`. A marker inside changes the key, so each is atomic. The label's characters are
  * pandoc's: letters, digits and `_`, with `:.#$%&+?<>~/-` inside, and not at its end.
  */
-const REFERENCES =
-  /(?<![\w@])@(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
+const REFERENCES = /(?<![\w@])@[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
 /** The attributes of a Quarto callout's opening fence, `::: {.callout-note title="…"}`: syntax, as an
  * alert's type is (docs/research/quarto.md, Q7). */
 const CALLOUT_FENCE_LINE = new RegExp(
@@ -437,6 +436,14 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
           dest: { from: i + 2, to: end },
         });
       }
+    } else if (
+      isPandoc() &&
+      w[i + 1] === '{' &&
+      /^\{[#.][^{}\n]*\}/y.test(w.slice(i + 1, i + 200))
+    ) {
+      // A span, `[text]{.mark}` (pandoc): a marker between the bracket and its attributes would
+      // leave the text with no attributes.
+      inside(i, i + 2, 'symbol');
     } else if (label[0] !== '^') {
       labels ??= definedLabels(file);
       if (w[i + 1] === '[') {
@@ -746,6 +753,42 @@ export function inspectPlace(
         to: offsetAt(index + code.length - 1) + 1,
       };
     }
+  }
+
+  // A key that the text before the marker and the text after it make together (`@fig-x` typed in
+  // front of `42`: the view reads the key `fig-x42`, a marker between would end it at `x`): the
+  // closer takes the rest of the key into the change, as it takes a shortcode; an opener goes in
+  // front of the whole key (format §3.1, rule 9, #1074).
+  const head =
+    around.before !== undefined
+      ? around.before.slice(-80)
+      : v.slice(Math.max(0, index - 80), index);
+  if (isPandoc() && (upcoming.includes('@') || head.includes('@'))) {
+    for (const m of (head + upcoming).matchAll(REFERENCES)) {
+      if (m.index >= head.length || m.index + m[0].length <= head.length) continue;
+      if (m[0].startsWith('[')) continue;
+      // Text typed after a key goes outside it, as its own insertion (the key is as it was until the
+      // insertion is accepted): only a closer, or an opener over text the file has, widens.
+      if (around.before === undefined && around.after !== undefined) continue;
+      const rest = m.index + m[0].length - head.length;
+      if (around.before !== undefined) {
+        return { kind: 'construct', from: offsetAt(index), to: offsetAt(index + rest - 1) + 1 };
+      }
+      const back = head.length - m.index;
+      return {
+        kind: 'construct',
+        from: offsetAt(index - back),
+        to: offsetAt(index + rest - 1) + 1,
+      };
+    }
+  }
+
+  // An opener in front of a key that a letter stands against in the view (`delt@fig-x`: no key to
+  // pandoc), where the marker would make it one: the change starts in front of the word.
+  if (isPandoc() && around.before === undefined && /^@\w/.test(upcoming) && isWord(v[index - 1])) {
+    let back = index;
+    while (back > 0 && isWord(v[back - 1])) back--;
+    return { kind: 'construct', from: offsetAt(back), to: offsetAt(index) };
   }
 
   // The trailing spaces of a hard break.

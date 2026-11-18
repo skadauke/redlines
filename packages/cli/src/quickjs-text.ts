@@ -31,28 +31,45 @@ function decode(bytes: Uint8Array, fatal: boolean, ignoreBom: boolean): string {
     if (fatal) throw new TypeError('The data is not valid UTF-8');
     out += '\ufffd';
   };
+  // The WHATWG decoder: a lead byte starts a sequence; a byte that doesn't fit it ends the sequence
+  // with one U+FFFD and is read again as a new start (so `E1 80 41` is U+FFFD and "A").
   while (i < bytes.length) {
     const b = bytes[i++] as number;
     if (b < 0x80) {
       out += String.fromCharCode(b);
       continue;
     }
-    const need =
-      b >= 0xf0 && b < 0xf5 ? 3 : b >= 0xe0 && b < 0xf0 ? 2 : b >= 0xc2 && b < 0xe0 ? 1 : -1;
-    if (need < 0) {
+    let need: number;
+    let lower = 0x80;
+    let upper = 0xbf;
+    let c: number;
+    if (b >= 0xc2 && b <= 0xdf) {
+      need = 1;
+      c = b & 0x1f;
+    } else if (b >= 0xe0 && b <= 0xef) {
+      need = 2;
+      c = b & 0x0f;
+      if (b === 0xe0) lower = 0xa0;
+      if (b === 0xed) upper = 0x9f;
+    } else if (b >= 0xf0 && b <= 0xf4) {
+      need = 3;
+      c = b & 0x07;
+      if (b === 0xf0) lower = 0x90;
+      if (b === 0xf4) upper = 0x8f;
+    } else {
       bad();
       continue;
     }
-    let c = b & (0x3f >> need);
     let k = 0;
     for (; k < need; k++) {
-      const next = bytes[i + k];
-      if (next === undefined || (next & 0xc0) !== 0x80) break;
+      const next = bytes[i];
+      if (next === undefined || next < lower || next > upper) break;
+      lower = 0x80;
+      upper = 0xbf;
       c = (c << 6) | (next & 63);
+      i++;
     }
-    i += k;
-    const overlong = need === 2 ? c < 0x800 : need === 3 ? c < 0x10000 : false;
-    if (k < need || overlong || c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) bad();
+    if (k < need) bad();
     else out += String.fromCodePoint(c);
   }
   return out;

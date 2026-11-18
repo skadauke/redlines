@@ -74,7 +74,7 @@ import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
   markEnd,
   marksOverlapping,
-  marksStartingIn,
+  marksReaching,
   windowEnd,
   windowStart,
   type Zone,
@@ -386,7 +386,18 @@ function struckBlocks(
       mark,
     }));
     const hold = new Set<MarkRange>();
-    if (first.carrier) {
+    // A table deleted alone, with text typed after it (#470): its payload has no break of its own, and
+    // the break after the marker is the opener's carrier, so the marker is the first line's, and
+    // the text below is paragraphs of their own.
+    const lone =
+      !!first.carrier &&
+      mark.segments.length === 1 &&
+      line.number === 1 &&
+      BLANK.test(lead) &&
+      first.open.to === line.to &&
+      !/\n[ \t>]*$/.test(plainPayload(first.payload)) &&
+      /^\s*\|/.test(plainPayload(first.payload));
+    if (first.carrier && !lone) {
       if (!CONTAINER_PREFIX.test(lead)) continue;
       where = BLANK.test(lead) ? 'lines' : 'before';
       const lastLine = doc.lineAt(last.open.to);
@@ -423,7 +434,10 @@ function struckBlocks(
       }
     } else {
       where = 'after';
-      if (mark.segments.length !== 1 || !/^\s*$/.test(doc.sliceString(first.open.to, end)))
+      if (
+        mark.segments.length !== 1 ||
+        (!lone && !/^\s*$/.test(doc.sliceString(first.open.to, end)))
+      )
         continue;
       // The first line of the file, with no text above it, has no block above to hold the marker:
       // the blocks are drawn above its line, which is hidden like the ledger and leaves the caret
@@ -505,8 +519,9 @@ function analyze(state: EditorState, kept: number | null, zone?: Zone): Model {
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const whole = state.field(parsedField);
-  // In a window, the marks that open in it: none reaches out of it (`windows.ts`).
-  const marksHere = zone ? marksStartingIn(whole, zone.from, zone.to) : whole.marks;
+  // In a window, the marks that open in it, and those of a block of its own that reach into it
+  // from above, whose pieces that start in the window it draws (`windows.ts`).
+  const marksHere = zone ? marksReaching(whole, zone.from, zone.to) : whole.marks;
   const parsed = zone ? { ...whole, marks: marksHere } : whole;
   // Simple is Redlines with the changes' looks mostly off (design: The views and the looks): the same
   // parts and layers, so that the bars land on the same lines, with no deleted text, no underline

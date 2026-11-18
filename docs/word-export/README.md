@@ -286,7 +286,8 @@ and `commentsIds.xml` for the durable ids written on export.
   that starts at the document's name with `.docx`. The host writes the bytes (the window may use the
   file plugin's text command, which writes the bytes it is given, on the file the save panel gave it; no broader write permission). What Word can't hold comes as a
   notification that stays until it is read; a plain success passes by. Never a dialog.
-- **`redlines export-docx <file.md> [-o out.docx]`** is the same, beside the file by default. It is
+- **`redlines export-docx <file.md> [-o out.docx]`** is the same, beside the file by default, and never over a `.docx` that is there: only an explicit
+  `-o` replaces one. It is
   in the Node command line (`pnpm redlines`); the program in the app, which runs the logic in QuickJS
   without Node, doesn't carry the writer, and says so.
 - **File › Open .docx…** opens a Word or Google Docs file as a new, unsaved document (here while the

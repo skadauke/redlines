@@ -40,6 +40,20 @@ function wraps(view: string, from: number, to: number, tag: string): boolean {
   return micromark(paragraph, OPTIONS).includes(`<${tag}>${inner}</${tag}>`);
 }
 
+/** `text` without the markers of the insertions it holds whole: each opener and its closer. */
+function withoutInsertions(text: string): string {
+  const ids = [
+    ...text.matchAll(/<!--ins ([bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz23456789]{3})-->/g),
+  ];
+  let out = text;
+  for (const [marker, id] of ids) {
+    if (id !== undefined && out.includes(`<!--/${id}-->`)) {
+      out = out.replace(marker, '').replace(`<!--/${id}-->`, '');
+    }
+  }
+  return out;
+}
+
 /**
  * `edits` with each deletion that empties an inline format taking the format's delimiters too.
  * Only deletions of text that stands whole in the file, with the delimiters against it.
@@ -61,7 +75,12 @@ export function emptiedFormats(text: string, edits: readonly TextChange[]): read
         view ??= newestView(text);
         const vFrom = view.map.fromSource(from);
         const vTo = view.map.fromSource(to);
-        if (view.text.slice(vFrom, vTo) !== text.slice(from, to)) continue;
+        // The text stands whole in the file, but for the markers of insertions inside it, which
+        // the newest view doesn't show (the editor's reading of the syntax takes such a format
+        // whole too, and the two write the same).
+        if (view.text.slice(vFrom, vTo) !== withoutInsertions(text.slice(from, to))) {
+          continue;
+        }
         if (!wraps(view.text, vFrom, vTo, tag)) continue;
         from -= n;
         to += n;

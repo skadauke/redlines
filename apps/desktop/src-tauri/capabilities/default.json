@@ -40,6 +40,7 @@
     "allow-crash-slow",
     "allow-document-windows",
     "allow-export-pdf",
+    "allow-fetch-remote-image",
     "allow-folder-exists",
     "allow-forget-documents",
     "allow-identity",

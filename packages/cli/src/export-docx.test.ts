@@ -27,6 +27,20 @@ describe('redlines export-docx', () => {
       expect((await readFile(join(folder, 'x.docx'))).length).toBeGreaterThan(100);
     });
   });
+  it('never replaces a .docx it was not told to: only -o names the file to replace', async () => {
+    await inFolder(async (folder, io) => {
+      const file = join(folder, 'plan.md');
+      await writeFile(file, 'Hello.\n');
+      const docx = join(folder, 'plan.docx');
+      await writeFile(docx, 'mine');
+      const said: string[] = [];
+      expect(await run(['export-docx', file], { ...io, stderr: (s) => void said.push(s) })).toBe(1);
+      expect(said.join('')).toContain(`-o ${docx}`);
+      expect(await readFile(docx, 'utf8')).toBe('mine');
+      expect(await run(['export-docx', file, '-o', docx], io)).toBe(0);
+      expect([...(await readFile(docx)).subarray(0, 2)]).toEqual([0x50, 0x4b]);
+    });
+  });
   it('needs a file, and refuses an unknown option', async () => {
     await inFolder(async (_folder, io) => {
       expect(await run(['export-docx'], io)).toBe(2);
@@ -56,6 +70,21 @@ describe('redlines import-docx', () => {
 });
 
 describe('redlines import-docx with pictures', () => {
+  it('takes its pictures away again when the Markdown cannot be written', async () => {
+    await inFolder(async (folder, io) => {
+      const docx = join(folder, 'pic.docx');
+      await copyFile(new URL('./picture.fixture.docx', import.meta.url), docx);
+      const failing: CliIo = {
+        ...io,
+        writeFile: () => Promise.reject(new Error('disk full')),
+      };
+      expect(await run(['import-docx', docx, '-o', join(folder, 'out', 'pic.md')], failing)).toBe(
+        1,
+      );
+      await expect(readFile(join(folder, 'out', 'media', 'image1.png'))).rejects.toThrow();
+      expect(await run(['import-docx', docx, '-o', join(folder, 'out', 'pic.md')], io)).toBe(0);
+    });
+  });
   it('writes the pictures beside the Markdown, where its links name them', async () => {
     await inFolder(async (folder, io) => {
       const docx = join(folder, 'pic.docx');
@@ -96,6 +125,21 @@ describe('redlines export-docx with pictures', () => {
       said.length = 0;
       expect(await run(['export-docx', file, '-o', join(folder, 'g.docx')], loud)).toBe(0);
       expect(said.join('')).toContain('An image is written as its description');
+    });
+  });
+  it('says a picture could not be read, and does not read a file past the cap', async () => {
+    await inFolder(async (folder, io) => {
+      // A folder named like a picture is a file that cannot be read.
+      await mkdir(join(folder, 'unreadable.png'));
+      await writeFile(join(folder, 'big.png'), DOT);
+      await expect(io.readBytes?.(join(folder, 'big.png'), 10)).rejects.toThrow('too large');
+      expect((await io.readBytes?.(join(folder, 'big.png'), 1000))?.length).toBe(DOT.length);
+      const file = join(folder, 'u.md');
+      await writeFile(file, '![x](unreadable.png)\n');
+      const said: string[] = [];
+      const loud = { ...io, stderr: (s: string) => void said.push(s) };
+      expect(await run(['export-docx', file], loud)).toBe(0);
+      expect(said.join('')).toContain('it could not be read');
     });
   });
 });
