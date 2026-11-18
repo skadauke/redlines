@@ -9,6 +9,7 @@ import { EditorView } from '@codemirror/view';
 import { openerRange, type Parsed, type Thread } from '@redlines/format';
 import { visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
+import { agentCaretFacet } from './caret-facet.ts';
 
 const sameReplies = (a: Thread, b: Thread) =>
   a.replies.length === b.replies.length &&
@@ -62,6 +63,10 @@ function outOfTableSyntax(state: EditorState, selection: EditorSelection): Edito
  */
 export function agentCaret(tr: Transaction): EditorSelection {
   const { state } = tr;
+  for (const place of tr.startState.facet(agentCaretFacet)) {
+    const at = place(tr);
+    if (at) return at;
+  }
   const after = state.field(parsedField, false);
   if (!after) return state.selection;
   const end = bodyEnd(after) ?? after.ledgerRange?.from ?? state.doc.length;

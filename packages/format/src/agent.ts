@@ -14,7 +14,8 @@ import { hunksOf, joinedHunks, runsOf } from './join.ts';
 import { tableSuggestion } from './table-diff.ts';
 import type { Hunk, JoinGuards } from './join.ts';
 import { parse } from './parse.ts';
-import { fineEdits as fineTrackedEdits, trackedEdits as widenedEdits } from './track.ts';
+import { fineEdits, trackedEdits as widenedEdits } from './track.ts';
+import { recordIds } from './edits-widen.ts';
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Parsed, Range, TextChange } from './types.ts';
 import { closerRange } from './blocks.ts';
@@ -118,13 +119,39 @@ export function suggestReplaceWith(
   });
 }
 
+const BREAK_NEXT =
+  /^Text can not start the line after a line break that someone inserted yet|^This edit would leave .*, and deciding one would change the other/;
+
+/** The fine write of the edits, or, where the fine form is refused, the replacement of the unit
+ * that holds them, as the editor does for a key (format §3.12): what an agent asks for is written
+ * wherever a person's typing would be (#107, #276). The guards of the widened path stay. */
+function fineThenWidened(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+): TrackedEdits {
+  const recorded = recordIds(ctx);
+  try {
+    return fineEdits(text, edits, recorded.ctx);
+  } catch (error) {
+    // Only the refusals of a pending line break next to the edit: the agent's other refusals (a
+    // join that reads otherwise, code, a prefix) are answers of their own.
+    if (!(error instanceof EditError) || !BREAK_NEXT.test(error.message)) throw error;
+    try {
+      return widenedEdits(text, edits, recorded.replay());
+    } catch {
+      throw error;
+    }
+  }
+}
+
 function suggestForms(
   text: string,
   oldStr: string,
   newStr: string,
   ctx: EditContext,
   join: (before: string, after: string, guards: JoinGuards) => Hunk[],
-  trackedEdits: typeof fineTrackedEdits = fineTrackedEdits,
+  trackedEdits: typeof fineEdits = fineThenWidened,
 ): TrackedEdits {
   const eol = eolOf(text);
   const before = inEol(oldStr, eol);
