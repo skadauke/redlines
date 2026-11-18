@@ -78,7 +78,7 @@ export const changes = {
     'It can comment on other text. Its edits are always tracked changes in its own name, for you to accept or reject.',
     'Each run starts fresh and reads the document and its thread from the file, so a follow-up needs no session and no server.',
     `${name} runs your own Claude Code or Codex, signed in as you. It never sees your Claude or ChatGPT sign-in. Choose a default agent and a model for each one in Preferences; Ask shows which model is answering and lets you pick another.`,
-    'An OpenClaw agent, you add in Preferences answers a mention and works as itself in the same way, and it can run on another computer: Preferences › Agents › Connect OpenClaw walks you through reaching it over a private network. Support for OpenClaw is new, and is still being tried against real setups.',
+    'An OpenClaw agent that you add in Preferences answers a mention and works as itself in the same way, and it can run on another computer: Preferences › Agents › Connect OpenClaw walks you through reaching it over a private network. Support for OpenClaw is new, and is still being tried against real setups.',
     `Open one document in a second window, and the two stay in sync, each with its caret named and colored for the other. Undo is each window’s own: it takes back your steps and leaves what the other window typed. ${name} does this on one Mac, not yet between people.`,
     'An edit in a list, a block, code or a table that plain text can’t hold, such as a row or column added or removed, is widened to the unit that holds it and written as a tracked change you can accept or reject, not refused.',
   ],
