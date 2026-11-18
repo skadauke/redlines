@@ -7,6 +7,7 @@
 // tracked layer (`trackedEdits`, with one group for the marks) or plainly, so a move with Track
 // Changes on is one suggestion that is accepted or rejected whole, and reads alike in every order.
 
+import { applyChanges } from './changes.ts';
 import { withDialect } from './dialect.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
@@ -463,6 +464,27 @@ function joinsLists(siblings: readonly Unit[], first: number, last: number, g: n
   });
 }
 
+/** Whether the tracked `changes` and the plain `source` edits leave the same newest view, but for
+ * blank lines (a closer stands alone on its line, §3.12) and the numbers of ordered lists. */
+function readsAs(text: string, source: readonly TextChange[], changes: readonly TextChange[]) {
+  const flat = (edits: readonly TextChange[]) =>
+    newestView(
+      applyChanges(
+        text,
+        edits.toSorted((x, y) => x.from - y.from || x.to - y.to),
+      ),
+    )
+      .text.trimEnd()
+      .replace(/^(\s*(?:>\s*)*)\d{1,9}([.)])/gm, '$1N$2')
+      .replace(/\n(?:[ \t]*\n)+/g, '\n');
+  try {
+    return flat(source) === flat(changes);
+  } catch (error) {
+    if (error instanceof RangeError) return true; // overlapping edits: nothing to compare
+    throw error;
+  }
+}
+
 /** Whether a change writes a marker inside a code unit (a fenced block, indented code, a raw HTML block), past its first line: a move takes
  * whole blocks, and a marker there is read as the code's own text. */
 function insideCode(text: string, changes: readonly TextChange[]): boolean {
@@ -524,6 +546,10 @@ export function trackedBlockMove(
         // at the closing fence of an earlier code block and writes a stray one, #586 seed 102) is
         // wrong: the next way, then the widened one, which asks if it can't be made.
         if (insideCode(text, changes)) continue;
+        // A fine write that joins the line above to the item below (a deletion that ends where an
+        // item starts takes its bullet, as a Delete over the break does) reads otherwise than the
+        // plain move: the next way, then the widened one (#586, block-move-random seed 142).
+        if (!readsAs(text, next.source, changes)) continue;
         return { changes, moved: next.moved };
       } catch (error) {
         if (!(error instanceof EditError)) throw error;

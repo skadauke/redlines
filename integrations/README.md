@@ -153,3 +153,7 @@ Preferences › General › Command line › Install puts it on the PATH (it lin
 `/usr/local/bin/redlines`, or `~/.local/bin/redlines` without an administrator's password), and
 then `redlines <command> <file> …` works in any folder. Give the file as an absolute path. In a
 checkout of this repository without the app, run it from the root as `pnpm -s redlines <command> …`.
+
+`redlines export-docx <file> [-o <out.docx>]` writes a Word file with the tracked changes and comments,
+and `redlines import-docx <file.docx> [-o <out.md>]` reads one (Google Docs' too) into Markdown with
+its marks and ledger.

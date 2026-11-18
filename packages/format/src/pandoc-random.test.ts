@@ -20,6 +20,7 @@ import { INCLUDE_LINE } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
 import { accept, reject } from './decide.ts';
+import { withDialect } from './dialect.ts';
 import { EditError } from './errors.ts';
 import { addHighlight } from './highlights.ts';
 import { readAs } from './oracle.ts';
@@ -33,6 +34,7 @@ import {
   context,
   everyOrder,
   exactly,
+  file,
   problemsOf,
   randomEdit,
 } from './test-helpers.ts';
@@ -148,7 +150,7 @@ const QMD = 'pandoc' as const;
 /** Seeds that fail and are filed (the seeds are of this generator and these INSERTS: change either and
  * they draw something else, so check them again), with the issue: they are skipped by name, not drawn out of the
  * suite, so that every other seed holds. */
-const KNOWN: Record<number, string> = { 287: '#1088' };
+const KNOWN: Record<number, string> = {};
 
 /** The marks of a file that are decided one at a time, those in the old text of a replacement too. */
 function undecided(text: string) {
@@ -159,13 +161,17 @@ function undecided(text: string) {
 }
 
 /** Every mark of a file decided one way, or undefined where one is refused. */
-function decideAll(text: string, how: typeof accept | typeof reject): string | undefined {
+function decideAll(
+  text: string,
+  how: typeof accept | typeof reject,
+  dialect: 'pandoc' | 'gfm',
+): string | undefined {
   let current = text;
   try {
     for (let step = 0; step < 60; step++) {
       const mark = undecided(current)[0];
       if (mark === undefined) return current;
-      current = applyChanges(current, how(current, mark.id));
+      current = applyChanges(current, how(current, mark.id, dialect));
     }
   } catch (error) {
     if (error instanceof EditError) return undefined;
@@ -226,7 +232,7 @@ function runSeed(
           const mark = pick(marks);
           const decide = below(2) === 0 ? accept : reject;
           log.push(`${decide.name} ${mark.id}`);
-          text = applyChanges(text, decide(text, mark.id));
+          text = applyChanges(text, decide(text, mark.id, dialect));
           count('decision');
         }
       } catch (error) {
@@ -245,7 +251,7 @@ function runSeed(
     // Every order of decisions: exhaustive for a few marks, random orders for many.
     const marks = undecided(text).length;
     if (marks > 0 && marks <= 4) {
-      const { outcomes, stuck } = everyOrder(text, exactly);
+      const { outcomes, stuck } = withDialect(dialect, () => everyOrder(text, exactly));
       for (const [decided, results] of outcomes) {
         if (results.size !== 1) throw new Error(`decided ${decided} reads ${results.size} ways`);
       }
@@ -260,7 +266,7 @@ function runSeed(
         const mark = pick(left);
         const decide = below(2) === 0 ? accept : reject;
         try {
-          current = applyChanges(current, decide(current, mark.id));
+          current = applyChanges(current, decide(current, mark.id, dialect));
         } catch (error) {
           if (!(error instanceof EditError)) throw error;
           count('decision refused');
@@ -273,8 +279,8 @@ function runSeed(
       }
     }
     // All accepted is the newest view, all rejected the original.
-    const accepted = decideAll(text, accept);
-    const rejected = decideAll(text, reject);
+    const accepted = decideAll(text, accept, dialect);
+    const rejected = decideAll(text, reject, dialect);
     if (
       accepted !== undefined &&
       readAs(withoutFront(bodyOf(accepted))) !== readAs(withoutFront(newestView(text).text))
@@ -327,4 +333,22 @@ describe('random edits of Quarto documents', () => {
     expect(stats['checked'] ?? 0).toBeGreaterThan(total / 3);
     expect((stats['tracked'] ?? 0) + (stats['untracked'] ?? 0)).toBeGreaterThan(total / 2);
   }, 300_000);
+});
+
+describe('a decision never puts a word in front of a marker that starts a key (#1088)', () => {
+  const start = file('x <!--del zq28 a-b--><!--ins hrts-->@fig-xa-b<!--/hrts--> y', {
+    zq28: 'ada',
+    hrts: 'ada',
+  });
+
+  it('rejecting the deletion takes the insertion of the key with it', () => {
+    const after = applyChanges(start, reject(start, 'zq28', 'pandoc'));
+    expect(unsound(after)).toBeUndefined();
+    expect(bodyOf(after)).not.toContain('@fig');
+  });
+
+  it('in a .md, where @fig-x is text, only the deletion is rejected', () => {
+    const after = applyChanges(start, reject(start, 'zq28'));
+    expect(bodyOf(after)).toContain('@fig-x');
+  });
 });

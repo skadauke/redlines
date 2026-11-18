@@ -120,5 +120,19 @@ describe('bare-marker walk seeds 80 and 260: Return in a bare marker whose write
       tc: true,
       expect: { file: '- alpha⏎  +⏎-⏎- ' },
     },
+    {
+      name: 'a numbered bare marker, a list with text after it: the closer of the substitution stands behind that text (seed 80 in full)',
+      doc: '1) review plan⏎   +⏎2)‸⏎⏎1) delta gamma⏎-⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: { file: '1) review plan⏎   +⏎2)⏎⏎1) delta gamma⏎-⏎' },
+    },
+    {
+      name: 'a bare marker under a nested one, items with text after it (seed 260 in full)',
+      doc: '- note⏎  +⏎-‸⏎- delta⏎',
+      keys: ['Enter'],
+      tc: true,
+      expect: { file: '- note⏎  +⏎-⏎- delta⏎' },
+    },
   ]);
 });

@@ -174,6 +174,7 @@ export function writeReview(
         request.ids,
         request.many === true,
         request.bulk === true,
+        who.dialect,
       );
       op = {
         op: 'decide',
@@ -206,14 +207,20 @@ function decide(
   ids: readonly string[],
   many: boolean,
   bulk = false,
+  dialect?: MarkdownDialect,
 ): TextChange[] {
   if (bulk) {
     // Each on its own, as Accept All has always decided them: the same bytes as before.
     const wanted = new Set(ids);
-    return (decision === 'accept' ? acceptAll : rejectAll)(text, (mark) => wanted.has(mark.id));
+    return (decision === 'accept' ? acceptAll : rejectAll)(
+      text,
+      (mark) => wanted.has(mark.id),
+      dialect,
+    );
   }
-  if (ids.length === 1 && !many) return (decision === 'accept' ? accept : reject)(text, ids[0]!);
-  return (decision === 'accept' ? acceptMarks : rejectMarks)(text, ids);
+  if (ids.length === 1 && !many)
+    return (decision === 'accept' ? accept : reject)(text, ids[0]!, dialect);
+  return (decision === 'accept' ? acceptMarks : rejectMarks)(text, ids, dialect);
 }
 
 /** A mark a decision leaves alone on newer text, and why. */

@@ -131,6 +131,7 @@ import {
 } from './code-edit.ts';
 import { widenedAtOnce, widenedEdits } from './edits-widen.ts';
 import {
+  afterBareDeletion,
   atBlockBoundary,
   atDelimiter,
   delimiterBesideBreak,
@@ -4579,6 +4580,12 @@ const EMPTY_ITEM_IN_CODE =
 const UNDERLINED_BULLET_IN_CODE =
   'The line breaks typed after this bullet make it read as the underline of the text above it, so what is typed under it would be indented code, where its markers would not be read. Reject those line breaks first, or turn Track Changes off.';
 
+/** Why a raw line break at the start of a bullet item's text, under text, is not written (#443): its
+ * marker would stand on the bullet's line, which the file reads as an item and the newest view as
+ * the underline of the text above it. */
+const UNDERLINING_SPLIT =
+  "A line break at the start of this bullet would read differently in the file than in the document: the empty bullet would turn the text above it into a heading. Type the text first and then the line break, or decide the other person's change first.";
+
 /** The line of an empty list item, in a view. */
 const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
 
@@ -4850,6 +4857,46 @@ function inCodeWords(text: string, edits: readonly TextChange[], views: Views): 
     return UNDERLINED_BULLET_IN_CODE;
   }
   return IN_CODE;
+}
+
+/**
+ * How many bullets there are that the newest view of `text` reads as the underline of the text above
+ * (an empty item can't interrupt a paragraph) and that a split's marker stands on, which the file
+ * reads as an item (#143, #443).
+ */
+function underliningSplits(text: string): number {
+  const view = newestView(text);
+  const shown = view.text;
+  let count = 0;
+  // Every line after the first of the body (front matter is no text above it), with the line before it.
+  for (
+    let start = shown.indexOf('\n', bodyStart(shown)) + 1;
+    start > 0 && start <= shown.length;
+    start = shown.indexOf('\n', start) + 1 || shown.length + 1
+  ) {
+    const line = shown.slice(start, lineEnd(shown, start));
+    if (!/^[ \t>]*-[ \t]*$/.test(line)) continue;
+    const over = lineStart(shown, start - 1);
+    if (!underliningBullet(shown.slice(over, start - 1).replace(/\r$/, ''), line)) continue;
+    const source = view.map.toSource(start, 1);
+    if (text.slice(lineStart(text, source), lineEnd(text, source)).includes('<!--split ')) count++;
+  }
+  return count;
+}
+
+/**
+ * `written`, the fine write of an edit, or an alert where it would put a split's marker on a bullet
+ * that the file reads as an item and the newest view as the underline of the text above it, where
+ * no write reads alike in both: the words say what to do (#443). Such a bullet that the file had
+ * already (another person's break) is not the edit's, and its own edits stay.
+ */
+function noUnderliningSplit(text: string, written: TrackedEdits): TrackedEdits {
+  if (!written.changes.some((change) => change.insert.includes('<!--split '))) return written;
+  const after = applyChanges(text, written.changes);
+  const now = underliningSplits(after);
+  if (now > 0 && now > underliningSplits(text) && readsOtherMicromark(text, written.changes))
+    throw new EditError(UNDERLINING_SPLIT, 'no-legal-placement');
+  return written;
 }
 
 /** What `trackedEdits` gives: the changes of the file, and which marks they made or changed. */
@@ -5499,9 +5546,11 @@ function editsWidening(
           } catch {
             // no unit holds it: the fine write stays
           }
-          return whole && !readsOtherMicromark(text, whole.changes) ? whole : written;
+          return whole && !readsOtherMicromark(text, whole.changes)
+            ? whole
+            : noUnderliningSplit(text, written);
         }
-        return written;
+        return noUnderliningSplit(text, written);
       } catch (error) {
         if (!(error instanceof ReadsOtherwise)) throw error;
       }
@@ -5509,7 +5558,19 @@ function editsWidening(
   } catch (error) {
     // Where no fine form reads alike in every order, it is a replacement of the unit (format §3.12).
     if (!widening) throw error;
-    return widenedEdits(text, edits, again(), error);
+    if (!(error instanceof EditError) || error.message !== UNDERLINING_SPLIT) {
+      return widenedEdits(text, edits, again(), error);
+    }
+    // A split's marker on a bullet that reads two ways (#443): the unit is replaced where that
+    // reads alike in the file and the newest view, and the person is told where it can't.
+    let whole: TrackedEdits | undefined;
+    try {
+      whole = widenedEdits(text, edits, again(), error);
+    } catch {
+      // no unit holds it
+    }
+    if (whole && !readsOtherMicromark(text, whole.changes)) return whole;
+    throw error;
   }
 }
 
@@ -5525,6 +5586,9 @@ export function readsOtherAtBoundary(
   edits: readonly TextChange[],
   changes: readonly TextChange[],
 ): boolean {
+  // A write right after a deletion that rejecting would leave a bare marker before reads alike as it
+  // stands and otherwise once the deletion is rejected: the unit is replaced (#1104).
+  if (edits.some((edit) => afterBareDeletion(text, edit.from))) return true;
   return (
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||

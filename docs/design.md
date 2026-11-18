@@ -113,7 +113,7 @@ from this table.
 | Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 
-The Mac app is built; Windows and Linux are planned (§10). The editor is not yet published as a
+The Mac app is built; Windows and Linux are planned (§10). Live collaboration with people is built between windows of one Mac and planned across networks (§7). The editor is not yet published as a
 package others can embed: the packages are private, and the website's embed is a demo. R Markdown
 and Quarto files are edited with their divs, callouts, citations, cross-references and includes
 drawn; running their code cells is not what Redlines does. Several windows of one document on one
@@ -1575,7 +1575,7 @@ syntax Markdown needs, and never shows them.
 
 Where Redlines departs from Word, and why: Return in an empty paragraph does nothing, because
 Markdown has no form for a second empty paragraph; a hard break is a backslash, not two trailing
-spaces, because it survives editors that trim spaces; Backspace never joins text into code or a
+spaces, because it survives editors that trim spaces; Backspace and Delete never take a character out of a code fence (the code would stop being code, and the fences after it would pair up differently) nor join text into code or a
 table; and Return in a table cell writes a line break in the cell (`<br>`), as the other word
 processors start a new paragraph there (§5.8).
 
@@ -1619,14 +1619,21 @@ without the editor.
 | `@redlines/render`     | Static HTML rendering and pagination, for print, PDF, HTML export and previews                                                              | Browsers, Node          |
 | `@redlines/clipboard`  | HTML-to-Markdown conversion for paste, and the copy formats: Redlines' own, Word's HTML, generic HTML, Markdown, plain text                 | Browsers                |
 | `@redlines/word`       | Word (`.docx`) export (`exportDocx`), import (a reader that turns a `.docx` into blocks and runs with its revisions and comments, and a mapper from that model to Markdown with its marks and ledger) and the Google Docs differences (§5.10; [export](word-export/README.md)). File › Export to Word… and Open .docx… call it; it is kept out of the editor's bundle | Browsers, Node          |
-| `@redlines/collab`     | The collaboration server and its client protocol                                                                                           | Node; client in browsers |
+| `@redlines/collab`     | The session authority that orders every edit and decision of a live session, with its hub, the window client, the write-ahead log and the transports (memory, and the app's events). A server that hosts sessions across networks is not built (§7.2) | Anywhere (the authority runs in a window of the app) |
+| `@redlines/collab-sim` | The session simulation harness: seeded live sessions over the real format library, with an oracle that checks every run. Research tooling, not shipped | Node                    |
 | `@redlines/mcp`        | The MCP server, for agents outside Redlines                                                                                                | Node                    |
-| `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
+| `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject, and `export-docx` and `import-docx` (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
 | `apps/website-embed`   | The editor with the review interface and a scripted agent, built as a bundle for the website; no desktop code, which the lint rule that keeps Tauri out of shared code checks (it covers `apps/embed-smoke`, the smallest embed, which holds the core's size, too) | Browsers                |
 | `apps/desktop`         | The desktop app: a Tauri v2 shell, in Rust, around the editor                                                                               | macOS, Windows, Linux   |
 | `apps/desktop/quicklook` | The Mac app's Quick Look preview of Markdown, R Markdown and Quarto files: the Clean view as HTML, made by a bundle of `@redlines/format`, micromark and the Default theme's CSS, and the Swift extension that runs it in JavaScriptCore (§10) | macOS (the system's JavaScriptCore) |
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
+
+Written so far: `format`, `editor`, `plugin-api`, `agent-tools`, `agent-process`, `collab`,
+`collab-sim`, `word` and `redlines`. `@redlines/react` and `@redlines/render` are not written. The paste
+converter and the copy formats that `@redlines/clipboard` names are in `@redlines/editor`
+(`clipboard/`), the MCP server that `@redlines/mcp` names is in `@redlines/agent-tools`, and print
+paginates in the desktop app.
 
 The desktop app carries the command line as `Redlines.app/Contents/MacOS/redlines`, a small Rust
 program (`apps/desktop/redlines`) that runs the same bundled TypeScript (`packages/cli` and
@@ -1686,10 +1693,12 @@ the same identity and the sandbox entitlement that an app extension must have
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
 table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu and the grips), `emoji`,
-`toolbar`, `agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
-written. The `word` row is a library so far, `@redlines/word` (§6.3), and no plugin: nothing in the
-app calls it yet, and neither `print` nor `export` is written as a plugin (the app's File › Print
-is its own).
+`toolbar`, `agents`, the three providers and `sync` (a window's side of a live session, §7.1a; the
+`collab` row below is the invitations and presence across networks, still to come) (`plugins/`). The `ai` row is what
+`agents` is growing toward: its chat panel isn't
+written. The `word` row is a library so far, `@redlines/word` (§6.3), and no plugin: the app's File ›
+Export to Word… and Open .docx… call it, and neither `print` nor `export` is written as a plugin (the
+app's File › Print and Export as PDF are its own).
 
 | Plugin       | Adds                                                                         | Needs from the host        |
 | ------------ | ---------------------------------------------------------------------------- | -------------------------- |
@@ -1718,7 +1727,8 @@ is its own).
 
 Where the desktop app's own features live:
 
-- **Printing and PDF** are the `print` plugin, built on `@redlines/render`. The host supplies the
+- **Printing and PDF** are to be the `print` plugin, built on `@redlines/render`; today File › Print and
+  Export as PDF are the desktop app's own. The host supplies the
   printing capability: the desktop app prints and writes PDF files through its webview (WebKit on
   macOS, WebView2 on Windows, WebKitGTK on Linux), and a browser host uses the browser's print.
 - **The first run** is the `onboarding` plugin, which only the desktop app turns on.
@@ -1875,14 +1885,15 @@ optional rules for document elements. People can add their own themes.
 
 ## 7. Collaboration
 
-Status: nothing in this section is on `main` as a feature. The simulations behind it are in
-[research](research/collaboration.md), and [the multiuser study](research/multiuser.md) (November
-2026) says what it would take: one authority per session that orders edits and decisions, with
-roles (viewer, commenter, editor) and a guard on accept and reject; its first Epic is the
-foundations and one document in several windows of one Mac, and its first decisions are taken
-(iroh's public relays, no accounts of our own). The authority, its protocol and its roles are being
-written on an integration branch (`packages/collab`) and are not merged. The text below is the
-design they follow.
+Status: one document in several windows of one Mac is built (§7.1a): the authority, its protocol,
+its hub, the client and the write-ahead log are `packages/collab`, a window's side of a session is
+`plugins/sync`, and `packages/collab-sim` is the simulation harness that tests them (research
+tooling, not shipped). Sessions between people, across networks (§7.2), are not built. The
+simulations behind this section are in [research](research/collaboration.md), and
+[the multiuser study](research/multiuser.md) (November 2026) says what the rest would take: one
+authority per session that orders edits and decisions, with roles (viewer, commenter, editor) and a
+guard on accept and reject; its first decisions are taken (iroh's public relays, no accounts of our
+own). The text below is the design they follow.
 
 ### 7.1 Live sessions
 
@@ -2281,10 +2292,14 @@ Suggest, the folders its tools may reach) with its tokens and device key in file
 can read, never shown and never returned to a window; adding a connection or giving one more asks
 in a question of the system's, as adding an Agent Client Protocol agent does. The agent's card in
 Preferences shows the level, the folders, when it was last used and where the connection is, and
-Remove deletes every file. Not yet built: the tools acting on a document (the tool bridge), and
-mentions through this connection; the `openclaw acp` agent below stays for a Mac that has the
-`openclaw` command. The wire's shapes are unverified against a real Gateway (the research note's
-First live test).
+Remove deletes every file. An @-mention or Ask goes to the agent through the Gateway (#966), and
+the run it starts edits as itself through the node's tools (the tool bridge, #971): the node's tool
+calls carry the run's session key, and the host answers them in the window the run was asked from,
+with the same six tools, gate, author, thread and edit path as a local agent, for that run only
+(Stop, cancel and the run's end drop it, and a call outside a live run is refused). The `openclaw
+acp` agent below stays for a Mac that has the `openclaw` command, and has no tools. The wire's
+shapes were checked against a throwaway Gateway with a stand-in model, not a real one (the
+research note's First live test).
 
 **OpenClaw.** An OpenClaw agent, such as one a person calls Moby, is reached through the Gateway
 that runs it, which may be on another machine, by `openclaw acp`. Preferences › Agents › OpenClaw
@@ -2568,7 +2583,11 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     exception for files (§11), loads the images itself (`PreviewImages.swift`), and hands them to
     Quick Look as the attachments of its answer, which the page names by `cid:` and which its
     Content-Security-Policy allows and nothing else (`img-src cid:`).
-  - **Not yet:** thumbnails in Finder, which are a separate extension.
+  - **Thumbnails in Finder** are a second extension, `RedlinesThumbnail.appex`
+    (`QLThumbnailProvider`, `apps/desktop/quicklook/swift/thumbnail`). It draws the first blocks of
+    the Clean view as a page, from a script of its own in JavaScriptCore, reads the one file it is
+    asked for (64 KB at most), has the sandbox and no network, and never calls the app or the
+    `redlines` program. The same script builds, signs and checks both extensions.
 
 ## 11. Security and privacy
 

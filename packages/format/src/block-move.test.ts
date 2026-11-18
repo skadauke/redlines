@@ -232,3 +232,20 @@ describe('a fence that nothing closes (#1103)', () => {
     expect(alpha.gaps.some((gap) => gap.index > 1)).toBe(false);
   });
 });
+
+describe('a block taken from between a line of text and a list (#586, block-move-random seed 142)', () => {
+  const text = file('para\n<div>\nx\n</div>\n\n- item one\n\nlast\n');
+
+  it('leaves the list a list, which a join of the line above to the item would not', () => {
+    const view = newestView(text);
+    const at = viewOf(text).indexOf('x');
+    const run = blockRunAt(text, { from: view.map.toSource(at, 1), to: view.map.toSource(at, 1) })!;
+    const gap = neighbourGap(run, false)!;
+    const out = applyChanges(
+      text,
+      trackedBlockMove(text, run, gap, { ...context(ada), random: source(7) })!.changes,
+    );
+    expect(viewOf(out)).toContain('para\n- item one');
+    expectEveryOrderRead('html block down', out);
+  });
+});
