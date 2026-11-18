@@ -218,8 +218,8 @@ interface Found {
   said: ReadonlyMap<string, string>;
   /** The checks that the file without its mark fails. */
   checks: string[];
-  /** A step of the walk is a plain edit, with Track Changes off. */
-  plain: boolean;
+  /** The steps that made it. */
+  steps: readonly string[];
 }
 
 /** The delimiters of emphasis, next to the end or the start of a marker, or in the old text that a marker keeps. */
@@ -247,11 +247,11 @@ const OLDER: { issue: string; why: string; shape: (found: Found) => boolean }[] 
   {
     issue: '#265',
     why: 'a delimiter run next to another person’s pending change, or a change over their deletion of a backslash, reads otherwise in some order of decisions',
-    // (not for a walk that made a plain edit: with Track Changes off the edit beside such a delimiter is
-    // held until the other person's changes are accepted, and the file is not left that way, #265)
-    shape: ({ control, checks, plain }) =>
-      !plain &&
+    // Only where a plain edit (no change tracked) is among the steps: it cuts a pending bold's delimiter, which no
+    // tracked write can keep apart. A walk of tracked steps only is written to read alike (#490).
+    shape: ({ control, checks, steps }) =>
       READS_OTHERWISE.includes(checks[0] ?? '') &&
+      steps.some((step) => step.startsWith('plain ')) &&
       (DELIMITER_BY_MARKER.test(control) || /<!--(?:del|sub) \w{4} [^>]*\\/.test(control)),
   },
   {
@@ -474,7 +474,7 @@ describe('a point alignment change with changes beside it, random', () => {
         failed: [...failed.keys()],
         said: failed,
         checks: [...control.keys()],
-        plain: steps.some((step) => step.startsWith('plain ')),
+        steps,
       };
       // The first check that fails says what went wrong first, and the later ones follow from it.
       if (found.failed[0] === found.checks[0]) {
@@ -519,7 +519,7 @@ describe('a point alignment change with changes beside it, random', () => {
     failed: [],
     said: new Map(),
     checks: [],
-    plain: false,
+    steps: [],
     ...over,
   });
 

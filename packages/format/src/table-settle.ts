@@ -10,6 +10,7 @@ import { parse } from './parse.ts';
 import { readTables } from './table.ts';
 import type { Range, TextChange } from './types.ts';
 import { newestView } from './views.ts';
+import { readsOtherAsIs } from './widen.ts';
 
 /** Whether a file has a change pending in a table: an inserted, deleted or moved row or column. */
 export function hasTableChange(text: string): boolean {
@@ -52,16 +53,37 @@ export function marksOfTablesAt(text: string, range: Range): Set<string> {
   return ids;
 }
 
-/** The decisions of the changes `ids` of `text`, one at a time, that are refused, by what they decide. */
-export function refusalsOf(text: string, ids: ReadonlySet<string>): Set<string> {
+/**
+ * Whether an end of `range` stands against an emphasis delimiter (`*`, `_`, `~`), the markers between not counted:
+ * a comment's or a highlight's marker there can cut the run of a bold or an italic that a decision of another
+ * person's change leaves, and Markdown then reads the cell otherwise than its view (#490, #265).
+ */
+export function besideDelimiter(text: string, range: Range): boolean {
+  const plain = (part: string) => part.replace(/<!--[^]*?-->/g, '');
+  return [range.from, range.to].some((at) => {
+    const before = plain(text.slice(Math.max(0, at - 200), at));
+    const after = plain(text.slice(at, at + 200));
+    return /[*_~]/.test(before.slice(-1)) || /[*_~]/.test(after.slice(0, 1));
+  });
+}
+
+/**
+ * The decisions of the changes `ids` of `text`, one at a time, that are refused, by what they decide. With `reads`,
+ * also those after which the file reads otherwise than its newest view (micromark), and the file as it is.
+ */
+export function refusalsOf(text: string, ids: ReadonlySet<string>, reads = false): Set<string> {
   const refused = new Set<string>();
+  if (reads && readsOtherAsIs(text)) refused.add('reads');
   for (const id of ids) {
     for (const [how, decide] of [
       ['accept', accept],
       ['reject', reject],
     ] as const) {
       try {
-        decide(text, id);
+        const changes = decide(text, id);
+        if (reads && readsOtherAsIs(applyChanges(text, changes))) {
+          refused.add(`reads ${how} ${id}`);
+        }
       } catch {
         // Whatever stops a decision, a placement must not add to it.
         refused.add(`${how} ${id}`);
@@ -77,8 +99,9 @@ export function decisionsHold(
   changes: readonly TextChange[],
   before: Set<string>,
   ids: ReadonlySet<string>,
+  reads = false,
 ): boolean {
-  const now = refusalsOf(applyChanges(text, changes), ids);
+  const now = refusalsOf(applyChanges(text, changes), ids, reads);
   for (const key of now) if (!before.has(key)) return false;
   return true;
 }

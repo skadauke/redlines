@@ -535,7 +535,7 @@ function tryRung(
   const viewFrom = view.map.fromSource(rung.from);
   const viewTo = view.map.fromSource(rung.to);
   if (edits.some((edit) => edit.from < viewFrom || edit.to > viewTo)) return giveUp('span');
-  const now = applyChanges(
+  let now = applyChanges(
     view.text.slice(viewFrom, viewTo),
     edits.map((edit) => ({ ...edit, from: edit.from - viewFrom, to: edit.to - viewFrom })),
   );
@@ -595,7 +595,15 @@ function tryRung(
   // the top level, the closer stands in it and the payload ends with the block's line break.
   // A closer on a line of its own inside an item reads as a block of the item, which no marker may be:
   // a text that needs one there (it ends in a delimiter) goes to a unit that is not in a container.
-  if (
+  // A new text that ends in one line break (an Enter typed at the end of the unit) keeps the
+  // break after the closer, as a plain line break: the closer then ends the line before it.
+  const trail =
+    rung.prefix !== '' && !rung.atomic && !endsInDelimiter(now) && !riskyEnd(now, rung.prefix)
+      ? (/(?<![\r\n])\r?\n$/.exec(now)?.[0] ?? '')
+      : '';
+  if (trail !== '' && now.slice(0, now.length - trail.length).trim() !== '') {
+    now = now.slice(0, now.length - trail.length);
+  } else if (
     rung.prefix !== '' &&
     !rung.atomic &&
     (endsInDelimiter(now) || riskyEnd(now, rung.prefix) || /\n[ \t>]*$/.test(now))
@@ -639,6 +647,10 @@ function tryRung(
   const tight = rung.kind === 'list' && rung.parent ? rung.parent.tight : rung.tight;
   const lead = scaffold(rung.prefix, eol, tight);
   const body = now.replaceAll('\r\n', '\n').replaceAll('\n', eol);
+  // Where a blank line follows the unit already, the break it would write is that blank line.
+  const trailBreak = /^\r?\n[ \t>]*\r?\n/.test(next)
+    ? ''
+    : trail.replaceAll('\r\n', '\n').replaceAll('\n', eol);
   let written: string;
   let end = to;
   if (atomic) {
@@ -646,7 +658,7 @@ function tryRung(
     written = `${opener}${lead}${body}${html || (bare && rung.prefix === '') ? eol : ''}${eol}${line}`;
     if (blankAfter) end = to + eol.length;
   } else {
-    written = `${opener}${lead}${body}${closer}`;
+    written = `${opener}${lead}${body}${closer}${trailBreak}`;
   }
   const result = applyChanges(before, [{ from, to: end, insert: written }]);
   const done = withLedger(result, ledger);
@@ -1055,31 +1067,6 @@ function stretchOf(
   return across(from) || across(to) ? undefined : here;
 }
 
-/** What micromark makes of a text, without the markers and the white space that shows nowhere. */
-function readMicromark(source: string): string {
-  return micromark(source, {
-    allowDangerousHtml: true,
-    extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
-    htmlExtensions: [
-      gfmAutolinkLiteralHtml(),
-      gfmStrikethroughHtml(),
-      gfmTableHtml(),
-      gfmTaskListItemHtml(),
-    ],
-  })
-    .replace(/<!--[^]*?-->/g, '')
-    .replace(/\s+/g, ' ')
-    .replace(/ ?(<[^>]*>) ?/g, '$1')
-    .trim();
-}
-
-/** Whether micromark reads the body of a file otherwise than its newest view. */
-export function readsOtherAsIs(file: string): boolean {
-  const ledger = parse(file).ledgerRange;
-  const body = ledger ? file.slice(0, ledger.from) : file;
-  return readMicromark(body) !== readMicromark(newestView(file).text);
-}
-
 /**
  * Whether micromark reads the file the changes make otherwise than its newest view. Only the
  * paragraphs the changes are in are read (`stretchOf`); otherwise, or with `whole`, the whole file,
@@ -1093,7 +1080,7 @@ export function readsOtherMicromark(
   const file = applyChanges(text, changes);
   const parsed = parse(file);
   const ledger = parsed.ledgerRange;
-  const read = readMicromark;
+  const read = micromarkText;
   const body = ledger ? file.slice(0, ledger.from) : file;
   const here = whole ? undefined : stretchOf(body, parsed, changes);
   const afterRead = here ?? body;
@@ -1126,4 +1113,33 @@ export function readsOtherMicromark(
   const [markedA, markedB] = alike(read(oldRead), read(afterRead));
   const [viewA, viewB] = alike(read(oldNewest), read(afterNewest));
   return markedA !== viewA || markedB !== viewB;
+}
+
+/**
+ * Whether micromark reads the body of `text` otherwise than its newest view: the file as it stands, with no
+ * change in question. A paragraph that begins with a marker is read so before any edit (#1092), which is no
+ * cell's doing: only the table blocks are compared by callers that mean cells (`table-settle.ts`).
+ */
+export function readsOtherAsIs(text: string): boolean {
+  const parsed = parse(text);
+  const ledger = parsed.ledgerRange;
+  const body = ledger ? text.slice(0, ledger.from) : text;
+  return micromarkText(body) !== micromarkText(newestView(text).text);
+}
+
+function micromarkText(source: string): string {
+  return micromark(source, {
+    allowDangerousHtml: true,
+    extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+    htmlExtensions: [
+      gfmAutolinkLiteralHtml(),
+      gfmStrikethroughHtml(),
+      gfmTableHtml(),
+      gfmTaskListItemHtml(),
+    ],
+  })
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
 }
