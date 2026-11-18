@@ -1575,7 +1575,7 @@ syntax Markdown needs, and never shows them.
 
 Where Redlines departs from Word, and why: Return in an empty paragraph does nothing, because
 Markdown has no form for a second empty paragraph; a hard break is a backslash, not two trailing
-spaces, because it survives editors that trim spaces; Backspace never joins text into code or a
+spaces, because it survives editors that trim spaces; Backspace and Delete never take a character out of a code fence (the code would stop being code, and the fences after it would pair up differently) nor join text into code or a
 table; and Return in a table cell writes a line break in the cell (`<br>`), as the other word
 processors start a new paragraph there (§5.8).
 
