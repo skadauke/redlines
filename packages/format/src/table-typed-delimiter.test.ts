@@ -50,29 +50,19 @@ describe('a backslash at the end of a row, and a comment inside another personâ€
     expectEveryOrderRead('space', after);
   }, 60_000);
 
-  it('places a comment over the last `*` of a run in a replaced table so that it reads alike', () => {
-    // `REDLINES_FUZZ=300 REDLINES_SEED=54`: the change that holds the whole table is decided with the cell's.
+  it('places a comment next to an inner `*` of a replaced table so that it reads alike', () => {
+    // The replacement of the whole table is the only change that covers the comment: no mark stands inside the table.
+    // A comment's marker right after the `*` between two letters makes the run no opener once the replacement is
+    // accepted, so the comment's start moves (seed 54 of the alignment suite is the same shape).
     const text = file(
-      'Intro words.\n\n<!--sub h4jj \\| *b* \\|\\n\\| :-: \\|\\n\\| b \\|\\n-->\n\n| *b* |\n| --: |\n| b |\n<!--/h4jj-->\nOutro words.',
-      { h4jj: 'ada' },
+      'Intro words.\n\n<!--sub h4jj \\| a \\|\\n\\| :-: \\|\\n\\| b \\|\\n-->\n\n| a*b*c |\n| --: |\n| b |\n<!--/h4jj-->\nOutro words.',
+      { h4jj: 'bo' },
     );
-    const at = text.indexOf('*b* |\n| --: |\n| b |\n<!--/h4jj') + 2;
-    const typed = applyChanges(
-      text,
-      trackedEdit(text, { from: at, to: at, insert: '*' }, context(bo, ['g9hj', 'k3x9'])),
-    );
-    expect(readsAsNewest(typed)).toBe(true);
-    expectEveryOrderRead('typed', typed);
-    const from = typed.indexOf('<!--/g9hj-->') - 2;
-    // The replacement that holds the table is one of the changes a comment in it must leave decidable.
-    expect(marksOfTablesAt(typed, { from, to: from + 1 }).size).toBeGreaterThan(0);
-    const { changes } = addComment(
-      typed,
-      { from, to: from + 1 },
-      'A note.',
-      context(ada, ['f3gg']),
-    );
-    const commented = applyChanges(typed, changes);
+    const from = text.indexOf('b*c');
+    const to = from + 3;
+    expect([...marksOfTablesAt(text, { from, to })]).toEqual(['h4jj']);
+    const { changes } = addComment(text, { from, to }, 'A note.', context(ada, ['f3gg']));
+    const commented = applyChanges(text, changes);
     expect(readsAsNewest(commented)).toBe(true);
     expectEveryOrderRead('commented', commented);
   }, 60_000);
