@@ -3,7 +3,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
 import type { LanguageSupport } from '@codemirror/language';
 import {
-  type ChangeSet,
+  ChangeSet,
   Compartment,
   EditorSelection,
   EditorState,
@@ -59,7 +59,7 @@ import { tableMarkers } from './table/markers.ts';
 import { imageFetcherFacet, images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { blockKeys } from './blocks/keys.ts';
-import { openBlocks, throughOpen } from './blocks/open.ts';
+import { openBlock, openBlocks, takeBackChanges, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
 import { typedSyntax } from './blocks/typed.ts';
 import { lineChanges } from './diff.ts';
@@ -314,6 +314,9 @@ export type { AgentIntent } from './tracked/agent-intent.ts';
 export { anchorChanges, rebaseAgentEdit } from './tracked/agent-rebase.ts';
 export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
 export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
+export { addLineBreakStyles, docFileText, fileLineBreak, loadFile } from './line-breaks.ts';
+export type { BreakStyle } from './line-breaks.ts';
+export { FileView } from './tracked/file-view.ts';
 export {
   anchorFormat,
   anchorMove,
@@ -707,6 +710,43 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       { author: who, time, ...(random ? { random } : {}) },
     );
     if (!made.changes.length) return { applied: [], skipped };
+    // A decision that rewrites the open empty paragraph's line would leave that line in the file
+    // for good (the open block is dropped when a change takes its line apart, and its blank lines
+    // stay: walk seed 294 of `REDLINES_FUZZ=300`, a rejected insertion above an open Return).
+    // The open block is taken back in the same step, and the decision is made on the file's text.
+    const open = onFile ? null : openBlock(view.state);
+    const taken = open ? takeBackChanges(view.state, true) : null;
+    if (open && taken) {
+      const whole = ChangeSet.of(made.changes, text.length);
+      let touched = false;
+      whole.iterChangedRanges((from, to) => {
+        if (from <= open.empty.to && to >= open.empty.from) touched = true;
+      });
+      if (touched) {
+        const without = taken.apply(view.state.doc).toString();
+        const again = writeReview(
+          without,
+          {
+            ...op,
+            ids: guarded.apply,
+            seen: keep ? op.seen : guarded.apply.map((one) => op.seen[ids.indexOf(one)] ?? ''),
+          },
+          { author: who, time, ...(random ? { random } : {}) },
+        );
+        if (again.changes.length) {
+          view.dispatch({
+            changes: taken.compose(ChangeSet.of(again.changes, without.length)),
+            annotations: [
+              trackedEditAnnotation.of(true),
+              isolateHistory.of('full'),
+              recordedAs(again.intent),
+            ],
+            userEvent: decision,
+          });
+          return { applied: guarded.apply, skipped };
+        }
+      }
+    }
     const brought = onFile?.changesToDoc(made.changes, fileLineBreak(view.state) ?? '\n');
     view.dispatch({
       changes: brought ? brought.changes : made.changes,
@@ -827,8 +867,26 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       const outcome = { rebased, dropped };
       if (doc === was) return outcome;
       const next = loadFile(doc, plain());
-      const { state } = view;
-      const { changes, selection, effects } = newVersion(state, next.doc);
+      // An edit that comes down on the open empty paragraph's lines would leave what the Return
+      // wrote (a tracked break and its blank lines) in the file for good, the open block gone
+      // from under it (walk seed 201 of `REDLINES_FUZZ=300`): the paragraph is taken back in the
+      // same step, which Undo gives back whole.
+      let { state } = view;
+      let made = newVersion(state, next.doc);
+      const open = openBlock(state);
+      const back = open ? takeBackChanges(state, true) : null;
+      if (open && back) {
+        let touched = false;
+        made.changes.iterChangedRanges((from, to) => {
+          if (from < open.empty.to && to > open.empty.from) touched = true;
+        });
+        if (touched) {
+          state = state.update({ changes: back, filter: false }).state;
+          const rest = newVersion(state, next.doc);
+          made = { ...rest, changes: back.compose(rest.changes) };
+        }
+      }
+      const { changes, selection, effects } = made;
       view.dispatch({
         changes,
         selection,
@@ -838,7 +896,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         annotations: [
           agentStep.of(step),
           trackedEditAnnotation.of(true),
-          recordedAs(plainIntent(state, changes)),
+          recordedAs(plainIntent(view.state, changes)),
           ...(base === undefined
             ? []
             : [

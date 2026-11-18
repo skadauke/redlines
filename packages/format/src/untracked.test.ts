@@ -588,6 +588,24 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
     }
   });
 
+  it('says why a block typed at the start of the paragraph after a split is refused (#107)', () => {
+    const text = file('alpha <!--split s3vb-->\n\nbeta', { s3vb: 'bo' });
+    const at = text.indexOf('beta');
+    for (const [typed, word] of [
+      ['## x', 'heading'],
+      ['- x', 'list item'],
+      ['> x', 'quote'],
+      ['1. x', 'list item'],
+    ] as const) {
+      expect(refusal(text, type(at, typed)), typed).toBe('no-legal-placement');
+      expect(message(text, type(at, typed), ada), typed).toBe(
+        `This edit can't be made with Track Changes off: it would turn the start of the paragraph after Bo Chen's line break into a ${word}, and deciding that line break would then read it otherwise. Accept or reject the line break first, or turn on Track Changes.`,
+      );
+    }
+    // Plain text there is written.
+    expect(newest(untrack(text, type(at, 'x')))).toBe('alpha \n\nxbeta');
+  });
+
   it('throws a RangeError for an edit outside the text', () => {
     expect(() => untrackedEdit('a b', type(9, 'x'))).toThrow(RangeError);
   });

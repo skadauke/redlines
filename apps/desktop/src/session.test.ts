@@ -186,6 +186,27 @@ describe('a document in two windows', () => {
     expect(text).toContain('TWO');
   });
 
+  it('keeps a file with CRLF line breaks as it is, in both windows, with no edit taken back (#1057)', async () => {
+    const crlf = 'First paragraph here.\r\n\r\nSecond\r\nparagraph here.\r\n';
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', crlf);
+    const two = await windowOn(app, 'doc-2', '');
+    await settle(one, two);
+    expect(two.editor.getDoc()).toBe(crlf);
+    two.editor.setTracking(true, { inFile: false });
+    one.editor.setTracking(true, { inFile: false });
+    type(one.editor, 'First', ' ONE');
+    type(two.editor, 'Second', ' TWO');
+    await settle(one, two);
+    const text = one.editor.getDoc();
+    expect(two.editor.getDoc()).toBe(text);
+    expect(text).toContain('First<!--ins');
+    expect(text).toContain('Second<!--ins');
+    expect(text.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(parse(text).warnings).toEqual([]);
+    expect([...one.notices, ...two.notices]).toEqual([]);
+  });
+
   it('saves the file once, from the leader, after a pause', async () => {
     const app = new FakeApp();
     const one = await windowOn(app, 'doc-1', BASE);
