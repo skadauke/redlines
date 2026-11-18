@@ -122,14 +122,12 @@ export function widenedCellFormat(
       reach = Math.max(reach, edit.to);
     }
     if (edits.length === 0) throw first;
-    const done = widen(text, edits, ctx);
+    // Outside a table's cells, the block beside, which holds another person's mark at the unit's
+    // edge whole, is tried before the unit alone (#107, #265).
+    const outsideCells = ranges.some((r) => scopeOf(text, r.from, r.to) !== 'cell');
+    const done = widen(text, edits, ctx, outsideCells);
     // Outside a table's cells, another person's mark at the unit's edge keeps the refusal (#107).
-    if (
-      done.touchingOthers.length > 0 &&
-      ranges.some((r) => scopeOf(text, r.from, r.to) !== 'cell')
-    ) {
-      throw first;
-    }
+    if (done.touchingOthers.length > 0 && outsideCells) throw first;
     return { changes: done.changes, markIds: [done.id], extendedIds: [] };
   } catch (error) {
     // No unit holds it, or the format has no meaning there: the first refusal stands.

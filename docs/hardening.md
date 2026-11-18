@@ -284,8 +284,11 @@ which decided only the marks that were in the file at the start, not the marks t
 One refusal is kept on purpose. When another person's mark ends at the unit's edge without being in
 it (a split's break right in front of the unit, an insertion right after it), `widen` reports it
 (`touchingOthers`) and the writers (`edits-widen.ts`, `table-widen.ts`) keep the refusal the fine writer had: that
-mark is decided with the block next to it, and a heading typed after another person's split would
-read `## xbeta` in one order and `xbeta` in another (#107). That is a cost, not a hole: the edit is
+mark is decided with the block next to it, and a heading typed after another person's split, in an
+insertion of its own, would read `## xbeta` in one order and `xbeta` in another (#107). Before that
+refusal applies, the block beside the unit is tried, which holds the split in the old text of one
+substitution (across a quote's blank `>` line too, and as the whole quote in an item), and that is
+what typing and a block change after a split write. What is left is a cost, not a hole: the edit is
 not written, so nothing is silently wrong. In the probe of random edits that the fine writer
 refuses (`agent-probe.test.ts`), about 146 of 285 were held by the first guard and 58 are by this one. The tests that pin it say `(#107)` in
 their comments (`issues.test.ts`, `code-substitution.test.ts`). Also not held:

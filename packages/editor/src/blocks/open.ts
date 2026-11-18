@@ -33,7 +33,8 @@ import { EditorView, ViewPlugin } from '@codemirror/view';
 import { EditError, reject } from '@redlines/format';
 import type { ViewMode } from '../api.ts';
 import { lineChanges } from '../diff.ts';
-import { doneDepth, dropStepsEffect, startsOver } from '../history/index.ts';
+import { agentCaretFacet } from '../history/caret-facet.ts';
+import { agentOf, doneDepth, dropStepsEffect, startsOver } from '../history/index.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import {
   authorFacet,
@@ -141,6 +142,24 @@ export function locateOf(doc: Text, line: Line): Locate | null {
     below: last < doc.lines ? trimmed(doc.line(last + 1).text) : null,
     blanks: last - first + 1,
     index: line.number - first,
+  };
+}
+
+/**
+ * The blank lines that the open line stands among, from the end of the line above them (the break
+ * that ends it) to the end of the last: a change that ends or starts in them leaves their count to
+ * the open block's take-back, which counts the blank lines as the file has them.
+ */
+export function blankRun(doc: Text, open: OpenBlock): Span & { lines: number } {
+  const line = doc.lineAt(open.empty.from);
+  let first = line.number;
+  while (first > 1 && BLANK_LINE.test(doc.line(first - 1).text)) first--;
+  let last = line.number;
+  while (last < doc.lines && BLANK_LINE.test(doc.line(last + 1).text)) last++;
+  return {
+    from: first > 1 ? doc.line(first - 1).to : 0,
+    to: doc.line(last).to,
+    lines: last - first + 1,
   };
 }
 
@@ -591,6 +610,7 @@ export const openBlockField = StateField.define<OpenBlock | null>({
     return (
       emptyParagraphAt(tr.state) ??
       emptyParagraphAbove(tr) ??
+      openedAgain(tr) ??
       emptyItemAt(tr) ??
       emptyLineAt(tr) ??
       emptiedItemAt(tr)
@@ -630,6 +650,52 @@ export const recordField = StateField.define<readonly Taken[]>({
     // Any other edit ends it: typing, a command, a decision, an agent's edit.
     return tr.docChanged ? [] : record;
   },
+});
+
+/**
+ * The documents that had an open block, this session: the last few, with the block and where the
+ * caret was in it, kept so that Undo and Redo of an agent's step, which bring such a document back
+ * whole, open the block again. An agent's edit that comes down on the open paragraph takes it back
+ * in its own step (`applyAgentEdit`), and Undo of that step gives the paragraph back with the caret
+ * where the agent's text changed, in no place the paragraph is in (walk seed 201 of
+ * `REDLINES_FUZZ=300`).
+ */
+interface Opened {
+  doc: Text;
+  open: OpenBlock;
+  head: number;
+}
+
+const openedDocs = StateField.define<readonly Opened[]>({
+  create: () => [],
+  update(list, tr) {
+    if (startsOver(tr)) return [];
+    const open = tr.state.field(openBlockField, false) ?? null;
+    if (!open) return list;
+    const entry = { doc: tr.newDoc, open, head: tr.newSelection.main.head };
+    return list.at(-1)?.doc === tr.newDoc
+      ? [...list.slice(0, -1), entry]
+      : [...list.slice(-19), entry];
+  },
+});
+
+/** The record of the open document that Undo or Redo of an agent's step has brought back, if it has. */
+function reopened(start: EditorState, tr: Transaction): Opened | null {
+  if (!tr.docChanged || (!tr.isUserEvent('undo') && !tr.isUserEvent('redo'))) return null;
+  if (agentOf(tr) === null || start.field(viewModeField, false) === 'raw') return null;
+  return start.field(openedDocs, false)?.findLast((entry) => entry.doc.eq(tr.newDoc)) ?? null;
+}
+
+/** The open block of a document that Undo or Redo of an agent's step has brought back. */
+function openedAgain(tr: Transaction): OpenBlock | null {
+  const entry = reopened(tr.startState, tr);
+  return entry && inOpen(entry.open, tr.newSelection) ? entry.open : null;
+}
+
+/** Where the caret goes, in the open block that Undo or Redo of an agent's step has brought back. */
+const reopeningCaret = agentCaretFacet.of((tr) => {
+  const entry = reopened(tr.startState, tr);
+  return entry ? EditorSelection.single(Math.min(entry.head, tr.newDoc.length)) : null;
 });
 
 /** The open block, if any. */
@@ -1091,8 +1157,10 @@ export function openBlocks(): Extension {
   return [
     openBlockField,
     madeItems,
+    openedDocs,
     recordField,
     pointerField,
+    reopeningCaret,
     Prec.high(emptiedRefusal),
     Prec.high(leaving),
     Prec.highest(pointer),

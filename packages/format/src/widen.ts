@@ -220,7 +220,10 @@ function widenIn(
   let besideTried = false;
   for (let index = 0; rung; index++) {
     const closed = closure(parsed, units, rung, sourceFrom, sourceTo, region);
-    const key = `${closed.lineFrom}:${closed.to}${ofOneParagraph(closed) ? ':list' : ''}`;
+    // A quote in an item and the blocks in it span the same text: each is tried, as the blocks
+    // can't be written where the quote starts on the item's marker line (#107).
+    const inItem = closed.kind === 'quote' && closed.parent?.kind === 'item';
+    const key = `${closed.lineFrom}:${closed.to}${ofOneParagraph(closed) ? ':list' : ''}${inItem ? ':quote' : ''}`;
     if (tried.has(key)) {
       rung = widerThan(rung);
       continue;
@@ -275,7 +278,7 @@ function widenIn(
         : parsed.marks.some(
             (mark) =>
               mark.entry.by !== ctx.author.handle &&
-              touches(mark, { from: closed.lineFrom - 2, to: closed.to + 2 }),
+              touches(mark, edgeOf(text, closed.lineFrom, closed.to)),
           ))
     ) {
       // A rung that another person's mark touches at its edge, or that its decisions with the mark
@@ -439,6 +442,19 @@ function encloses(mark: MarkRange, region: Range | undefined): boolean {
         region.to <= segment.content.to,
     )
   );
+}
+
+/**
+ * The unit's range with what lies beside it that carries no text: the line breaks, white space and
+ * quote marks between it and the next text on either side, so that a mark in the paragraph before
+ * a quote's blank line (`>`) touches the unit as it does across a blank line (#107).
+ */
+function edgeOf(text: string, from: number, to: number): Range {
+  let a = from;
+  while (a > 0 && /[ \t>\r\n]/.test(text[a - 1] ?? '')) a--;
+  let b = to;
+  while (b < text.length && /[ \t>\r\n]/.test(text[b] ?? '')) b++;
+  return { from: Math.min(a, from - 2), to: Math.max(b, to + 2) };
 }
 
 /** Whether a mark has any marker in `range`. */
@@ -665,7 +681,7 @@ function tryRung(
           // A change that holds the unit in its new text is no neighbour: the unit is written
           // inside it (format §3.12).
           !encloses(mark, { from: rung.from, to: rung.to }) &&
-          touches(mark, { from: rung.lineFrom - 2, to: rung.to + 2 }),
+          touches(mark, edgeOf(text, rung.lineFrom, rung.to)),
       )
       .map((mark) => mark.id),
     folded: own.map((mark) => mark.id),

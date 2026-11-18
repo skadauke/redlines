@@ -64,10 +64,14 @@ test.each(WORKLOADS)(
 
 test.skipIf(fuzz === 0)(
   'fuzz: replay sessions of every workload settle and converge',
-  { timeout: 3_600_000 },
+  // A synchronous run can't be stopped by its timeout, only marked after it ends: give it the deep
+  // run's own limit (deep.yml), so that a slow runner doesn't fail a run that passed.
+  { timeout: 19_800_000 },
   () => {
+    // REDLINES_FUZZ is the number of sessions in all, spread evenly over the workloads.
+    const perCell = Math.ceil(fuzz / WORKLOADS.length);
     for (const workload of WORKLOADS) {
-      for (let n = 0; n < fuzz; n++) {
+      for (let n = 0; n < perCell; n++) {
         const result = runReplay({ seed: seedFor(9, n), workload });
         const codes = new Set(result.violations.map((v) => v.code));
         expect(codes.has('crash'), `${workload}/${n}`).toBe(false);
