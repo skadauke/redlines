@@ -113,7 +113,7 @@ from this table.
 | Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 
-The Mac app is built; Windows and Linux are planned (§10). The editor is not yet published as a
+The Mac app is built; Windows and Linux are planned (§10). Live collaboration with people is built between windows of one Mac and planned across networks (§7). The editor is not yet published as a
 package others can embed: the packages are private, and the website's embed is a demo. R Markdown
 and Quarto files are edited with their divs, callouts, citations, cross-references and includes
 drawn; running their code cells is not what Redlines does. Several windows of one document on one
@@ -2292,10 +2292,14 @@ Suggest, the folders its tools may reach) with its tokens and device key in file
 can read, never shown and never returned to a window; adding a connection or giving one more asks
 in a question of the system's, as adding an Agent Client Protocol agent does. The agent's card in
 Preferences shows the level, the folders, when it was last used and where the connection is, and
-Remove deletes every file. Not yet built: the tools acting on a document (the tool bridge), and
-mentions through this connection; the `openclaw acp` agent below stays for a Mac that has the
-`openclaw` command. The wire's shapes are unverified against a real Gateway (the research note's
-First live test).
+Remove deletes every file. An @-mention or Ask goes to the agent through the Gateway (#966), and
+the run it starts edits as itself through the node's tools (the tool bridge, #971): the node's tool
+calls carry the run's session key, and the host answers them in the window the run was asked from,
+with the same six tools, gate, author, thread and edit path as a local agent, for that run only
+(Stop, cancel and the run's end drop it, and a call outside a live run is refused). The `openclaw
+acp` agent below stays for a Mac that has the `openclaw` command, and has no tools. The wire's
+shapes were checked against a throwaway Gateway with a stand-in model, not a real one (the
+research note's First live test).
 
 **OpenClaw.** An OpenClaw agent, such as one a person calls Moby, is reached through the Gateway
 that runs it, which may be on another machine, by `openclaw acp`. Preferences › Agents › OpenClaw
