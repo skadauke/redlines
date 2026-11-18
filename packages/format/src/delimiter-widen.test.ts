@@ -72,3 +72,20 @@ describe("a delimiter run pasted next to another person's pending split or delet
     expectWhole(before, after, 'Start *one ***_\n\ntwo* End', 'a split');
   });
 });
+
+describe("a delimiter typed after a letter, beside another person's pending bold (#265)", () => {
+  it('is written as a replacement of the paragraph, never over the text of their format change', () => {
+    const body = 'x ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->é';
+    const at = body.length;
+    for (const [insert, edited] of [
+      ['_', 'x ca**f**é_'],
+      ['**', 'x ca**f**é**'],
+      ['*', 'x ca**f**é*'],
+      ['~~', 'x ca**f**é~~'],
+    ] as const) {
+      const { before, after } = type(`${body}z`, at, at, insert);
+      expect(bodyOf(after), insert).toMatch(/^<!--sub m2bd x ca<!-\\-fmt k3x9 \+bold-\\->/);
+      expectWhole(before, after, `${edited}z`, insert);
+    }
+  }, 60_000);
+});

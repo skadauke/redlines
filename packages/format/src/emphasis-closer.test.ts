@@ -192,6 +192,13 @@ describe("another person's pending marks around the change (#81)", () => {
       'Start ‸<!--del k3x9 \\n\\n-->middle End',
       '**Start<!--del k3x9 \\n\\n-->‸middle** End',
       'Start<!--del k3x9 \\n\\n-->middle ‸End',
+      // A run typed before or after a word that holds his pending emphasis, across a letter (#265).
+      'x ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->é‸z',
+      'x ‸ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->é',
+      'x ‸a<!--fmt k3x9 +italic-->*f*<!--/k3x9-->é y',
+      'x ‸ca<!--ins k3x9-->**f**<!--/k3x9-->é',
+      'x a<!--ins k3x9-->*f*<!--/k3x9-->é‸ y',
+      'x ‸ca<!--ins k3x9-->~~f~~<!--/k3x9-->é',
     ];
     const total = fuzzCount(400);
     let written = 0;

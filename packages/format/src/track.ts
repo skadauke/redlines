@@ -2562,8 +2562,28 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   const refuse = (reason: string): never => {
     throw new EditError(reason, 'no-legal-placement');
   };
+  /** Whether growing the change to the left, to `a`, or to the right, to `b`, would go in through a
+   * marker of another person's pending format change into its text: the change would write that
+   * text again, and take the bold or italic out from under their mark, which is theirs to decide
+   * (#265). A change that stands inside the mark's text already is the author's own to grow there. */
+  const intoTheirFormat = (a: number, b: number) =>
+    plan.parsed.marks.some(
+      (mark) =>
+        mark.kind === 'fmt' &&
+        mark.entry.by !== plan.ctx.author.handle &&
+        mark.segments.some(
+          (segment) =>
+            segment.close !== undefined &&
+            ((a < from && segment.close.to <= from && a < segment.close.from) ||
+              (b > to && segment.open.from >= to && b > segment.open.to)),
+        ),
+    );
   const grow = (a: number, b: number) => {
     if (plan.frontEnd >= 0 && a <= plan.frontEnd) throw new EditError(FRONT_MATTER, 'front-matter');
+    // Not into the text of another person's format change (#265): the unit is replaced instead.
+    if (intoTheirFormat(a, b)) {
+      refuse('A marker here would change how the text next to it is emphasized.');
+    }
     if (a < from) {
       left = visibleText(text, markers, a, from) + left;
       from = a;
