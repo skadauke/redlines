@@ -11,7 +11,7 @@ import {
   rejectMarks,
 } from './decide.ts';
 import { EditError } from './errors.ts';
-import { expectWidened } from './oracle.ts';
+import { expectEveryOrderRead, expectWidened } from './oracle.ts';
 import { parse } from './parse.ts';
 import {
   pendingOf,
@@ -899,8 +899,15 @@ describe('deleting a whole table (format §3.7, rule 6)', () => {
     });
 
     it('says what to do for an HTML block right under the table, and for code above and below it', () => {
-      const html = file(`Intro.\n\n${FRUIT}\n<!-- note -->\n\nAfter.`);
-      expect(refusal(() => remove(html)).message).toBe(HTML_BELOW);
+      // An HTML comment or block right under the table is written as a replacement of the table with
+      // it, in which the block stands alone (#454).
+      for (const below of ['<!-- note -->', '<div>x</div>', '<!-- a\n   b -->']) {
+        const html = file(`Intro.\n\n${FRUIT}\n${below}\n\nAfter.`);
+        const written = remove(html);
+        expect(shown(written.after), below).toHaveLength(0);
+        expectEveryOrderAlike(below, written.after, exactly);
+        expectEveryOrderRead(below, written.after);
+      }
       const between = file(`Intro.\n\n    one\n\n${FRUIT}\n\n    two\n\nAfter.`);
       expect(refusal(() => remove(between)).message).toBe(CODE_BETWEEN);
       // The ways out are what the words say.

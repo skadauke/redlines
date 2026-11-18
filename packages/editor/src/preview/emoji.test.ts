@@ -83,11 +83,21 @@ describe('an emoji shortcode in the preview (#312)', () => {
     expect(drawn(editorAt(doc, 0, false))).toEqual([]);
   });
 
-  it('is no emoji against a letter or a digit before it, as GitHub shows it as written', () => {
-    const glued = 'a:tent: 9:smile: (:tent:) b :tent:.\n';
-    expect(drawn(editorAt(glued, glued.length))).toEqual([
-      { source: ':tent:', shown: '⛺' },
-      { source: ':tent:', shown: '⛺' },
+  it('is an emoji only after white space or at the start of a text, as GitHub shows it (#388)', () => {
+    const glued = 'a:tent: 9:smile: (:tent:) .:tent: -:tent: b :tent:.\n';
+    expect(drawn(editorAt(glued, glued.length))).toEqual([{ source: ':tent:', shown: '⛺' }]);
+    const starts = ':tent: and\n:tent: and *:tent:* and a <!--ins k3x9-->:tent:<!--/k3x9-->\n';
+    expect(drawn(editorAt(starts, starts.length)).map((found) => found.source)).toEqual([
+      ':tent:',
+      ':tent:',
+      ':tent:',
+      ':tent:',
+    ]);
+    // A marker in front of emphasis, or a long one, is no text: the shortcode still follows a space.
+    const marked = `a <!--fmt m2bd +bold-->**:tent:**<!--/m2bd--> b <!--del k3x9 ${'x'.repeat(300)}-->:smile:\n`;
+    expect(drawn(editorAt(marked, marked.length)).map((found) => found.source)).toEqual([
+      ':tent:',
+      ':smile:',
     ]);
   });
 

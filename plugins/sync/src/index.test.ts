@@ -5,14 +5,22 @@
 
 import { Authority, Hub, memoryTransport } from '@redlines/collab';
 import type { Identity } from '@redlines/collab';
-import { createEditor, editSourceFacet, moveBlocks, refusedEditEffect } from '@redlines/editor';
+import {
+  anchorReview,
+  createEditor,
+  editSourceFacet,
+  intentOf,
+  moveBlocks,
+  refusedEditEffect,
+  rederiveReview,
+} from '@redlines/editor';
 import { EditorView } from '@codemirror/view';
 import type { Editor } from '@redlines/editor';
 import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from '@redlines/formatting';
 import { createTables } from '@redlines/tables';
-import { peersShown, syncEditor } from './index.ts';
+import { peersShown, syncEditor, syncText } from './index.ts';
 import type { SyncBinding } from './index.ts';
 
 const BASE = 'First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.\n';
@@ -70,7 +78,8 @@ function window(hub: Hub, who: 'ada' | 'bo', doc: string, hosts: boolean) {
 }
 
 /** Types `text` at the end of the first line that contains `after`. */
-function type(editor: Editor, after: string, text: string): void {
+function type(editor: Editor | { editor: Editor }, after: string, text: string): void {
+  if ('editor' in editor) editor = editor.editor;
   const doc = editor.view.state.doc.toString();
   const at = doc.indexOf(after) + after.length;
   editor.view.dispatch({
@@ -850,5 +859,100 @@ describe('commands over another window’s edit', () => {
     ]);
     expect(parse(text).warnings).toEqual([]);
     expect(bo.editor.view.state.doc.toString()).toBe(text);
+  });
+});
+
+describe('a file with line breaks of its own kind', () => {
+  const CRLF = 'First paragraph here.\r\n\r\nSecond\r\nparagraph here.\r\n';
+  const MIXED = 'First paragraph here.\r\n\r\nSecond\nparagraph here.\r\n\r\nThird\nparagraph.\n';
+
+  /** Every window shows the authority's text, as the file has it, and nobody was told of a take-back. */
+  function agree(hub: Hub, ...windows: ReturnType<typeof window>[]) {
+    for (const w of windows) {
+      expect(JSON.stringify(syncText(w.editor.view.state))).toBe(
+        JSON.stringify(hub.authority.text),
+      );
+      expect(w.notices).toEqual([]);
+      expect(w.said).toEqual([]);
+    }
+    expect(parse(hub.authority.text).warnings).toEqual([]);
+  }
+
+  /** The offset in the window's document of the line break after `line`. */
+  const breakAfter = (w: ReturnType<typeof window>, line: string) =>
+    w.editor.view.state.doc.toString().indexOf(line) + line.length;
+
+  it('lands typing, deleting, accepting and rejecting in both windows (#1057)', async () => {
+    const { hub, ada, bo } = await session(CRLF);
+    expect(bo.editor.getDoc()).toBe(CRLF);
+    type(ada, 'First', ' ADA');
+    await settle(ada.binding, bo.binding);
+    agree(hub, ada, bo);
+    expect(hub.authority.text).toContain('\r\n');
+    // Bo deletes a line break, and Ada rejects it: the break comes back as the file's own.
+    const at = breakAfter(bo, 'Second');
+    bo.editor.view.dispatch({ changes: { from: at, to: at + 1 }, userEvent: 'delete.forward' });
+    await settle(ada.binding, bo.binding);
+    agree(hub, ada, bo);
+    const del = parse(hub.authority.text).marks.find((mark) => mark.kind === 'del');
+    expect(del).toBeDefined();
+    ada.editor.reject(del!.id);
+    await settle(ada.binding, bo.binding);
+    agree(hub, ada, bo);
+    expect(hub.authority.text).toContain('Second\r\nparagraph here.');
+    expect(hub.authority.text.replace(/\r\n/g, '')).not.toContain('\n');
+    // Ada accepts her own typing; Bo types after it.
+    const mark = parse(hub.authority.text).marks.find((m) => m.kind === 'ins')!;
+    ada.editor.accept(mark.id);
+    await settle(ada.binding, bo.binding);
+    type(bo, 'Second\nparagraph', ' BO');
+    await settle(ada.binding, bo.binding);
+    agree(hub, ada, bo);
+    expect(newestView(hub.authority.text).text).toContain('First ADA paragraph');
+    expect(hub.authority.text.replace(/\r\n/g, '')).not.toContain('\n');
+  });
+
+  it('brings back a break of the other kind in a file that mixes them, in the other window', async () => {
+    const { hub, ada, bo } = await session(MIXED);
+    expect(bo.editor.getDoc()).toBe(MIXED);
+    // Bo deletes the LF after Second; Ada rejects while Bo types beside it, so her reject is placed again.
+    const at = breakAfter(bo, 'Second');
+    bo.editor.view.dispatch({ changes: { from: at, to: at + 1 }, userEvent: 'delete.forward' });
+    await settle(ada.binding, bo.binding);
+    agree(hub, ada, bo);
+    const del = parse(hub.authority.text).marks.find((mark) => mark.kind === 'del')!;
+    ada.editor.reject(del.id);
+    type(bo, 'Second', ' BO');
+    // Bo's edit is confirmed first, so Ada's reject is written again on the text that follows it.
+    await bo.binding.settled();
+    await settle(ada.binding, bo.binding);
+    agree(hub, ada, bo);
+    expect(hub.authority.text).toContain(' BO<!--/');
+    expect(hub.authority.text).toContain('\nparagraph here.\r\n');
+    expect(hub.authority.text).not.toContain('\r\nparagraph here.\r\n\r\nThird');
+    expect(hub.authority.text).toContain('First paragraph here.\r\n\r\n');
+  });
+  it('writes a replayed reject on the file, with the kind of the break it brings back (#1057)', async () => {
+    const { hub, ada, bo } = await session(MIXED);
+    const at = breakAfter(bo, 'Second');
+    bo.editor.view.dispatch({ changes: { from: at, to: at + 1 }, userEvent: 'delete.forward' });
+    await settle(ada.binding, bo.binding);
+    const del = parse(hub.authority.text).marks.find((mark) => mark.kind === 'del')!;
+    const before = ada.editor.view.state;
+    let intent: ReturnType<typeof intentOf> | undefined;
+    ada.editor.addExtension(
+      EditorView.updateListener.of((update) => {
+        for (const tr of update.transactions) intent ??= intentOf(tr);
+      }),
+    );
+    ada.editor.reject(del.id);
+    expect(intent?.kind).toBe('review');
+    if (intent?.kind !== 'review') return;
+    // Replayed on the newest text, the reject brings back the LF the file had, not the CRLF.
+    const placed = rederiveReview(before, anchorReview(before.doc.toString(), intent));
+    expect(placed.ok).toBe(true);
+    if (!placed.ok) return;
+    expect(placed.styles).toHaveLength(1);
+    expect(placed.styles![0]!.style).toBe('\n');
   });
 });

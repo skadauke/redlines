@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { rejectAll } from './decide.ts';
 import { expectEveryOrderRead } from './oracle.ts';
+import { emphasisReadsAlike } from './emphasis-orders.ts';
 import { ada, bo, bodyOf, context, exactly, expectEveryOrderAlike, file } from './test-helpers.ts';
 import type { Person } from './types.ts';
 import { trackedEdits } from './track.ts';
@@ -89,6 +90,17 @@ describe('#276: next to chains of another person’s marks', () => {
     const two = at(before, 'two');
     held('M3 star', before, press(before, two, two, '*', ada));
   }, 60_000);
+});
+
+describe('#276 M2: a cluster of four or more adjacent marks is read to the end', () => {
+  it('judges a chain of 4 of Bo’s insertions after a plain *, from a mark in the middle', () => {
+    for (const n of [4]) {
+      const ids = IDS.slice(0, n);
+      const chain = ids.map((id, i) => `<!--ins ${id}-->${'abcdef'[i]}<!--/${id}-->`).join('');
+      const before = file(`one *${chain} two`, Object.fromEntries(ids.map((id) => [id, 'bo'])));
+      expect(emphasisReadsAlike(before, new Set([ids[Math.floor(n / 2)] ?? '']))).toBe(true);
+    }
+  });
 });
 
 describe('#142: a line break typed after a file’s final line break, in a file with mixed endings', () => {

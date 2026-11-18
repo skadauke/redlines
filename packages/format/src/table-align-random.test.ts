@@ -235,50 +235,6 @@ const TAG_IN_OLD_TEXT = /<!--(?:del|sub) \w{4} (?:(?!-->).)*<[a-z/]/i;
 const LINK_IN_OLD_TEXT =
   /<!--(?:del|sub) \w{4} (?:(?!-->).)*\]-->(?:<!--(?!cmt)[^>]*-->)*<!--cmt \w{4}-->\(/;
 
-const DELIMITER_ROW = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
-
-/** How many cells a row has: the pipes that no backslash escapes, the edge ones not counted. */
-function cellsOf(row: string): number {
-  const inside = row
-    .trim()
-    .replace(/^\|/, '')
-    .replace(/(?<!\\)\|$/, '');
-  return inside.split(/(?<!\\)\|/).length;
-}
-
-/** Whether the header of the table in a view has lost a cell: it is no more than pipes, or has fewer cells
- * than the delimiter row under it, which is how a header whose last cell has no text left reads (#428). */
-function lostACell(view: string): boolean {
-  const lines = view.split(/\r?\n/);
-  const at = lines.findIndex((line, i) => i > 0 && DELIMITER_ROW.test(line));
-  if (at === -1) return false;
-  const header = lines[at - 1] ?? '';
-  return header.replace(/[\s|]/g, '') === '' || cellsOf(header) < cellsOf(lines[at] ?? '');
-}
-
-/** Whether `test` holds of the file or of any state that deciding its changes, one at a time in any order,
- * leaves. */
-function anyState(text: string, test: (state: string) => boolean): boolean {
-  const seen = new Set<string>();
-  const visit = (current: string): boolean => {
-    if (seen.has(current)) return false;
-    seen.add(current);
-    if (test(current)) return true;
-    for (const { id, kind } of parse(current).marks) {
-      if (kind === 'cmt' || kind === 'hl') continue;
-      for (const decide of [accept, reject]) {
-        try {
-          if (visit(applyChanges(current, decide(current, id)))) return true;
-        } catch (error) {
-          if (!(error instanceof EditError)) throw error;
-        }
-      }
-    }
-    return false;
-  };
-  return visit(text);
-}
-
 /**
  * Where a state that fails without the mark comes from. The mark never makes a sound file unsound, and a
  * file that is not sound without it is older than the mark, and is left out of the check: but only a shape
@@ -286,26 +242,6 @@ function anyState(text: string, test: (state: string) => boolean): boolean {
  * first. A shape that none of these says is new, and fails the suite: file an issue for it, and add it here.
  */
 const OLDER: { issue: string; why: string; shape: (found: Found) => boolean }[] = [
-  {
-    issue: '#428',
-    why: 'the last cell of a header with no pipe at its end, or of one column, has no text left in a view of some order of decisions, and no closing pipe was written for it: the view reads as a paragraph',
-    shape: ({ control }) =>
-      anyState(control, (state) =>
-        [newestView(state).text, originalView(state).text].some(lostACell),
-      ),
-  },
-  {
-    issue: '#376',
-    why: 'a comment over a backtick makes the decision of another change refused as hiding changes in code, and not all of them can be decided',
-    shape: ({ control, checks }) =>
-      [
-        'a decision is refused',
-        'accepting all is not the newest view',
-        'rejecting all is not the original view',
-      ].includes(checks[0] ?? '') &&
-      /<!--cmt /.test(control) &&
-      /`|\\x60/.test(control),
-  },
   {
     issue: '#265',
     why: 'a delimiter run next to another person’s pending change, or a change over their deletion of a backslash, reads otherwise in some order of decisions',

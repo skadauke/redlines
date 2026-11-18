@@ -103,3 +103,22 @@ describe('walk seed 201: an agent’s edit on the open empty paragraph’s lines
     },
   ]);
 });
+
+describe('bare-marker walk seeds 80 and 260: Return in a bare marker whose write replaces the whole list', () => {
+  scriptRows([
+    {
+      name: 'a numbered bare marker, a list after it (seed 80), Track Changes on',
+      doc: '1) plan⏎2)‸⏎⏎1) ',
+      keys: ['Enter'],
+      tc: true,
+      expect: { file: '1) plan⏎2)⏎⏎1) ' },
+    },
+    {
+      name: 'a bare marker under a nested one (seed 260), Track Changes on',
+      doc: '- alpha⏎  +⏎-‸⏎- ',
+      keys: ['Enter'],
+      tc: true,
+      expect: { file: '- alpha⏎  +⏎-⏎- ' },
+    },
+  ]);
+});

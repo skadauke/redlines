@@ -17,3 +17,27 @@ const AT_START = new RegExp(`^${SHORTCODE_SOURCE}`);
 export function shortcodeAt(text: string): string | null {
   return AT_START.exec(text)?.[0] ?? null;
 }
+
+/**
+ * Whether a shortcode that comes after `before` is an emoji (#388): GitHub shows one only at the
+ * start of a text or after white space, and as written after anything else, a letter, a digit or
+ * punctuation (`a:tent:`, `(:tent:`, `.:tent:`). Comments between (markers) are no text, so `before`
+ * is read as it is without them. A run of `*`, `_` and `~` right before the shortcode may open
+ * emphasis, which the text then starts in: a drawing that has the parse says so with `emphasis`
+ * and reads through it; a marker's place never does, since a star that nothing closes is text.
+ * `before` is the end of the text in front, or all of it.
+ */
+export function startsEmoji(before: string, emphasis = false): boolean {
+  let text = before;
+  for (;;) {
+    const length = text.length;
+    // A comment that ends there; one whose start is cut off holds all of what is left.
+    while (text.endsWith('-->')) {
+      const open = text.lastIndexOf('<!--');
+      text = open === -1 ? '' : text.slice(0, open);
+    }
+    if (emphasis) text = text.replace(/[*_~]+$/, '');
+    if (text.length === length) break;
+  }
+  return text === '' || /\s$/u.test(text);
+}

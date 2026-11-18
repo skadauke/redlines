@@ -244,10 +244,14 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
 **Silent wrong writes, and changes that can't be decided, found so far.** Each is an open issue with
 its case; each is a bug. The list is what has been found, not a count of what is there.
 
-- A raw line break typed at the start of a bullet item's text under a line of text, or under the line
-  of the item it is in, is written where the file reads the bullet as an item and the newest view as
-  the underline of the text above it; the words typed on its blank lines (#143) are written the same
-  way (#443).
+- The editor's document has LF line breaks only; since #1054 it records the kind of a break that a
+  tracked edit takes out, so rejecting gives it back in its own kind (format §2.5, #924). Three paths
+  still write the file's kind: the sync boundary in a file with CRLF (the replica's text has CRLFs and
+  the editor's changes are in LF-only offsets), a lone CR in a file with mixed breaks, and eight or
+  more deletions at once (#1057).
+- A raw line break typed at the start of a bullet item's text under a line of text is written as a
+  replacement of its unit where that reads alike in the file and the view, and is otherwise an alert
+  (#443, #1098). Left: typing before a deletion that empties a bullet.
 - The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
   as a lazy line of the item's paragraph, where CommonMark reads a list. Backspace at the first
   item of a list now reads the line below it as the file does (`ownLines` in `blocks/joins.ts`) and
