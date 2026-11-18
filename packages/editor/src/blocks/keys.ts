@@ -248,7 +248,7 @@ export function applyKeyEdit(
     annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
   else if (edit.caretInOpen && edit.open)
-    annotations.push(caretAnnotation.of({ inOpen: located! }));
+    annotations.push(caretAnnotation.of({ inOpen: located ?? edit.open }));
   else if (edit.caretOnLine) annotations.push(caretAnnotation.of({ onLine: edit.caretOnLine }));
   else if (edit.caretAfterText) {
     annotations.push(caretAnnotation.of({ afterText: edit.caretAfterText }));

@@ -155,7 +155,7 @@ const sameLocate = (a: Locate | null, b: Locate) =>
  * write that replaced the unit round it (a substitution of a whole list), where the line the key
  * planned maps to no line of it (walk seeds 80 and 260 of `REDLINES_FUZZ=300`).
  */
-function locatedLine(tr: Transaction, locate: Locate): Line | null {
+function locatedLine(tr: Transaction, locate: Locate, near: number): Line | null {
   const doc = tr.newDoc;
   let from = doc.lines + 1;
   let to = 0;
@@ -163,10 +163,13 @@ function locatedLine(tr: Transaction, locate: Locate): Line | null {
     from = Math.min(from, doc.lineAt(fromB).number);
     to = Math.max(to, doc.lineAt(toB).number);
   });
+  let found: Line | null = null;
   for (let n = Math.max(1, from - 1); n <= Math.min(doc.lines, to + 1); n++) {
-    if (sameLocate(locateOf(doc, doc.line(n)), locate)) return doc.line(n);
+    if (!sameLocate(locateOf(doc, doc.line(n)), locate)) continue;
+    // The nearest to where the mapping put it, if several read alike.
+    if (!found || Math.abs(n - near) < Math.abs(found.number - near)) found = doc.line(n);
   }
-  return null;
+  return found;
 }
 
 /** Marks a key's transaction that opens (or keeps) the empty block, and where. */
@@ -509,8 +512,10 @@ function removableLine(doc: Text, line: Line): boolean {
 export function requestedLine(tr: Transaction, request: OpenRequest): Line {
   const line = mappedLine(tr, request);
   if (!request.locate || request.item || request.line) return line;
-  if (sameLocate(locateOf(tr.newDoc, line), request.locate)) return line;
-  return locatedLine(tr, request.locate) ?? line;
+  // A blank line the mapping found stays (the tracked layer's markers round it change its context).
+  if (BLANK_LINE.test(line.text) || sameLocate(locateOf(tr.newDoc, line), request.locate))
+    return line;
+  return locatedLine(tr, request.locate, line.number) ?? line;
 }
 
 function mappedLine(tr: Transaction, request: OpenRequest): Line {
