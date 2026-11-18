@@ -718,14 +718,26 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const taken = open ? takeBackChanges(view.state, true) : null;
     if (open && taken) {
       const whole = ChangeSet.of(made.changes, text.length);
-      // The same for a decision that ends beside the blank lines the open line stands among: what
-      // it leaves of them, with the open line's own, is more blank lines than the file may hold
-      // (walk seed 294 of `REDLINES_FUZZ=300`, the insertion above the paragraph rejected).
+      // The same for a decision that ends beside the blank lines the open line stands among and
+      // leaves more of them than there were: with the open line's own, more than the file may hold
+      // (walk seed 294 of `REDLINES_FUZZ=300`, the insertion above the paragraph rejected). One
+      // that leaves their number as it was (an insertion on the line above accepted) keeps the
+      // paragraph open.
       const run = blankRun(view.state.doc, open);
       let touched = false;
+      let beside = false;
       whole.iterChangedRanges((from, to) => {
-        if (from <= run.to && to >= run.from) touched = true;
+        if (from <= open.empty.to && to >= open.empty.from) touched = true;
+        else if (from <= run.to && to >= run.from) beside = true;
       });
+      if (!touched && beside) {
+        const at = whole.mapPos(open.empty.from, 1);
+        const after = blankRun(whole.apply(view.state.doc), {
+          ...open,
+          empty: { from: at, to: at },
+        });
+        touched = after.lines > run.lines;
+      }
       if (touched) {
         const without = taken.apply(view.state.doc).toString();
         const again = writeReview(

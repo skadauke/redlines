@@ -150,13 +150,17 @@ export function locateOf(doc: Text, line: Line): Locate | null {
  * that ends it) to the end of the last: a change that ends or starts in them leaves their count to
  * the open block's take-back, which counts the blank lines as the file has them.
  */
-export function blankRun(doc: Text, open: OpenBlock): Span {
+export function blankRun(doc: Text, open: OpenBlock): Span & { lines: number } {
   const line = doc.lineAt(open.empty.from);
   let first = line.number;
   while (first > 1 && BLANK_LINE.test(doc.line(first - 1).text)) first--;
   let last = line.number;
   while (last < doc.lines && BLANK_LINE.test(doc.line(last + 1).text)) last++;
-  return { from: first > 1 ? doc.line(first - 1).to : 0, to: doc.line(last).to };
+  return {
+    from: first > 1 ? doc.line(first - 1).to : 0,
+    to: doc.line(last).to,
+    lines: last - first + 1,
+  };
 }
 
 const sameLocate = (a: Locate | null, b: Locate) =>

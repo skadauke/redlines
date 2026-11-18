@@ -760,6 +760,34 @@ describe('walk seed 294 (#1117): a decision that ends beside the open empty para
   ]);
 });
 
+describe('a decision on the line above the open empty paragraph keeps it open (#1117)', () => {
+  // A decision that ends at the end of the line above the blank lines, and leaves as many of them
+  // as there were, takes nothing back: the paragraph stays open, the caret in it.
+  const rows = (
+    [
+      ['in a paragraph', 'alpha‸⏎⏎beta', 'alphax⏎⏎‸⏎⏎beta', 'alpha⏎⏎‸⏎⏎beta'],
+      ['in a quote', '> q‸⏎>⏎> r', '> qx⏎>⏎> ‸⏎>⏎> r', '> q⏎>⏎> ‸⏎>⏎> r'],
+      ['after a heading', '## head‸⏎⏎beta', '## headx⏎⏎‸⏎⏎beta', '## head⏎⏎‸⏎⏎beta'],
+    ] as const
+  ).flatMap(([name, doc, accepted, rejected]) => [
+    {
+      name: `${name}, accepted`,
+      doc,
+      keys: [{ type: 'x' }, 'Enter', { decide: 'accept' }] as Step[],
+      tc: true,
+      expect: { caret: accepted },
+    },
+    {
+      name: `${name}, rejected`,
+      doc,
+      keys: [{ type: 'x' }, 'Enter', { decide: 'reject' }] as Step[],
+      tc: true,
+      expect: { caret: rejected },
+    },
+  ]);
+  scriptRows(rows);
+});
+
 describe('walk seed 207 (#1117): ⌥↓ in the new text of a substitution that holds the whole quote', () => {
   // The substitution's opener stands before the paragraph in the file, and went with it, out of the
   // quote's text: the list that stayed was left outside the substitution, and the quote ended at the
