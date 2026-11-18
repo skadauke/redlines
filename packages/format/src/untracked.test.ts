@@ -458,6 +458,22 @@ describe('deleting with Track Changes off (format §3.10, issue #24)', () => {
   });
 });
 
+describe('deleting the only body line of a callout with Track Changes off (#1112)', () => {
+  it('leaves an empty quote line, as every view reads it', () => {
+    const text = 'x\n\n> [!info]\n> 42 gamma\n\ndelta\n';
+    const from = text.indexOf('42 gamma');
+    const next = untrack(text, remove(from, from + 8));
+    expect(next).toBe('x\n\n> [!info]\n> \n\ndelta\n');
+    expect(newest(next)).toBe('x\n\n> [!info]\n> \n\ndelta');
+  });
+
+  it('still takes a wrapped line of a longer body with its break', () => {
+    const text = '> [!info]\n> one\n> two\n';
+    const from = text.indexOf('two');
+    expect(untrack(text, remove(from, from + 3))).toBe('> [!info]\n> one\n');
+  });
+});
+
 describe('what has no legal form with Track Changes off is refused (format §3.10)', () => {
   /** The message an untracked edit is refused with. */
   function message(text: string, edit: TextChange, author = bo): string {

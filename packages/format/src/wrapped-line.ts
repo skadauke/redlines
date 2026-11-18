@@ -194,7 +194,8 @@ export function wrappedLineStart(
   // indentation), starts at the text of the line, as a tracked change's does (`coverBreaks`): the
   // prefix goes with the break in front.
   const inPrefix = breaks.find((found) => lineStart(text, found.end) <= from && from < found.end);
-  if (inPrefix && to > inPrefix.end) from = inPrefix.end;
+  const inFront = inPrefix !== undefined && to > inPrefix.end;
+  if (inPrefix && inFront) from = inPrefix.end;
   // The range starts where the text of a line that goes on a paragraph does.
   if (lineStartKind(text, from, markers) !== 'continuation') return undefined;
   const old = visibleText(text, markers, from, to);
@@ -216,6 +217,14 @@ export function wrappedLineStart(
   // The lines are lines of one paragraph of text.
   const paragraph = wrappedParagraph(text, parsed, markers, from, marker);
   if (!paragraph || to > paragraph.to) return undefined;
+  // All the body of an alert, the lines under its type line: removed with the break, the callout
+  // would lose its body line, where every view reads an empty quote line (#1112).
+  // (A range that starts in the line's prefix takes the prefix too, and the line goes with its break.)
+  if (!marker && !inFront && lineEnd(text, to) >= paragraph.to) {
+    const above = lineStart(text, from) - 1;
+    const typeLine = visibleText(text, markers, lineStart(text, above), lineEnd(text, above));
+    if (lineStart(text, above) === paragraph.from && ALERT.test(typeLine)) return undefined;
+  }
   const start = front.start - trailingSyntax(text, front.start, floor);
   // A marker that follows a delimiter run would open what the views do not.
   if (
