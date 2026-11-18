@@ -138,3 +138,30 @@ describe("a delimiter of another person's pending bold, with Track Changes off (
     expect(editor.getDoc()).toBe(BOLD);
   });
 });
+
+describe('a delimiter typed beside a comment only is written, with no question (#265)', () => {
+  it('types the `*` where there is no change to accept', async () => {
+    const doc = [
+      'xx<!--cmt c8d2-->x<!--/c8d2--> end.',
+      '',
+      '<!-- redlines',
+      'version: 1',
+      'people:',
+      '  ada: {name: Ada Lovelace}',
+      'comments:',
+      '  c8d2:',
+      '    by: ada',
+      '    at: 2026-10-13T22:40Z',
+      '    text: |-',
+      '      A note.',
+      '-->',
+      '',
+    ].join('\n');
+    const { editor, asked } = load(doc, ['cancel']);
+    editor.view.dispatch({ selection: { anchor: 2 } });
+    type(editor, '*');
+    await tick();
+    expect(asked).toEqual([]);
+    expect(editor.getDoc()).toContain('xx*<!--cmt c8d2-->');
+  });
+});

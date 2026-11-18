@@ -3298,7 +3298,9 @@ that holds marks is held to the same reading: where the fine write would make a 
 reads otherwise than its newest view (a marker between a `*` and the text it flanks, as in Bo's
 pending `**1**` after a `1` when one `*` is deleted, #265), it is refused with `no-legal-placement`,
 and the editor answers with the question of §3.13 (accepting the pending changes in the unit, then
-making the edit). In Plain, with Track Changes off, the editor edits the source as written,
+making the edit). That holds only where the smallest unit that holds the edit has a change to accept:
+beside a comment or a highlight alone there is nothing to ask about, and the edit is written as it
+is. In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
@@ -3420,6 +3422,14 @@ substitution of this kind is written in the forms of §3.3 (a paragraph, a headi
 paragraph, a list item, a list) and of §3.5 (a code block, display math, raw-text HTML) and §3.7 (a
 table), and nothing about its markers differs from theirs.
 
+A new text that ends in one line break, in a unit inside a quote or an item (an Enter typed at its
+end, next to another person's insertion), is written with the closer before that break: the closer
+ends the unit's last line, where one on a line of its own would read as a block of the container.
+The break follows the closer as a plain line break, or is the blank line that follows the unit
+already, so that no blank line is added to the file. A text that ends in two or more line breaks, a
+delimiter, a risky line or an atomic block, or that is only line breaks, keeps the closer rule above
+(`widen.ts`, `tryRung`).
+
 The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
 and the views read the replacements it writes, and the writers that refuse today call it one unit at
 a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format change in a cell),
@@ -3472,6 +3482,18 @@ which start on the item's marker line) is tried again as the quote whole. Typing
 line after another person's split (`## x`, `- x`, `> x`, `1. x`, a letter or a space), and a block
 change of that line (heading, bullet, quote, number), are written this way: the substitution holds
 the split in its old text, and every order of decisions reads alike (#107, #276).
+
+A change that, to keep its markers clear of a delimiter run, takes in the letters beside it never goes
+in through the marker of another person's pending format change into its text, which would write
+their bold or italic again outside their mark. Where it would, the write that takes the text in is
+read in every order of decisions of the marks of its paragraph (`ordersReadOtherwiseNear` in
+`widen.ts`; only that paragraph is read in each state, with the ledger, so the cost does not grow with
+the file): if any order reads otherwise than its newest view, the unit is replaced whole instead;
+where all read alike, the fine write stays (#265). The reading has caps, and over any of them the unit
+is replaced, which is always sound: more than four marks in the paragraphs, more than 100 states, or a
+mark that runs out of them past three rounds of taking the paragraphs it spans in. An edit across a
+line break is no letter beside a run and is not read this way, and a table's cell is read by the rule
+that follows.
 
 In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that types a delimiter or a backslash, or stands
 against a delimiter, in a table that holds changes, is read in the file as it stands and after each
@@ -3579,7 +3601,8 @@ pending changes around it, is asked about in the same way, with its own title, "
 made without accepting Bo Chen's 2 pending changes in this paragraph. Make the edit?", Cancel and
 Make Edit, and no "Don't ask again". The pending changes in the smallest unit that holds the edit
 (§3.12), the person's own and other people's, are accepted, and the edit is made on the text that
-results, as one step, so that one Undo gives back the file as it was. Rejecting is never chosen for
+results, as one step, so that one Undo gives back the file as it was. It is asked only where that unit holds a change to accept: comments and highlights are not changes,
+and an edit beside them alone is written without a question. Rejecting is never chosen for
 the person. It is asked every time, since no answer to it stands for the next edit: the changes are
 gone after the first. Where accepting them doesn't let the edit be made either, the refusal stands as
 before. The same words are used for an input method's composition, asked about when it ends.

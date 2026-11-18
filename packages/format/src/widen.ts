@@ -535,7 +535,7 @@ function tryRung(
   const viewFrom = view.map.fromSource(rung.from);
   const viewTo = view.map.fromSource(rung.to);
   if (edits.some((edit) => edit.from < viewFrom || edit.to > viewTo)) return giveUp('span');
-  const now = applyChanges(
+  let now = applyChanges(
     view.text.slice(viewFrom, viewTo),
     edits.map((edit) => ({ ...edit, from: edit.from - viewFrom, to: edit.to - viewFrom })),
   );
@@ -595,7 +595,15 @@ function tryRung(
   // the top level, the closer stands in it and the payload ends with the block's line break.
   // A closer on a line of its own inside an item reads as a block of the item, which no marker may be:
   // a text that needs one there (it ends in a delimiter) goes to a unit that is not in a container.
-  if (
+  // A new text that ends in one line break (an Enter typed at the end of the unit) keeps the
+  // break after the closer, as a plain line break: the closer then ends the line before it.
+  const trail =
+    rung.prefix !== '' && !rung.atomic && !endsInDelimiter(now) && !riskyEnd(now, rung.prefix)
+      ? (/(?<![\r\n])\r?\n$/.exec(now)?.[0] ?? '')
+      : '';
+  if (trail !== '' && now.slice(0, now.length - trail.length).trim() !== '') {
+    now = now.slice(0, now.length - trail.length);
+  } else if (
     rung.prefix !== '' &&
     !rung.atomic &&
     (endsInDelimiter(now) || riskyEnd(now, rung.prefix) || /\n[ \t>]*$/.test(now))
@@ -639,6 +647,10 @@ function tryRung(
   const tight = rung.kind === 'list' && rung.parent ? rung.parent.tight : rung.tight;
   const lead = scaffold(rung.prefix, eol, tight);
   const body = now.replaceAll('\r\n', '\n').replaceAll('\n', eol);
+  // Where a blank line follows the unit already, the break it would write is that blank line.
+  const trailBreak = /^\r?\n[ \t>]*\r?\n/.test(next)
+    ? ''
+    : trail.replaceAll('\r\n', '\n').replaceAll('\n', eol);
   let written: string;
   let end = to;
   if (atomic) {
@@ -646,7 +658,7 @@ function tryRung(
     written = `${opener}${lead}${body}${html || (bare && rung.prefix === '') ? eol : ''}${eol}${line}`;
     if (blankAfter) end = to + eol.length;
   } else {
-    written = `${opener}${lead}${body}${closer}`;
+    written = `${opener}${lead}${body}${closer}${trailBreak}`;
   }
   const result = applyChanges(before, [{ from, to: end, insert: written }]);
   const done = withLedger(result, ledger);
@@ -1055,6 +1067,100 @@ function stretchOf(
   return across(from) || across(to) ? undefined : here;
 }
 
+/** The HTML that micromark, with GFM, reads `source` as, with comments and white space folded. */
+function readHtml(source: string): string {
+  return micromark(source, {
+    allowDangerousHtml: true,
+    extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+    htmlExtensions: [
+      gfmAutolinkLiteralHtml(),
+      gfmStrikethroughHtml(),
+      gfmTableHtml(),
+      gfmTaskListItemHtml(),
+    ],
+  })
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
+}
+
+/** The most marks in a paragraph that are decided in every order, and the most states read; over
+ * either the unit is replaced, which is safe (#265). */
+const MOST_NEAR_MARKS = 4;
+const MOST_STATES = 100;
+
+/**
+ * Whether `file`, a write that took in text of another person's format change, reads otherwise than
+ * its newest view (micromark) in some order of deciding the marks of the paragraph or paragraphs
+ * from `first` to `last`, or has more than four of them, or more states than are read, or a mark
+ * that runs out of them (#265). Only that stretch is read in each state, with the ledger after it,
+ * so that the cost does not grow with the file. A decision that is refused ends its order.
+ */
+export function ordersReadOtherwiseNear(file: string, first: number, last: number): boolean {
+  const parsed = parse(file);
+  const end = parsed.ledgerRange?.from ?? file.length;
+  const startOf = (at: number) => {
+    const before = file.lastIndexOf('\n\n', Math.max(0, at - 1));
+    return before < 0 ? 0 : before + 2;
+  };
+  const endOf = (at: number) => {
+    const after = file.indexOf('\n\n', Math.min(at, end));
+    return after < 0 || after > end ? end : after;
+  };
+  let from = startOf(first);
+  let to = endOf(last);
+  // A mark that runs out of the paragraphs takes the paragraphs it spans in, a few times over; past
+  // that the unit is replaced.
+  let ids = new Set<string>();
+  for (let round = 0; ; round++) {
+    ids = new Set<string>();
+    let grown = false;
+    for (const mark of parsed.marks) {
+      if (mark.kind === 'cmt' || mark.kind === 'hl') continue;
+      for (const segment of mark.segments) {
+        const stop = segment.close?.to ?? segment.open.to;
+        const inside = segment.open.from >= from && stop <= to;
+        const touches = segment.open.to > from && segment.open.from < to;
+        if (touches && !inside) {
+          from = Math.min(from, startOf(segment.open.from));
+          to = Math.max(to, endOf(stop));
+          grown = true;
+        } else if (inside) ids.add(mark.id);
+      }
+    }
+    if (!grown) break;
+    if (round >= 3) return true;
+  }
+  if (ids.size > MOST_NEAR_MARKS) return true;
+  // The ledger only: the body after the stretch holds no mark that a decision here could reach.
+  const tail = file.slice(end);
+  const seen = new Set<string>();
+  const walk = (stretch: string): boolean => {
+    if (seen.has(stretch)) return true;
+    seen.add(stretch);
+    if (seen.size > MOST_STATES) return false;
+    if (readHtml(stretch) !== readHtml(newestView(stretch).text)) return false;
+    const current = stretch + tail;
+    for (const mark of parse(current).marks) {
+      if (!ids.has(mark.id)) continue;
+      for (const decide of [accept, reject]) {
+        let next: string;
+        try {
+          next = applyChanges(current, decide(current, mark.id));
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          continue;
+        }
+        // The ledger changes with a decision; the stretch is what comes before it.
+        if (!walk(next.slice(0, parse(next).ledgerRange?.from ?? next.length))) return false;
+      }
+    }
+    return true;
+  };
+  return !walk(file.slice(from, to));
+}
+
 /**
  * Whether micromark reads the file the changes make otherwise than its newest view. Only the
  * paragraphs the changes are in are read (`stretchOf`); otherwise, or with `whole`, the whole file,
@@ -1068,21 +1174,7 @@ export function readsOtherMicromark(
   const file = applyChanges(text, changes);
   const parsed = parse(file);
   const ledger = parsed.ledgerRange;
-  const read = (source: string) =>
-    micromark(source, {
-      allowDangerousHtml: true,
-      extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
-      htmlExtensions: [
-        gfmAutolinkLiteralHtml(),
-        gfmStrikethroughHtml(),
-        gfmTableHtml(),
-        gfmTaskListItemHtml(),
-      ],
-    })
-      .replace(/<!--[^]*?-->/g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/ ?(<[^>]*>) ?/g, '$1')
-      .trim();
+  const read = readHtml;
   const body = ledger ? file.slice(0, ledger.from) : file;
   const here = whole ? undefined : stretchOf(body, parsed, changes);
   const afterRead = here ?? body;

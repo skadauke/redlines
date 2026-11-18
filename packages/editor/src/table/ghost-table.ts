@@ -52,6 +52,9 @@ interface Owner {
   color: number;
 }
 
+/** A marker of the file, whose text holds no `-->`. */
+const MARKER = /<!--(?:[^-]|-(?!->))*-->/g;
+
 /** The cell's text as runs, in the color of the person whose deletion each stretch is. */
 function runsOf(cell: DeletedCell, owners: readonly Owner[], fallback: number): GhostRun[] {
   const runs: GhostRun[] = [];
@@ -60,7 +63,8 @@ function runsOf(cell: DeletedCell, owners: readonly Owner[], fallback: number): 
     const owner = owners.find((candidate) => at < candidate.to);
     const to = Math.min(end, owner?.to ?? end);
     const color = owner?.color ?? fallback;
-    const text = cell.text.slice(at - cell.at, to - cell.at);
+    // The old text keeps other people's marks as written; they are no text of the cell.
+    const text = cell.text.slice(at - cell.at, to - cell.at).replace(MARKER, '');
     const last = runs.at(-1);
     if (last?.color === color) last.text += text;
     else runs.push({ text, color });

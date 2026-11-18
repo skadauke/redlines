@@ -18,7 +18,7 @@ import type { MarkdownDialect } from './dialect.ts';
 import { assertWholeCharacters } from './characters.ts';
 import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
-import { accept, reject } from './decide.ts';
+import { accept, changesIn, reject } from './decide.ts';
 import { encodePayload } from './payload.ts';
 import { readLine } from './table.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
@@ -56,7 +56,8 @@ import {
 } from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
-import { atDelimiter, readsOtherMicromark } from './widen.ts';
+import { atDelimiter, readsOtherAsIs, readsOtherMicromark } from './widen.ts';
+import { unitsOf } from './widen-units.ts';
 import { wrappedLineStart } from './wrapped-line.ts';
 
 /**
@@ -584,6 +585,69 @@ function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[]
   return null;
 }
 
+/** The smallest unit that holds the edit, as the editor's accept plan finds it. */
+function unitRange(text: string, edit: TextChange): Range {
+  let units = unitsOf(text, parse(text)).filter(
+    (unit) => unit.lineFrom <= edit.to && edit.from <= unit.to,
+  );
+  while (units.length === 1) {
+    const inside = units[0]!.children.filter(
+      (unit) => unit.lineFrom <= edit.to && edit.from <= unit.to,
+    );
+    if (inside.length === 0) break;
+    units = inside;
+  }
+  const first = units[0];
+  const last = units.at(-1);
+  return first && last ? { from: first.lineFrom, to: last.to } : { from: edit.from, to: edit.to };
+}
+
+/** A pending deletion or replacement whose old text holds a delimiter run (`<!--del k3x9 **-->`). */
+const DELIMITER_PAYLOAD = /<!--(?:del|sub) \w+ [^>]*[*_~]/;
+/** Such a deletion right after the edit, or right before it, with other markers between at most. */
+const AHEAD = new RegExp(`^(?:<!--(?!(?:del|sub) )(?:(?!-->)[^])*-->)*${DELIMITER_PAYLOAD.source}`);
+const BEHIND = /<!--(?:del|sub) \w+ [^>]*[*_~][^>]*-->(?:<!--(?:(?!-->)[^])*-->)*$/;
+
+/**
+ * Whether the file that `changes` make reads otherwise than its newest view after deciding a change
+ * of another person's whose old text holds a delimiter run, where the file as it is reads alike
+ * (`*ab` and a deleted `**`: rejecting the deletion leaves `*ab**`, #265). The edit is no delimiter
+ * of its own here, so `atDelimiter` doesn't see it; the decisions are tried only where the edit stands
+ * against such a deletion.
+ */
+function readsOtherInDecisions(text: string, changes: readonly TextChange[]): boolean {
+  // Only an edit right against the deletion: with other markers between at most.
+  const beside = changes.some(
+    (change) =>
+      AHEAD.test(text.slice(change.to, change.to + 600)) ||
+      BEHIND.test(text.slice(Math.max(0, change.from - 600), change.from)),
+  );
+  if (!beside) return false;
+  const after = applyChanges(text, changes);
+  const ids = parse(after).marks.filter(
+    (mark) => mark.kind === 'del' || mark.kind === 'sub' || mark.kind === 'ins',
+  );
+  const known = new Set(parse(text).marks.map((mark) => mark.id));
+  const decide = (file: string, id: string, how: typeof accept): string | undefined => {
+    try {
+      return applyChanges(file, how(file, id));
+    } catch (error) {
+      if (error instanceof EditError) return undefined;
+      throw error;
+    }
+  };
+  for (const { id } of ids.slice(0, 8)) {
+    if (!known.has(id)) continue;
+    for (const how of [accept, reject]) {
+      const now = decide(after, id, how);
+      if (now === undefined || !readsOtherAsIs(now)) continue;
+      const was = decide(text, id, how);
+      if (was === undefined || !readsOtherAsIs(was)) return true;
+    }
+  }
+  return false;
+}
+
 function edited(
   text: string,
   edit: TextChange,
@@ -600,8 +664,11 @@ function edited(
     if (
       !half &&
       changes.length > 0 &&
-      atDelimiter(text, changes) &&
-      readsOtherMicromark(text, changes)
+      ((atDelimiter(text, changes) && readsOtherMicromark(text, changes)) ||
+        readsOtherInDecisions(text, changes)) &&
+      // Only where the editor has something to accept (`acceptPlan`): a paragraph with only comments
+      // and highlights has no change to decide, and the edit is written as it was.
+      changesIn(parse(text), unitRange(text, edit)).length > 0
     ) {
       throw new EditError(ACCEPT_FIRST, 'no-legal-placement');
     }

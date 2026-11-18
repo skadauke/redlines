@@ -1086,3 +1086,39 @@ describe("a delimiter taken out beside another person's pending format, Track Ch
     expect(refusal(plain, remove(2, 3))).toBeUndefined();
   });
 });
+
+describe('a delimiter beside a comment or a highlight only is written, not asked about (#265)', () => {
+  it('writes where no change is there to accept', () => {
+    const hl = 'foo*<!--hl k3x9-->bar<!--/k3x9-->';
+    const highlighted = file(hl, { k3x9: 'bo' });
+    expect(refusal(highlighted, type(hl.length, '*'))).toBeUndefined();
+    const cmt = '2*<!--cmt c8d2-->3<!--/c8d2--> and 4^5';
+    const commented = file(cmt, {}, thread('c8d2'));
+    expect(refusal(commented, type(cmt.indexOf('^'), '*'))).toBeUndefined();
+    const lone = 'xx*<!--cmt c8d2-->x<!--/c8d2-->';
+    expect(refusal(file(lone, {}, thread('c8d2')), type(lone.length, '*'))).toBeUndefined();
+  });
+});
+
+describe("a plain edit beside another person's pending deletion of a delimiter run (#265)", () => {
+  // `*xy ` and Bo's deleted `**` under a comment: replacing `xy ` by `ab` leaves `*ab`, and rejecting the
+  // deletion puts the comment's end between `ab` and its `**`, which reads otherwise than the newest
+  // view. The deletion's delimiters are in no visible text, so the edit doesn't show one.
+  const del = '<!--cmt c8d2--><!--del k3x9 **--><!--/c8d2-->';
+  for (const [what, wrap] of [
+    ['a paragraph', (line: string) => line],
+    ['a cell', (line: string) => `| a | b |\n| --- | --- |\n| c | ${line}`],
+  ] as const) {
+    it(`asks first in ${what}, and the accepted plan reads alike`, () => {
+      const body = wrap(`*xy ${del}`);
+      const text = file(body, { k3x9: 'bo' }, thread('c8d2'));
+      const at = body.indexOf('xy ');
+      expect(refusal(text, replace(at, at + 3, 'ab'))).toBe('no-legal-placement');
+      const accepted = applyChanges(text, accept(text, 'k3x9'));
+      const x = bodyOf(accepted).indexOf('xy ');
+      const after = applyChanges(accepted, untrackedEdit(accepted, replace(x, x + 3, 'ab')));
+      expect(newest(after)).toBe(wrap('*ab'));
+      expectSound(what, after);
+    });
+  }
+});
