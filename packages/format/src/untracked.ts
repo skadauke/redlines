@@ -604,22 +604,25 @@ function unitRange(text: string, edit: TextChange): Range {
 
 /** A pending deletion or replacement whose old text holds a delimiter run (`<!--del k3x9 **-->`). */
 const DELIMITER_PAYLOAD = /<!--(?:del|sub) \w+ [^>]*[*_~]/;
+/** Such a deletion right after the edit, or right before it, with other markers between at most. */
+const AHEAD = new RegExp(`^(?:<!--(?!(?:del|sub) )(?:(?!-->)[^])*-->)*${DELIMITER_PAYLOAD.source}`);
+const BEHIND = /<!--(?:del|sub) \w+ [^>]*[*_~][^>]*-->(?:<!--(?:(?!-->)[^])*-->)*$/;
 
 /**
  * Whether the file that `changes` make reads otherwise than its newest view after deciding a change
  * of another person's whose old text holds a delimiter run, where the file as it is reads alike
  * (`*ab` and a deleted `**`: rejecting the deletion leaves `*ab**`, #265). The edit is no delimiter
- * of its own here, so `atDelimiter` doesn't see it; the decisions are tried only where the paragraph
- * holds such a deletion.
+ * of its own here, so `atDelimiter` doesn't see it; the decisions are tried only where the edit stands
+ * against such a deletion.
  */
 function readsOtherInDecisions(text: string, changes: readonly TextChange[]): boolean {
-  const first = changes.reduce((a, c) => Math.min(a, c.from), Infinity);
-  const last = changes.reduce((a, c) => Math.max(a, c.to), 0);
-  let from = text.lastIndexOf('\n\n', Math.max(0, first - 1));
-  from = from < 0 ? 0 : from;
-  let to = text.indexOf('\n\n', last);
-  to = to < 0 ? text.length : to;
-  if (!DELIMITER_PAYLOAD.test(text.slice(from, to))) return false;
+  // Only an edit right against the deletion: with other markers between at most.
+  const beside = changes.some(
+    (change) =>
+      AHEAD.test(text.slice(change.to, change.to + 600)) ||
+      BEHIND.test(text.slice(Math.max(0, change.from - 600), change.from)),
+  );
+  if (!beside) return false;
   const after = applyChanges(text, changes);
   const ids = parse(after).marks.filter(
     (mark) => mark.kind === 'del' || mark.kind === 'sub' || mark.kind === 'ins',
