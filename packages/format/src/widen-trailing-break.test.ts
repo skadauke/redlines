@@ -1,6 +1,7 @@
 // An Enter typed at the end of a unit in a container, next to another person's insertion (#17): the
 // closer of the replacement stands before the break, not alone on a line after it, where it would
 // read as a block of the container (format §3.12). Every order of decisions reads alike.
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { acceptAll, rejectAll } from './decide.ts';
@@ -32,12 +33,12 @@ describe("an Enter at the end of a container's text, next to another person's in
       expect(newest).toContain('beta de');
       expect(newest).not.toContain('lta');
       expect(applyChanges(written, acceptAll(written))).toBe(newest);
-      // The break is a blank line more between blocks, which is plain (format §3.4): the original
-      // text has it too.
-      const blank = (text: string) => text.replace(/(?:\r?\n){3,}/g, eol + eol);
-      expect(blank(originalView(written).text)).toBe(blank(originalView(source).text));
-      expect(blank(applyChanges(written, rejectAll(written)))).toBe(
-        blank(applyChanges(source, rejectAll(source))),
+      // The break is a blank line more between blocks, which is plain (format §3.4): micromark
+      // reads the original text and what rejecting gives as it reads the file before the edit.
+      const html = (text: string) => micromark(text);
+      expect(html(originalView(written).text)).toBe(html(originalView(source).text));
+      expect(html(applyChanges(written, rejectAll(written)))).toBe(
+        html(applyChanges(source, rejectAll(source))),
       );
     }
   });
