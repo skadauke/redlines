@@ -6,7 +6,9 @@ waiting in it (design §10). R Markdown and Quarto files too, where no other app
 extensions as its own type. This folder is that preview: the renderer, and the
 Swift extension that hosts it. The app builds it as part of `pnpm build`
 (`apps/desktop/scripts/build-quicklook`), and carries it as
-`Redlines.app/Contents/PlugIns/RedlinesPreview.appex`.
+`Redlines.app/Contents/PlugIns/RedlinesPreview.appex`. It carries a second extension beside it,
+`RedlinesThumbnail.appex`, which draws the page's first blocks as the thumbnail of the file in Finder
+(`swift/thumbnail`, `ThumbnailPage.swift`, `src/thumbnail.ts`).
 
 ## The renderer (`src/`)
 
