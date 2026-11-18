@@ -110,5 +110,7 @@ describe('a block move in 2,000 blocks with 200 pending changes', () => {
       console.log(`MOVE plain ${middle(plain).toFixed(2)} moved ${middle(moved).toFixed(2)}`);
       expect(middle(moved)).toBeLessThan(middle(plain) * 24 + 5);
     },
+    // Twenty-five moves at about 115 ms each on a CI runner, with their keys: more than the 5 s default.
+    60_000,
   );
 });
