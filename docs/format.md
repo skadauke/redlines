@@ -3571,7 +3571,8 @@ pending changes around it, is asked about in the same way, with its own title, "
 made without accepting Bo Chen's 2 pending changes in this paragraph. Make the edit?", Cancel and
 Make Edit, and no "Don't ask again". The pending changes in the smallest unit that holds the edit
 (§3.12), the person's own and other people's, are accepted, and the edit is made on the text that
-results, as one step, so that one Undo gives back the file as it was. Rejecting is never chosen for
+results, as one step, so that one Undo gives back the file as it was. It is asked only where that unit holds a change to accept: comments and highlights are not changes,
+and an edit beside them alone is written without a question. Rejecting is never chosen for
 the person. It is asked every time, since no answer to it stands for the next edit: the changes are
 gone after the first. Where accepting them doesn't let the edit be made either, the refusal stands as
 before. The same words are used for an input method's composition, asked about when it ends.
