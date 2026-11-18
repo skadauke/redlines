@@ -282,7 +282,15 @@ function assertMarksKept(
           continue;
         }
         const at = forward(changes, range.from);
-        if (at === null || !read.has(at)) hidden();
+        if (at === null) {
+          // A marker that the decision keeps and that the changes, joined into one, write again: it must be
+          // written, and read where it is (a comment in the new text of a table's replacement, rejected: #265).
+          const marker = before.text.slice(range.from, range.to);
+          if (!changes.some((change) => change.insert.includes(marker))) hidden();
+          if (!carriedRead(before.text, range, changes, read)) hidden();
+          continue;
+        }
+        if (!read.has(at)) hidden();
       }
     }
   }
