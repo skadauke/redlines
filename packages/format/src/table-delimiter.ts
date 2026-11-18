@@ -47,7 +47,7 @@ export function readsOtherInDecisions(
   // table's row has a pipe on its own line or on one next to it, and the edit stands against a delimiter.
   // The text typed holds a delimiter, or the edit stands against one: the first can pair with a run beside a marker
   // that the old text beside the edit does not show (spaces, a pipe).
-  const typed = edits.some((edit) => /[*_~]/.test(edit.insert));
+  const typed = edits.some((edit) => /[*_~\\]/.test(edit.insert));
   if (!(typed || besideDelimiter(text, { from, to })) || !nearPipe(text, from, to)) return false;
   if (!readTables(text, parse(text)).some((table) => from <= table.to && table.from <= to)) {
     return false;

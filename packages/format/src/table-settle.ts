@@ -42,7 +42,11 @@ export function marksOfTablesAt(text: string, range: Range): Set<string> {
     for (const mark of parsed.marks) {
       if (mark.kind === 'cmt' || mark.kind === 'hl') continue;
       const at = mark.segments[0]?.open.from ?? -1;
-      if (at < table.from || at > last) continue;
+      // A change that holds the whole table (another person's replacement of it) is decided with it too.
+      const holds = mark.segments.some(
+        (seg) => seg.open.from <= table.from && (seg.close?.to ?? seg.open.to) >= table.to,
+      );
+      if (!holds && (at < table.from || at > last)) continue;
       if (mark.kind === 'ins' && mark.payload === 'row') {
         const row = table.rows.findIndex((r) => r.from <= at && at <= r.to);
         if (row < lo || row > hi) continue;
@@ -63,7 +67,7 @@ export function besideDelimiter(text: string, range: Range): boolean {
   return [range.from, range.to].some((at) => {
     const before = plain(text.slice(Math.max(0, at - 200), at));
     const after = plain(text.slice(at, at + 200));
-    return /[*_~]/.test(before.slice(-1)) || /[*_~]/.test(after.slice(0, 1));
+    return /[*_~\\]/.test(before.slice(-1)) || /[*_~\\]/.test(after.slice(0, 1));
   });
 }
 

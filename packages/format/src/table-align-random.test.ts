@@ -222,8 +222,6 @@ interface Found {
   plain: boolean;
 }
 
-/** The delimiters of emphasis, next to the end or the start of a marker, or in the old text that a marker keeps. */
-const DELIMITER_BY_MARKER = /[*_~]<!--|-->[*_~]|<!--(?:del|sub) \w{4} [^>]*[*_~]/;
 /** The checks that fail where Markdown reads the text otherwise than the view does. */
 const READS_OTHERWISE = [
   'the file reads otherwise than its newest view',
@@ -244,16 +242,6 @@ const LINK_IN_OLD_TEXT =
  * first. A shape that none of these says is new, and fails the suite: file an issue for it, and add it here.
  */
 const OLDER: { issue: string; why: string; shape: (found: Found) => boolean }[] = [
-  {
-    issue: '#265',
-    why: 'a delimiter run next to another person’s pending change, or a change over their deletion of a backslash, reads otherwise in some order of decisions',
-    // (not for a walk that made a plain edit: with Track Changes off the edit beside such a delimiter is
-    // held until the other person's changes are accepted, and the file is not left that way, #265)
-    shape: ({ control, checks, plain }) =>
-      !plain &&
-      READS_OTHERWISE.includes(checks[0] ?? '') &&
-      (DELIMITER_BY_MARKER.test(control) || /<!--(?:del|sub) \w{4} [^>]*\\/.test(control)),
-  },
   {
     issue: '#467',
     why: 'rejecting deletions that cut an HTML entity (an `&` and a letter), beside a comment, leaves a marker inside the entity, and the same holds of the start of an HTML tag (a `<` and a letter) that a pending deletion or replacement keeps, and of a link whose `]` it keeps, a comment right after it and the `(` of the link after that: the file reads otherwise in some order of decisions',

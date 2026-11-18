@@ -3473,7 +3473,7 @@ line after another person's split (`## x`, `- x`, `> x`, `1. x`, a letter or a s
 change of that line (heading, bullet, quote, number), are written this way: the substitution holds
 the split in its old text, and every order of decisions reads alike (#107, #276).
 
-In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that stands
+In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that types a delimiter or a backslash, or stands
 against a delimiter, in a table that holds changes, is read in the file as it stands and after each
 accept and reject of the table's changes (`readsOtherInDecisions`, `table-delimiter.ts`); where one of
 them reads otherwise than the newest view and the file before the edit had none, the table that holds the
