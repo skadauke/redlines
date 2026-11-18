@@ -3248,7 +3248,10 @@ In a file with full history, such an edit is an `edit` event (§6.2).
 **Deleted text is gone for good,** with what was pending about it, as when a deletion is accepted.
 A deletion of all the text of a wrapped line takes the same range as with Track Changes on (§3.2): the
 line and the line break in front of it, with the prefix of the line and the spaces or the backslash
-that end the line above it. Left in, the empty line would be a paragraph break (#427).
+that end the line above it. Left in, the empty line would be a paragraph break (#427). The one
+exception is all the body of an alert (the lines under its `[!TYPE]` line), deleted from the start
+of the text: the line stays with its quote marker, an empty quote line, as every view reads it
+(#1112), and the callout keeps its type line and a body line.
 
 - A mark whose text is all deleted goes, with its ledger entry: an insertion, a highlight or a
   format change with nothing left in it, and a split whose break is deleted. A mark that keeps some
