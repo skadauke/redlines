@@ -261,6 +261,12 @@ describe('stray blank lines', () => {
     expect(strayBlankLines('One.\n\nTwo.\n')).toEqual([]);
     expect(strayBlankLines('One.\n\n\nTwo.\n')).toHaveLength(1);
     expect(strayBlankLines('```\na\n\n\nb\n```\n')).toEqual([]);
+    // Blank lines of front matter and of indented code are content (#606).
+    expect(strayBlankLines('---\ntags: [a, b]\n\n\nx: 1\n---\n\nText.\n')).toEqual([]);
+    expect(strayBlankLines('Para.\n\n     a a\n\n\n    code a\n')).toEqual([]);
+    expect(emptyParagraphs('Para.\n\n     a a\n\n\n\n    code a\n')).toEqual([]);
+    expect(emptyParagraphs('```\n```\n\n\n\n      code a\n')).toEqual([]);
+    expect(strayBlankLines('One.\n\n\n    Two.\n')).toHaveLength(1);
   });
 });
 
