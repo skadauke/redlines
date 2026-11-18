@@ -8,7 +8,14 @@
 // writer all of them share: they differ in why the fine form failed, not in what to write.
 
 import { isPandoc, withDialect } from './dialect.ts';
-import { scaffold, continuationPrefix, bodyStart, lineEnd, lineStart } from './blocks.ts';
+import {
+  INCLUDE_LINE,
+  scaffold,
+  continuationPrefix,
+  bodyStart,
+  lineEnd,
+  lineStart,
+} from './blocks.ts';
 import { micromark } from 'micromark';
 import {
   gfmAutolinkLiteral,
@@ -693,6 +700,8 @@ function riskyEnd(text: string, prefix: string): boolean {
   const line = lastLineOf(text, prefix);
   // The fence of a pandoc div: nothing but the fence may be on its line (format §3.1, rule 9).
   if (isPandoc() && /^[ \t>]*:{3,}/.test(line)) return true;
+  // A Quarto include line, alone on its line, takes no marker after it either (#1087).
+  if (isPandoc() && INCLUDE_LINE.test(line)) return true;
   return RISKY_LINES.some((risky) => risky.test(line));
 }
 
@@ -870,10 +879,89 @@ export function delimiterBesideBreak(text: string, edits: readonly TextChange[])
   });
 }
 
-/** Whether micromark reads the file the changes make otherwise than its newest view. */
-export function readsOtherMicromark(text: string, changes: readonly TextChange[]): boolean {
+/** Where each change of `changes` ends up in the text they make: the stretch they touch there. */
+function changedStretch(
+  changes: readonly TextChange[],
+  limit: number,
+): { from: number; to: number } | undefined {
+  let delta = 0;
+  let from = Infinity;
+  let to = -Infinity;
+  for (const change of changes.toSorted((a, b) => a.from - b.from || a.to - b.to)) {
+    // (the ledger is no text of the file's body)
+    if (change.from + delta < limit) {
+      from = Math.min(from, change.from + delta);
+      to = Math.max(to, change.from + delta + change.insert.length);
+    }
+    delta += change.insert.length - (change.to - change.from);
+  }
+  return from === Infinity ? undefined : { from, to };
+}
+
+/** Raw HTML that goes on past a blank line: a tag of raw text, a processing instruction, a declaration. */
+const RAW_HTML = /<(?:pre|script|style|textarea)\b|<\?|<![A-Za-z[]/i;
+
+/**
+ * Whether text above a stretch can leave a block open in it: a fence that isn't plainly one (not
+ * at the start of a line, or of the other kind, or not closed), raw HTML, or a comment that
+ * isn't closed.
+ */
+function opensBlock(above: string): boolean {
+  const fences = above.match(/^.*(?:`{3,}|~{3,}).*$/gm) ?? [];
+  if (fences.length % 2 === 1) return true;
+  let kind = '';
+  for (const line of fences) {
+    const plain = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (!plain) return true;
+    if (kind && kind !== plain[1]![0]) return true;
+    kind = plain[1]![0]!;
+  }
+  return RAW_HTML.test(above) || above.split('<!--').length !== above.split('-->').length;
+}
+
+/**
+ * The paragraphs the changes are in, between blank lines, of `body` (the file without its ledger),
+ * where reading them alone reads them as the file does: no fence or raw HTML open above or in them,
+ * no mark across their edges, no CRLF; undefined where it is not so.
+ */
+function stretchOf(
+  body: string,
+  parsed: Parsed,
+  changes: readonly TextChange[],
+): string | undefined {
+  const stretch = changedStretch(changes, body.length);
+  if (!stretch || stretch.to > body.length || body.length <= 2000 || body.includes('\r')) {
+    return undefined;
+  }
+  const lastBreak = body.lastIndexOf('\n\n', Math.max(0, stretch.from - 1));
+  const nextBreak = body.indexOf('\n\n', stretch.to);
+  const from = lastBreak < 0 ? 0 : lastBreak + 2;
+  const to = nextBreak < 0 ? body.length : nextBreak;
+  const here = body.slice(from, to);
+  if (opensBlock(body.slice(0, from)) || opensBlock(here)) return undefined;
+  // A mark that runs across a blank line is cut in two by the stretch.
+  const across = (at: number) =>
+    parsed.marks.some((mark) =>
+      mark.segments.some(
+        (segment) => segment.open.from < at && (segment.close?.to ?? Infinity) > at,
+      ),
+    );
+  return across(from) || across(to) ? undefined : here;
+}
+
+/**
+ * Whether micromark reads the file the changes make otherwise than its newest view. Only the
+ * paragraphs the changes are in are read (`stretchOf`); otherwise, or with `whole`, the whole file,
+ * which costs the size of the file: 380 ms for a key in 100 KB.
+ */
+export function readsOtherMicromark(
+  text: string,
+  changes: readonly TextChange[],
+  whole = false,
+): boolean {
   const file = applyChanges(text, changes);
-  const ledger = parse(file).ledgerRange;
+  const parsed = parse(file);
+  const ledger = parsed.ledgerRange;
   const read = (source: string) =>
     micromark(source, {
       allowDangerousHtml: true,
@@ -889,5 +977,8 @@ export function readsOtherMicromark(text: string, changes: readonly TextChange[]
       .replace(/\s+/g, ' ')
       .replace(/ ?(<[^>]*>) ?/g, '$1')
       .trim();
-  return read(ledger ? file.slice(0, ledger.from) : file) !== read(newestView(file).text);
+  const body = ledger ? file.slice(0, ledger.from) : file;
+  const here = whole ? undefined : stretchOf(body, parsed, changes);
+  if (here !== undefined) return read(here) !== read(newestView(here).text);
+  return read(body) !== read(newestView(file).text);
 }

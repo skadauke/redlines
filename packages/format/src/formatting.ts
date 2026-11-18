@@ -2351,6 +2351,8 @@ function formatTracked(
   const body: TextChange[] = [];
   const extended: string[] = [];
   let removes = false;
+  // The marks of the same person that two ranges both lie in, which are taken off or put on once.
+  const unwrapped = new Set<string>();
   for (const { steps, region } of blocks) {
     const ids = new Map<number, string>();
     const unmarked: TextChange[] = [];
@@ -2376,6 +2378,8 @@ function formatTracked(
       } else if (step.kind === 'wrap') {
         const { a, b, opener, left, right, op: written, own } = step;
         if (own !== undefined) {
+          if (unwrapped.has(`+${a}:${b}`)) continue;
+          unwrapped.add(`+${a}:${b}`);
           const changes = [
             { from: a, to: a, insert: left },
             { from: b, to: b, insert: right },
@@ -2394,6 +2398,8 @@ function formatTracked(
       } else if (step.kind === 'unwrap') {
         const { opens, closes, opener, op: written, depth, own } = step;
         if (own !== undefined) {
+          if (unwrapped.has(`-${opens.from}:${closes.from}`)) continue;
+          unwrapped.add(`-${opens.from}:${closes.from}`);
           const changes = [
             { ...opens, insert: '' },
             { ...closes, insert: '' },

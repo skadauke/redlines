@@ -43,7 +43,11 @@ function documentOf(blocks: number): string {
         `<!-- an ordinary comment -->\n\n${WORDS} <!-- and another --> text`,
         `plain ${WORDS}\n\nand another plain paragraph ${n}`,
         `line one <!--split ${a}-->\nline two ${n} <!--cmt ${b}-->commented<!--/${b}-->`,
-      ][n % 10]!,
+        // Blocks inserted whole, the opening marker on a line of its own (#1025): a run of them has
+        // no plain paragraph between, and each is a firm stretch of its own.
+        `<!--ins ${a}-->\n\nAn inserted block ${n}.<!--/${a}-->\n\n<!--ins ${b}-->\n\nAnd another, ${WORDS}.<!--/${b}-->`,
+        `<!--ins ${a}-->\n\nA block ${n} that holds a comment <!-- aside --> in it.<!--/${a}-->`,
+      ][n % 12]!,
     );
   }
   const ids = IDS.slice(0, Math.min(m, IDS.length));
@@ -147,6 +151,58 @@ describe('the tracked display, kept and drawn again in windows', () => {
         }
       }
       // Most of the steps were drawn in windows, not whole.
+      expect(trackedStats.windowed).toBeGreaterThan(trackedStats.whole * 3);
+    },
+    120_000,
+  );
+
+  it.each([5, 13, 29])(
+    'is what drawing it all again gives in a text of blocks inserted whole, with no plain paragraph (seed %i)',
+    (seed) => {
+      const parts: string[] = [];
+      const ids = IDS.slice(0, 120);
+      ids.forEach((id, n) => {
+        // Every fifth block's text is a table, a list or a fence, which no window may be cut across.
+        const text = [
+          `Inserted block ${n}, ${WORDS}.`,
+          `| a | b |\n| - | - |\n| ${n} | x |`,
+          `- item ${n}\n- item two`,
+          '```\ncode\n```',
+        ][n % 5 < 3 ? 0 : (n % 5) - 2]!;
+        parts.push(`<!--ins ${id}-->\n\n${text}<!--/${id}-->`);
+      });
+      const entries = ids.map((id) => `  ${id}: {by: ada, at: 2026-10-31T09:30Z}\n`).join('');
+      const doc = `${parts.join('\n\n')}\n\n<!-- redlines\nversion: 1\nmarks:\n${entries}-->\n`;
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author, view: 'redlines' });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const next = random(seed);
+      trackedStats.windowed = trackedStats.whole = 0;
+      for (let step = 0; step < 200; step++) {
+        const length = view.state.doc.length;
+        const pos = Math.floor(next() * length);
+        const kind = next();
+        let what: string;
+        if (kind < 0.5) {
+          const insert = SNIPPETS[Math.floor(next() * SNIPPETS.length)]!;
+          view.dispatch({
+            changes: { from: pos, insert },
+            selection: { anchor: pos + insert.length },
+          });
+          what = `insert ${JSON.stringify(insert)} at ${pos}`;
+        } else if (kind < 0.7) {
+          const to = Math.min(length, pos + Math.floor(next() * 60));
+          view.dispatch({ changes: { from: pos, to } });
+          what = `delete ${pos}-${to}`;
+        } else {
+          view.dispatch({ selection: { anchor: pos } });
+          what = `select ${pos}`;
+        }
+        expect(keptDisplay(view.state), what).toEqual(freshDisplay(view.state));
+      }
       expect(trackedStats.windowed).toBeGreaterThan(trackedStats.whole * 3);
     },
     120_000,

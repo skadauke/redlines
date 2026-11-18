@@ -156,6 +156,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   ['packages/editor/src/blocks/tab.ts', 'THEIR_SPLIT', 'widen', 'inventory #1'],
   [
+    'packages/editor/src/blocks/move.ts',
+    'UNCLOSED_FENCE',
+    'disable',
+    'a fence nothing closes holds the blocks after it wherever the move puts it (#1103)',
+  ],
+  [
     'packages/editor/src/blocks/tab.ts',
     'error.message',
     'info',
