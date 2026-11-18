@@ -11,7 +11,7 @@
 // half that pairs across cells (#480), a step that hides the file's ledger or brings a hidden one back
 // (#483), and a file that fails the same first check without the mark (the file with the mark cut out
 // fails the check that the file fails first, as the alignment suite holds it), in a table with a half
-// (#480, #483) or with a delimiter run before a tag (#265). `REDLINES_FUZZ` sets how many tables (6000
+// (#480, #483). `REDLINES_FUZZ` sets how many tables (6000
 // before a stage merges), and `REDLINES_SEED` the seed.
 import { describe, expect, it } from 'vitest';
 import { addComment } from './comments.ts';
@@ -85,11 +85,6 @@ const POOL = [
 /** The halves that some cells hold: a backtick, and the opener or the closer of a raw comment, which the scan pairs
  * with another across the cells and the rows of a table. */
 const HALVES = ['`', '<!--', '-->'];
-/** The delimiter run that opens a pending bold or italic right before an HTML tag (`<sup>`, `<sub>`): in the file it
- * follows the `>` of a marker, and in the view, once the change in front of it is decided, a letter that somebody typed
- * there. The run is left-flanking after the `>` and not after the letter, so micromark reads some order of decisions
- * otherwise than its view (#265: a delimiter run next to another person's marks). No alignment change is in that. */
-const RUN_BEFORE_TAG = /<!--fmt \w{4} \+(?:bold|italic)-->\*+<(?:sup|sub)>/;
 const CELL_WORDS =
   /^.+'s .+ is in the cell in (?:the header|row \d+), column \d+\. Accept or reject it first, then format the cell\.$/;
 
@@ -109,15 +104,13 @@ describe('a rectangle of cells made bold or italic, random', () => {
     // was pending, the tables that hold halves of code spans or comments, and those left out, by the mechanism that
     // left them out, none of them the alignment change's: a step that left a pending mark unread beside a half that
     // pairs across cells (#480), a step that hid the file's ledger or brought a hidden one back (#483), a file that
-    // fails the same first check without its mark in a table with a half (#480 and #483, by check), and one with a
-    // delimiter run before a tag (#265).
+    // fails the same first check without its mark in a table with a half (#480 and #483, by check).
     let withAlignAndRect = 0;
     let rectsBesideAlign = 0;
     let withHalves = 0;
     let olderUnread = 0;
     let olderLedger = 0;
     let olderControl = 0;
-    let olderTag = 0;
     const olderBy = new Map<string, number>();
     const olderFor = (failed: unknown) => {
       const check = failed instanceof CheckFailed ? failed.check : 'unnamed';
@@ -479,25 +472,21 @@ describe('a rectangle of cells made bold or italic, random', () => {
       try {
         finals(text);
       } catch (error) {
-        // The same first check fails without the alignment change, in a table with a lone half or with a delimiter run
-        // before a tag: older than the change. In a table with a half the mechanisms are those of the steps above seen in
+        // The same first check fails without the alignment change, in a table with a lone half: older than the change. In a table with a half the mechanisms are those of the steps above seen in
         // what a check reads (#483: a ledger that a lone `<!--` hides; #480: a half that pairs across cells and hides a
         // pending change), and, seen at the default size, a bold whose delimiter another change cut (#299, #265), which a
-        // half does not make; a delimiter run before a tag is #265. Counted by the check that failed. A control that
+        // half does not make; Counted by the check that failed. A control that
         // passes, or that fails another check first, is no excuse: the mark made it fail.
-        const known = halves || RUN_BEFORE_TAG.test(text);
-        if (!(known && failsFirstWithout(error, text, finals))) throw error;
-        if (halves) {
-          olderControl++;
-          olderFor(error);
-        } else olderTag++;
+        if (!(halves && failsFirstWithout(error, text, finals))) throw error;
+        olderControl++;
+        olderFor(error);
       }
     }
-    const older = olderUnread + olderLedger + olderControl + olderTag;
+    const older = olderUnread + olderLedger + olderControl;
     if (process.env['REDLINES_FUZZ_STATS']) {
       const byCheck = [...olderBy].map(([check, count]) => `${check} ${count}`).join(', ');
       console.log(
-        `tables ${used}, written ${written}, refused for a cell ${refusedForCell}, with others' marks ${withMarks}, with rows or columns pending ${withStructure}, over more than two cells ${wide}, with an alignment change pending ${withAlignAndRect} (${rectsBesideAlign} rectangles written beside one), with halves ${withHalves}, left out as older ${older} (a step left a pending mark unread beside a half, #480: ${olderUnread}; a step hid the ledger or brought a hidden one back, #483: ${olderLedger}; the same first check fails without the mark, in a table with a half, #480 and #483: ${olderControl}${byCheck === '' ? '' : ` (${byCheck})`}; a delimiter run before a tag, #265: ${olderTag})`,
+        `tables ${used}, written ${written}, refused for a cell ${refusedForCell}, with others' marks ${withMarks}, with rows or columns pending ${withStructure}, over more than two cells ${wide}, with an alignment change pending ${withAlignAndRect} (${rectsBesideAlign} rectangles written beside one), with halves ${withHalves}, left out as older ${older} (a step left a pending mark unread beside a half, #480: ${olderUnread}; a step hid the ledger or brought a hidden one back, #483: ${olderLedger}; the same first check fails without the mark, in a table with a half, #480 and #483: ${olderControl}${byCheck === '' ? '' : ` (${byCheck})`})`,
       );
     }
     expect(used).toBeGreaterThan(10);
