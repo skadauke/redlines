@@ -94,7 +94,7 @@ rule 9, no marker inside pandoc's `~x~` and `^x^`, is not (#370).
 `random-docs.ts` has the seeded generators: `randomDocument` (blocks with other people's insertions,
 deletions, substitutions, comments and highlights, a ledger, front matter), `listDocument` and
 `adjacentListsDocument` (plain words in the shapes lists take, with no marks), and `seeded` and
-`fuzzCount`. The `*-random.test.ts` suites, and others, draw documents or tables from them or from
+`fuzzCount`. `randomDocument` takes `dialect: 'pandoc'` for Quarto documents (divs and callouts, includes, code chunks, citations, cross-references, shortcodes, `~x~` and `^x^`); `pandoc-random.test.ts` edits, comments, highlights and decides over them and holds every construct pandoc reads by its own grammar whole (#220). The `*-random.test.ts` suites, and others, draw documents or tables from them or from
 generators of their own, and each says in its header what it holds: usually that every order of
 decisions reads alike, that all accepted is the newest view and all rejected the original; the table
 suites and `first-prefix-random` also judge what is written by micromark's reading, and
@@ -244,10 +244,6 @@ its case; each is a bug. The list is what has been found, not a count of what is
   whose LF a tracked edit takes out, so in a file with mixed line breaks the editor writes that
   break into the change as the file's own kind and rejecting gives it back in the file's kind. The
   command line writes the break's own kind and gives it back exactly (format §2.5, #924).
-- A raw line break typed at the start of a bullet item's text under a line of text, or under the line
-  of the item it is in, is written where the file reads the bullet as an item and the newest view as
-  the underline of the text above it; the words typed on its blank lines (#143) are written the same
-  way (#443).
 - The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
   as a lazy line of the item's paragraph, where CommonMark reads a list. Backspace at the first
   item of a list now reads the line below it as the file does (`ownLines` in `blocks/joins.ts`) and

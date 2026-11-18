@@ -7,6 +7,7 @@
 import { forceParsing } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, parsedField } from '../index.ts';
+import { trackedStats } from '../tracked/decorations.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -61,6 +62,18 @@ function time(fn: () => void, runs: number): number {
   return median(samples);
 }
 
+/** The fastest of `runs`: what a busy machine adds is never negative, so the minimum is the cost. */
+function best(fn: () => void, runs: number): number {
+  fn();
+  let fastest = Infinity;
+  for (let i = 0; i < runs; i++) {
+    const start = performance.now();
+    fn();
+    fastest = Math.min(fastest, performance.now() - start);
+  }
+  return fastest;
+}
+
 const timed = it.skipIf(!process.env['REDLINES_COST']);
 
 describe('a document of 4,000 own-line marker blocks', () => {
@@ -86,10 +99,22 @@ describe('a document of 4,000 own-line marker blocks', () => {
       state.update({ selection: { anchor: at(state) } }).state;
     // A caret move costs next to nothing, at any size.
     expect(time(caret(large), 15)).toBeLessThan(time(caret(small), 15) * 8 + 1);
-    // A keystroke still draws the whole layer again: about 185 ms at 4,000 blocks on a
-    // development Mac, with no linear scan left to find (a profile spreads it over the pass that
-    // collects the markers, the one that hides their lines and the one that draws), which is
-    // 8 to 12 times the 24 ms of 1,000. The bound holds it from growing further than that.
-    expect(time(keystroke(large), 9)).toBeLessThan(time(keystroke(small), 9) * 20 + 1);
+    // A keystroke draws again only the window of the blocks it touches (`tracked/windows.ts`), where
+    // it once drew the whole layer: about 40 ms at 4,000 blocks against 12 ms at 1,000. What still
+    // grows is the parse and the incremental tree, about 3 times for 4 times the blocks. Timing
+    // can't tell the two apart well on a busy machine, so this holds the growth to linear (8 times)
+    // and the next test holds the window itself, which doesn't depend on the clock.
+    expect(best(keystroke(large), 15)).toBeLessThan(best(keystroke(small), 15) * 8 + 5);
+  });
+
+  it('draws only the window of the blocks a keystroke touches, never the whole text', () => {
+    const { view } = editorFor(documentOf(4_000));
+    // In the text of a block, in front of its closing marker.
+    const at = view.state.doc.toString().indexOf('Paragraph 2000') + 'Paragraph 20'.length;
+    trackedStats.windowed = trackedStats.whole = 0;
+    view.dispatch({ changes: { from: at, insert: 'x' } });
+    view.dispatch({ changes: { from: at + 1, insert: 'y' } });
+    expect(trackedStats.whole).toBe(0);
+    expect(trackedStats.windowed).toBe(2);
   });
 });

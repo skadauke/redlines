@@ -7,7 +7,7 @@ import { isPandoc } from './dialect.ts';
 import { HTML_STARTS } from './block-read.ts';
 import { isOlderPunctuation, isPunctuation, runRole } from './flanking.ts';
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
-import { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
+import { SHORTCODE_SOURCE, shortcodeAt, startsEmoji } from './shortcode.ts';
 import { isTableRowAt } from './table-rules.ts';
 import type { Range } from './types.ts';
 
@@ -189,7 +189,7 @@ const EMOJI = new RegExp(
 const MAY_BE_EMOJI = /[\ud800-\udfff]|\u200d|\ufe0f|\u20e3/;
 /** What a change is told that would leave a shortcode at the start of a text with a letter before it. */
 const STUCK_SHORTCODE =
-  'A marker between a letter and an emoji shortcode would make it show as an emoji. Select the shortcode along with the word.';
+  'A marker between a letter, a digit or punctuation and an emoji shortcode would make it show as an emoji. Select the shortcode along with the text before it.';
 const ATTRIBUTES = /\{\{<[^\n]*?>\}\}|\{[#.][^{}\n]*\}/g;
 /**
  * Pandoc's superscript `^x^` (format §3.1, rule 9): no space inside. A marker inside would break
@@ -203,12 +203,11 @@ const SUPERSCRIPT = /(?<!\\)\^[^\s^\\]+(?<!\\)\^/g;
 const SUBSCRIPT = /(?<![\\~])~[^\s~\\]+(?<!\\)~(?!~)/g;
 /**
  * A cross-reference or a citation of Quarto and pandoc (format §3.1, rule 9): `@fig-x`, `@sec-x`,
- * `@tbl-x`, `@eq-x` and the other kinds Quarto numbers, and a bracket of citations, `[@a; @b, p. 4]`
- * or `[-@a]`. A marker inside changes the key, so each is atomic. The label's characters are
+ * `@tbl-x`, `@eq-x` and the other kinds Quarto numbers, which are keys like any other (`@smith2020`,
+ * the author in the text), and a bracket of citations, `[@a; @b, p. 4]` or `[-@a]`. A marker inside changes the key, so each is atomic. The label's characters are
  * pandoc's: letters, digits and `_`, with `:.#$%&+?<>~/-` inside, and not at its end.
  */
-const REFERENCES =
-  /(?<![\w@])@(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
+const REFERENCES = /(?<![\w@])@[\w][\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])|\[-?@[^\][\n]*\]/g;
 /** The attributes of a Quarto callout's opening fence, `::: {.callout-note title="…"}`: syntax, as an
  * alert's type is (docs/research/quarto.md, Q7). */
 const CALLOUT_FENCE_LINE = new RegExp(
@@ -437,6 +436,14 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
           dest: { from: i + 2, to: end },
         });
       }
+    } else if (
+      isPandoc() &&
+      w[i + 1] === '{' &&
+      /^\{[#.][^{}\n]*\}/y.test(w.slice(i + 1, i + 200))
+    ) {
+      // A span, `[text]{.mark}` (pandoc): a marker between the bracket and its attributes would
+      // leave the text with no attributes.
+      inside(i, i + 2, 'symbol');
     } else if (label[0] !== '^') {
       labels ??= definedLabels(file);
       if (w[i + 1] === '[') {
@@ -725,16 +732,23 @@ export function inspectPlace(
     // The end is just after the construct's last character, not after the markers that follow it.
     return { kind: 'construct', from: offsetAt(widest.from), to: offsetAt(widest.to - 1) + 1 };
   }
-  // A shortcode that a letter or a digit stands against is no emoji to GitHub, which shows it only
-  // at the start of a text or after a space; a marker between the two would leave it at the start of
+  // A shortcode that anything but white space stands against is no emoji to GitHub, which shows it
+  // only at the start of a text or after white space; a marker between the two would leave it at the start of
   // a text, where it shows as the emoji (format §3.1, rule 9). What stands on each side of the marker
   // is what the change leaves there: `around`, or the text of the paragraph.
   const upcoming =
     around.after !== undefined ? around.after.slice(0, 80) : v.slice(index, index + 80);
   if (upcoming.startsWith(':')) {
-    const beforeMarker = around.before !== undefined ? around.before.slice(-1) : v[index - 1];
+    // The text in front of the marker, as the change leaves it; a line's own prefix (a quote's `>`)
+    // is no text of the paragraph, so a shortcode at the start of its first line starts a text.
+    const lead =
+      around.before !== undefined
+        ? around.before
+        : index - start <= prefixLength(lineText)
+          ? v.slice(0, start)
+          : v.slice(0, index);
     const code = shortcodeAt(upcoming);
-    if (code !== null && isWord(beforeMarker)) {
+    if (code !== null && !startsEmoji(lead)) {
       // A closer, which has the text of the change before it (`around.before`), takes the shortcode
       // into the change, as a closer inside any construct does: the shortcode is then in the old text
       // and the new, and no marker stands between it and the letter. An opener, or a format's edge,
@@ -746,6 +760,42 @@ export function inspectPlace(
         to: offsetAt(index + code.length - 1) + 1,
       };
     }
+  }
+
+  // A key that the text before the marker and the text after it make together (`@fig-x` typed in
+  // front of `42`: the view reads the key `fig-x42`, a marker between would end it at `x`): the
+  // closer takes the rest of the key into the change, as it takes a shortcode; an opener goes in
+  // front of the whole key (format §3.1, rule 9, #1074).
+  const head =
+    around.before !== undefined
+      ? around.before.slice(-80)
+      : v.slice(Math.max(0, index - 80), index);
+  if (isPandoc() && (upcoming.includes('@') || head.includes('@'))) {
+    for (const m of (head + upcoming).matchAll(REFERENCES)) {
+      if (m.index >= head.length || m.index + m[0].length <= head.length) continue;
+      if (m[0].startsWith('[')) continue;
+      // Text typed after a key goes outside it, as its own insertion (the key is as it was until the
+      // insertion is accepted): only a closer, or an opener over text the file has, widens.
+      if (around.before === undefined && around.after !== undefined) continue;
+      const rest = m.index + m[0].length - head.length;
+      if (around.before !== undefined) {
+        return { kind: 'construct', from: offsetAt(index), to: offsetAt(index + rest - 1) + 1 };
+      }
+      const back = head.length - m.index;
+      return {
+        kind: 'construct',
+        from: offsetAt(index - back),
+        to: offsetAt(index + rest - 1) + 1,
+      };
+    }
+  }
+
+  // An opener in front of a key that a letter stands against in the view (`delt@fig-x`: no key to
+  // pandoc), where the marker would make it one: the change starts in front of the word.
+  if (isPandoc() && around.before === undefined && /^@\w/.test(upcoming) && isWord(v[index - 1])) {
+    let back = index;
+    while (back > 0 && isWord(v[back - 1])) back--;
+    return { kind: 'construct', from: offsetAt(back), to: offsetAt(index) };
   }
 
   // The trailing spaces of a hard break.

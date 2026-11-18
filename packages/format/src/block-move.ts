@@ -49,6 +49,9 @@ export interface BlockRun {
   /** The indexes of its first and last sibling. */
   first: number;
   last: number;
+  /** The run ends in a code fence that nothing closes, which holds what follows it: wherever the
+   * run goes but last, it would hold other blocks, so it has no place to go (#1103). */
+  unclosed?: boolean;
   /** Whether there is a place above and below it. */
   canMoveUp: boolean;
   canMoveDown: boolean;
@@ -108,12 +111,26 @@ function readRun(text: string, from: number, to: number): Read | undefined {
 const lineEnd = (unit: Unit) => unit.to;
 const CLOSER = /^<!--\/[a-z0-9]{4}-->/;
 
+/** Whether a unit is a fenced code block whose fence nothing closes, which holds the rest of its
+ * container (#1103). */
+function isUnclosed(view: string, unit: Unit): boolean {
+  if (unit.kind !== 'code') return false;
+  const tail = view.slice(unit.lineFrom, unit.to).split('\n');
+  const fence = /^[ \t>]*(`{3,}|~{3,})/.exec(tail[0] ?? '')?.[1];
+  if (fence === undefined) return false;
+  const closing = new RegExp(`^[ \\t>]*${fence[0] === '~' ? '~' : '`'}{${fence.length},}[ \\t]*$`);
+  return !(tail.length > 1 && closing.test(tail.at(-1) ?? ''));
+}
+
 /** The gaps of a read: all but the two that touch the run. */
 function gapsOf(read: Read): BlockGap[] {
   const { siblings, first, last, map } = read;
   const gaps: BlockGap[] = [];
+  // Nothing goes below a fence that nothing closes: it would be the fence's own text.
+  const held = siblings.findIndex((unit) => isUnclosed(read.view, unit));
   for (let i = 0; i <= siblings.length; i++) {
     if (i >= first && i <= last + 1) continue;
+    if (held !== -1 && i > held) continue;
     const next = siblings[i];
     const previous = siblings[i - 1];
     const above = previous ? { above: map.toSource(lineEnd(previous), -1) } : {};
@@ -135,6 +152,7 @@ export function blockRunAt(text: string, range: Range): BlockRun | undefined {
   const firstUnit = read?.siblings[read.first];
   const lastUnit = read?.siblings[read.last];
   if (!read || !firstUnit || !lastUnit) return undefined;
+  const unclosed = isUnclosed(read.view, lastUnit);
   return {
     kind: firstUnit.kind,
     count: read.last - read.first + 1,
@@ -143,10 +161,11 @@ export function blockRunAt(text: string, range: Range): BlockRun | undefined {
     to: read.map.toSource(lastUnit.to, -1),
     viewFrom: firstUnit.lineFrom,
     viewTo: lastUnit.to,
-    gaps: gapsOf(read),
+    gaps: unclosed ? [] : gapsOf(read),
     first: read.first,
     last: read.last,
-    canMoveUp: read.first > 0,
+    ...(unclosed ? { unclosed } : {}),
+    canMoveUp: read.first > 0 && !unclosed,
     canMoveDown: read.last < read.siblings.length - 1,
   };
 }
@@ -169,12 +188,12 @@ export function moveBlockEdits(
   run: BlockRun,
   gap: BlockGap,
 ): { edits: TextChange[]; moved: Range; verbatim?: true } | undefined {
-  const [plan] = plansOf(text, run, gap);
-  if (plan && plan.anchors > 0) {
+  const [plan] = plansOf(text, run, gap, false, true);
+  if (plan && (plan.anchors > 0 || plan.pending)) {
     // Every way takes out a comment's or a highlight's marker, which typed text can't put back, and
     // the marker left alone would split a list that the move keeps whole (#1052): the text goes as
     // the file has it, markers and all, as edits that are made as they are.
-    const own = plansOf(text, run, gap, true)[0];
+    const own = plansOf(text, run, gap, true, true)[0];
     if (own) return { edits: own.source, moved: own.moved, verbatim: true };
   }
   return plan && { edits: plan.source, moved: plan.moved };
@@ -211,6 +230,7 @@ function build(
   g: number,
   behind: boolean,
   verbatim = false,
+  plain = false,
 ): Plan | undefined {
   const { view, siblings, map } = read;
   const firstUnit = siblings[a];
@@ -227,9 +247,24 @@ function build(
       : { from: firstUnit.lineFrom, to: lastUnit.to };
   // The break that stands between siblings here, as the first two of them have it.
   const [left, right] = siblings;
-  const breakOf = left && right ? view.slice(left.to, right.lineFrom) : '\n\n';
+  const between = left && right ? view.slice(left.to, right.lineFrom) : '\n\n';
   const target = siblings[g];
   const above = siblings[g - 1];
+  // A block put right below or above an HTML block is put apart from it by a blank line, where the siblings
+  // stand apart by a line break alone: the HTML block takes the next line as its own (#1103).
+  const precede = target && !(behind && above) ? above : (above ?? siblings.at(-1));
+  const before1 = target && !(behind && above);
+  const html =
+    (precede !== undefined && view[precede.from] === '<') ||
+    (before1 && view[firstUnit.from] === '<');
+  const breakOf =
+    html && left?.kind !== 'item' && !/\n[ \t>]*\n/.test(between)
+      ? between.replace(
+          /^(\n)([ \t>]*)$/,
+          (_, nl: string, prefix: string) => `${nl}${prefix.trimEnd()}\n${prefix}`,
+        )
+      : between;
+
   const place =
     target && !(behind && above)
       ? { at: target.lineFrom, insert: chunk + breakOf }
@@ -270,21 +305,73 @@ function build(
     insert = place.insert.startsWith(chunk) ? own + breakOf : breakOf + own;
   }
   const removed = taken.to - taken.from;
-  const start = place.at + lead - (place.at > taken.from ? removed : 0);
+  // An empty item can't start a list under a line of text: when the move makes one the first of its
+  // siblings, a blank line goes above the list, as the file needs to read it (#1103).
+  const blank = blankAbove(view, siblings, a, b, g);
+  const gain = blank ? blank.insert.length : 0;
+  const start = place.at + lead - (place.at > taken.from ? removed : 0) + gain;
+  // The blank line goes in with the edit that stands where the list starts: in front of the moved
+  // text where it lands first, and in place of the text taken out where that was first.
+  const lead1 = blank && g === 0 ? blank.insert : '';
+  const gone = plain && blank && g !== 0 ? blank.insert : '';
+  const apart: TextChange[] =
+    blank && g !== 0 && !plain
+      ? [{ from: map.toSource(blank.at, -1), to: map.toSource(blank.at, -1), insert: blank.insert }]
+      : [];
   return {
     anchors,
     pending,
     ...(verbatim ? { verbatim } : {}),
     moved: { from: start, to: start + chunk.length },
     source: [
-      { from: cut.from, to: cut.to, insert: '' },
-      { from: landing, to: landing, insert },
+      { from: cut.from, to: cut.to, insert: gone },
+      { from: landing, to: landing, insert: lead1 + insert },
+      ...apart,
     ].toSorted(byFrom),
     view: [
-      { from: taken.from, to: taken.to, insert: '' },
-      { from: place.at, to: place.at, insert: place.insert },
+      { from: taken.from, to: taken.to, insert: gone },
+      { from: place.at, to: place.at, insert: lead1 + place.insert },
+      ...(blank && g !== 0 && !plain
+        ? [{ from: blank.at, to: blank.at, insert: blank.insert }]
+        : []),
     ].toSorted(byFrom),
   };
+}
+
+/** A line that can't start a list under a line of text: a bare marker, or a number other than 1. */
+const CANT_START = /^[ \t>]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]*$|(?!0*1[.)])\d{1,9}[.)])/;
+
+/**
+ * Where a blank line is needed above a list after a move: the move makes an item with no text the
+ * first of the siblings (the moved run, or the one after it where the run was first), and a line of
+ * text stands right above the list. Undefined when none is.
+ */
+function blankAbove(
+  view: string,
+  siblings: readonly Unit[],
+  a: number,
+  b: number,
+  g: number,
+): { at: number; insert: string } | undefined {
+  const top = siblings[0];
+  if (!top || top.kind !== 'item') return undefined;
+  const next = siblings[b + 1];
+  const lineAt = (from: number) => {
+    const end = view.indexOf('\n', from);
+    return view.slice(from, end === -1 ? undefined : end);
+  };
+  const first =
+    g === 0
+      ? lineAt(siblings[a]?.lineFrom ?? 0)
+      : a === 0 && next
+        ? lineAt(next.lineFrom)
+        : undefined;
+  if (first === undefined || !CANT_START.test(first)) return undefined;
+  if (top.lineFrom === 0) return undefined;
+  const above = view.slice(view.lastIndexOf('\n', top.lineFrom - 2) + 1, top.lineFrom - 1);
+  if (/^[ \t>]*$/.test(above)) return undefined;
+  const quote = /^(?:[ \t]*>)*/.exec(view.slice(top.lineFrom))?.[0] ?? '';
+  return { at: top.lineFrom, insert: `${quote}\n` };
 }
 
 /**
@@ -302,6 +389,9 @@ function verbatimChunk(
 ): string | undefined {
   const from = map.toSource(viewFrom, -1);
   let to = map.toSource(viewTo, -1);
+  // The markers that stand right after the last text on its line (a pending deletion, say) go with it.
+  const past = map.toSource(viewTo, 1);
+  if (past > to && !text.slice(to, past).includes('\n')) to = past;
   for (let m = CLOSER.exec(text.slice(to)); m; m = CLOSER.exec(text.slice(to))) to += m[0].length;
   if (cut.from > from || cut.to < to) return undefined;
   for (const mark of parse(text).marks) {
@@ -320,7 +410,13 @@ function verbatimChunk(
  * above the sibling at the gap or after the one above it, then the same text again with the
  * siblings that it passes moving the other way, which reads as the same file.
  */
-function plansOf(text: string, run: BlockRun, gap: BlockGap, verbatim = false): Plan[] {
+function plansOf(
+  text: string,
+  run: BlockRun,
+  gap: BlockGap,
+  verbatim = false,
+  plain = false,
+): Plan[] {
   const read = readRun(text, run.viewFrom, run.viewTo);
   const firstUnit = read?.siblings[read.first];
   const lastUnit = read?.siblings[read.last];
@@ -330,14 +426,14 @@ function plansOf(text: string, run: BlockRun, gap: BlockGap, verbatim = false): 
   const g = gap.index;
   if (g >= first && g <= last + 1) return [];
   const plans = [
-    build(text, read, first, last, g, false, verbatim),
-    build(text, read, first, last, g, true, verbatim),
+    build(text, read, first, last, g, false, verbatim, plain),
+    build(text, read, first, last, g, true, verbatim, plain),
   ];
   // The siblings that the run passes move the other way, to where the run was.
   plans.push(
     g < first
-      ? build(text, read, g, first - 1, last + 1, true, verbatim)
-      : build(text, read, last + 1, g - 1, first, false, verbatim),
+      ? build(text, read, g, first - 1, last + 1, true, verbatim, plain)
+      : build(text, read, last + 1, g - 1, first, false, verbatim, plain),
   );
   const [primary, ...others] = plans.filter((plan): plan is Plan => plan !== undefined);
   if (!primary) return [];
@@ -365,6 +461,27 @@ function joinsLists(siblings: readonly Unit[], first: number, last: number, g: n
       Math.abs(siblings.indexOf(next) - siblings.indexOf(unit)) !== 1
     );
   });
+}
+
+/** Whether a change writes a marker inside a code unit (a fenced block, indented code, a raw HTML block), past its first line: a move takes
+ * whole blocks, and a marker there is read as the code's own text. */
+function insideCode(text: string, changes: readonly TextChange[]): boolean {
+  const code: Range[] = [];
+  const walk = (units: readonly Unit[]) => {
+    for (const unit of units) {
+      if (unit.kind === 'code') {
+        const open = text.indexOf('\n', unit.lineFrom);
+        if (open !== -1 && open < unit.to) code.push({ from: open, to: unit.to });
+      }
+      walk(unit.children);
+    }
+  };
+  walk(unitsOf(text, parse(text)));
+  return changes.some(
+    (change) =>
+      change.insert.includes('<!--') &&
+      code.some((range) => range.from < change.from && change.from < range.to),
+  );
 }
 
 /**
@@ -402,10 +519,12 @@ export function trackedBlockMove(
     }
     for (const next of plans.filter((other) => !other.joins)) {
       try {
-        return {
-          changes: trackedEdits(text, next.source, { ...ctx, group }).changes,
-          moved: next.moved,
-        };
+        const { changes } = trackedEdits(text, next.source, { ...ctx, group });
+        // A fine write whose newest view has other fences than the file's (a replacement that starts
+        // at the closing fence of an earlier code block and writes a stray one, #586 seed 102) is
+        // wrong: the next way, then the widened one, which asks if it can't be made.
+        if (insideCode(text, changes)) continue;
+        return { changes, moved: next.moved };
       } catch (error) {
         if (!(error instanceof EditError)) throw error;
       }

@@ -219,3 +219,16 @@ describe('moving blocks that hold comments or pending changes (#1052)', () => {
     expectEveryOrderRead('pending', out);
   });
 });
+
+describe('a fence that nothing closes (#1103)', () => {
+  const text = file('alpha\n\n```js\ncode\n');
+
+  it('has no place to go, and nothing goes below it', () => {
+    const view = viewOf(text);
+    const fence = blockRunAt(text, { from: view.indexOf('code'), to: view.indexOf('code') })!;
+    expect(fence.unclosed).toBe(true);
+    expect(fence.gaps).toEqual([]);
+    const alpha = blockRunAt(text, { from: 1, to: 1 })!;
+    expect(alpha.gaps.some((gap) => gap.index > 1)).toBe(false);
+  });
+});

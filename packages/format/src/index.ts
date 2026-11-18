@@ -17,7 +17,7 @@ export type { BlockRead } from './block-read.ts';
 export { idsIn, isId, newId } from './ids.ts';
 export { decodePayload, encodePayload } from './payload.ts';
 export { plainPayload } from './changes.ts';
-export { parse } from './parse.ts';
+export { parse, parseStats } from './parse.ts';
 export type { Change as ParseChange } from './scan.ts';
 export { applyChanges, eolOf } from './changes.ts';
 export {
@@ -48,7 +48,7 @@ export { suggestionOf, suggestions } from './suggestion.ts';
 export { formatChange, NUMBERED_CHILD as OUTDENT_NUMBERED_CHILD } from './format-blocks.ts';
 export { parseFormatOps } from './format-ops.ts';
 export { ALERT_LINE, GITHUB_TYPES, calloutWord, typeOfWord } from './callout.ts';
-export { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
+export { SHORTCODE_SOURCE, shortcodeAt, startsEmoji } from './shortcode.ts';
 export type {
   AlignedColumn,
   BlockType,

@@ -78,6 +78,7 @@ export function moveBlocksReason(state: EditorState, up: boolean): string | unde
   const run = runOfSelection(read.file);
   if (!run) return 'Put the caret in a paragraph, a list item or a block.';
   if (neighbourGap(run, up)) return undefined;
+  if (run.unclosed) return UNCLOSED_FENCE;
   const many = run.count > 1;
   return `${many ? 'These blocks are' : 'This block is'} at the ${up ? 'top' : 'bottom'} already.`;
 }
@@ -202,6 +203,10 @@ export function moveRunTo(
   });
   return true;
 }
+
+/** Why a code block whose fence nothing closes has nowhere to go. */
+const UNCLOSED_FENCE =
+  'This code block has no closing fence, so it holds everything after it. Close it to move it.';
 
 /** The sheet's question for a move that no tracked write holds. */
 const TOO_MANY_BLOCKS =
