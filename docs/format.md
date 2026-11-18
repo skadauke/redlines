@@ -3465,7 +3465,8 @@ whole, before the refusal below applies.
 In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that stands
 against a delimiter, in a table that holds changes, is read in the file as it stands and after each
 accept and reject of the table's changes (`readsOtherInDecisions`, `table-delimiter.ts`); where one of
-them reads otherwise than the newest view and the file before the edit had none, the cell is replaced.
+them reads otherwise than the newest view and the file before the edit had none, the table that holds the
+cell is replaced.
 A comment or a highlight whose end stands against a delimiter is placed the same way as beside a pending
 row change: at the nearest range whose ends cut no delimiter run in any decision (`besideDelimiter` in
 `table-settle.ts`), and as asked when none does. An untracked edit that cuts a delimiter of a pending

@@ -5547,7 +5547,7 @@ function editsWidening(
             whole = widenedAtOnce(text, edits, again(), false, true);
             // A typed edit in a table's cell is held by the table's own unit, which the cells' rungs
             // of the ladder write (#490): where its fine write reads otherwise in some order of
-            // decisions, the cell is replaced.
+            // decisions, the table that holds the cell is replaced.
             whole ??=
               edits.every((edit) => scopeOf(text, edit.from, edit.to) === 'cell') &&
               readsOtherInDecisions(text, edits, written.changes)

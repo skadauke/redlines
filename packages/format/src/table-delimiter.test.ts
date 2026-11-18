@@ -1,6 +1,6 @@
 // A comment or a typed key in a table's cell, next to the delimiters of another person's pending bold: every order of
 // decisions reads alike (micromark), as it does in a paragraph (#490, #265). The comment's ends stand where the run
-// is not cut, and a typed `*` is written as a replacement of the cell.
+// is not cut, and a typed `*` is written as a replacement of the table that holds the cell.
 
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
@@ -37,7 +37,7 @@ describe('a table cell next to another person’s pending bold (#490)', () => {
     expectEveryOrderRead('highlight', after);
   }, 60_000);
 
-  it('writes a `*` typed after the closing `*` of a cell with an alignment change as the cell’s replacement', () => {
+  it('writes a `*` typed after the closing `*` of a cell with an alignment change as the replacement of its table', () => {
     const text = file(
       '|  café  |  *b*<!--fmt t5vw align=\\|\\x20-\\-:\\x20\\|\\x20-\\-\\-\\x20\\|-->  |\n| --: | :-: |\n|  café  |  11  |\n|  x y  |  café  |',
       { t5vw: 'bo' },

@@ -18,6 +18,18 @@ function misreadsOf(text: string, from: number, to: number): Set<string> {
   return found;
 }
 
+/** Whether a line from two above `from` to two below `to` holds a pipe: the rows of a table are there. */
+function nearPipe(text: string, from: number, to: number): boolean {
+  let start = from;
+  for (let n = 0; n < 3 && start > 0; n++) start = text.lastIndexOf('\n', start - 1) + 1;
+  let end = to;
+  for (let n = 0; n < 3 && end < text.length; n++) {
+    const next = text.indexOf('\n', end + 1);
+    end = next === -1 ? text.length : next;
+  }
+  return text.slice(start, end).includes('|');
+}
+
 /**
  * Whether `changes`, the fine write of `edits` in `text`, are in a table, stand against an emphasis delimiter, and
  * leave a decision of a change of the table that Markdown reads otherwise than its view, where the file before the
@@ -31,7 +43,9 @@ export function readsOtherInDecisions(
   if (edits.length === 0 || changes.length === 0) return false;
   const from = Math.min(...edits.map((edit) => edit.from));
   const to = Math.max(...edits.map((edit) => edit.to));
-  if (!/<!--(?!\/)/.test(text) || !besideDelimiter(text, { from, to })) return false;
+  // The cheap checks first, so that a keystroke in a paragraph, or in a file with no table, costs nothing: a
+  // table's row has a pipe on its own line or on one next to it, and the edit stands against a delimiter.
+  if (!besideDelimiter(text, { from, to }) || !nearPipe(text, from, to)) return false;
   if (!readTables(text, parse(text)).some((table) => from <= table.to && table.from <= to)) {
     return false;
   }
