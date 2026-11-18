@@ -595,11 +595,11 @@ function tryRung(
   // the top level, the closer stands in it and the payload ends with the block's line break.
   // A closer on a line of its own inside an item reads as a block of the item, which no marker may be:
   // a text that needs one there (it ends in a delimiter) goes to a unit that is not in a container.
-  // A new text that ends in a line break only (an Enter typed at the end of the unit) keeps the
+  // A new text that ends in one line break (an Enter typed at the end of the unit) keeps the
   // break after the closer, as a plain line break: the closer then ends the line before it.
   const trail =
     rung.prefix !== '' && !rung.atomic && !endsInDelimiter(now) && !riskyEnd(now, rung.prefix)
-      ? (/(?:\r?\n)+$/.exec(now)?.[0] ?? '')
+      ? (/(?<![\r\n])\r?\n$/.exec(now)?.[0] ?? '')
       : '';
   if (trail !== '' && now.slice(0, now.length - trail.length).trim() !== '') {
     now = now.slice(0, now.length - trail.length);
@@ -647,7 +647,10 @@ function tryRung(
   const tight = rung.kind === 'list' && rung.parent ? rung.parent.tight : rung.tight;
   const lead = scaffold(rung.prefix, eol, tight);
   const body = now.replaceAll('\r\n', '\n').replaceAll('\n', eol);
-  const trailBreak = trail.replaceAll('\r\n', '\n').replaceAll('\n', eol);
+  // Where a blank line follows the unit already, the break it would write is that blank line.
+  const trailBreak = /^\r?\n[ \t>]*\r?\n/.test(next)
+    ? ''
+    : trail.replaceAll('\r\n', '\n').replaceAll('\n', eol);
   let written: string;
   let end = to;
   if (atomic) {
