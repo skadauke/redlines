@@ -54,6 +54,24 @@ function parseAll(doc: string, view: ViewMode = 'redlines'): number {
   return performance.now() - started;
 }
 
+/** The median of five ratios of a large run to a small one, the two run in turns, so that a busy
+ * machine (CI's shared runners) doesn't decide it with one slow run. */
+function medianRatio(
+  small: () => number,
+  large: () => number,
+): { ratio: number; a: number; b: number } {
+  const ratios: number[] = [];
+  let a = 0;
+  let b = 0;
+  for (let turn = 0; turn < 5; turn++) {
+    a = small();
+    b = large();
+    ratios.push(b / a);
+  }
+  ratios.sort((x, y) => x - y);
+  return { ratio: ratios[2] ?? Number.POSITIVE_INFINITY, a, b };
+}
+
 // Every look has its own decorations over the parse: the Raw look's highlighting and the clean
 // looks' preview, tracked changes and tables (#696). Redlines runs always; the others are timing
 // tests, which run with REDLINES_COST (a busy machine can't time them).
@@ -66,17 +84,18 @@ describe.each<ViewMode>(['redlines', 'clean', 'raw'])(
         const small = documentOf(150_000);
         const large = documentOf(600_000);
         parseAll(small, view); // warm up
-        // The best of two runs each, so that a busy machine doesn't decide it.
-        const a = Math.min(parseAll(small, view), parseAll(small, view));
-        const b = Math.min(parseAll(large, view), parseAll(large, view));
+        const { ratio, a, b } = medianRatio(
+          () => parseAll(small, view),
+          () => parseAll(large, view),
+        );
         console.log(
           `parse cost (${view}): ${small.length} -> ${a.toFixed(0)} ms, ${large.length} -> ${b.toFixed(0)} ms`,
         );
         // Four times the text: linear is 4x; quadratic is 16x.
         // Before the restyling was incremental it was 12 to 16.
-        expect(b / a).toBeLessThan(8.5);
+        expect(ratio).toBeLessThan(8.5);
       },
-      120_000,
+      240_000,
     );
   },
 );
@@ -121,14 +140,16 @@ describe.skipIf(!process.env['REDLINES_COST'])(
       const small = markedDocument(20_000);
       const large = markedDocument(80_000);
       deleteAll(small); // warm up
-      const a = Math.min(deleteAll(small), deleteAll(small));
-      const b = Math.min(deleteAll(large), deleteAll(large));
+      const { ratio, a, b } = medianRatio(
+        () => deleteAll(small),
+        () => deleteAll(large),
+      );
       console.log(
         `deleting: ${small.length} -> ${a.toFixed(0)} ms, ${large.length} -> ${b.toFixed(0)} ms`,
       );
       // Four times the text: linear is 4x; quadratic is 16x. It was 14 before each marker on the
       // old text's one long line searched the line for its start.
-      expect(b / a).toBeLessThan(8.5);
-    }, 120_000);
+      expect(ratio).toBeLessThan(8.5);
+    }, 240_000);
   },
 );
