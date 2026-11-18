@@ -704,6 +704,38 @@ describe('Deleted blocks', () => {
     });
   });
 
+  describe('a table replaced whole (format §3.7), the old table holding another person’s mark', () => {
+    // The old text is the table as it was, and its cell `un**ripe**` still holds Bo's pending bold,
+    // written in the payload with its markers escaped.
+    const replaced = withLedger(
+      'One.\n\n<!--sub g9hj \\| Item \\| Note \\|\\n\\| -\\-\\- \\| -\\-\\- \\|\\n\\| pears \\| un<!-\\-fmt m2bd +bold-\\->**ripe**<!-\\-/m2bd-\\-> \\|-->\n\n| Item | Note |\n| --- | --- |\n| pears | un**_ripe** |\n<!--/g9hj-->\nAfter.',
+      { g9hj: 'ada', m2bd: 'bo' },
+    );
+
+    it('draws the old table as a struck table above the new, with no raw markup', () => {
+      const editor = load(replaced);
+      const struck = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')];
+      expect(struck).toHaveLength(1);
+      expect(struck[0]?.classList).toContain('rl-ghost-table');
+      expect(struck[0]?.dataset['mark']).toBe('g9hj');
+      const rows = [...struck[0]!.querySelectorAll('[role="row"]')];
+      expect(
+        rows.map((row) => [...row.querySelectorAll('.rl-tc')].map((cell) => cell.textContent)),
+      ).toEqual([
+        ['Item', 'Note'],
+        ['pears', 'un**ripe**'],
+      ]);
+      // Neither the payload's markers nor its escapes are drawn, and no letter column.
+      expect(struck[0]?.textContent).not.toContain('<!--');
+      expect(struck[0]?.textContent).not.toContain('\\');
+      expect(editor.view.contentDOM.querySelector('.cm-line .rl-del')).toBeNull();
+      // It stands before the new table.
+      expect(editor.view.contentDOM.innerHTML.indexOf('rl-ghost-table')).toBeLessThan(
+        editor.view.contentDOM.innerHTML.indexOf('pears'),
+      );
+    });
+  });
+
   it('draws an empty pair of fences as a struck code block a line high', () => {
     const doc = withLedger('One.\n\n<!--del b2b2 ```\\n```\\n\\n-->\n\nAfter.', { b2b2: 'bo' });
     const editor = load(doc);
