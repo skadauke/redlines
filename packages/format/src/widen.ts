@@ -218,8 +218,14 @@ function widenIn(
     const fenced =
       /^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to)) &&
       sorted.some((edit) => /^[ \t>]*$/.test(text.slice(lineStart(text, edit.from), edit.from)));
+    // A line break typed in a unit that holds code is read too: the text after it may stand less deep
+    // than the container, and the blocks after the unit read otherwise beside the closer (#586).
+    const broken =
+      sorted.some(
+        (edit) => edit.insert.includes('\n') || text.slice(edit.from, edit.to).includes('\n'),
+      ) && /^(?: {4,}|\t)\S|^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to));
     const kept =
-      done && !((fromSpare || fenced) && readsOtherMicromark(text, done.changes))
+      done && !((fromSpare || fenced || broken) && readsOtherMicromark(text, done.changes))
         ? done
         : undefined;
     if (kept && (!beside || kept.touchingOthers.length === 0)) return kept;
@@ -547,7 +553,10 @@ function tryRung(
   // (a setext underline or a rule is a line of its own, which the closer cannot join)
   const bare =
     endsInBare(now) && !/(?:^|\n)[ \t>]*(?:[-*+][ \t]+)*(?:-{2,}|={2,})[ \t]*$/.test(now);
-  if (html && (rung.prefix !== '' || rung.kind === 'table')) return giveUp('html');
+  // (a table that is deleted leaves the lines after it, the HTML block that was its next line, which
+  // is a block of its own once the table is gone: no table's closer is then in its way)
+  const tableLeft = rung.kind === 'table' && now.includes('|');
+  if (html && (rung.prefix !== '' || tableLeft)) return giveUp('html');
   const atomic =
     html ||
     rung.atomic ||

@@ -62,7 +62,10 @@ describe('the tracked move of blocks on random documents', () => {
         }
         written++;
         expect(parse(after).warnings, label).toEqual([]);
-        expect(originalView(after).text, label).toBe(originalView(text).text);
+        // A blank line above a list (written where a move would leave an empty item, or a number
+        // other than 1, first under a line of text, #1103) is no text of either view.
+        const blanks = (view: string) => view.replace(/\n{2,}/g, '\n');
+        expect(blanks(originalView(after).text), label).toBe(blanks(originalView(text).text));
         // The newest view is what the plain move makes (in a file with no marks: the plain edits
         // don't carry others' marks).
         const plain = moveBlockEdits(text, run, gap);

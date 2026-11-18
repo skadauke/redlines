@@ -297,6 +297,8 @@ export function deriveReview(
   text: string,
   intent: ReviewIntent,
   op: ReviewOp = intent.op,
+  /** The text to write on when it isn't `text`: the file's, for a file with breaks of more than one kind. */
+  writeOn: string = text,
 ): DerivedReview {
   let skipped: readonly SkippedMark[] = [];
   if (op.op === 'decide') {
@@ -315,7 +317,7 @@ export function deriveReview(
     }
   }
   const request: ReviewRequest = op;
-  const done = writeReview(text, request, {
+  const done = writeReview(writeOn, request, {
     author: intent.author,
     time: intent.time,
     random: replaying(intent),
