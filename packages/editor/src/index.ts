@@ -59,7 +59,7 @@ import { tableMarkers } from './table/markers.ts';
 import { imageFetcherFacet, images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { blockKeys } from './blocks/keys.ts';
-import { openBlock, openBlocks, takeBackChanges, throughOpen } from './blocks/open.ts';
+import { blankRun, openBlock, openBlocks, takeBackChanges, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
 import { typedSyntax } from './blocks/typed.ts';
 import { lineChanges } from './diff.ts';
@@ -718,9 +718,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const taken = open ? takeBackChanges(view.state, true) : null;
     if (open && taken) {
       const whole = ChangeSet.of(made.changes, text.length);
+      // The same for a decision that ends beside the blank lines the open line stands among: what
+      // it leaves of them, with the open line's own, is more blank lines than the file may hold
+      // (walk seed 294 of `REDLINES_FUZZ=300`, the insertion above the paragraph rejected).
+      const run = blankRun(view.state.doc, open);
       let touched = false;
       whole.iterChangedRanges((from, to) => {
-        if (from <= open.empty.to && to >= open.empty.from) touched = true;
+        if (from <= run.to && to >= run.from) touched = true;
       });
       if (touched) {
         const without = taken.apply(view.state.doc).toString();
