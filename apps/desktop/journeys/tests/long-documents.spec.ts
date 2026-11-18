@@ -153,11 +153,15 @@ test.describe('long documents @long', () => {
     );
   });
 
+  // The budgets sit about twice over what the shared macOS runner measures on a normal run, as the
+  // two above do (#1122). The runner's longest stall to the end was 413 to 729 ms over four runs;
+  // one run measured 1,359 ms, on a runner slower in every phase of all three documents, and failed
+  // the old budget of 800.
   test('5 MB of ordinary text with hundreds of changes and comments', async ({ start }) => {
     await journey(
       'five-mb',
       ordinaryDocument(5_000_000),
-      { stall: 800, frame: 800, memoryMB: 3500, open: 40_000 },
+      { stall: 1500, frame: 1500, memoryMB: 3500, open: 40_000 },
       start,
     );
   });
