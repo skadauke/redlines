@@ -3483,9 +3483,10 @@ read in every order of decisions of the marks of its paragraph (`ordersReadOther
 `widen.ts`; only that paragraph is read in each state, with the ledger, so the cost does not grow with
 the file): if any order reads otherwise than its newest view, the unit is replaced whole instead;
 where all read alike, the fine write stays (#265). The reading has caps, and over any of them the unit
-is replaced, which is always sound: more than four marks in the paragraph, more than 100 states, or a
-mark that runs out of the paragraph. A table cell, which has no replacement of its own for this, is
-written as before.
+is replaced, which is always sound: more than four marks in the paragraphs, more than 100 states, or a
+mark that runs out of them past three rounds of taking the paragraphs it spans in. An edit across a
+line break is no letter beside a run and is not read this way, and a table's cell is read by the rule
+that follows.
 
 In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that stands
 against a delimiter, in a table that holds changes, is read in the file as it stands and after each
