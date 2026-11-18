@@ -74,6 +74,15 @@ Between the twins.
 
 Last paragraph.
 
+<!--sub k9k9 \\| Fruit \\| Note \\|\\n\\| -\\-\\- \\| -\\-\\- \\|\\n\\| pears \\| un<!-\\-fmt m2m2 +bold-\\->**ripe**<!-\\-/m2m2-\\-> \\|-->
+
+| Fruit | Note |
+| --- | --- |
+| pears | un**_ripe** |
+<!--/k9k9-->
+
+After the replaced table.
+
 ${filler(15, 8)}
 
 <!-- redlines
@@ -90,6 +99,8 @@ marks:
   g6g6: {by: claude-ada, at: 2026-10-31T09:34Z}
   h7h7: {by: ada, at: 2026-10-31T09:35Z}
   j8j8: {by: bo, at: 2026-10-31T09:36Z}
+  k9k9: {by: ada, at: 2026-10-31T09:37Z}
+  m2m2: {by: bo, at: 2026-10-31T09:38Z}
 -->
 `;
 
@@ -382,6 +393,36 @@ const drawing: Check[] = [
       const marks = twins.map((block) => block.dataset['mark']);
       const colors = twins.map((block) => [...block.classList].find((c) => /^rl-author-/.test(c)));
       return marks.join() === 'h7h7,j8j8' && colors[0] !== colors[1] ? null : { marks, colors };
+    },
+  },
+  {
+    name: 'replaced-table-is-a-struck-table-above-the-new-one-with-no-raw-markup',
+    async run(editor) {
+      await open(editor, 'redlines', 'After the replaced table.');
+      const block = blockWith(editor, 'Fruit');
+      const next = lineWith(editor, 'un**_ripe**');
+      if (!block || !next) return { note: 'nothing drawn', block: !!block };
+      await reveal(block);
+      const problems: Problem = {};
+      const [b, n] = [block, next].map((el) => el.getBoundingClientRect()) as [DOMRect, DOMRect];
+      if (!block.classList.contains('rl-ghost-table')) problems['ghost'] = block.className;
+      if (b.bottom > n.top + 1.5) problems['order'] = [b.bottom, n.top];
+      // A table of rows and columns, not a column of letters: two cells side by side, as tall as rows.
+      const cells = [...block.querySelectorAll<HTMLElement>('.rl-tc')];
+      if (cells.length !== 4) problems['cells'] = cells.length;
+      else if (
+        !(cells[1]!.getBoundingClientRect().left > cells[0]!.getBoundingClientRect().left + 20)
+      ) {
+        problems['columns'] = cells.map((cell) => cell.getBoundingClientRect().left);
+      }
+      if (b.height > 220) problems['height'] = b.height;
+      if (/<!--|\\\||fmt/.test(block.textContent ?? '')) problems['raw'] = block.textContent;
+      if (
+        lines(editor).some((line) => line.querySelector('.rl-del')?.textContent?.includes('Fruit'))
+      ) {
+        problems['inline'] = true;
+      }
+      return problemsOf(problems);
     },
   },
 ];
