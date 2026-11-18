@@ -50,7 +50,10 @@ and when, and the comment threads, are in a block at the end of the file.
 
 ## What is in the Mac app
 
-- **Writing.** Open, Open Recent, Save, Rename, Print and Reveal in Finder from the File menu.
+- **Writing.** Open, Open Recent, Save, Rename, Print, Export as PDF and Reveal in Finder from the
+  File menu. Open in Another Window shows the same document in a second window, and the two edit it
+  together, with no network and no account. Export to Word… writes a `.docx` with the tracked
+  changes and comments, and Open .docx… reads one, Google Docs' too.
   Find and Replace (⌘F, ⌥⌘F) works on the text you see, and with Track Changes on a replacement is
   a tracked change. ⌘= and ⌘- zoom the whole window, and a pinch or ⌃⌘= and ⌃⌘- the text alone. A file sidebar (⌃⌘S) lists
   the folders and documents of the document's project, its repository or else its folder. Plain
@@ -95,7 +98,7 @@ and when, and the comment threads, are in a block at the end of the file.
   declares those extensions as its own type, in which case macOS asks that app. It comes with the
   app and needs nothing installed (macOS 13.3 or later; System Settings turns it off, with the
   other Quick Look extensions, and Preferences › General has a button that opens System Settings
-  there); it draws no script and loads nothing from a server. An image that is a file in the
+  there); Finder's thumbnails of those files are the page's first blocks, from a second extension. It draws no script and loads nothing from a server. An image that is a file in the
   document's project is drawn, and any other is its alt text.
 - **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
   Command line › Install links it at `/usr/local/bin/redlines`, so that it works in any new

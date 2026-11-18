@@ -86,8 +86,8 @@ records one earlier shortcut in them that was "wrong on both counts" (§2.6):
 The other rules are rules, and where they are built they are held by tests; the word for that here
 is *tested*: §3.2 (line starts), §3.4 (block breaks, splits and joins), §3.5's rule 9 (content that
 can't hold a marker, such as code, is changed whole, as a substitution with the old block as its
-payload), and §3.7's agreement with micromark on what a table is. Not every rule is built: §3.1's
-rule 9, no marker inside pandoc's `~x~` and `^x^`, is not (#370).
+payload), §3.1's rule 9 for pandoc's `~x~` and `^x^` (atoms in `.qmd` and `.Rmd` files, #370), and
+§3.7's agreement with micromark on what a table is.
 
 ### The random suites: `packages/format/src`
 
@@ -105,6 +105,10 @@ failure repeats from its seed. To try more:
 REDLINES_FUZZ=300 pnpm exec vitest run packages/format/src/<suite>.test.ts   # more documents
 REDLINES_SEED=<n> pnpm exec vitest run packages/format/src/table-cols-random.test.ts   # from one seed
 ```
+
+A shared Mac can't hold a deep draw. `gh workflow run deep.yml --ref <branch>` (`-f fuzz=300`, and
+`-f suites='<files>'` for some) runs every suite that reads `REDLINES_FUZZ` at that count, one job per
+suite, on GitHub's runners (#586); nothing else runs it.
 
 `REDLINES_SEED` starts `table-cols-random`, `table-format-random`, `table-rows-random` and
 `format-apart` at one seed.
@@ -157,10 +161,9 @@ line, micromark's reading of the file against the newest view, structural warnin
 a line start than before, the order of decisions, Undo, the caret in an open empty paragraph, the
 history, and the file's text (`getDoc()` is the document with the open line taken back, each line
 and the ledger once: #439; a file with a CR is left out of that one, since its line endings come
-back as the file has them). A refusal is allowed in a walk, and a break of one of those is not, except in the seeds
-that are skipped by name for known failures (46, 130 and 146 of the Tab walks: 46 and 130 are #258,
-and 146 is named in the comment of `KNOWN_STAGE_1`) and in one form of Return that has a row of its
-own. `walk-248.test.ts` also skips 'list-reads' for a step that takes a character out of a list marker
+back as the file has them). A refusal is allowed in a walk, and a break of one of those is not, except in one
+form of Return that has a row of its own (no seed of the Stage 2 walks is skipped by name now:
+`KNOWN_STAGE_1`, which held seeds 46 and 130 of #258, is empty). `walk-248.test.ts` also skips 'list-reads' for a step that takes a character out of a list marker
 with the caret inside the marker and Track Changes off (`editedMarker`, seed 1140 of #292, `3.‸ ship`
 and Backspace): that is the person editing the syntax, the next numbered item reads as text of the
 line as Markdown reads it, and the tracked key is refused. A key that takes a marker away from the
@@ -194,9 +197,10 @@ to run against the markdown parse and by 11 % against a key in a paragraph. Thes
 ### The system WKWebView checks: `apps/desktop/src/*-check.ts`
 
 happy-dom lays out nothing, and the app's page is drawn by WKWebView. The block keys, the tables,
-deleted and replaced blocks, the Simple view, printing and zoom each have a check that runs in the
-page (`block-check.ts`, `table-check.ts`, `struck-check.ts`, `simple-check.ts`, `print-check.ts`,
-`zoom-check.ts`). `VITE_BLOCK_CHECK=1 pnpm dev` in `apps/desktop` serves one in a browser, and
+deleted and replaced blocks, the Simple view, printing, zoom, the toolbar and Ask, and one document in
+two windows each have a check that runs in the page (`block-check.ts`, `table-check.ts`,
+`struck-check.ts`, `simple-check.ts`, `print-check.ts`, `zoom-check.ts`, `palette-check.ts`,
+`sync-check.ts`). `VITE_BLOCK_CHECK=1 pnpm dev` in `apps/desktop` serves one in a browser, and
 `pnpm tauri dev` runs it in WKWebView; the block, table and struck checks end with a
 `... done <n> passed, <n> failed` line. They are no part of CI and no step of
 [releasing.md](releasing.md): they are run by hand, and the pull request says when. A layout,
@@ -240,10 +244,9 @@ micromark 4.0.2's reading; it draws 4,000 layouts by default, and its checks ran
 **Silent wrong writes, and changes that can't be decided, found so far.** Each is an open issue with
 its case; each is a bug. The list is what has been found, not a count of what is there.
 
-- The editor's document has LF line breaks only, and its record of a break's kind forgets a break
-  whose LF a tracked edit takes out, so in a file with mixed line breaks the editor writes that
-  break into the change as the file's own kind and rejecting gives it back in the file's kind. The
-  command line writes the break's own kind and gives it back exactly (format §2.5, #924).
+- A raw line break typed at the start of a bullet item's text under a line of text is written as a
+  replacement of its unit where that reads alike in the file and the view, and is otherwise an alert
+  (#443, #1098). Left: typing before a deletion that empties a bullet.
 - The editor's parse reads a numbered line (other than 1) or an empty marker right under a list item
   as a lazy line of the item's paragraph, where CommonMark reads a list. Backspace at the first
   item of a list now reads the line below it as the file does (`ownLines` in `blocks/joins.ts`) and
@@ -262,11 +265,10 @@ its case; each is a bug. The list is what has been found, not a count of what is
   keys next to chains of another person's marks that main wrote (#276).
 - Return at the start of a nested first item, tracked, fails in four more shapes, and the walks over
   lists side by side fail at 13 more seeds past 200 (#395).
-- Failures of Stage 1's keys that the walks found are skipped by name (seeds 46, 130 and 146 of the
-  Tab walks), and more are not drawn by the walks as they are (#258).
-- Pandoc's `~x~` and `^x^` in `.qmd` and `.Rmd` files are not protected from markers: the reader has
-  no file type yet (#370). `pre` and `title` inside a quote or a list item are not read as raw text,
-  so markers can go in them ([format.md](format.md) §3.5).
+- The walks of Stage 1's keys skip no seed by name now, and some shapes of them are still not drawn
+  by the walks as they are (#258).
+- `pre` and `title` inside a quote or a list item are not read as raw text, so markers can go in them
+  ([format.md](format.md) §3.5).
 
 **The guard: the refusal that widening keeps (#808, #107).** The engine that replaces refusals
 (`widen.ts`, format §3.12) is called by the writers for tables (#657, #863), lists (#797), blocks
