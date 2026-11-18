@@ -13,7 +13,7 @@
 // What has no legal form is refused. The result is checked against the plain edit of both views,
 // and an edit that would come out otherwise is refused too, so the file is never damaged.
 
-import { withDialect } from './dialect.ts';
+import { isPandoc, withDialect } from './dialect.ts';
 import type { MarkdownDialect } from './dialect.ts';
 import { assertWholeCharacters } from './characters.ts';
 import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
@@ -586,6 +586,46 @@ function edited(
   return withDialect(ctx.dialect, () => editedIn(text, edit, ctx, half));
 }
 
+/** A key as pandoc reads it, `@fig-x` or `@smith2020` (the same as inline.ts's). */
+const KEYS = /(?<![\w@])@\w[\w:.#$%&+?~/-]*(?<![:.#$%&+?~/-])/g;
+
+/** The keys that a file with its markers reads other than its newest view does: a marker is a raw
+ * comment to pandoc, and ends a key. */
+function misreadKeys(text: string): string[] {
+  const view = newestView(text).text;
+  const marked = text
+    .slice(0, parse(text).ledgerRange?.from ?? text.length)
+    .replace(/<!--[\s\S]*?-->/g, '\uE000');
+  const plain = new Map<string, number>();
+  for (const [key] of view.matchAll(KEYS)) plain.set(key, (plain.get(key) ?? 0) + 1);
+  const wrong: string[] = [];
+  for (const [key] of marked.matchAll(KEYS)) {
+    const left = plain.get(key) ?? 0;
+    if (left > 0) plain.set(key, left - 1);
+    else wrong.push(key);
+  }
+  return [...wrong, ...[...plain].filter(([, n]) => n > 0).map(([key]) => key)];
+}
+
+/**
+ * An edit that ends a key at a marker (`@fig-x` typed in front of an insertion that starts with
+ * `42`, or after letters that are another change's) leaves a file that pandoc reads other than the
+ * newest view (format §3.1, rule 9, #1074): with Track Changes off the text can't go there.
+ */
+function assertNoSplitKey(text: string, changes: readonly TextChange[], typed: string): void {
+  if (!isPandoc() || typed === '' || !(typed.includes('@') || text.includes('@'))) return;
+  const mid = applyChanges(text, changes);
+  const before = misreadKeys(text);
+  const now = misreadKeys(mid);
+  for (const key of before) now.splice(now.indexOf(key), now.includes(key) ? 1 : 0);
+  if (now.length > 0) {
+    throw new EditError(
+      "Text can't be typed here with Track Changes off: it would end a reference or a citation inside its key, where pandoc reads it as two. Turn on Track Changes, or type it away from the change next to it.",
+      'no-legal-placement',
+    );
+  }
+}
+
 function editedIn(
   text: string,
   edit: TextChange,
@@ -651,7 +691,10 @@ function editedIn(
   const cutOff = both === 'alert';
   // So does an edit away from every mark, which is most of them.
   const away = awayFromMarks(text, parsed, markers, { from, to, insert: typed });
-  if (away) return away;
+  if (away) {
+    assertNoSplitKey(text, away, typed);
+    return away;
+  }
   // The ends of a range that draw nothing on either side are on the side of the text: the range
   // starts and ends with what it deletes.
   const shrinks = (m: MarkerRange) => m.role === 'ledger' || isBlank(m);
@@ -944,6 +987,7 @@ function editedIn(
     );
   // In a table's replacement where no cell of the old rows corresponds (`inOldRows`).
   if (cutOff) throw cannotSplit();
+  assertNoSplitKey(text, changes, typed);
   if (created.length > 0 || ahead) {
     // The markers around the typed text must stand where format §3.1 and §3.2 allow them.
     const mid = applyChanges(text, changes);
