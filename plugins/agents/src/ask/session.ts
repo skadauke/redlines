@@ -373,6 +373,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
         abort,
         generation,
         // Only the first named agent answers: another name stays in the question, as a word in it.
+        question.trim(),
         withoutMentions(question, agents, mentionedAgents(question, agents).slice(0, 1)),
         () => {
           started = true;
@@ -396,7 +397,10 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
     reach: Reach,
     abort: AbortController,
     generation: number,
+    /** The person's own words: the turn keeps them, a mention included. */
     question: string,
+    /** What the agent is sent: the question without the name that chose it. */
+    asked: string,
     onStart: () => void,
   ): Promise<void> {
     const me = deps.author.handle;
@@ -444,7 +448,7 @@ export function createAskSession(deps: AskDeps, about: { quote: string }): AskSe
       return answer(line);
     };
     const request: AgentRequest = {
-      prompt: askText(question, state.turns),
+      prompt: askText(asked, state.turns),
       systemPrompt: askPrompt({
         documentName: path === null ? 'Untitled' : basename(path),
         quote: about.quote,

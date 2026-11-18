@@ -27,6 +27,19 @@ function attempt<T>(run: () => T): T | undefined {
   }
 }
 
+/** The refusals of an edit that no replacement of a block can hold: in a line's own syntax. */
+const SYNTAX_EDIT = /cut a character in two|alert's type|can't go in a line's indentation/;
+
+function refusal(run: () => unknown): string {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof EditError) return error.message;
+    throw error;
+  }
+  return '';
+}
+
 describe('a refused edit in a block, written as a replacement of the block', () => {
   const runs = fuzzCount(80);
 
@@ -66,7 +79,11 @@ describe('a refused edit in a block, written as a replacement of the block', () 
         if (attempt(() => fineEdits(text, [source], context(ada, IDS)))) continue;
         const done = attempt(() => trackedEdits(text, [source], context(ada, IDS)));
         if (!done) {
-          refused++;
+          // An edit in a line's syntax (a character cut in two, an alert's type, a quote's or list's
+          // marker) is no text that a block holds; the rest must be written (§3.13).
+          if (!SYNTAX_EDIT.test(refusal(() => trackedEdits(text, [source], context(ada, IDS))))) {
+            refused++;
+          }
           continue;
         }
         widened++;

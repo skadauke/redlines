@@ -301,14 +301,23 @@ export function readLedger(source: string, range: Range): LedgerRead {
     const found: [string, YamlValue][] = [];
     for (const [name, value] of Object.entries(map)) {
       if (known.has(name)) continue;
-      warn('unknown-key', `The key ${name} in ${where} is not known and is kept`);
+      if (!newer) warn('unknown-key', `The key ${name} in ${where} is not known and is kept`);
       found.push([name, toYamlValue(value)]);
     }
     return found.length > 0 ? Object.fromEntries(found) : undefined;
   };
 
+  // A ledger of a later version is never downgraded (format §5.2): its number is kept as it was
+  // read (in `extra`, where `serializeLedger` writes it back in `version`'s place), so are the fields
+  // it has that this version doesn't know, and the reader warns once, not for each of them.
   const version = str(doc['version']);
-  if (version !== undefined && version !== '1')
+  const newer = version !== undefined && /^[0-9]+$/.test(version) && Number(version) > 1;
+  if (newer)
+    warn(
+      'bad-ledger',
+      `This file's ledger is version ${version}, newer than this Redlines reads (1). Its fields are kept as they are and its version number is not changed; update Redlines to read it fully.`,
+    );
+  else if (version !== undefined && version !== '1')
     warn('bad-ledger', `Unsupported ledger version ${version}`);
 
   const tracking = str(doc['tracking']);
@@ -361,10 +370,11 @@ export function readLedger(source: string, range: Range): LedgerRead {
   const extra: [string, YamlValue][] = [];
   for (const [key, value] of Object.entries(doc)) {
     if (TOP_KEYS.has(key)) continue;
-    if (!KEPT_KEYS.has(key))
+    if (!KEPT_KEYS.has(key) && !newer)
       warn('unknown-key', `The key ${key} in the ledger is not known and is kept`);
     extra.push([key, toYamlValue(value)]);
   }
+  if (newer) extra.unshift(['version', version]);
   if (extra.length > 0) ledger.extra = Object.fromEntries(extra);
 
   return { ledger, warnings, valid: true };

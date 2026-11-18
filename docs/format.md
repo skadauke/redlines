@@ -1182,10 +1182,10 @@ at the outer edge of a whole inline construct. A marker never goes:
    attributes; on `:::` lines (a fence line; a change there is a replacement of the div's
    paragraph, and a typed div is one insertion with no marker on a fence line, §9.4); before or
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
-   or a digit and an emoji shortcode; or inside `{{< >}}`, a cross-reference (`@fig-x`, `@sec-x`, and the other kinds Quarto numbers), a
-   citation bracket (`[@a; @b]`, `[-@a]`) or `(\#fig:x)`. Four of these are pandoc's alone and
+   or a digit and an emoji shortcode; or inside `{{< >}}`, a cross-reference or a citation in the text (`@fig-x`, `@sec-x`, `@smith2020`), a
+   citation bracket (`[@a; @b]`, `[-@a]`), the brackets and attributes of a span (`[x]{.mark}`: a marker never stands between them) or `(\#fig:x)`. Four of these are pandoc's alone and
    are held in a file of the pandoc dialect only (§9.1): `^x^`, `~x~`, the `:::` line, and the
-   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. GitHub shows a
+   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. Text typed in front of a word that makes a key with it (`@fig-x` before `42`) takes the rest of the key into the tracked change, so that no marker stands in the key; with Track Changes off, where that can't be done, the edit says so (#1074). GitHub shows a
    shortcode as its emoji at the start of a text or after a space, and as written with a letter or
    a digit before it (`a:tent:`); a marker between the two would leave it at the start of a text,
    where it shows as the emoji. A change whose end would stand there, as when text is typed or a
@@ -1557,12 +1557,17 @@ them and the line end, the edit is refused. The underline of a setext heading is
 break: replacing all of it is this too (`---` typed over by `===` leaves `Title⏎===⏎⏎` a heading),
 and a change of a part of it is refused (below, under a setext heading). Where the closer or
 another change next to the break has no place, the edit is refused, as any edit is. The break of
-the author's own pending split is left as it was (#419). A deletion there is not this: a change
-that takes a line break away takes all of the break (above), taking the quote markers or the white
-space out of a blank line is the rule for a quote's blank lines (below), and a deletion that
-takes no line break and that rule does not know (the `>` of a blank line indented in a list item,
-in the break of a pending split) is written as the join of the two blocks, which the last check
-sees only where letters differ (#447).
+the author's own pending split is cancelled with its break, and what stays of the break is typed
+again with what is typed, its line breaks as splits of their own (`> One⏎>⏎> Two` with `x` typed over
+the `>` of the blank line is `> One⏎x⏎> Two`, new splits for both breaks, not raw line breaks in an
+insertion; #419). A deletion inside a blank line of a break that takes no line break away, and that
+the rule for a quote's blank lines (below) does not know (the `>` of a blank line indented in a list
+item, a quote that starts at the blank line, a blank line of the break of a pending split of the
+author's own), is the same substitution with nothing typed: the break stays, whole, in the new
+text (#447). In the break of another person's split it is told as a pair that must be decided in
+order, as any change next to a split is. A change that takes a line break away takes all of the break
+(above), and taking the quote markers or the white space out of a blank line is the rule for a
+quote's blank lines (below).
 
 **The prefix of the first line, taken away.** A deletion of all of the prefix of the first line of
 the body, a list marker or a quote's `>` with the white space after it, where the text of its block
@@ -1915,6 +1920,12 @@ item's, because a marker can't stand between two items:
 `- one`, `- two`, `- three` without `- two` is `- one`⏎`- <!--del k3x9 two\n- -->`⏎`  three`. The
 break that goes is the one after the blocks, or the one before them when that is the stronger of
 the two, so that the last item of a list and the paragraph after it stay a list and a paragraph.
+
+**Text typed at the marker of a text that is only deleted blocks** (a table deleted with nothing else
+in the file) is written after the marker, never before it: the newest view has nothing there, so
+both places read alike, and after the marker the text is a paragraph of its own, below the deleted
+blocks, where the editor draws them as they were (#470). Before the marker it would share the
+marker's line.
 
 **Under a setext heading,** the break in front of the deleted blocks does not go, for it holds the
 heading's underline (above), and the underline is the heading's own: no marker may stand behind it
@@ -3787,13 +3798,17 @@ frontmatter:
 | `frontmatter` | Pending changes to the YAML front matter (§3.8)                                                    |
 
 Defaults are never written. Unknown keys are kept and ignored, so later versions can add fields.
-A ledger whose `version` is not `1` is read with a warning, and the next write puts `version: 1`.
+A ledger whose `version` is a whole number above `1` was written by a later Redlines. It is never
+downgraded: it is read with one warning (not one for each field it has that this version doesn't
+know), its number and its unknown fields are kept as they were read, and every write puts the same
+`version` back. A `version` that is `0`, or not a number, is read with a warning, and the next write
+puts `version: 1`.
 
 ### 5.3 People
 
 - `people` maps a handle (§2.4) to a person. Fields: `name` (required; what Word shows), `email`,
-  `org`, `accounts` (stable ids such as `github:ada-l` or Microsoft 365 ids from Word, used to
-  match the same person across documents and on Word import), `aliases` (other names seen on
+  `org`, `accounts` (stable ids such as `github:ada-l`, used to
+  match the same person across documents; Word's account ids are never written by the import), `aliases` (other names seen on
   import), `agent: true` and `for: HANDLE` for an agent acting for a person, `members` for a team
   that can be mentioned, and `deleted: true` for someone who left; their handle stays.
 - A handle is derived from the email's local part, or else from the name, with `-2`, `-3` appended

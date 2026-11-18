@@ -62,6 +62,12 @@ function pick3<T>(base: T | undefined, ours: T | undefined, theirs: T | undefine
   return canon(ours) >= canon(theirs) ? ours : theirs;
 }
 
+/** The version of a later Redlines, which is the higher number: never a downgrade (format §5.2). */
+function newerVersion(base: unknown, ours: unknown, theirs: unknown): unknown {
+  const number = (value: unknown) => (typeof value === 'string' ? Number(value) : 0);
+  return number(ours) >= number(theirs) ? (ours ?? base) : theirs;
+}
+
 /** A list of strings as a set: what either side added is kept, and what either removed is gone. */
 function set3(
   base: string[] | undefined,
@@ -411,7 +417,8 @@ export function mergeLedgers(
   ledger.threads = mergeKeyed(base.threads, o.threads, t.threads, mergeThread);
   const names = new Set([...base.extra.keys(), ...o.extra.keys(), ...t.extra.keys()]);
   for (const name of [...names].sort(compareText)) {
-    const merge = name === 'frontmatter' ? mergeFrontmatter : pick3;
+    const merge =
+      name === 'frontmatter' ? mergeFrontmatter : name === 'version' ? newerVersion : pick3;
     const value = merge(base.extra.get(name), o.extra.get(name), t.extra.get(name));
     if (value !== undefined) ledger.extra.set(name, value as YamlValue);
   }

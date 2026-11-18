@@ -97,6 +97,34 @@ describe('#470: Delete Table on a file that is only a table, and text typed near
   }
 });
 
+describe('#470: text typed at the marker of a lone deleted table goes after it, a paragraph of its own', () => {
+  const TABLE = '| Fruit | Count |\n| ----- | ----- |\n| Pears | 5     |';
+  const start = file(TABLE);
+  const deleted = applyChanges(
+    start,
+    tableEdit(start, tableOp(start, { kind: 'deleteTable' }), context(ada, IDS)).changes,
+  );
+  const marker = at(deleted, '<!--del');
+  const after = marker + deleted.slice(marker).indexOf('-->') + 3;
+  it('writes the text after the marker, as when it is typed there, so that it shares no line with it', () => {
+    const typedAt = (position: number) =>
+      applyChanges(
+        deleted,
+        trackedEdit(
+          deleted,
+          { from: position, to: position, insert: 'x' },
+          context(bo, IDS.slice(4)),
+        ),
+      );
+    const before = typedAt(marker);
+    expect(before).toBe(typedAt(after));
+    expect(bodyOf(before)).toMatch(/-->\n\n<!--ins \w+-->\n\nx<!--\/\w+-->/);
+    expectEveryOrderRead('470 typed', before);
+    expectNoDecisionRefused('470 typed', before);
+    expect(bodyOf(applyChanges(before, rejectAll(before))).trim()).toBe(TABLE);
+  });
+});
+
 describe('#478: a row move that reverses a highlight across rows is written, as a replacement of the table', () => {
   const plain = file('| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |');
   const lit = applyChanges(

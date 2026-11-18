@@ -18,14 +18,15 @@ use crate::file_scope;
 pub struct ProjectRoot {
     folder: String,
     is_repo: bool,
-    /// The home folder or the disk's root: an agent gets only the document, and the sidebar lists
-    /// the document's own folder.
+    /// The home folder, a folder above it or the disk's root: not a project (#451). An agent gets
+    /// only the document, and no sidebar shows a folder: the window never gets more of the disk
+    /// than its sidebar shows.
     too_broad: bool,
 }
 
 impl ProjectRoot {
-    /// Whether the project is the home folder or the disk's root, which shows its document's own
-    /// folder alone (`sidebar_folder`).
+    /// Whether the project is the home folder, a folder above it or the disk's root: none is taken
+    /// as a project, and nothing is shown (`Projects::show`).
     pub fn is_too_broad(&self) -> bool {
         self.too_broad
     }
@@ -56,13 +57,16 @@ fn is_direct(path: &Path) -> bool {
 }
 
 /// The project folder of the file at `document`, given the home folder: the nearest folder above
-/// it holding a `.git`, which is a file in a worktree, or else the document's own folder. The folder
-/// is one of the document's path as given, so that the sidebar can find the document in it.
+/// it holding a `.git`, which is a file in a worktree, or else the document's own folder. A
+/// repository that is the home folder or above (some keep their settings in one) is no project, so
+/// the document's own folder is, unless that is too broad as well. The folder is one of the
+/// document's path as given, so that the sidebar can find the document in it.
 pub fn root_of(document: &Path, home: Option<&Path>) -> ProjectRoot {
     let own = document.parent().unwrap_or(document);
     let repo = own
         .ancestors()
-        .find(|folder| folder.join(".git").symlink_metadata().is_ok());
+        .find(|folder| folder.join(".git").symlink_metadata().is_ok())
+        .filter(|repo| !too_broad(repo, home) || too_broad(own, home));
     let folder = repo.unwrap_or(own);
     ProjectRoot {
         folder: folder.to_string_lossy().into_owned(),
@@ -369,15 +373,11 @@ pub fn document_extensions() -> impl Iterator<Item = &'static str> {
         .flat_map(|(_, each)| each.iter().copied())
 }
 
-/// The folder the sidebar of a window shows for its document: the project folder, or the
-/// document's own folder when the project is too broad (`src/ui/sidebar.ts`).
-fn sidebar_folder(document: &Path, home: Option<&Path>) -> PathBuf {
+/// The folder the sidebar of a window shows for its document: the project folder, or none when
+/// the project is too broad (`src/ui/sidebar.ts`): the file opens on its own (#451).
+fn sidebar_folder(document: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let root = root_of(document, home);
-    if root.too_broad {
-        document.parent().unwrap_or(document).to_path_buf()
-    } else {
-        PathBuf::from(root.folder)
-    }
+    (!root.too_broad).then(|| PathBuf::from(root.folder))
 }
 
 /// What is done with a folder the first time it is shown, and whether its subfolders are shown
@@ -391,12 +391,16 @@ type FolderShown = Box<dyn Fn(&Path, bool) + Send + Sync>;
 #[derive(Default)]
 pub struct Projects {
     folders: Mutex<Vec<PathBuf>>,
+    /// The own folders of documents whose project is too broad: the preview may load their images
+    /// and nothing else there is shown (#451). Never listed, read or opened by a window.
+    image_only: Mutex<Vec<PathBuf>>,
     /// Told of each folder as it is first shown (`on_new_folder`).
     on_new: OnceLock<FolderShown>,
 }
 
 impl Projects {
-    /// Calls `then` with each folder the first time it is shown, and whether all it holds is shown.
+    /// Calls `then` with each folder the first time it is shown, and whether all it holds is shown
+    /// (`false` for the own folder of a document whose project is too broad: its files alone).
     /// The app uses it to let the preview load the images of a project and of no other folder
     /// (`images`). Only the first call counts.
     pub fn on_new_folder(&self, then: impl Fn(&Path, bool) + Send + Sync + 'static) {
@@ -413,9 +417,25 @@ impl Projects {
         if !is_direct(file) {
             return;
         }
-        let folder = sidebar_folder(file, home);
-        // A document's own folder, where the project is too broad, shows its files alone.
-        let whole = !root_of(file, home).too_broad;
+        // Where the project is too broad, no folder is shown: `list_folder`, `real_path` and
+        // `open_default` give a window nothing of the home folder or what is above it. Only the
+        // document's own folder, where paste and crop write its images, loads them in the preview.
+        let Some(folder) = sidebar_folder(file, home) else {
+            let own = file.parent().unwrap_or(file).to_path_buf();
+            let mut only = self
+                .image_only
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if only.contains(&own) {
+                return;
+            }
+            only.push(own.clone());
+            drop(only);
+            if let Some(then) = self.on_new.get() {
+                then(&own, false);
+            }
+            return;
+        };
         let mut folders = self
             .folders
             .lock()
@@ -427,7 +447,7 @@ impl Projects {
         // Not under the lock, which the callback has no business holding.
         drop(folders);
         if let Some(then) = self.on_new.get() {
-            then(&folder, whole);
+            then(&folder, true);
         }
     }
 
@@ -954,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn a_document_in_the_home_folder_shows_that_folder_alone() {
+    fn a_document_in_the_home_folder_shows_no_folder_and_a_window_learns_nothing_of_it() {
         let home = folder("images-home");
         let told = std::sync::Arc::new(Mutex::new(Vec::<(PathBuf, bool)>::new()));
         let projects = Projects::default();
@@ -962,8 +982,20 @@ mod tests {
         projects.on_new_folder(move |folder, whole| {
             log.lock().unwrap().push((folder.to_path_buf(), whole));
         });
+        make(&home, &["note.md", "notes/plan.md", "Private/"]);
         projects.show_with(&home.join("note.md"), Some(&home));
+        // Only the document's own folder is told of, for its images alone; no sidebar has it.
         assert_eq!(*told.lock().unwrap(), [(home.clone(), false)]);
+        assert!(projects.folders().is_empty());
+        // So nothing of it is listed, read or opened, as no sidebar shows it.
+        assert!(list_shown(&projects.folders(), &home, &home).is_err());
+        assert!(openable_in(&projects.folders(), &home, &home.join("note.md")).is_err());
+        // Nor a folder above it.
+        projects.show_with(&home.join("notes/plan.md"), Some(&home.join("notes")));
+        assert!(projects.folders().is_empty());
+        // Shown twice, told of once.
+        projects.show_with(&home.join("note.md"), Some(&home));
+        assert_eq!(told.lock().unwrap().len(), 2);
         fs::remove_dir_all(&home).unwrap();
     }
 
@@ -1045,10 +1077,15 @@ mod tests {
             root_of(&home.join("plan.md"), Some(&home)),
             root(&home, false, true)
         );
-        // A repository at home, as some keep their settings in, is too broad as well.
+        // A repository at home, as some keep their settings in, is no project: the document's own
+        // folder is, unless that is home itself.
         make(&home, &[".git/"]);
         assert_eq!(
             root_of(&home.join("notes/plan.md"), Some(&home)),
+            root(&home.join("notes"), false, false)
+        );
+        assert_eq!(
+            root_of(&home.join("plan.md"), Some(&home)),
             root(&home, true, true)
         );
         // The same folder by another path, here through a link, is still home.
@@ -1678,14 +1715,39 @@ mod tests {
     }
 
     #[test]
-    fn the_sidebar_shows_the_project_or_else_the_documents_own_folder() {
+    fn a_document_in_the_home_folder_is_still_allowed_and_answered_but_shows_no_folder() {
+        let home = folder("home-allowed");
+        make(&home, &["note.md"]);
+        let (scope, projects) = (scope(), Projects::default());
+        scope.allow_file(home.join("note.md")).unwrap();
+        // The window may use the file and learns that its project is too broad (the page then
+        // shows the notice); the only things it loses are the project's folder and its pictures.
+        let root = project_of(
+            &scope,
+            &projects,
+            &home.join("note.md").to_string_lossy(),
+            Some(&home),
+        )
+        .unwrap();
+        assert!(root.is_too_broad());
+        assert!(file_scope::allowed(&scope, &home.join("note.md")));
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn the_sidebar_shows_the_project_and_for_one_too_broad_no_folder() {
         let repo = folder("sidebar-folder");
         make(&repo, &[".git/", "docs/plan.md"]);
         let document = repo.join("docs/plan.md");
-        assert_eq!(sidebar_folder(&document, repo.parent()), repo);
-        // A repository at home is too broad.
-        assert_eq!(sidebar_folder(&document, Some(&repo)), repo.join("docs"));
-        assert_eq!(sidebar_folder(Path::new("/plan.md"), None), Path::new("/"));
+        assert_eq!(sidebar_folder(&document, repo.parent()), Some(repo.clone()));
+        // A repository at home is no project: the document's own folder is.
+        assert_eq!(
+            sidebar_folder(&document, Some(&repo)),
+            Some(repo.join("docs"))
+        );
+        // The home folder and the disk's root are none.
+        assert_eq!(sidebar_folder(&repo.join("README.md"), Some(&repo)), None);
+        assert_eq!(sidebar_folder(Path::new("/plan.md"), None), None);
         fs::remove_dir_all(&repo).unwrap();
     }
 

@@ -200,11 +200,34 @@ export function viewsOnce(): Views {
       return view;
     };
   };
-  return { newest: once(newestView, recentNewest), original: once(originalView, recentOriginal) };
+  return {
+    newest: once(newestViewOf, recentNewest),
+    original: once(originalViewOf, recentOriginal),
+  };
 }
 
+/** The views of long texts, by text: a block move or a decision asks for the views of one file's
+ * text some ten times (#1062). Shorter texts are read faster than they are looked up. */
+const LONG = 20_000;
+const LONGEST = 2_000_000;
+function remembered(make: (text: string) => DocView, recent: Map<string, DocView>) {
+  return (text: string): DocView => {
+    if (text.length < LONG || text.length > LONGEST) return make(text);
+    let view = recent.get(text);
+    if (view) recent.delete(text);
+    else view = make(text);
+    recent.set(text, view);
+    if (recent.size > RECENT) recent.delete(recent.keys().next().value!);
+    return view;
+  };
+}
+const longNewest = new Map<string, DocView>();
+const longOriginal = new Map<string, DocView>();
+
 /** Every change accepted: no markers, no deleted text and no ledger. */
-export function newestView(text: string): DocView {
+export const newestView = remembered((text) => newestViewOf(text), longNewest);
+
+function newestViewOf(text: string): DocView {
   const parsed = parse(text);
   const rows = insertedRows(text, parsed);
   const cols = insertedCols(text, parsed);
@@ -328,7 +351,9 @@ export function originalViewOfText(text: string): DocView {
  * deletion that comes back can hold the syntax a format change undoes (format §2.6). One that can't
  * be undone, as when its syntax is no longer there, keeps its text as it is.
  */
-export function originalView(text: string): DocView {
+export const originalView = remembered((text) => originalViewOf(text), longOriginal);
+
+function originalViewOf(text: string): DocView {
   const parsed = parse(text);
   if (!parsed.marks.some((mark) => mark.kind === 'fmt')) return originalViewOfText(text);
   const first = originalChanges(text, parsed, false);
