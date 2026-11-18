@@ -3468,6 +3468,14 @@ line after another person's split (`## x`, `- x`, `> x`, `1. x`, a letter or a s
 change of that line (heading, bullet, quote, number), are written this way: the substitution holds
 the split in its old text, and every order of decisions reads alike (#107, #276).
 
+A change that, to keep its markers clear of a delimiter run, takes in the letters beside it never goes
+in through the marker of another person's pending format change into its text, which would write
+their bold or italic again outside their mark. Where it would, the write that takes the text in is
+read in every order of decisions of the marks beside it (`ordersReadOtherwiseNear` in `widen.ts`):
+if any order reads otherwise than its newest view, the unit is replaced whole instead; where all
+read alike, the fine write stays (#265). A table cell, which has no replacement of its own for this,
+is written as before.
+
 **The old text holds other people's marks.** The old text of a replacement may hold another
 person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every
 order of accepting and rejecting the replacement and the marks in it reads alike (#808). The one

@@ -89,3 +89,34 @@ describe("a delimiter typed after a letter, beside another person's pending bold
     }
   }, 60_000);
 });
+
+describe("a change beside another person's pending bold keeps the fine form where it reads alike (#265)", () => {
+  it('writes a letter right after their bold as typed', () => {
+    const body = 'x <!--fmt k3x9 +bold-->**word**<!--/k3x9--> y';
+    const at = body.indexOf('<!--/k3x9-->') + '<!--/k3x9-->'.length;
+    const { before, after } = type(body, at, at, 'a');
+    expect(bodyOf(after)).not.toMatch(/^<!--sub m2bd/);
+    expectWhole(before, after, 'x **word**a y', 'a letter after the bold');
+  });
+
+  it('writes a word right before their bold as typed', () => {
+    const body = 'x <!--fmt k3x9 +bold-->**word**<!--/k3x9--> y';
+    const at = body.indexOf('<!--fmt');
+    const { before, after } = type(body, at, at, 'a ');
+    expect(bodyOf(after)).not.toMatch(/^<!--sub m2bd/);
+    expectWhole(before, after, 'x a **word** y', 'a word before the bold');
+  });
+
+  it('refuses nothing in a table cell, which has no replacement of its own here', () => {
+    const cell = 'x ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->é z';
+    const body = `| a | b |\n|---|---|\n| ${cell} | q |`;
+    const closer = body.indexOf('<!--/k3x9-->') + '<!--/k3x9-->'.length;
+    const c = body.indexOf('ca<!--fmt') + 1;
+    for (const insert of ['a', '**', '*', '~~', '\\']) {
+      for (const at of [closer, c]) {
+        const label = `${JSON.stringify(insert)} at ${at}`;
+        expect(() => type(body, at, at, insert), label).not.toThrow();
+      }
+    }
+  }, 60_000);
+});

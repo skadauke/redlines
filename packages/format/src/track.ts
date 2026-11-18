@@ -69,6 +69,7 @@ import {
   checkTableEdits,
   inOwnInsertedCol,
   inOwnInsertedRow,
+  isTableRowAt,
   leadingPipeAt,
   outerPipeWrites,
   tableStartsAt,
@@ -135,6 +136,7 @@ import {
   atBlockBoundary,
   atDelimiter,
   delimiterBesideBreak,
+  ordersReadOtherwiseNear,
   readsOtherMicromark,
 } from './widen.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
@@ -229,7 +231,14 @@ interface Plan {
    * change is first written as typed (`mode` 0) and read in every order of decisions, then written
    * again by a character on one side or the other (`mode` 1 on), as far as `options` goes.
    * `touched` is set where the markers stand against a mark. */
-  readonly emphasis: { mode: number; options: number; touched: boolean; near: Set<string> };
+  readonly emphasis: {
+    mode: number;
+    options: number;
+    touched: boolean;
+    near: Set<string>;
+    /** The change grew into the text of another person's format change (#265). */
+    intoFormat: boolean;
+  };
 }
 
 /** A deletion of a table row or column (format §3.7), which text is not merged into. */
@@ -290,7 +299,7 @@ function createPlan(text: string, ctx: EditContext, mode = 0): Plan {
     plain: false,
     touched: [],
     spans: [],
-    emphasis: { mode, options: 0, touched: false, near: new Set() },
+    emphasis: { mode, options: 0, touched: false, near: new Set(), intoFormat: false },
   };
 }
 
@@ -2580,10 +2589,9 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     );
   const grow = (a: number, b: number) => {
     if (plan.frontEnd >= 0 && a <= plan.frontEnd) throw new EditError(FRONT_MATTER, 'front-matter');
-    // Not into the text of another person's format change (#265): the unit is replaced instead.
-    if (intoTheirFormat(a, b)) {
-      refuse('A marker here would change how the text next to it is emphasized.');
-    }
+    // Into the text of another person's format change (#265): read in every order of decisions
+    // once written (`editsOnce`), and the unit is replaced where that reads otherwise.
+    if (intoTheirFormat(a, b)) plan.emphasis.intoFormat = true;
     if (a < from) {
       left = visibleText(text, markers, a, from) + left;
       from = a;
@@ -5942,6 +5950,21 @@ function editsOnce(
             'no-legal-placement',
           );
         }
+      }
+      // A change that took in the text of another person's format change reads as its newest view in
+      // every order of decisions, or is replaced with the unit that holds it (#265). A table cell
+      // has no such replacement of its own here, and is written as before.
+      if (
+        plan.emphasis.intoFormat &&
+        !edits.some((edit) => isTableRowAt(text, edit.from)) &&
+        changes.length > 0 &&
+        ordersReadOtherwiseNear(
+          after,
+          Math.min(...changes.map((change) => change.from)),
+          Math.max(...changes.map((change) => change.from + change.insert.length)),
+        )
+      ) {
+        throw new ReadsOtherwise();
       }
       // Whatever the path: no marker this edit brings right after an unescaped backslash.
       if (escapedMarkers(after, parsed) > escapedMarkers(text, plan.parsed)) {

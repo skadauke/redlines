@@ -1055,6 +1055,73 @@ function stretchOf(
   return across(from) || across(to) ? undefined : here;
 }
 
+/** The HTML that micromark, with GFM, reads `source` as, with comments and white space folded. */
+function readHtml(source: string): string {
+  return micromark(source, {
+    allowDangerousHtml: true,
+    extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+    htmlExtensions: [
+      gfmAutolinkLiteralHtml(),
+      gfmStrikethroughHtml(),
+      gfmTableHtml(),
+      gfmTaskListItemHtml(),
+    ],
+  })
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
+}
+
+const MOST_NEAR_MARKS = 6;
+const MOST_STATES = 600;
+
+/**
+ * Whether `file`, a write, reads otherwise than its newest view (micromark) in some order of
+ * deciding the marks within 400 characters of `first` to `last`, or has more than six of them: a
+ * file that the person's change made, which another person's decisions read other than it shows
+ * (#265). A decision that is refused ends its order.
+ */
+export function ordersReadOtherwiseNear(file: string, first: number, last: number): boolean {
+  const parsed = parse(file);
+  const ids = new Set(
+    parsed.marks
+      .filter(
+        (mark) =>
+          mark.kind !== 'cmt' &&
+          mark.kind !== 'hl' &&
+          mark.segments.some((s) => s.open.to >= first - 400 && s.open.from <= last + 400),
+      )
+      .map((mark) => mark.id),
+  );
+  if (ids.size > MOST_NEAR_MARKS) return true;
+  const seen = new Set<string>();
+  const walk = (current: string): boolean => {
+    if (seen.has(current)) return true;
+    seen.add(current);
+    if (seen.size > MOST_STATES) return false;
+    const now = parse(current);
+    const end = now.ledgerRange?.from ?? current.length;
+    const body = current.slice(0, end);
+    if (readHtml(body) !== readHtml(newestView(body).text)) return false;
+    for (const mark of now.marks) {
+      if (!ids.has(mark.id)) continue;
+      for (const decide of [accept, reject]) {
+        let next: string;
+        try {
+          next = applyChanges(current, decide(current, mark.id));
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          continue;
+        }
+        if (!walk(next)) return false;
+      }
+    }
+    return true;
+  };
+  return !walk(file);
+}
+
 /**
  * Whether micromark reads the file the changes make otherwise than its newest view. Only the
  * paragraphs the changes are in are read (`stretchOf`); otherwise, or with `whole`, the whole file,
@@ -1068,21 +1135,7 @@ export function readsOtherMicromark(
   const file = applyChanges(text, changes);
   const parsed = parse(file);
   const ledger = parsed.ledgerRange;
-  const read = (source: string) =>
-    micromark(source, {
-      allowDangerousHtml: true,
-      extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
-      htmlExtensions: [
-        gfmAutolinkLiteralHtml(),
-        gfmStrikethroughHtml(),
-        gfmTableHtml(),
-        gfmTaskListItemHtml(),
-      ],
-    })
-      .replace(/<!--[^]*?-->/g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/ ?(<[^>]*>) ?/g, '$1')
-      .trim();
+  const read = readHtml;
   const body = ledger ? file.slice(0, ledger.from) : file;
   const here = whole ? undefined : stretchOf(body, parsed, changes);
   const afterRead = here ?? body;
