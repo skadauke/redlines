@@ -792,30 +792,51 @@ describe('random keys next to backslashes read as micromark reads them (#223, #2
 });
 
 describe("a hard break typed next to another person's pending deletion of a block break (#265)", () => {
-  // Seed 4706 of the walk: Ada's own changes `gz9w` and `hz9w` hold the caret, Bo's `b2zz` deletes
-  // the break after the `x`, and Return follows Ada's backslash. Rejecting the typed break took the
-  // item's indent in one order of decisions and not in another.
-  const body =
-    '- two\n  x<!--del hz9w \\\\\\--><!--del b2zz \\n\\n--><!--del hz9w \\x2d--><!--ins gz9w-->\\\\\\-<!--/gz9w--> a\n  bold a One\\\n  a C:\\Users two';
-  const marks = { hz9w: 'ada', gz9w: 'ada', b2zz: 'bo' };
-  const typed = () => {
-    const text = file(body, marks);
-    const view = newestView(text);
-    return {
-      text,
-      edit: { from: view.map.toSource(11, 1), to: view.map.toSource(11, -1), insert: '\\\n  ' },
-    };
-  };
+  // Seeds of the walk: Ada's own changes hold the caret, Bo's `b2zz` deletes a block break, and
+  // Return follows Ada's backslash. Rejecting the typed break took a list item's indent in one order
+  // of decisions and not in another (4706), or read the quote after it otherwise than the view (5456).
+  const cases: {
+    seed: number;
+    body: string;
+    marks: Record<string, string>;
+    caret: number;
+    key: string;
+  }[] = [
+    {
+      seed: 4706,
+      body: '- two\n  x<!--del hz9w \\\\\\--><!--del b2zz \\n\\n--><!--del hz9w \\x2d--><!--ins gz9w-->\\\\\\-<!--/gz9w--> a\n  bold a One\\\n  a C:\\Users two',
+      marks: { hz9w: 'ada', gz9w: 'ada', b2zz: 'bo' },
+      caret: 11,
+      key: '\\\n  ',
+    },
+    {
+      seed: 5456,
+      body: 'path\\ One<!--ins f4z2-->\\\\<!--/f4z2-->\ntwo<!--del b2zz \\n\\n-->> bold a bold path\\\n',
+      marks: { f4z2: 'ada', b2zz: 'bo' },
+      caret: 5,
+      key: '\n',
+    },
+  ];
 
-  it('is no fine write, and is written as a replacement of the item', () => {
-    const { text, edit } = typed();
-    expect(readsAsNewest(text)).toBe(true);
-    const ids = ['m2bd', 'n8fx', 'nz9w', 'p7qd'];
-    expect(() => trackedEdits(text, [edit], context(ada, ids))).toThrow(
-      /every order of decisions reads alike/,
-    );
-    const after = applyChanges(text, widenedEdits(text, [edit], context(ada, ids)).changes);
-    expect(readsAsNewest(after)).toBe(true);
-    expectSound('seed 4706', after);
-  }, 60_000);
+  it.each(cases)(
+    'seed $seed is no fine write, and is written as a replacement',
+    (c) => {
+      const text = file(c.body, c.marks);
+      const view = newestView(text);
+      const edit = {
+        from: view.map.toSource(c.caret, 1),
+        to: view.map.toSource(c.caret, -1),
+        insert: c.key,
+      };
+      expect(readsAsNewest(text)).toBe(true);
+      const ids = ['m2bd', 'n8fx', 'n4z2', 'p7qd'];
+      expect(() => trackedEdits(text, [edit], context(ada, ids))).toThrow(
+        /every order of decisions reads alike/,
+      );
+      const after = applyChanges(text, widenedEdits(text, [edit], context(ada, ids)).changes);
+      expect(readsAsNewest(after)).toBe(true);
+      expectSound(`seed ${c.seed}`, after);
+    },
+    60_000,
+  );
 });

@@ -2,6 +2,14 @@
 // that touches another mark, where the markers of both read as punctuation to the delimiters between
 // them, and deciding either mark changes which delimiters stand next to which (format §3.1, rule 5).
 
+import { micromark } from 'micromark';
+import {
+  gfmAutolinkLiteral,
+  gfmAutolinkLiteralHtml,
+} from 'micromark-extension-gfm-autolink-literal';
+import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
+import { gfmTable, gfmTableHtml } from 'micromark-extension-gfm-table';
+import { gfmTaskListItem, gfmTaskListItemHtml } from 'micromark-extension-gfm-task-list-item';
 import { lineEnd, lineStart, nextLineStart } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
@@ -13,6 +21,7 @@ import { hitsIn } from './inline.ts';
 import { markerRanges } from './markers.ts';
 import { parse } from './parse.ts';
 import type { MarkRange, Parsed, Range } from './types.ts';
+import { newestView } from './views.ts';
 
 /**
  * The text with the delimiters that are no emphasis left out, in the same places: an escaped
@@ -171,6 +180,31 @@ export function neighbours(after: string, seeds: ReadonlySet<string>): MarkRange
   return parsed.marks.filter((mark) => cluster.has(mark.id));
 }
 
+/** What micromark, with GFM, reads `source` as, with comments and white space folded. */
+function readHtml(source: string): string {
+  return micromark(source, {
+    allowDangerousHtml: true,
+    extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+    htmlExtensions: [
+      gfmAutolinkLiteralHtml(),
+      gfmStrikethroughHtml(),
+      gfmTableHtml(),
+      gfmTaskListItemHtml(),
+    ],
+  })
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
+}
+
+/** Whether micromark reads the body of `text` as its newest view. */
+function readsLikeView(text: string): boolean {
+  const ledger = parse(text).ledgerRange;
+  const body = ledger ? text.slice(0, ledger.from) : text;
+  return readHtml(body) === readHtml(newestView(body).text);
+}
+
 /** The most marks near a break that are decided in every order, and the most states read. */
 const MOST_NEAR = 6;
 const MOST_ORDER_STATES = 600;
@@ -224,6 +258,7 @@ export function hardBreakBesideDeletionReadsOtherwise(
     if (seen.has(key)) return true;
     seen.add(key);
     if (++states > MOST_ORDER_STATES) return false;
+    if (!readsLikeView(current)) return false;
     const left = parse(current).marks.filter((mark) => ids.has(mark.id));
     if (left.length === 0) {
       const set = decided.toSorted().join(' ');
