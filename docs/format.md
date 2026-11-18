@@ -1181,11 +1181,11 @@ at the outer edge of a whole inline construct. A marker never goes:
    tilde is a subscript; in a `.md` file one tilde is GFM's strikethrough, which takes marks); after or inside `{…}`
    attributes; on `:::` lines (a fence line; a change there is a replacement of the div's
    paragraph, and a typed div is one insertion with no marker on a fence line, §9.4); before or
-   inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
-   a digit or punctuation and an emoji shortcode; or inside `{{< >}}`, a cross-reference (`@fig-x`, `@sec-x`, and the other kinds Quarto numbers), a
-   citation bracket (`[@a; @b]`, `[-@a]`) or `(\#fig:x)`. Four of these are pandoc's alone and
+   inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter,
+   a digit or punctuation and an emoji shortcode; or inside `{{< >}}`, a cross-reference or a citation in the text (`@fig-x`, `@sec-x`, `@smith2020`), a
+   citation bracket (`[@a; @b]`, `[-@a]`), the brackets and attributes of a span (`[x]{.mark}`: a marker never stands between them) or `(\#fig:x)`. Four of these are pandoc's alone and
    are held in a file of the pandoc dialect only (§9.1): `^x^`, `~x~`, the `:::` line, and the
-   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. GitHub shows a
+   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. Text typed in front of a word that makes a key with it (`@fig-x` before `42`) takes the rest of the key into the tracked change, so that no marker stands in the key; with Track Changes off, where that can't be done, the edit says so (#1074). GitHub shows a
    shortcode as its emoji only at the start of a text or after white space, and as written after
    anything else: a letter or a digit (`a:tent:`), punctuation (`(:tent:`, `.:tent:`) or another
    shortcode. Redlines draws the same (#388), and a marker never changes which: between that
@@ -3796,7 +3796,11 @@ frontmatter:
 | `frontmatter` | Pending changes to the YAML front matter (§3.8)                                                    |
 
 Defaults are never written. Unknown keys are kept and ignored, so later versions can add fields.
-A ledger whose `version` is not `1` is read with a warning, and the next write puts `version: 1`.
+A ledger whose `version` is a whole number above `1` was written by a later Redlines. It is never
+downgraded: it is read with one warning (not one for each field it has that this version doesn't
+know), its number and its unknown fields are kept as they were read, and every write puts the same
+`version` back. A `version` that is `0`, or not a number, is read with a warning, and the next write
+puts `version: 1`.
 
 ### 5.3 People
 
