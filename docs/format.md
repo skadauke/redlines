@@ -3496,7 +3496,7 @@ line break is no letter beside a run and is not read this way, and a table's cel
 that follows.
 
 In a table's cell the same holds for every order of decisions (#490). When someone types or pastes text in a
-cell of a table that holds changes, and the text has a `*`, `_`, `~` or `\\` in it, or the edit stands right
+cell of a table that holds changes, and the text has a `*`, `_`, `~` or `\` in it, or the edit stands right
 against one of them, the file is read as it stands and after each accept and each reject of the table's
 changes (`readsOtherInDecisions`, `table-delimiter.ts`). If one of those readings differs from the newest
 view, and the file before the edit had none that did, the table that holds the cell is replaced.
