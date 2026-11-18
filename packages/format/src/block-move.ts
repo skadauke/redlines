@@ -111,12 +111,26 @@ function readRun(text: string, from: number, to: number): Read | undefined {
 const lineEnd = (unit: Unit) => unit.to;
 const CLOSER = /^<!--\/[a-z0-9]{4}-->/;
 
+/** Whether a unit is a fenced code block whose fence nothing closes, which holds the rest of its
+ * container (#1103). */
+function isUnclosed(view: string, unit: Unit): boolean {
+  if (unit.kind !== 'code') return false;
+  const tail = view.slice(unit.lineFrom, unit.to).split('\n');
+  const fence = /^[ \t>]*(`{3,}|~{3,})/.exec(tail[0] ?? '')?.[1];
+  if (fence === undefined) return false;
+  const closing = new RegExp(`^[ \\t>]*${fence[0] === '~' ? '~' : '`'}{${fence.length},}[ \\t]*$`);
+  return !(tail.length > 1 && closing.test(tail.at(-1) ?? ''));
+}
+
 /** The gaps of a read: all but the two that touch the run. */
 function gapsOf(read: Read): BlockGap[] {
   const { siblings, first, last, map } = read;
   const gaps: BlockGap[] = [];
+  // Nothing goes below a fence that nothing closes: it would be the fence's own text.
+  const held = siblings.findIndex((unit) => isUnclosed(read.view, unit));
   for (let i = 0; i <= siblings.length; i++) {
     if (i >= first && i <= last + 1) continue;
+    if (held !== -1 && i > held) continue;
     const next = siblings[i];
     const previous = siblings[i - 1];
     const above = previous ? { above: map.toSource(lineEnd(previous), -1) } : {};
@@ -138,15 +152,7 @@ export function blockRunAt(text: string, range: Range): BlockRun | undefined {
   const firstUnit = read?.siblings[read.first];
   const lastUnit = read?.siblings[read.last];
   if (!read || !firstUnit || !lastUnit) return undefined;
-  const tail = read.view.slice(lastUnit.lineFrom, lastUnit.to).split('\n');
-  const fence = /^[ \t>]*(`{3,}|~{3,})/.exec(tail[0] ?? '')?.[1];
-  const closing = new RegExp(
-    `^[ \\t>]*${fence?.[0] === '~' ? '~' : '`'}{${fence?.length ?? 3},}[ \\t]*$`,
-  );
-  const unclosed =
-    lastUnit.kind === 'code' &&
-    fence !== undefined &&
-    !(tail.length > 1 && closing.test(tail.at(-1) ?? ''));
+  const unclosed = isUnclosed(read.view, lastUnit);
   return {
     kind: firstUnit.kind,
     count: read.last - read.first + 1,
