@@ -1,9 +1,7 @@
 // Where the markers of a comment or a highlight go (format §3.1 to §3.3, §4): both are anchored on a
 // range of the text, which changes no text, so their markers are placed by one set of rules.
 //
-// A range across blocks is written as one segment per block with the same id (format §4, see
-// `blockParts`); a table is one block, and a range that meets code, an HTML block or what the block
-// reader doesn't read stays one segment. Its ends are moved to where
+// In v0.1 a range is written as one segment, even across blocks. Its ends are moved to where
 // format §3.1 to §3.3 allow a marker, which changes what the mark covers by whitespace or by a
 // whole construct but never by text: out of a link destination or an image, off a delimiter whose
 // flanking a marker would change, back over the line break in front of a wrapped line, back from
@@ -131,53 +129,6 @@ function widenToHtmlBlocks(
     if (end > open && end < close) to = Math.max(to, close);
   }
   return { from, to };
-}
-
-/**
- * `range` cut at the blocks of the text: the part of it in each block, from the start of the block's
- * text (after its prefix) to the end of its last line, so that a block carries a segment of its own
- * when it is moved or deleted (format §4). A paragraph, a heading and a quote's paragraph are
- * blocks, an item is its paragraph, and a table is one block, whose rows a mark crosses as one
- * segment (§3.12). Only the range is returned where it is inside one block, or meets code, an HTML
- * block or text the block reader doesn't read (tabs, a lone carriage return), as before.
- */
-export function blockParts(
-  text: string,
-  markers: readonly MarkerRange[],
-  body: number,
-  range: Range,
-  frontEnd: number,
-): Range[] {
-  if (range.from >= range.to) return [range];
-  const begin = frontEnd >= 0 ? frontEnd + 1 : 0;
-  if (begin >= body || range.from < begin || range.to > body) return [range];
-  const shown = visible(text, markers, begin, body);
-  const read = readBlocks(shown.text)?.filter(
-    (block) => block.kind !== 'item' && block.kind !== 'quote',
-  );
-  if (!read || read.length < 2) return [range];
-  const lines = shown.text.split('\n');
-  const starts: number[] = [];
-  for (let at = 0, n = 0; n < lines.length; n++) {
-    starts.push(at);
-    at += (lines[n]?.length ?? 0) + 1;
-  }
-  const parts: Range[] = [];
-  for (const block of read) {
-    const at = starts[block.first];
-    const after = starts[block.last];
-    if (at === undefined || after === undefined) return [range];
-    const line = lines[block.last] ?? '';
-    const lineEndAt = after + line.length - (line.endsWith('\r') ? 1 : 0);
-    const open = lineTextStart(text, shown.offsets[at] ?? 0);
-    const close = shown.offsets[lineEndAt] ?? body;
-    const from = Math.max(range.from, open);
-    const to = Math.min(range.to, close);
-    if (from >= to) continue;
-    if (block.kind !== 'paragraph' && !/^h[1-6]$/.test(block.kind)) return [range];
-    parts.push({ from, to });
-  }
-  return parts.length < 2 ? [range] : parts;
 }
 
 /**

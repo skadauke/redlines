@@ -8,6 +8,7 @@ import { mergeLedgers } from './ledger-merge.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { ada, bo, context, file } from './test-helpers.ts';
+import { blockRunAt, moveBlockEdits, neighbourGap } from './block-move.ts';
 import { trackedEdit } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -136,72 +137,81 @@ describe("#11: the ledger's YAML (format §5.5)", () => {
 });
 
 describe('#17: line breaks, blocks and rejecting all', () => {
-  // Format §4: "A range may span blocks, as one segment per block with the same id."
-  const across = (body: string, first: string, last: string, ends: [number, number] = [0, 0]) => {
-    const from = body.indexOf(first) + ends[0];
-    const to = body.indexOf(last) + last.length + ends[1];
+  // Format §4: a range that spans blocks is written as one segment, its opener in the first block
+  // and its closer in the last, so that moves, deletions and decisions keep it whole. A reader also
+  // takes one segment per block with the same id, which other tools may write.
+  const across = (body: string, first: string, last: string) => {
+    const from = body.indexOf(first);
+    const to = body.indexOf(last) + last.length;
     return applyChanges(body, addComment(body, { from, to }, 'x', ids()).changes);
   };
+  const THREE = 'One two.\n\nThree four.\n\nFive six.\n';
 
   it.each([
-    ['two paragraphs', 'First para.\n\nSecond para.\n', 'para', 'Second', 2],
-    [
-      'three paragraphs, from the middle of one to the middle of another',
-      'One two.\n\nThree.\n\nFour five.\n',
-      'two',
-      'Four',
-      3,
-    ],
-    ['list items', '- one\n- two\n- three\n', 'one', 'three', 3],
-    ['a numbered list', '1. one\n2. two\n', 'one', 'two', 2],
-    ['quote paragraphs', '> one\n>\n> two\n', 'one', 'two', 2],
-    ['a heading and its paragraph', '# Head\n\nBody text\n', 'Head', 'text', 2],
-    ['a paragraph and an item', 'Intro.\n\n- item\n', 'Intro', 'item', 2],
-  ])('writes a comment across %s as one segment per block, with one id', (_, body, a, b, n) => {
+    ['paragraphs', THREE, 'two', 'Five'],
+    ['list items', '- one\n- two\n- three\n', 'one', 'three'],
+    ['quote paragraphs', '> one\n>\n> two\n', 'one', 'two'],
+  ])('writes a comment across %s as one segment with one id', (_, body, a, b) => {
     const written = across(body, a, b);
     const read = parse(written);
     expect(read.warnings).toEqual([]);
-    expect(read.marks.map((mark) => [mark.id, mark.segments.length])).toEqual([['k3x9', n]]);
-    expect(read.ledger.comments.map((thread) => thread.id)).toEqual(['k3x9']);
+    expect(read.marks.map((mark) => [mark.id, mark.segments.length])).toEqual([['k3x9', 1]]);
     expect(newestView(written).text).toBe(body);
-    expect(originalView(written).text).toBe(body);
   });
 
-  it('keeps a range in one block as one segment, and a range across a table as one block', () => {
-    const body = 'Hello world.\n\n| a | b |\n| - | - |\n| c | d |\n| e | f |\n';
-    const one = applyChanges(body, addComment(body, { from: 0, to: 5 }, 'x', ids()).changes);
-    expect(parse(one).marks.map((mark) => mark.segments.length)).toEqual([1]);
-    const rows = across(body, 'c |', 'e |');
-    expect(parse(rows).warnings).toEqual([]);
-    expect(parse(rows).marks.map((mark) => mark.segments.length)).toEqual([1]);
-  });
-
-  it('removes every segment when the thread is deleted, and keeps the text', () => {
-    const body = 'First para.\n\nSecond para.\n';
-    const written = across(body, 'para', 'Second');
-    const removed = applyChanges(written, deleteThread(written, 'k3x9'));
-    expect(parse(removed).marks).toEqual([]);
-    expect(newestView(removed).text).toBe(body);
-    expect(removed).not.toContain('cmt');
-  });
-
-  it("carries each segment with its block when another person's deletion of a block is decided", () => {
-    const body = 'First para.\n\nSecond para.\n\nThird para.\n';
-    const written = across(body, 'para', 'Third');
-    const start = written.indexOf('Second');
-    const end = written.indexOf('Second para.') + 'Second para.'.length;
+  it('keeps the comment whole when the block in the middle is deleted, tracked', () => {
+    const written = across(THREE, 'two', 'Five');
+    const from = written.indexOf('Three four.');
     const deleted = applyChanges(
       written,
-      trackedEdit(written, { from: start, to: end, insert: '' }, context(bo, ['m3xb', 'p3xb'])),
+      trackedEdit(
+        written,
+        { from, to: from + 'Three four.'.length, insert: '' },
+        context(bo, ['m3xb', 'p3xb']),
+      ),
     );
+    expect(parse(deleted).marks.map((mark) => [mark.id, mark.kind])).toEqual(
+      expect.arrayContaining([['k3x9', 'cmt']]),
+    );
+    expect(parse(deleted).marks.find((mark) => mark.kind === 'sub')).toBeUndefined();
     for (const decide of [acceptAll, rejectAll]) {
       const after = applyChanges(deleted, decide(deleted));
-      const read = parse(after);
-      expect(read.warnings).toEqual([]);
-      expect(read.ledger.comments.map((thread) => thread.id)).toEqual(['k3x9']);
+      const comment = parse(after).marks.find((mark) => mark.id === 'k3x9');
+      expect(comment?.segments.at(-1)?.close, decide.name).toBeDefined();
+      expect(
+        after.slice(comment?.segments[0]?.content.from, comment?.segments[0]?.content.to),
+      ).toContain('two.');
     }
-    expect(newestView(rejected(deleted)).text).toBe(body);
-    expect(originalView(deleted).text).toBe(body);
+    expect(newestView(rejected(deleted)).text).toBe(THREE);
+  });
+
+  it.each([
+    ['up', true],
+    ['down', false],
+  ])('keeps the comment whole when the middle block is moved %s, untracked', (_, up) => {
+    const written = across(THREE, 'two', 'Five');
+    const view = newestView(written);
+    const from = view.map.toSource(view.text.indexOf('Three four.'), 1);
+    const run = blockRunAt(written, { from, to: from });
+    const gap = run && neighbourGap(run, up);
+    const plan = run && gap && moveBlockEdits(written, run, gap);
+    expect(plan).toBeTruthy();
+    const after = applyChanges(written, plan ? plan.edits : []);
+    expect(parse(after).warnings).toEqual([]);
+    const comment = parse(after).marks.find((mark) => mark.id === 'k3x9');
+    expect(comment?.segments.length).toBe(1);
+    expect(comment?.segments[0]?.close).toBeDefined();
+    expect(newestView(after).text).toBe(
+      up ? 'Three four.\n\nOne two.\n\nFive six.\n' : 'One two.\n\nFive six.\n\nThree four.\n',
+    );
+  });
+
+  it('removes the one segment when the thread is deleted, and keeps the text', () => {
+    const written = across(THREE, 'two', 'Five');
+    const removed = applyChanges(written, deleteThread(written, 'k3x9'));
+    expect(parse(removed).marks).toEqual([]);
+    expect(newestView(removed).text).toBe(THREE);
+    expect(removed).not.toContain('cmt');
   });
 
   it.each(['\n', '\r\n'])('gives a payload its line breaks back alike, in a file of %j', (eol) => {
