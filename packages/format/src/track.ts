@@ -5968,6 +5968,8 @@ function editsOnce(
       if (
         plan.emphasis.intoFormat &&
         !edits.some((edit) => isTableRowAt(text, edit.from)) &&
+        // An edit across a line break is no letter beside a run: its blocks are the unit's own.
+        !edits.some((edit) => /\n/.test(text.slice(edit.from, edit.to) + edit.insert)) &&
         changes.length > 0 &&
         ordersReadOtherwiseNear(
           after,

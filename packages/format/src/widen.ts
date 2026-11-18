@@ -1100,19 +1100,37 @@ const MOST_STATES = 100;
 export function ordersReadOtherwiseNear(file: string, first: number, last: number): boolean {
   const parsed = parse(file);
   const end = parsed.ledgerRange?.from ?? file.length;
-  const before = file.lastIndexOf('\n\n', Math.max(0, first - 1));
-  const from = before < 0 ? 0 : before + 2;
-  const after = file.indexOf('\n\n', Math.min(last, end));
-  const to = after < 0 || after > end ? end : after;
-  const ids = new Set<string>();
-  for (const mark of parsed.marks) {
-    if (mark.kind === 'cmt' || mark.kind === 'hl') continue;
-    for (const segment of mark.segments) {
-      const inside = segment.open.from >= from && (segment.close?.to ?? segment.open.to) <= to;
-      const touches = segment.open.to > from && segment.open.from < to;
-      if (touches && !inside) return true;
-      if (inside) ids.add(mark.id);
+  const startOf = (at: number) => {
+    const before = file.lastIndexOf('\n\n', Math.max(0, at - 1));
+    return before < 0 ? 0 : before + 2;
+  };
+  const endOf = (at: number) => {
+    const after = file.indexOf('\n\n', Math.min(at, end));
+    return after < 0 || after > end ? end : after;
+  };
+  let from = startOf(first);
+  let to = endOf(last);
+  // A mark that runs out of the paragraphs takes the paragraphs it spans in, a few times over; past
+  // that the unit is replaced.
+  let ids = new Set<string>();
+  for (let round = 0; ; round++) {
+    ids = new Set<string>();
+    let grown = false;
+    for (const mark of parsed.marks) {
+      if (mark.kind === 'cmt' || mark.kind === 'hl') continue;
+      for (const segment of mark.segments) {
+        const stop = segment.close?.to ?? segment.open.to;
+        const inside = segment.open.from >= from && stop <= to;
+        const touches = segment.open.to > from && segment.open.from < to;
+        if (touches && !inside) {
+          from = Math.min(from, startOf(segment.open.from));
+          to = Math.max(to, endOf(stop));
+          grown = true;
+        } else if (inside) ids.add(mark.id);
+      }
     }
+    if (!grown) break;
+    if (round >= 3) return true;
   }
   if (ids.size > MOST_NEAR_MARKS) return true;
   // The ledger only: the body after the stretch holds no mark that a decision here could reach.
