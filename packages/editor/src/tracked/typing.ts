@@ -710,7 +710,7 @@ function trackEditsWith(
   // A group of its own for several edits, or the one a caller has made for them.
   if (typeof grouped === 'string') ctx = { ...ctx, group: grouped };
   else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
-  const together = widening === false ? deletedTogether(text, parsed, edits, ctx) : null;
+  const together = widening === false ? deletedTogether(state, text, parsed, edits, ctx) : null;
   if (together) return together;
   return formatEdits(
     text,
@@ -765,6 +765,7 @@ const TOGETHER = 8;
  * The caret goes where the last deletion starts; the tracked layer moves it out of hidden text.
  */
 function deletedTogether(
+  state: EditorState,
   text: string,
   parsed: Parsed,
   edits: readonly Edit[],
@@ -779,11 +780,24 @@ function deletedTogether(
   ) {
     return null;
   }
+  // A file with line breaks of more than one kind is written on its own text, so that a payload
+  // names the kind of each break a deletion takes out (#924, #1057).
+  const file = fileTextFor(state, text);
+  const view = file === null ? null : new FileView(file);
+  const on = view ? view.text : text;
+  const onParsed = view ? parse(on) : parsed;
   try {
-    const written = fineEdits(text, edits, ctx).changes;
-    const changes = ChangeSet.of(written, text.length);
-    const after = parse(applyChanges(text, written), parsed);
-    if (lineStartMarkers(after) > lineStartMarkers(parsed)) return null;
+    const written = fineEdits(
+      on,
+      view ? edits.map((edit) => ({ ...edit, ...view.changeToFile(edit) })) : edits,
+      ctx,
+    ).changes;
+    const changes = ChangeSet.of(
+      view ? written.map((change) => view.changeToDoc(change)) : written,
+      text.length,
+    );
+    const after = parse(applyChanges(on, written), onParsed);
+    if (lineStartMarkers(after) > lineStartMarkers(onParsed)) return null;
     const main = edits.find((edit) => edit.main);
     return { changes, caret: main ? changes.mapPos(main.from, -1) : null };
   } catch (error) {

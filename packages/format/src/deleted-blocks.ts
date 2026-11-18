@@ -360,7 +360,7 @@ export function deletedBlocks(
   const lines = linesOf(payload);
   let from = 0;
   let to = lines.length;
-  if (first.carrier) {
+  if (first.carrier && !context.alone) {
     // The opener of a block that starts here: the payload ends with the break and the prefix of
     // the block after it, and never starts with one.
     if (lines.length < 2 || BLANK.test(lines[0]!.text)) return null;

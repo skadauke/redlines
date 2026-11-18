@@ -11,9 +11,10 @@ import { parse } from './parse.ts';
 import { readTables } from './table.ts';
 import { fineTableEdit as tableEdit, tableEdit as widenedOrFine } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
-import { fineFormat, trackedFormat } from './formatting.ts';
+import { fineFormat, trackedFormat, trackedFormatRanges } from './formatting.ts';
 import { widenedTableEdit } from './table-widen.ts';
 import { ada, bo, bodyOf, context, file } from './test-helpers.ts';
+import { newestView } from './views.ts';
 import { Untrackable } from './widen.ts';
 
 const BODY = ['| A | B | C |', '| - | - | - |', '| a1 | b1 | c1 |', '| a2 | b2 | c2 |'];
@@ -180,4 +181,27 @@ describe("a widened format change in a cell, over another person's pending marks
     }
     expect(widened).toBeGreaterThan(0);
   });
+});
+
+describe('two ranges that lie in one mark (#1093)', () => {
+  // The collab-sim replay turned bold off over three tokens of one nested file and got a RangeError
+  // from `applyChanges`: both ranges planned the same edits, and they were written twice.
+  const bodies = {
+    "a person's own insertion": '<!--ins k3x9-->**one two three**<!--/k3x9--> end',
+    'a bold run in a mark of another person': '<!--sub w8nn-->**one two three**<!--/w8nn--> end',
+  };
+  for (const [name, body] of Object.entries(bodies)) {
+    it(`takes bold off over both, once, in ${name}`, () => {
+      const text = file(body, { k3x9: 'ada', w8nn: 'bo' });
+      const ranges = [
+        { from: text.indexOf('one'), to: text.indexOf('one') + 3 },
+        { from: text.indexOf('three'), to: text.indexOf('three') + 5 },
+      ];
+      const op = { kind: 'inline', format: 'bold', on: false } as const;
+      const made = trackedFormatRanges(text, ranges, op, context(ada, ['m2np', 'q3rs', 'z4tt']));
+      const after = applyChanges(text, made.changes);
+      expect(newestView(after).text.trim(), name).toBe('one two three end');
+      if (made.markIds.length > 0) expectEveryOrderRead(name, after);
+    });
+  }
 });
