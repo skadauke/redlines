@@ -3495,15 +3495,18 @@ mark that runs out of them past three rounds of taking the paragraphs it spans i
 line break is no letter beside a run and is not read this way, and a table's cell is read by the rule
 that follows.
 
-In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that stands
-against a delimiter, in a table that holds changes, is read in the file as it stands and after each
-accept and reject of the table's changes (`readsOtherInDecisions`, `table-delimiter.ts`); where one of
-them reads otherwise than the newest view and the file before the edit had none, the table that holds the
-cell is replaced.
-A comment or a highlight whose end stands against a delimiter is placed the same way as beside a pending
-row change: at the nearest range whose ends cut no delimiter run in any decision (`besideDelimiter` in
-`table-settle.ts`), and as asked when none does. An untracked edit that cuts a delimiter of a pending
-bold is not widened: it is no tracked write.
+In a table's cell the same holds for every order of decisions (#490). When someone types or pastes text in a
+cell of a table that holds changes, and the text has a `*`, `_`, `~` or `\` in it, or the edit stands right
+against one of them, the file is read as it stands and after each accept and each reject of the table's
+changes (`readsOtherInDecisions`, `table-delimiter.ts`). If one of those readings differs from the newest
+view, and the file before the edit had none that did, the table that holds the cell is replaced.
+
+A comment or a highlight whose start or end stands against one of those characters is placed the same
+way as beside a pending row change: at the nearest range whose ends cut no delimiter run in any
+decision (`besideDelimiter` in `table-settle.ts`; a backslash counts there as `*`, `_` and `~` do), and
+as asked when none does. A change that holds the whole table, another person's replacement of it, is one
+of the decisions read. An untracked edit that cuts a delimiter of a pending bold is not widened: it is no
+tracked write.
 
 **The old text holds other people's marks.** The old text of a replacement may hold another
 person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every

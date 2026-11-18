@@ -45,7 +45,10 @@ export function readsOtherInDecisions(
   const to = Math.max(...edits.map((edit) => edit.to));
   // The cheap checks first, so that a keystroke in a paragraph, or in a file with no table, costs nothing: a
   // table's row has a pipe on its own line or on one next to it, and the edit stands against a delimiter.
-  if (!besideDelimiter(text, { from, to }) || !nearPipe(text, from, to)) return false;
+  // The text typed holds a delimiter, or the edit stands against one: the first can pair with a run beside a marker
+  // that the old text beside the edit does not show (spaces, a pipe).
+  const typed = edits.some((edit) => /[*_~\\]/.test(edit.insert));
+  if (!(typed || besideDelimiter(text, { from, to })) || !nearPipe(text, from, to)) return false;
   if (!readTables(text, parse(text)).some((table) => from <= table.to && table.from <= to)) {
     return false;
   }
