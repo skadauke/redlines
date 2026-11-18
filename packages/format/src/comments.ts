@@ -4,14 +4,14 @@
 // highlight (anchors.ts).
 
 import { withDialect } from './dialect.ts';
-import { closerRange, openerRange } from './blocks.ts';
+import { closerRange, frontMatterEnd, openerRange } from './blocks.ts';
 import { aroundFences } from './div-ends.ts';
 import { awayFromIncludes, type AroundInclude } from './include.ts';
 import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, markerRanges, visibleText, workingLedger } from './edit-support.ts';
 import type { MarkerRange } from './edit-support.ts';
-import { anchorRange, assertRange, checkAnchor } from './anchors.ts';
+import { anchorRange, assertRange, blockParts, checkAnchor } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
@@ -99,6 +99,12 @@ export function addComment(
     }
     const { from, to } = around;
     const point = from === to;
+    // A range across blocks is one segment per block, with the same id (format §4); where the
+    // blocks' own placing doesn't hold, it stays one segment.
+    const parts =
+      point || fenced.whole
+        ? [around]
+        : segmentsOf(text, parsed, markers, around, frontMatterEnd(text));
 
     const id = newId(idsIn(text), ctx.random);
     const thread: Thread = {
@@ -117,15 +123,20 @@ export function addComment(
 
     // Next to an include, each marker is a line of its own, and the line break goes with it.
     const eol = eolOf(text, parsed.ledgerRange);
-    const anchors: TextChange[] = [
-      { from, to: from, insert: `<!--cmt ${id}-->${around.openerLine ? eol : ''}` },
-    ];
-    if (!point) {
+    const anchors: TextChange[] = [];
+    for (const part of parts) {
       anchors.push({
-        from: to,
-        to,
-        insert: `${around.closerLine ? eol : ''}<!--/${id}-->`,
+        from: part.from,
+        to: part.from,
+        insert: `<!--cmt ${id}-->${part.openerLine ? eol : ''}`,
       });
+      if (!point) {
+        anchors.push({
+          from: part.to,
+          to: part.to,
+          insert: `${part.closerLine ? eol : ''}<!--/${id}-->`,
+        });
+      }
     }
     const changes = commitEdit(text, anchors, ledger, {
       parsed,
@@ -167,6 +178,39 @@ export function addComment(
     }
     throw across.error;
   });
+}
+
+/**
+ * The segments of a comment on `around`: its part in each block, each placed as the whole range is
+ * (a quote's `>` line, the end of a block's text, no marker inside code), or the whole range as one
+ * where a part can't be placed, or the parts would not stay apart.
+ */
+function segmentsOf(
+  text: string,
+  parsed: Parsed,
+  markers: readonly MarkerRange[],
+  around: AroundInclude,
+  frontEnd: number,
+): AroundInclude[] {
+  const body = parsed.ledgerRange?.from ?? text.length;
+  const parts = blockParts(text, markers, body, around, frontEnd);
+  if (parts.length < 2) return [around];
+  try {
+    const placed: AroundInclude[] = [];
+    for (const part of parts) {
+      let one = anchorRange(text, parsed, markers, part, COMMENT_WORDS);
+      one = pastPendingRowMarks(text, parsed, markers, one);
+      one = beforePipes(text, parsed, markers, one, COMMENT_WORDS);
+      const next = awayFromIncludes(text, one);
+      const last = placed.at(-1);
+      if (next.from >= next.to || (last && next.from < last.to)) return [around];
+      placed.push(next);
+    }
+    return placed;
+  } catch (error) {
+    if (error instanceof EditError) return [around];
+    throw error;
+  }
 }
 
 /**

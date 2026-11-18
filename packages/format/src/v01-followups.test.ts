@@ -1,7 +1,7 @@
 // The v0.1 follow-ups of #11 and #17 (issue #1024), each as the case that was not reproduced.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { addComment } from './comments.ts';
+import { addComment, deleteThread } from './comments.ts';
 import { acceptAll, reject, rejectAll } from './decide.ts';
 import { applyLedgerOp, ledgerMapOf } from './ledger-map.ts';
 import { mergeLedgers } from './ledger-merge.ts';
@@ -128,13 +128,72 @@ describe("#11: the ledger's YAML (format §5.5)", () => {
 });
 
 describe('#17: line breaks, blocks and rejecting all', () => {
-  it('writes a comment across two blocks as one segment', () => {
-    const body = 'First para.\n\nSecond para.\n';
-    const from = body.indexOf('para');
-    const to = body.indexOf('Second') + 3;
-    const written = applyChanges(body, addComment(body, { from, to }, 'x', ids()).changes);
-    expect(parse(written).marks.map((mark) => mark.segments.length)).toEqual([1]);
+  // Format §4: "A range may span blocks, as one segment per block with the same id."
+  const across = (body: string, first: string, last: string, ends: [number, number] = [0, 0]) => {
+    const from = body.indexOf(first) + ends[0];
+    const to = body.indexOf(last) + last.length + ends[1];
+    return applyChanges(body, addComment(body, { from, to }, 'x', ids()).changes);
+  };
+
+  it.each([
+    ['two paragraphs', 'First para.\n\nSecond para.\n', 'para', 'Second', 2],
+    [
+      'three paragraphs, from the middle of one to the middle of another',
+      'One two.\n\nThree.\n\nFour five.\n',
+      'two',
+      'Four',
+      3,
+    ],
+    ['list items', '- one\n- two\n- three\n', 'one', 'three', 3],
+    ['a numbered list', '1. one\n2. two\n', 'one', 'two', 2],
+    ['quote paragraphs', '> one\n>\n> two\n', 'one', 'two', 2],
+    ['a heading and its paragraph', '# Head\n\nBody text\n', 'Head', 'text', 2],
+    ['a paragraph and an item', 'Intro.\n\n- item\n', 'Intro', 'item', 2],
+  ])('writes a comment across %s as one segment per block, with one id', (_, body, a, b, n) => {
+    const written = across(body, a, b);
+    const read = parse(written);
+    expect(read.warnings).toEqual([]);
+    expect(read.marks.map((mark) => [mark.id, mark.segments.length])).toEqual([['k3x9', n]]);
+    expect(read.ledger.comments.map((thread) => thread.id)).toEqual(['k3x9']);
     expect(newestView(written).text).toBe(body);
+    expect(originalView(written).text).toBe(body);
+  });
+
+  it('keeps a range in one block as one segment, and a range across a table as one block', () => {
+    const body = 'Hello world.\n\n| a | b |\n| - | - |\n| c | d |\n| e | f |\n';
+    const one = applyChanges(body, addComment(body, { from: 0, to: 5 }, 'x', ids()).changes);
+    expect(parse(one).marks.map((mark) => mark.segments.length)).toEqual([1]);
+    const rows = across(body, 'c |', 'e |');
+    expect(parse(rows).warnings).toEqual([]);
+    expect(parse(rows).marks.map((mark) => mark.segments.length)).toEqual([1]);
+  });
+
+  it('removes every segment when the thread is deleted, and keeps the text', () => {
+    const body = 'First para.\n\nSecond para.\n';
+    const written = across(body, 'para', 'Second');
+    const removed = applyChanges(written, deleteThread(written, 'k3x9'));
+    expect(parse(removed).marks).toEqual([]);
+    expect(newestView(removed).text).toBe(body);
+    expect(removed).not.toContain('cmt');
+  });
+
+  it("carries each segment with its block when another person's deletion of a block is decided", () => {
+    const body = 'First para.\n\nSecond para.\n\nThird para.\n';
+    const written = across(body, 'para', 'Third');
+    const start = written.indexOf('Second');
+    const end = written.indexOf('Second para.') + 'Second para.'.length;
+    const deleted = applyChanges(
+      written,
+      trackedEdit(written, { from: start, to: end, insert: '' }, context(bo, ['m3xb', 'p3xb'])),
+    );
+    for (const decide of [acceptAll, rejectAll]) {
+      const after = applyChanges(deleted, decide(deleted));
+      const read = parse(after);
+      expect(read.warnings).toEqual([]);
+      expect(read.ledger.comments.map((thread) => thread.id)).toEqual(['k3x9']);
+    }
+    expect(newestView(rejected(deleted)).text).toBe(body);
+    expect(originalView(deleted).text).toBe(body);
   });
 
   it.each(['\n', '\r\n'])('gives a payload its line breaks back alike, in a file of %j', (eol) => {
@@ -185,6 +244,31 @@ describe('#17: line breaks, blocks and rejecting all', () => {
       trackedEdit(split, { from, to: from + 1, insert: '' }, ids()),
     );
     expect(fused).toBe(body);
+  });
+
+  it('types your own split again with the text that comes right after its break (format §3.4)', () => {
+    // "Your own split is typed again with the text": the split and the typed text get ids of their
+    // own, and the break and the text are decided together, in every order.
+    const body = 'Hello world\n';
+    const at = body.indexOf(' world');
+    const split = applyChanges(body, trackedEdit(body, { from: at, to: at, insert: '\n' }, ids()));
+    const view = newestView(split);
+    const after = view.map.toSource(view.text.indexOf('\n') + 1, 1);
+    const typed = applyChanges(
+      split,
+      trackedEdit(split, { from: after, to: after, insert: 'X' }, context(ada, ['p3xb', 'q3xb'])),
+    );
+    expect(typed.slice(0, typed.indexOf('<!-- redlines'))).toBe(
+      'Hello<!--ins p3xb--><!--split q3xb-->\nX<!--/p3xb--> world\n\n',
+    );
+    expect(parse(typed).marks.map((mark) => [mark.id, mark.kind])).toEqual([
+      ['p3xb', 'ins'],
+      ['q3xb', 'split'],
+    ]);
+    expect(newestView(typed).text).toBe('Hello\nX world\n');
+    expect(applyChanges(typed, acceptAll(typed))).toBe(newestView(typed).text);
+    expect(originalView(typed).text).toBe(body);
+    expect(rejected(typed)).toBe(body);
   });
 
   it("tracks another person's fusing of a split as a deletion under their own id", () => {
