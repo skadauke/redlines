@@ -56,7 +56,7 @@ import {
 } from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
-import { atDelimiter, readsOtherMicromark } from './widen.ts';
+import { atDelimiter, readsOtherAsIs, readsOtherMicromark } from './widen.ts';
 import { unitsOf } from './widen-units.ts';
 import { wrappedLineStart } from './wrapped-line.ts';
 
@@ -602,6 +602,49 @@ function unitRange(text: string, edit: TextChange): Range {
   return first && last ? { from: first.lineFrom, to: last.to } : { from: edit.from, to: edit.to };
 }
 
+/** A pending deletion or replacement whose old text holds a delimiter run (`<!--del k3x9 **-->`). */
+const DELIMITER_PAYLOAD = /<!--(?:del|sub) \w+ [^>]*[*_~]/;
+
+/**
+ * Whether the file that `changes` make reads otherwise than its newest view after deciding a change
+ * of another person's whose old text holds a delimiter run, where the file as it is reads alike
+ * (`*ab` and a deleted `**`: rejecting the deletion leaves `*ab**`, #265). The edit is no delimiter
+ * of its own here, so `atDelimiter` doesn't see it; the decisions are tried only where the paragraph
+ * holds such a deletion.
+ */
+function readsOtherInDecisions(text: string, changes: readonly TextChange[]): boolean {
+  const first = changes.reduce((a, c) => Math.min(a, c.from), Infinity);
+  const last = changes.reduce((a, c) => Math.max(a, c.to), 0);
+  let from = text.lastIndexOf('\n\n', Math.max(0, first - 1));
+  from = from < 0 ? 0 : from;
+  let to = text.indexOf('\n\n', last);
+  to = to < 0 ? text.length : to;
+  if (!DELIMITER_PAYLOAD.test(text.slice(from, to))) return false;
+  const after = applyChanges(text, changes);
+  const ids = parse(after).marks.filter(
+    (mark) => mark.kind === 'del' || mark.kind === 'sub' || mark.kind === 'ins',
+  );
+  const known = new Set(parse(text).marks.map((mark) => mark.id));
+  const decide = (file: string, id: string, how: typeof accept): string | undefined => {
+    try {
+      return applyChanges(file, how(file, id));
+    } catch (error) {
+      if (error instanceof EditError) return undefined;
+      throw error;
+    }
+  };
+  for (const { id } of ids.slice(0, 8)) {
+    if (!known.has(id)) continue;
+    for (const how of [accept, reject]) {
+      const now = decide(after, id, how);
+      if (now === undefined || !readsOtherAsIs(now)) continue;
+      const was = decide(text, id, how);
+      if (was === undefined || !readsOtherAsIs(was)) return true;
+    }
+  }
+  return false;
+}
+
 function edited(
   text: string,
   edit: TextChange,
@@ -618,8 +661,8 @@ function edited(
     if (
       !half &&
       changes.length > 0 &&
-      atDelimiter(text, changes) &&
-      readsOtherMicromark(text, changes) &&
+      ((atDelimiter(text, changes) && readsOtherMicromark(text, changes)) ||
+        readsOtherInDecisions(text, changes)) &&
       // Only where the editor has something to accept (`acceptPlan`): a paragraph with only comments
       // and highlights has no change to decide, and the edit is written as it was.
       changesIn(parse(text), unitRange(text, edit)).length > 0

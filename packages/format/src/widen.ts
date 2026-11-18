@@ -1055,6 +1055,31 @@ function stretchOf(
   return across(from) || across(to) ? undefined : here;
 }
 
+/** What micromark makes of a text, without the markers and the white space that shows nowhere. */
+function readMicromark(source: string): string {
+  return micromark(source, {
+    allowDangerousHtml: true,
+    extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+    htmlExtensions: [
+      gfmAutolinkLiteralHtml(),
+      gfmStrikethroughHtml(),
+      gfmTableHtml(),
+      gfmTaskListItemHtml(),
+    ],
+  })
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
+}
+
+/** Whether micromark reads the body of a file otherwise than its newest view. */
+export function readsOtherAsIs(file: string): boolean {
+  const ledger = parse(file).ledgerRange;
+  const body = ledger ? file.slice(0, ledger.from) : file;
+  return readMicromark(body) !== readMicromark(newestView(file).text);
+}
+
 /**
  * Whether micromark reads the file the changes make otherwise than its newest view. Only the
  * paragraphs the changes are in are read (`stretchOf`); otherwise, or with `whole`, the whole file,
@@ -1068,21 +1093,7 @@ export function readsOtherMicromark(
   const file = applyChanges(text, changes);
   const parsed = parse(file);
   const ledger = parsed.ledgerRange;
-  const read = (source: string) =>
-    micromark(source, {
-      allowDangerousHtml: true,
-      extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
-      htmlExtensions: [
-        gfmAutolinkLiteralHtml(),
-        gfmStrikethroughHtml(),
-        gfmTableHtml(),
-        gfmTaskListItemHtml(),
-      ],
-    })
-      .replace(/<!--[^]*?-->/g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/ ?(<[^>]*>) ?/g, '$1')
-      .trim();
+  const read = readMicromark;
   const body = ledger ? file.slice(0, ledger.from) : file;
   const here = whole ? undefined : stretchOf(body, parsed, changes);
   const afterRead = here ?? body;
