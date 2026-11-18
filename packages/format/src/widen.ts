@@ -973,6 +973,34 @@ export function readsOtherMicromark(
       .trim();
   const body = ledger ? file.slice(0, ledger.from) : file;
   const here = whole ? undefined : stretchOf(body, parsed, changes);
-  if (here !== undefined) return read(here) !== read(newestView(here).text);
-  return read(body) !== read(newestView(file).text);
+  const afterRead = here ?? body;
+  const afterNewest = here !== undefined ? newestView(here).text : newestView(file).text;
+  if (read(afterRead) === read(afterNewest)) return false;
+  // A paragraph that begins with a marker is raw HTML to micromark, and reads otherwise than its
+  // newest view before the change as well (#1092). That is the file's, not the change's: the change
+  // reads otherwise only if it is read in the file differently than it is in the newest view.
+  const old = parse(text);
+  const oldBody = old.ledgerRange ? text.slice(0, old.ledgerRange.from) : text;
+  const same = changes.map((c) => ({ from: c.from, to: c.to, insert: ' '.repeat(c.to - c.from) }));
+  const oldHere = here !== undefined ? stretchOf(oldBody, old, same) : undefined;
+  if (here !== undefined && oldHere === undefined) return true;
+  const oldRead = oldHere ?? oldBody;
+  const oldNewest = oldHere !== undefined ? newestView(oldHere).text : newestView(text).text;
+  if (read(oldRead) === read(oldNewest)) return true;
+  const alike = (a: string, b: string): [string, string] => {
+    let start = 0;
+    while (start < a.length && start < b.length && a[start] === b[start]) start++;
+    let end = 0;
+    while (
+      end < a.length - start &&
+      end < b.length - start &&
+      a[a.length - 1 - end] === b[b.length - 1 - end]
+    ) {
+      end++;
+    }
+    return [a.slice(start, a.length - end), b.slice(start, b.length - end)];
+  };
+  const [markedA, markedB] = alike(read(oldRead), read(afterRead));
+  const [viewA, viewB] = alike(read(oldNewest), read(afterNewest));
+  return markedA !== viewA || markedB !== viewB;
 }

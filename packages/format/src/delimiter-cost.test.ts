@@ -49,6 +49,21 @@ function time(fn: () => void, runs = 9): number {
 
 const timed = it.skipIf(!process.env['REDLINES_COST']);
 
+describe('a delimiter key at the end of a paragraph that holds marks (#1092)', () => {
+  it('is the narrowest write whether or not blocks follow the paragraph', () => {
+    for (const more of [0, 5]) {
+      const { before, at } = documentOf(more);
+      const done = trackedEdits(
+        before,
+        [{ from: at, to: at, insert: '*' }],
+        context(ada, [...FRESH]),
+      );
+      const after = applyChanges(before, done.changes);
+      expect(after.length - before.length, `${more} blocks follow`).toBeLessThan(200);
+    }
+  });
+});
+
 describe('a delimiter key in a paragraph that holds marks', () => {
   it('is written in a long paragraph, alone and in a long file', () => {
     for (const { before, at } of [documentOf(0), documentOf(60)]) {

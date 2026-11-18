@@ -18,6 +18,8 @@ import {
 } from './edit-support.ts';
 import { changesBetween } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
+import { isPandoc, withDialect } from './dialect.ts';
+import type { MarkdownDialect } from './dialect.ts';
 import { EditError } from './errors.ts';
 import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
@@ -420,7 +422,7 @@ function decide(
   action: Action,
 ): TextChange[] {
   try {
-    return decideOnce(text, parsed, marks, action);
+    return widenForKeys(text, parsed, marks, action, decideOnce(text, parsed, marks, action));
   } catch (error) {
     // A replacement that gives its old text back with other people's marks in it, where those marks
     // can't stand at the top level as they are (a deletion line with typed text after it): the
@@ -450,6 +452,54 @@ function decide(
       throw error;
     }
   }
+}
+
+/**
+ * The ids of the insertions and substitutions of a pandoc file whose text starts a key (`@fig-x`)
+ * that a letter or a digit stands against in the view, with only markers between: pandoc reads a
+ * key there in the file and none in the view (format §3.1, rule 9, #1088).
+ */
+function keysAgainstWord(text: string): Set<string> {
+  const found = new Set<string>();
+  const body = text.slice(0, parse(text).ledgerRange?.from ?? text.length);
+  const marker = '<!--[^>]*-->';
+  for (const m of body.matchAll(
+    new RegExp(
+      `([\\p{L}\\p{N}_])((?:${marker})*)<!--(?:ins|sub) (\\w+)[^>]*-->(?:${marker})*@\\w`,
+      'gu',
+    ),
+  )) {
+    found.add(m[3]!);
+  }
+  return found;
+}
+
+/**
+ * A decision that brings a letter in front of the opener of a key (a deletion decided, a replacement's
+ * old text given back) would leave the file reading a key that its view does not. The insertion that
+ * starts the key is decided with it, as the unit that holds the two: no order of decisions leaves a
+ * marker in front of a key with a letter against it (#1088).
+ */
+function widenForKeys(
+  text: string,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  action: Action,
+  changes: TextChange[],
+): TextChange[] {
+  if (!isPandoc() || changes.length === 0 || !text.includes('@')) return changes;
+  const decided = new Set(marks.map((mark) => mark.id));
+  const before = keysAgainstWord(text);
+  for (let round = 0; round < 5; round++) {
+    const bad = [...keysAgainstWord(applyChanges(text, changes))].filter(
+      (id) => !before.has(id) && !decided.has(id),
+    );
+    if (bad.length === 0) return changes;
+    for (const id of bad) decided.add(id);
+    const more = [...decided].flatMap((id) => parsed.marks.filter((mark) => mark.id === id));
+    changes = decideOnce(text, parsed, more, action);
+  }
+  return changes;
 }
 
 function decideOnce(
@@ -780,9 +830,8 @@ function decideById(text: string, parsed: Parsed, id: string, action: Action): T
  * @throws EditError when there is no such change, when it is a comment, when its kind is not decided
  *   yet (`not supported in v0.1`), or when the ledger can't be read.
  */
-export function accept(text: string, id: string): TextChange[] {
-  const parsed = parse(text);
-  return decideById(text, parsed, id, 'accept');
+export function accept(text: string, id: string, dialect?: MarkdownDialect): TextChange[] {
+  return withDialect(dialect, () => decideById(text, parse(text), id, 'accept'));
 }
 
 /**
@@ -793,9 +842,8 @@ export function accept(text: string, id: string): TextChange[] {
  * @throws EditError as `accept` does, and when the text of a format change no longer has the
  *   formatting that rejecting takes away (`no-legal-placement`).
  */
-export function reject(text: string, id: string): TextChange[] {
-  const parsed = parse(text);
-  return decideById(text, parsed, id, 'reject');
+export function reject(text: string, id: string, dialect?: MarkdownDialect): TextChange[] {
+  return withDialect(dialect, () => decideById(text, parse(text), id, 'reject'));
 }
 
 /**
@@ -812,9 +860,15 @@ function marksToDecide(parsed: Parsed, ids: readonly string[]): MarkRange[] {
  *
  * @throws EditError as `accept` does for any one of them, and then nothing is decided.
  */
-export function acceptMarks(text: string, ids: readonly string[]): TextChange[] {
-  const parsed = parse(text);
-  return decide(text, parsed, marksToDecide(parsed, ids), 'accept');
+export function acceptMarks(
+  text: string,
+  ids: readonly string[],
+  dialect?: MarkdownDialect,
+): TextChange[] {
+  return withDialect(dialect, () => {
+    const parsed = parse(text);
+    return decide(text, parsed, marksToDecide(parsed, ids), 'accept');
+  });
 }
 
 /**
@@ -823,7 +877,15 @@ export function acceptMarks(text: string, ids: readonly string[]): TextChange[] 
  *
  * @throws EditError as `reject` does for any one of them, and then nothing is decided.
  */
-export function rejectMarks(text: string, ids: readonly string[]): TextChange[] {
+export function rejectMarks(
+  text: string,
+  ids: readonly string[],
+  dialect?: MarkdownDialect,
+): TextChange[] {
+  return withDialect(dialect, () => rejectMarksIn(text, ids));
+}
+
+function rejectMarksIn(text: string, ids: readonly string[]): TextChange[] {
   const parsed = parse(text);
   const marks = marksToDecide(parsed, ids);
   for (const mark of marks) {
