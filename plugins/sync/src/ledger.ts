@@ -49,11 +49,11 @@ export function placeLedgerWrite(
       insert: inserted.toString(),
     });
   });
-  const body = ChangeSet.of(edits, doc.length);
+  const body = ChangeSet.of(edits, doc.length, '\n');
   const next = body.apply(doc);
   try {
     const writes = setLedgerEntries(next.toString(), applyLedgerOps(theirs, ops));
-    return body.compose(ChangeSet.of(writes, next.length));
+    return body.compose(ChangeSet.of(writes, next.length, '\n'));
   } catch {
     return null;
   }
