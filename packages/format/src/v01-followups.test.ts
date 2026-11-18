@@ -1,18 +1,18 @@
 // The v0.1 follow-ups of #11 and #17 (issue #1024), each as the case that was not reproduced.
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { addComment } from './comments.ts';
-import { rejectAll } from './decide.ts';
+import { addComment, deleteThread } from './comments.ts';
+import { acceptAll, reject, rejectAll } from './decide.ts';
 import { applyLedgerOp, ledgerMapOf } from './ledger-map.ts';
 import { mergeLedgers } from './ledger-merge.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { ada, context, file } from './test-helpers.ts';
+import { ada, bo, context, file, thread } from './test-helpers.ts';
+import { blockRunAt, moveBlockEdits, neighbourGap, trackedBlockMove } from './block-move.ts';
 import { trackedEdit } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 const ids = (...more: string[]) => context(ada, ['k3x9', 'w8nn', 'c8d2', ...more]);
-const bodyOf = (text: string) => text.slice(0, text.indexOf('<!-- redlines'));
 
 /** `text` with every pending change rejected. */
 const rejected = (text: string) => applyChanges(text, rejectAll(text));
@@ -34,6 +34,14 @@ describe("#11: the ledger's YAML (format §5.5)", () => {
     const read = parse(`Hi<!--ins k3x9-->x<!--/k3x9-->\n\n${written}`);
     expect(read.ledger.marks['k3x9']?.note).toBe('Why:');
   });
+
+  it.each(['\\', 'a\n\\\nb', '\\\n\n\\'])(
+    'reads a comment whose text has a line of only a backslash back as it was: %j',
+    (text) => {
+      const written = commented(text);
+      expect(parse(written).ledger.comments[0]?.text).toBe(text);
+    },
+  );
 
   it('keeps a key with a line break in it on one line, and reads it back', () => {
     const text = file('Hello').replace('version: 1', 'version: 1\n"a\\nb": 1');
@@ -129,13 +137,130 @@ describe("#11: the ledger's YAML (format §5.5)", () => {
 });
 
 describe('#17: line breaks, blocks and rejecting all', () => {
-  it('writes a comment across two blocks as one segment', () => {
-    const body = 'First para.\n\nSecond para.\n';
-    const from = body.indexOf('para');
-    const to = body.indexOf('Second') + 3;
-    const written = applyChanges(body, addComment(body, { from, to }, 'x', ids()).changes);
-    expect(parse(written).marks.map((mark) => mark.segments.length)).toEqual([1]);
+  // Format §4: a range that spans blocks is written as one segment, its opener in the first block
+  // and its closer in the last, so that moves, deletions and decisions keep it whole. A reader also
+  // takes one segment per block with the same id, which other tools may write.
+  const across = (body: string, first: string, last: string) => {
+    const from = body.indexOf(first);
+    const to = body.indexOf(last) + last.length;
+    return applyChanges(body, addComment(body, { from, to }, 'x', ids()).changes);
+  };
+  const THREE = 'One two.\n\nThree four.\n\nFive six.\n';
+
+  it.each([
+    ['paragraphs', THREE, 'two', 'Five'],
+    ['list items', '- one\n- two\n- three\n', 'one', 'three'],
+    ['quote paragraphs', '> one\n>\n> two\n', 'one', 'two'],
+  ])('writes a comment across %s as one segment with one id', (_, body, a, b) => {
+    const written = across(body, a, b);
+    const read = parse(written);
+    expect(read.warnings).toEqual([]);
+    expect(read.marks.map((mark) => [mark.id, mark.segments.length])).toEqual([['k3x9', 1]]);
     expect(newestView(written).text).toBe(body);
+  });
+
+  it('keeps the comment whole when the block in the middle is deleted, tracked', () => {
+    const written = across(THREE, 'two', 'Five');
+    const from = written.indexOf('Three four.');
+    const deleted = applyChanges(
+      written,
+      trackedEdit(
+        written,
+        { from, to: from + 'Three four.'.length, insert: '' },
+        context(bo, ['m3xb', 'p3xb']),
+      ),
+    );
+    expect(parse(deleted).marks.map((mark) => [mark.id, mark.kind])).toEqual(
+      expect.arrayContaining([['k3x9', 'cmt']]),
+    );
+    expect(parse(deleted).marks.find((mark) => mark.kind === 'sub')).toBeUndefined();
+    for (const decide of [acceptAll, rejectAll]) {
+      const after = applyChanges(deleted, decide(deleted));
+      const comment = parse(after).marks.find((mark) => mark.id === 'k3x9');
+      expect(comment?.segments.at(-1)?.close, decide.name).toBeDefined();
+      expect(
+        after.slice(comment?.segments[0]?.content.from, comment?.segments[0]?.content.to),
+      ).toContain('two.');
+    }
+    expect(newestView(rejected(deleted)).text).toBe(THREE);
+  });
+
+  it.each([
+    ['up', true],
+    ['down', false],
+  ])('keeps the comment whole when the middle block is moved %s, untracked', (_, up) => {
+    const written = across(THREE, 'two', 'Five');
+    const view = newestView(written);
+    const from = view.map.toSource(view.text.indexOf('Three four.'), 1);
+    const run = blockRunAt(written, { from, to: from });
+    const gap = run && neighbourGap(run, up);
+    const plan = run && gap && moveBlockEdits(written, run, gap);
+    expect(plan).toBeTruthy();
+    const after = applyChanges(written, plan ? plan.edits : []);
+    expect(parse(after).warnings).toEqual([]);
+    const comment = parse(after).marks.find((mark) => mark.id === 'k3x9');
+    expect(comment?.segments.length).toBe(1);
+    expect(comment?.segments[0]?.close).toBeDefined();
+    expect(newestView(after).text).toBe(
+      up ? 'Three four.\n\nOne two.\n\nFive six.\n' : 'One two.\n\nFive six.\n\nThree four.\n',
+    );
+  });
+
+  it.each([
+    ['up', true],
+    ['down', false],
+  ])('keeps the comment whole when the middle block is moved %s, tracked', (_, up) => {
+    const text = file(
+      'One <!--cmt kjxn-->two.\n\nThree four.\n\nFive<!--/kjxn--> six.\n',
+      {},
+      thread('kjxn'),
+    );
+    const view = newestView(text);
+    const from = view.map.toSource(view.text.indexOf('Three four.'), 1);
+    const run = blockRunAt(text, { from, to: from });
+    const gap = run && neighbourGap(run, up);
+    expect(run && gap).toBeTruthy();
+    let state = 7;
+    const random = (n: number) => {
+      const bytes = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        state = (state * 1103515245 + 12345) & 0x7fffffff;
+        bytes[i] = state >> 16;
+      }
+      return bytes;
+    };
+    const moved = trackedBlockMove(text, run!, gap!, { ...context(bo), random });
+    const after = applyChanges(text, moved!.changes);
+    expect(parse(after).warnings).toEqual([]);
+    const spans = (written: string) => {
+      const comment = parse(written).marks.find((mark) => mark.id === 'kjxn');
+      const segment = comment?.segments[0];
+      expect(comment?.segments.length).toBe(1);
+      expect(segment?.close).toBeDefined();
+      return [comment?.segments.length, segment?.close !== undefined] as const;
+    };
+    spans(after);
+    expect(parse(after).marks.find((mark) => mark.kind === 'sub')).toBeUndefined();
+    for (const decide of [acceptAll, rejectAll]) {
+      const decided = applyChanges(after, decide(after));
+      spans(decided);
+      const comment = parse(decided).marks.find((mark) => mark.id === 'kjxn');
+      const covered = decided.slice(
+        comment?.segments[0]?.content.from,
+        comment?.segments[0]?.close?.from,
+      );
+      expect(covered.startsWith('two.')).toBe(true);
+      expect(covered.endsWith('Five')).toBe(true);
+    }
+    expect(newestView(rejected(after)).text).toBe(view.text);
+  });
+
+  it('removes the one segment when the thread is deleted, and keeps the text', () => {
+    const written = across(THREE, 'two', 'Five');
+    const removed = applyChanges(written, deleteThread(written, 'k3x9'));
+    expect(parse(removed).marks).toEqual([]);
+    expect(newestView(removed).text).toBe(THREE);
+    expect(removed).not.toContain('cmt');
   });
 
   it.each(['\n', '\r\n'])('gives a payload its line breaks back alike, in a file of %j', (eol) => {
@@ -175,7 +300,7 @@ describe('#17: line breaks, blocks and rejecting all', () => {
     expect(rejected(written)).toBe(body);
   });
 
-  it('gives back the text of a break and its own fusing, both tracked', () => {
+  it('cancels your own split when you fuse it again: no change is left, and no new id', () => {
     const body = 'Hello world\n';
     const at = body.indexOf(' world');
     const split = applyChanges(body, trackedEdit(body, { from: at, to: at, insert: '\n' }, ids()));
@@ -185,8 +310,68 @@ describe('#17: line breaks, blocks and rejecting all', () => {
       split,
       trackedEdit(split, { from, to: from + 1, insert: '' }, ids()),
     );
+    expect(fused).toBe(body);
+  });
+
+  it('types your own split again with the text that comes right after its break (format §3.4)', () => {
+    // "Your own split is typed again with the text": the split and the typed text get ids of their
+    // own, and the break and the text are decided together, in every order.
+    const body = 'Hello world\n';
+    const at = body.indexOf(' world');
+    const split = applyChanges(body, trackedEdit(body, { from: at, to: at, insert: '\n' }, ids()));
+    const view = newestView(split);
+    const after = view.map.toSource(view.text.indexOf('\n') + 1, 1);
+    const typed = applyChanges(
+      split,
+      trackedEdit(split, { from: after, to: after, insert: 'X' }, context(ada, ['p3xb', 'q3xb'])),
+    );
+    expect(typed.slice(0, typed.indexOf('<!-- redlines'))).toBe(
+      'Hello<!--ins p3xb--><!--split q3xb-->\nX<!--/p3xb--> world\n\n',
+    );
+    expect(parse(typed).marks.map((mark) => [mark.id, mark.kind])).toEqual([
+      ['p3xb', 'ins'],
+      ['q3xb', 'split'],
+    ]);
+    expect(newestView(typed).text).toBe('Hello\nX world\n');
+    expect(applyChanges(typed, acceptAll(typed))).toBe(newestView(typed).text);
+    expect(originalView(typed).text).toBe(body);
+    expect(rejected(typed)).toBe(body);
+  });
+
+  it("tracks another person's fusing of a split as a deletion under their own id", () => {
+    const body = 'Hello world\n';
+    const at = body.indexOf(' world');
+    const split = applyChanges(body, trackedEdit(body, { from: at, to: at, insert: '\n' }, ids()));
+    const view = newestView(split);
+    const from = view.map.toSource(view.text.indexOf('\n'));
+    const fused = applyChanges(
+      split,
+      trackedEdit(split, { from, to: from + 1, insert: '' }, context(bo, ['m3xb', 'p3xb'])),
+    );
+    expect(
+      parse(fused)
+        .marks.map((mark) => mark.id)
+        .sort(),
+    ).toEqual(['k3x9', 'm3xb']);
     expect(originalView(fused).text).toBe(body);
     expect(rejected(fused)).toBe(body);
-    expect(bodyOf(fused).length).toBeGreaterThan(0);
+    expect(newestView(fused).text).toBe('Hello world\n');
+  });
+
+  it.each([
+    ['a replacement from inside an HTML block into the text after it', 'raw', 'Outro', 'New'],
+    ['a replacement that starts above it', 'Intro', 'raw', 'New\n\nthing'],
+    ['a replacement of the block alone', '<div>', '</div>', 'X'],
+    ['a replacement of everything', 'Intro', 'Outro', 'Z'],
+  ])('keeps every line break when %s is rejected or accepted', (_, first, last, insert) => {
+    const html = 'Intro\n\n<div>\nraw\n</div>\n\nOutro\n';
+    const from = html.indexOf(first);
+    const to = html.indexOf(last) + last.length;
+    const written = applyChanges(html, trackedEdit(html, { from, to, insert }, ids()));
+    expect(rejected(written)).toBe(html);
+    expect(rejected(written)).toBe(originalView(written).text);
+    expect(applyChanges(written, acceptAll(written))).toBe(newestView(written).text);
+    const [mark] = parse(written).marks;
+    expect(applyChanges(written, reject(written, mark?.id ?? ''))).toBe(html);
   });
 });
