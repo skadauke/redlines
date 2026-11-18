@@ -43,6 +43,18 @@ describe('Backspace and Delete in a fence line keep the fence whole (#1109)', ()
       '```⏎code⏎‸```⏎⏎* a⏎* b',
     ),
     ...both(
+      'Backspace in the marks of a closing fence with a space after it',
+      '```⏎code⏎`‸`` ⏎⏎* a⏎* b',
+      'Backspace',
+      '```⏎code⏎`‸`` ⏎⏎* a⏎* b',
+    ),
+    ...both(
+      'Delete at the end of the last line of the code',
+      '```⏎code‸⏎```⏎⏎* a⏎* b',
+      'Delete',
+      '```⏎code‸⏎```⏎⏎* a⏎* b',
+    ),
+    ...both(
       'Delete in the closing fence of a code block in a quote',
       '> ```⏎> code⏎> ‸```⏎⏎* a⏎* b',
       'Delete',

@@ -1237,7 +1237,7 @@ function breaksFence(state: EditorState, block: Block, head: number, forward: bo
   const at = forward ? head : head - 1;
   if (at < open.from || at > end.to) return false;
   const marks = (line: Line, run: RegExpExecArray) => {
-    const to = line.from + run[0].length;
+    const to = line.from + run[0].trimEnd().length;
     return at >= to - run[1]!.length && at < to;
   };
   if (doc.lineAt(at).number === open.number) return marks(open, openRun);
