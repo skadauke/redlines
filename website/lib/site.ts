@@ -153,7 +153,7 @@ export const developers = {
     },
     {
       title: 'Agents, with limits',
-      body: 'Claude Code, Codex and OpenClaw agents get a small set of tools. They read only after you say yes, and reach the web only if you turn on one switch. They write only this document, as tracked changes. A mention that arrives through git never starts a run.',
+      body: 'Claude Code and Codex get a small set of tools. They read only after you say yes, and reach the web only if you turn on one switch. They write only this document, as tracked changes. A mention that arrives through git never starts a run. Through Redlines, an OpenClaw agent gets the same document tools for its run and writes only this document, as tracked changes; what else it can do is set on the computer it runs on.',
     },
     {
       title: 'Built to embed',
