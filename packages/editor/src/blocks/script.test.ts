@@ -178,6 +178,21 @@ describe('the checks the review asked for', () => {
     expect(decisionProblems(file).length).toBeGreaterThan(0);
   });
 
+  it('decides the marks that a decision frees, in the sampled orders (#808)', () => {
+    // A replacement holds Bo's marks in its old text (format §3.12): rejecting it frees them, and
+    // an order of decisions goes on until none is left, so that rejecting every mark reads as the
+    // original view and accepting every one as the newest.
+    const ids = 'cdfghjkm'.split('');
+    const olds = ids.map((c) => `w<!-\\-ins b${c}2${c}-\\->${c}<!-\\-/b${c}2${c}-\\->`);
+    const marks = ids.map((c) => `  b${c}2${c}: {by: bo, at: 2026-11-01T10:00Z}`);
+    const filler = ' padding'.repeat(30);
+    const file =
+      `<!--sub m2bd ${olds.join(' ')}${filler}-->\n\nnew text\n<!--/m2bd-->\n\n` +
+      `<!-- redlines\nversion: 1\nmarks:\n  m2bd: {by: ada, at: 2026-11-01T10:00Z}\n${marks.join('\n')}\n-->\n`;
+    expect(file.length).toBeGreaterThan(800);
+    expect(decisionProblems(file)).toEqual([]);
+  });
+
   it('reads raw HTML of the file the same on both sides (review N4)', () => {
     checkInvariants(
       runScript({
@@ -201,6 +216,19 @@ describe('the checks the review asked for', () => {
     const refusing = (text: string, id: string, how: 'a' | 'r') =>
       id === stuck ? undefined : sampledDecisions.decide(text, id, how);
     expect(sampledDecisions(file, marks, refusing).join(' ')).toMatch(/no decision can be made/);
+  });
+
+  it('fails a decision that is refused in every state (#591)', () => {
+    const file =
+      'One <!--ins b2b2-->two<!--/b2b2--> <!--ins c3c3-->three<!--/c3c3-->.\n\n' +
+      '<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: ada, at: 2026-11-01T10:00Z}\n' +
+      '  c3c3: {by: ada, at: 2026-11-01T10:00Z}\n-->\n';
+    expect(decisionProblems(file)).toEqual([]);
+    const noReject = (text: string, id: string, how: 'a' | 'r') =>
+      id === 'b2b2' && how === 'r' ? undefined : sampledDecisions.decide(text, id, how);
+    const found = decisionProblems(file, noReject).join(' ');
+    expect(found).toMatch(/rejecting b2b2 is refused in every state/);
+    expect(found).toMatch(/no order of decisions rejects every mark/);
   });
 
   it('fails a skip that is no longer needed', () => {
@@ -233,6 +261,12 @@ describe('stray blank lines', () => {
     expect(strayBlankLines('One.\n\nTwo.\n')).toEqual([]);
     expect(strayBlankLines('One.\n\n\nTwo.\n')).toHaveLength(1);
     expect(strayBlankLines('```\na\n\n\nb\n```\n')).toEqual([]);
+    // Blank lines of front matter and of indented code are content (#606).
+    expect(strayBlankLines('---\ntags: [a, b]\n\n\nx: 1\n---\n\nText.\n')).toEqual([]);
+    expect(strayBlankLines('Para.\n\n     a a\n\n\n    code a\n')).toEqual([]);
+    expect(emptyParagraphs('Para.\n\n     a a\n\n\n\n    code a\n')).toEqual([]);
+    expect(emptyParagraphs('```\n```\n\n\n\n      code a\n')).toEqual([]);
+    expect(strayBlankLines('One.\n\n\n    Two.\n')).toHaveLength(1);
   });
 });
 

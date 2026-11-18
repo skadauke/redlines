@@ -5,6 +5,7 @@ import type { UntrackedAsker } from './tracked/ask.ts';
 import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+import type { DecisionOutcome } from './tracked/decided.ts';
 import type { Handle, MarkRange, Parsed, Range, Twin, TwinKind } from '@redlines/format';
 
 /**
@@ -22,6 +23,14 @@ export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
  * read or written, and the commands that make them are disabled with their reason.
  */
 export type DocumentKind = 'markdown' | 'plain-only';
+
+/** What the host gives the editor to read and open an included file by its path as written. */
+export interface IncludeHost {
+  /** The text of the included file, or null where it can't be read. */
+  read(path: string): Promise<string | null>;
+  /** Opens the included file, as a document of its own. */
+  open(path: string): void;
+}
 
 /** The dialect of a Markdown file (format §9.1): GitHub's, or pandoc's in `.qmd` and `.Rmd`. */
 export type MarkdownDialect = 'gfm' | 'pandoc';
@@ -100,6 +109,8 @@ export interface EditorUiState {
    * selection, or with only a caret, in the document.
    */
   canAcceptAll: boolean;
+  /** How many changes Accept All Changes and Stop Tracking would accept now: the count to show. */
+  acceptAllCount: number;
   /** Whether there is a step to redo. */
   canRedo: boolean;
 }
@@ -331,6 +342,13 @@ export interface EditorOptions {
    */
   openImage?: (src: string) => void;
   /**
+   * How the editor reads and opens the files that a Quarto document includes (`{{< include
+   * _part.qmd >}}`, drawn as a block in a `.qmd`, decision 4 of docs/research/quarto.md): given the
+   * path as the document writes it. The host knows where the document is and which files may be
+   * read. Default: none, and the block names the file and does no more.
+   */
+  includes?: IncludeHost;
+  /**
    * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
    * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
    * to keep, as fractions of its width and height. Writes the copy beside the original, in the
@@ -354,6 +372,18 @@ export interface EditorOptions {
    * not called. Default: none, and the browser does what it does with such a paste or a drop.
    */
   onImageFiles?: (files: File[], spot: ImageSpot, pasted: boolean) => void;
+  /**
+   * Called for each picture of a pasted page that is at a web address the host fetches (Google
+   * Docs' pictures), with that address. Resolves to the picture's bytes, which are then saved
+   * through `onImageFiles` like any pasted picture, or null when it can't be fetched: the picture
+   * then stays linked to its address, and the person is told. Default: none, and such pictures stay
+   * linked.
+   */
+  onFetchImage?: (url: string) => Promise<{
+    bytes: Uint8Array<ArrayBuffer>;
+    type: string;
+    extension: string;
+  } | null>;
   /**
    * Called when an image file of the project is dragged into the document from the sidebar
    * (`PROJECT_IMAGE_TYPE` in the drag's data, holding the file's path), with that path. Returns the
@@ -405,6 +435,14 @@ export interface EditorOptions {
    * never reaches the page's own undo.
    */
   onNothingToUndo?: (redo: boolean) => void;
+}
+
+/** What an agent's edit did on the text it met. */
+export interface AgentEditOutcome {
+  /** The edit was placed on newer text, not written as it was. */
+  rebased: boolean;
+  /** The agent's changes that could not be placed, since the text they changed is gone. */
+  dropped: readonly { removed: string; insert: string }[];
 }
 
 /** An agent's edit, for the history: what it is part of, and who made it (design: What a step is). */
@@ -475,8 +513,15 @@ export interface Editor {
    * scroll stay where the text stayed; unlike one, it is a step to undo, joined to the newest step
    * when that is `step.group`'s, and Track Changes leaves it as it is. `getDoc()` is then `next`
    * byte for byte; Undo gives back the text before, byte for byte, and Redo `next`.
+   *
+   * With `base`, the text the agent's tool read to work out `next`, and a document that is no longer
+   * that text (someone typed meanwhile), what the agent changed is placed on the text as it is, and
+   * what others wrote since stays: the edit is a push, not a whole-text write. A change of the
+   * agent's whose text is gone is left out and told in the outcome; nothing throws for it. The
+   * ledger's entries are merged by key, so both writers' marks and comments are kept. With no `base`,
+   * or a document still at it, the edit is `next`, as before.
    */
-  applyAgentEdit(next: string, step: AgentStep): void;
+  applyAgentEdit(next: string, step: AgentStep, base?: string): AgentEditOutcome;
   /**
    * The parse of the document as CodeMirror holds it, with LF line breaks, so its offsets are
    * CodeMirror positions. Its `text` matches `getDoc()` only when all the file's line breaks
@@ -582,6 +627,25 @@ export interface Editor {
   acceptAllAndStopTracking(): boolean;
   /** Rejects a pending change by its mark id, as `accept` does. */
   reject(id: string | readonly string[]): void;
+  /**
+   * A decision as the person saw it, for a window that shows marks a while before a click lands on
+   * newer text: `seen` is each mark's `seenOf`, taken when it was drawn. A mark that changed since,
+   * or is gone, is left alone and says why ("Bo changed this suggestion. Review it again.", "Ada
+   * accepted this a moment ago."), and nothing is thrown for it. With `bulk`, the marks are decided
+   * each on its own and the ones that stand are decided (Accept All, with the ids of the click).
+   *
+   * @throws EditError when the format refuses a decision that stands.
+   */
+  decideSeen(
+    decision: 'accept' | 'reject',
+    ids: readonly string[],
+    seen: readonly string[],
+    options?: { bulk?: boolean },
+  ): DecisionOutcome;
+  /** What a person sees of each mark now, to carry in `decideSeen`; '' for a mark that isn't there. */
+  seenOf(ids: readonly string[]): string[];
+  /** Records that someone decided a mark, in another window, for the message a late decision gets. */
+  noteDecided(id: string, by: string, kind: 'accept' | 'reject'): void;
   /**
    * Adds CodeMirror extensions after the editor was made, as a plugin such as @redlines/review
    * does. Like the extensions given in `EditorOptions`, they stay when another document is opened

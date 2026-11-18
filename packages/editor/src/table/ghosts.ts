@@ -8,11 +8,11 @@
 
 import { type EditorState, type Extension, StateField, type Range } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
-import { readRowCells } from '@redlines/format';
+import { plainPayload, readRowCells } from '@redlines/format';
 import type { MarkRange } from '@redlines/format';
 import { colorClass, colorsOf } from '../tracked/colors.ts';
 import { isRowDeletion, parsedField, viewModeField } from '../tracked/field.ts';
-import { ghostTableLook } from './ghost-table.ts';
+import { ghostPress, ghostTableLook } from './ghost-table.ts';
 import { type Table, tablesField } from './model.ts';
 
 /** A deleted row of a table, as it is drawn. */
@@ -57,7 +57,7 @@ export function ghostsOf(state: EditorState): Ghost[] {
       const line = doc.line(n);
       const mark = byLine.get(line.from);
       if (!mark) break;
-      const payload = mark.payload ?? '';
+      const payload = plainPayload(mark.payload ?? '');
       const found = POSITION.exec(payload);
       const text = payload.slice(found?.[0].length ?? 0);
       const read = readRowCells(text, 0, text.length).cells;
@@ -212,17 +212,7 @@ const ghostField = StateField.define<Ghosts>({
   provide: (field) => EditorView.decorations.from(field, (value) => value.set),
 });
 
-/** A press on a ghost puts no caret there: the card the press opens is its only effect. */
-const ghostPress = EditorView.domEventHandlers({
-  mousedown(event) {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest('.rl-ghost')) return false;
-    event.preventDefault();
-    return true;
-  },
-});
-
 /** Deleted rows drawn as ghost rows, and a table deleted whole as a ghost table. */
 export function tableGhosts(): Extension {
-  return [ghostField, ghostPress, ghostTableLook()];
+  return [ghostField, ghostPress('.rl-ghost'), ghostTableLook()];
 }

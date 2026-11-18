@@ -22,6 +22,7 @@ function commands() {
     saveAs: vi.fn(),
     rename: vi.fn(),
     revealInFinder: vi.fn(),
+    openAnotherWindow: vi.fn(),
     print: vi.fn(),
     exportPdf: vi.fn(),
     exportWord: vi.fn(),
@@ -202,6 +203,7 @@ describe('the menu model', () => {
       ['Save As…', 'Shift+CmdOrCtrl+S'],
       ['Rename…', undefined],
       ['Reveal in Finder', undefined],
+      ['Open in Another Window', undefined],
       '---',
       'Close',
       '---',
@@ -293,6 +295,8 @@ describe('the menu model', () => {
     expect(c.rename).toHaveBeenCalledOnce();
     click('File', 'Reveal in Finder');
     expect(c.revealInFinder).toHaveBeenCalledOnce();
+    click('File', 'Open in Another Window');
+    expect(c.openAnotherWindow).toHaveBeenCalledOnce();
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
     click('File', 'Open .docx…');

@@ -9,7 +9,9 @@ so that the authority synced plain text and collab rebased the tracked changes l
 text. These notes test that design in simulation and derive the rules that replace it. The first
 simulation covered insertions and deletions; a
 [second](#a-second-simulation-every-kind-of-change) covered every other kind of change, and a
-[third](#a-third-simulation-inserted-table-rows) inserted table rows.
+[third](#a-third-simulation-inserted-table-rows) inserted table rows. A
+[fourth](#a-fourth-simulation-todays-format-with-the-real-library) reran the sessions in this
+repository, over today's format and the real library.
 
 The code and data are in the project's lab, outside this repository. Running `npm run reproduce`
 there reruns each simulation.
@@ -207,6 +209,526 @@ oracle had none, so it never saw lost rows):
 - Not run: columns, moves and header changes (specified in the
   [format spec](../format.md#37-tables)), and the in-row marker in Word and in other Markdown
   editors.
+
+## A fourth simulation: today's format with the real library
+
+The earlier simulations ran in a lab, with their own tracking code and an older ledger layout. The
+fourth runs in this repository (`packages/collab-sim`, not shipped) over the code that exists:
+`trackedEdits`, `trackedFormat`, `addComment`, `reply`, `accept`, `reject`, `parse` and the views
+of `@redlines/format`, today's ledger, and the format as [format.md](../format.md) has it. It is
+the test bed that [multiuser §6](multiuser.md#6-how-wed-know-it-works) asks for.
+`pnpm --filter @redlines/collab-sim matrix` reruns it, and `REDLINES_FUZZ=<n>` runs the matrix in
+vitest.
+
+Method:
+
+- Sessions: 4 clients (3 and 5 where said), 20 operations each, 0.3–2.5 s apart. The
+  network is seeded: latency 5–225 ms, 2% of messages held up 0.4–3 s, a dropped connection of 0.1–1 s for
+  30% of the clients, and an offline period of 2–8 s for 40%. Messages on a link arrive in order;
+  those in flight when it drops are lost. A client that comes back asks for what it missed.
+- The authority is a log with a snapshot after every update. It never reads a mark. Three rules:
+  - c1: a push made on an older version is rejected;
+  - c2: it is rebased, one logged update at a time, unless its footprint touches the footprint of
+    an update logged since (touching ends count), then it is rejected;
+  - c-naive: it is always rebased by mapping positions, which is what happens if the authority
+    keeps transforming text that has marks in it.
+
+  Footprints are derived from the changes `trackedEdits` returns: the ranges changed, every mark
+  with a marker in or touching them, whole, and the nearest visible character on each side.
+  The ledger's change is kept as a footprint of its own.
+- Clients keep intents: raw edits anchored to visible words, with fallback anchors, toggles with a
+  target state, and decisions that carry the mark as the person saw it (its kind, author and every
+  character from its first marker to its last). A deletion lists the words it means, so words that
+  someone typed between them since stay out of it. An intent's ids come from its own seed, so
+  deriving it again gives the same ids. A client derives again against the newest confirmed text
+  whenever its push is rejected, and a push waits until the client has seen the version the
+  authority said was newest.
+- Operations: typing, deleting and substituting (also across someone's insertion, which about a third of the
+  runs start on once someone has typed in the paragraph), bold, accept and reject by id with the guard, range and point comments,
+  and replies. Not modeled: blocks, tables, moves, links, resolve and likes, undo.
+- Workloads as before: hot (everyone in one paragraph), typical (80% in one's own paragraph),
+  spread (anywhere, now and then across a paragraph break) and review (the owner makes two thirds of
+  their operations decisions while the others edit).
+- The document is a heading and five paragraphs of twelve unique words. A typed word names its
+  author, so the oracle can say whose text survived.
+- The oracle runs on every confirmed state, and on every step from one to the next:
+  - the markup and the ledger are valid: `parse` has no warnings, and the body reads, in
+    micromark, as the newest view does;
+  - nothing is lost or swallowed: the words of the newest view are those before, plus the typed
+    ones, minus the deleted ones;
+  - nothing is left untracked: any edit but a decision leaves the original view as it was, to the
+    character;
+  - nothing is revived: no deleted word, decided mark or rejected text comes back;
+  - a decision moves only its own mark: accepting leaves the newest view as it was, rejecting the
+    original view;
+  - nothing is duplicated or misattributed: each word is in each view once, and a pending typed word
+    stands in a change of the person who typed it;
+  - every comment and reply is in the ledger once, with its author;
+  - every copy has the text of the authority's version at every version.
+- Scale: 200 sessions per row, the same seeds in every row. In each cell, the first number is the
+  share of sessions corrupted at the end (at any point, text lost, swallowed,
+  duplicated, left untracked, revived or misattributed, a decision that moved more than its mark, a
+  ledger that lost a comment or reply, or a copy that differed; or invalid markup in the final text); the second, the share in which
+  invalid markup was confirmed at any point. Two words with no space between them are counted
+  apart as "joined" and are not corruption (below). The whole matrix takes about an hour on three
+  cores.
+
+| Workload | (c1)         | (c2)         | (c-naive)        | Pushes rejected, c1 / c2 |
+| -------- | ------------ | ------------ | ---------------- | ------------------------ |
+| hot      | 9.0% / 1.0%  | 8.5% / 1.5%  | 100.0% / 100.0%  | 40.1% / 36.2%            |
+| typical  | 14.5% / 18.5% | 15.0% / 18.5% | 100.0% / 100.0% | 41.7% / 30.3%            |
+| spread   | 7.5% / 6.0%  | 8.0% / 6.0%  | 100.0% / 100.0%  | 41.1% / 37.8%            |
+| review   | 10.0% / 3.0% | 10.0% / 4.0% | 100.0% / 100.0%  | 41.0% / 38.2%            |
+
+Strategies (a) and (b) of the earlier tables, where the clients rebase tracked changes
+themselves, are not rerun: the library has no tracking filter that runs on a rebase, which is the
+point of the design.
+
+### What the matrix shows
+
+**c1 and c2 are alike, and neither is the problem.** c-naive corrupts every session: its rebased
+pushes carry a whole-ledger replacement made on an older ledger, which overwrites other people's
+entries, and positions mapped through marked-up text. Every session confirms markup with no ledger
+entry, comments missing from the ledger or an edit left untracked. c1 and c2 corrupt 7.5–15% of sessions, the same
+share under both, so the rebase rule isn't what corrupts them. Two kinds of failure are in that:
+one the format does on its own, and one that needs two people. **One person editing alone** (cells
+`solo/…` of the matrix: 60 operations, 100 sessions, the same code) shows the first:
+
+| Workload | Corrupted at end / invalid at any point |
+| -------- | --------------------------------------- |
+| hot      | 10% / 17%                               |
+| typical  | 17% / 20%                               |
+| spread   | 10% / 14%                               |
+
+Every one of those is the body not reading as the newest view in micromark (`render`), with
+nobody else in the session. It is a gap of the format that shows once many changes are pending
+in one place, and the longer a session, the more of them. With four people and 20 operations each
+it is 3% of hot sessions, 18% of typical and 6% of spread; the typical workload is where it
+matters. In the hot workload the corruption is almost all the second kind, below. For
+example, a person deleting words inside bold text that another person typed leaves
+`**<!--del …--> ed007**`, in which the first `**` is followed by a space, so it opens no emphasis.
+Five clients in the typical workload corrupt 19% of sessions against 15% for four, and the hot
+workload 7.0%, 8.5% and 9.5% for 3, 4 and 5, so the number of people adds little.
+
+The failures that need two people:
+
+| Violation (sessions of 200, c2)        | hot | typical | spread | review |
+| -------------------------------------- | --- | ------- | ------ | ------ |
+| A pending typed word in someone else's change | 17  | 2       | 10     | 15     |
+| A decided mark came back                      | 0   | 1       | 0      | 0      |
+| An edit left untracked, a mark with no entry  | 0   | 1       | 1      | 0      |
+| Text lost, swallowed or duplicated            | 0   | 0       | 0      | 0      |
+
+- Typing next to someone's insertion can put the new word inside their change. It is the largest
+  count (8.5% of hot sessions) and it is the same under c1 and c2, so no rebase rule causes it:
+  in the sessions looked at, the edit is derived on the newest text and written inside the other
+  person's insertion, and the ledger then says that person typed it. Reject that insertion and the
+  word goes with it.
+- Two sessions out of 800 (the same seed, in the typical and spread rows) confirmed an edit that
+  left the original view changed and a mark without a ledger entry. They are rare, they showed under c2
+  only (not under c1 in 200 sessions), and the seed reproduces them. A decided mark that came back
+  (typical, one session of 200) is the one failure of this kind that shows under both rules.
+- No session lost, swallowed or duplicated text under c1 or c2. The words a person deleted were
+  gone, and the words they didn't delete stayed.
+
+**Joined words.** In 25–52% of sessions two words end up with no space between them in a view
+(`u005ed002`). It happens alone as well: a word typed after a deleted word lands after the deletion
+and the deletion keeps the space, so deciding the two the other way round reads as one word. It is
+not corruption by the oracle (the text is all there), and it is the most frequent event of the
+matrix, and a gap the format spec doesn't say anything about.
+
+**Turned-away edits.** Of what people did, 10–14% was turned away while deriving, and 86–90% was
+confirmed. The reasons, in every row:
+
+- A bold change near another person's pending format change: "decide the other change first"
+  (`no-legal-placement`). It is by far the largest (1,100–1,700 per 200 sessions in every row): it
+  refuses a bold change next to another person's pending one, so in a paragraph where two people have
+  bold changes pending, nobody else can bold.
+- A deletion or substitution whose words someone else has deleted meanwhile: nothing left.
+- A deletion or typing next to a change that can't take it (`no-legal-placement`).
+- A typed word whose anchors are all gone.
+
+Multiuser §4.2 asks that nothing be turned away; today's library turns away about one edit in ten.
+
+**Decisions and the guard.** Review sessions: 10.0% / 3.0% corrupted with the guard and 11.5% / 4.0%
+without it under c2 (c1: 10.0% / 3.0% and 9.5% / 3.5%), which is no difference at 200 sessions. The
+guard turned away 141 more decisions (221 against 80, of every cause) per 200 sessions under c2. The earlier study found the guard
+essential, with accepts and rejects that acted by inverse edits. Here they act on the mark by id,
+and (reading the code) decide the mark's current text, so a stale decision decides what is there now. The
+guard still tells a person that what they were about to decide has changed.
+
+**Speed.** Pushes confirmed in a median 350–466 ms and a p95 of 4.1–4.7 s (set by the offline periods and
+spikes of the network).
+c2 was faster than c1 by 8–25% in the median.
+
+### The ledger
+
+The study predicts that every concurrent pair of edits collides in the ledger, because every edit
+that touches it writes it whole ([multiuser §4.3](multiuser.md#43-the-ledger-travels-as-entries)).
+Measured in the c2 rows (every stale push is classified whatever the rule, so this is the same
+under c1):
+
+| Workload | Updates that change the ledger | Pushes made on an older version | Of those with a ledger change, collide in the ledger | Of the older pushes, touch another body edit | Of the older pushes, collide only in the ledger |
+| -------- | ----- | ----- | ----- | ----- | ----- |
+| hot      | 85.6% | 39.7% | 89.4% | 50.8% | 40.4% |
+| typical  | 77.5% | 41.0% | 85.6% | 5.8%  | 68.1% |
+| spread   | 93.7% | 40.7% | 96.0% | 8.4%  | 84.6% |
+| review   | 94.7% | 40.7% | 96.6% | 8.8%  | 85.0% |
+
+- 78–95% of updates change the ledger, and 86–97%
+  of the pushes that do and were made on an older version collide with another push's ledger
+  change. The prediction holds.
+- In the typical, spread and review workloads, where people are mostly in different places, the
+  ledger is the only thing that stops a rebase for 68–85% of the older pushes. c2 rebased 2.5–10.7%
+  of pushes and rejected 30–38%, where c1 rejected 40–42%. Footprints on the body alone would
+  rebase most of the stale pushes of those workloads, but can't be used with today's ledger, since
+  the rebased push would replace the ledger with its own (c-naive).
+- Only in the hot workload do the bodies themselves touch (51% of the older pushes).
+- Not tried here: the ledger as entries, which the design proposes. This simulation says how much
+  there is to gain (c2 would rebase most of what c1 rejects outside the hot paragraph) and not
+  whether it holds.
+
+### Limits
+
+- The same seeds are used for every row, so rows are paired, but the random numbers an edit draws
+  depend on what has happened, so two rows of one seed are different sessions.
+- Unique words, paragraphs of plain words, bold as the only format, no tables, lists, links,
+  moves, undo, resolve or likes, three to five clients, about 20 operations each.
+- Every number is a share of 200 sessions, so a 0 means that the rate is probably below 1.5%.
+- Offline periods are 2–8 s. Longer ones aren't tried.
+- The oracle checks words and markup. It can't say that a word was placed where the person meant,
+  only that it is where its author's change says.
+- Bold is refused so often that bold changes are rarely confirmed together with other changes, so
+  the format-change rules are tested far less than typing and deleting.
+
+## The no-host replay merge
+
+[Multiuser §3](multiuser.md#3-what-decides-the-architecture) leaves one method for a simulation
+before a decision: replicas that merge by replaying intents through the tracking filter in a fixed
+order, with no authority (the idea of [Eg-walker](https://arxiv.org/abs/2409.14252), with Redlines'
+`trackedEdits` as the replay). §8 decision 7 asks for it. `packages/collab-sim/src/replay.ts` runs
+it under the oracle of the fourth simulation.
+
+How it works in the simulation:
+
+- There is no host. Every replica is joined to every other by a link of the same network as before
+  (latency, spikes, drops, offline periods), keeps the intents it knows, and sends each new one to
+  all of the others, who pass it on. When a link comes back, the two ends exchange what they lack.
+- An intent carries a Lamport time (one more than the largest time its replica had seen) and its
+  replica's index. The order of two intents is their time, then the index.
+- A replica's text is the first text with every intent it knows derived again, in that order, by
+  the same code a client uses against the authority's newest text (`derive`: the real `trackedEdits`
+  and its kin, with the decision's guard). An intent that changes nothing there (the words are gone,
+  the mark has changed since the person saw it) changes nothing, and the same one changes nothing
+  in every replica.
+- An intent that arrives from someone else is slotted in by its time. When it sorts before intents
+  already derived, those are derived again, on the text with the new one in it. A person's own new
+  intent always sorts last. Ids come from each intent's seed, so deriving again gives the same ids.
+- The text is a function of the set of intents. Replicas that know the same ones have the same text
+  to the byte, in whatever order they heard them. A unit test shuffles twelve intents and finds the
+  same text each time, and no session of the matrix ended with replicas that differed.
+- The oracle runs on every history a replica derived (histories share their beginnings, so each step
+  is derived and checked once): every step on its own, as against the authority's every update, and
+  every state a replica showed.
+
+Results, 200 sessions per row, the seeds and the network of the fourth simulation (so the two
+columns are the same sessions as far as the network goes):
+
+| Workload | c2: corrupted / invalid | Replay: corrupted / invalid | Intents that changed the text | Seen by their author, gone in the final order |
+| -------- | ----------------------- | --------------------------- | ----------------------------- | --------------------------------------------- |
+| hot      | 8.5% / 1.5%             | 10.5% / 2.0%                | 86.5%                         | 1.2%                                          |
+| typical  | 15.0% / 18.5%          | 14.5% / 16.5%               | 90.8%                         | 0.4%                                          |
+| spread   | 8.0% / 6.0%             | 6.0% / 6.5%                 | 88.9%                         | 0.5%                                          |
+| review   | 10.0% / 4.0%            | 11.5% / 5.0%                | 89.9%                         | 0.7%                                          |
+
+| Cell              | Corrupted at end / invalid at any point | Replicas that differed at the end |
+| ----------------- | --------------------------------------- | --------------------------------- |
+| hot, 5 replicas   | 13.5% / 1.5%                            | 0 of 200                          |
+| typical, 5        | 14.5% / 19.0%                           | 0 of 200                          |
+| hot, never offline | 9.5% / 1.0%                            | 0 of 200                          |
+
+- **Safety is the same as with an authority.** The replay corrupted 6–14.5% of sessions, the share
+  of c1 and c2, from the same causes: the body not reading as the newest view (`render`, which one
+  person alone also makes), and a typed word inside someone else's change (`misattributed`, 19 of 200
+  hot sessions against 17 for c2). One session in the typical row with five replicas accepted a
+  decision that moved more than its own mark. No text was lost, swallowed, duplicated, revived or
+  left untracked at the level the oracle sees.
+- **Convergence is by construction, and held.** Not one replica of 1,400 sessions ended with a
+  different text, with the offline periods of the network, the replicas knowing intents in all
+  orders, and five replicas.
+- **Accept and reject go in one order**, which no merge of marks as text did: a decision is one
+  intent among the others, and the guard drops it, in every replica alike, when the mark has
+  changed before it in the order. It cost no more than the authority's guard did: 0.4–1.2% of
+  intents were applied where their person made them and dropped in the final order.
+- **The cost is that nothing is ever final.** An authority's version is confirmed for good; here an
+  intent that arrives late and sorts earlier derives the later ones again. 17.2% of merges did that,
+  and 4.0 intents were derived again each time. What a person saw changed under them in
+  0.4–1.2% of their intents (above) and in the other direction 0.0–0.1% (an intent that changed
+  nothing where its person made it, and does in the final order). There is no moment at which a
+  state is safe to save or decide on: a state is a replica's best reading of the intents it has. The
+  design in §4 gives that to the authority, and §4.7's replicas and epochs would need it when a host
+  is away.
+- **Time until every replica has an intent**: a median of 186 ms and a p95 of 5.3 s, for the
+  network of these sessions (the p95 is the offline periods).
+
+Limits, beyond those of the fourth simulation:
+
+- Offline periods of 2–8 s, so the longest divergence is a few intents. A copy that worked for a
+  day, and `git merge`, aren't tried. A replica never forgets an intent, and history would have to
+  be pruned at some point for it to be kept for ever; nothing here says how.
+- An intent's anchors are words, as in the sessions with an authority. Ids a decision refers to are
+  those the intent's seed gives, which holds while ids don't collide (a collision isn't counted
+  separately).
+- No outside edit (a `git pull`, an agent writing the file) takes part. It would be an intent with
+  no known place in the order.
+
+## The sessions over the editor's own writers
+
+The fourth simulation and the replay called the format library as the first simulations did. By
+now the editor has intents of its own (typing, formats, comments, replies and decisions kept as
+what the person did, with the guard on a decision), so the matrix was run again with each intent
+derived by the editor's code (`packages/collab-sim/src/real.ts`): typing, deleting and replacing
+through a headless editor's tracking filter, formats, comments, replies and decisions through
+`writeFormat`, `writeReview` and `guardDecision`. The sessions, seeds, network and oracle are those
+of the fourth simulation; the oracle checks every confirmed state, and every state a replica
+showed. `REDLINES_REAL=60 pnpm exec vitest run packages/collab-sim/src/real.test.ts` reruns it;
+`REDLINES_REAL_WRITERS=format` runs the same cells over the library's writers, the baseline below.
+Deep runs stay off CI, which only holds the two checks that follow.
+
+- **One person's file is the same bytes.** On 627 derivations over seeded sessions, each on the text
+  its intent was made on, the editor wrote what the library writes, byte for byte, but for one that
+  drew other ids (the editor tries the fine form first and widens when it is refused, which draws
+  more ids). It declined none of what the library wrote.
+- **Sessions over the editor settle and converge**, with an authority and without (`real.test.ts`).
+
+Results, 60 sessions per row (the earlier tables have 200; the seeds are the same for the two
+columns here), first number the share corrupted at the end, second the share that confirmed invalid
+markup at any point:
+
+| Workload | c2, library | c2, editor | Replay, library | Replay, editor |
+| -------- | ----------- | ---------- | --------------- | -------------- |
+| hot      | 8.3% / 0.0% | 8.3% / 0.0% | 11.7% / 0.0%   | 11.7% / 0.0%   |
+| typical  | 6.7% / 6.7% | 5.0% / 5.0% | 5.0% / 3.3%    | 5.0% / 3.3%    |
+| spread   | 10.0% / 0.0% | 10.0% / 0.0% | 5.0% / 1.7%   | 5.0% / 1.7%    |
+| review   | 6.7% / 1.7% | 6.7% / 1.7% | 10.0% / 0.0%    | 10.0% / 0.0%   |
+
+One person alone (60 operations): 3.3%, 5.0% and 5.0% corrupted at the end, the same with either
+writer. Not one session of 960 ended with copies that differed.
+
+- **The numbers are the library's, to within the noise of 60 sessions** (typical/c2: 6.7% with the library, 5.0% with the editor). The causes are the same two: the body not reading as the newest
+  view (`render`, which one person alone makes too), and a typed word inside someone else's change
+  (`misattributed`). No text was lost, swallowed, duplicated, revived or left untracked at the level
+  the oracle sees, except one session in each of two cells (a revived word, as before).
+- **The editor declines some edits, and says so.** Over 4,800 intents in the hot cell, 33 (0.7%)
+  were declined: the editor asked or alerted, and wrote nothing. The first run of the matrix counted
+  these as written, and the oracle called them "typed word lost"; a declined edit is an edit not
+  made, and the harness now turns it away (`declined`). Of the declines, deletes and replacements
+  across other people's pending insertions are most.
+- **The replay costs what it cost.** 17.1% of merges rewrote history, 4.0 intents were derived again
+  each time, and 0.5–1.2% of intents were applied where their person made them and dropped in the
+  final order.
+
+### Verdict on a session with no host
+
+[Multiuser §8, decision 7](multiuser.md#8-decisions) asked for the replay merge to be built only if
+it holds up. On the editor's own intents it **holds up on the three things measured**: safety is the
+authority's (shares of sessions corrupted within a few sessions of 60 of each other, from the same
+causes, with either writer),
+replicas that know the same intents have the same bytes (0 of 960 differed, five replicas and
+offline periods included), and a decision is one intent among the others, dropped alike in every
+replica when its mark changed first.
+
+It is **not built in phases 0 and 1.** What it gives up is the thing the plan needs next: no state
+is ever final. A version that a role check, a save, a decision's "accepted a moment ago", per-person
+undo or the app's one writer can rely on needs a settled order, which an authority gives and the
+replay cannot until every replica has been heard from (median 188 ms, p95 5.2 s here, longer when
+someone is away). Phase 1's authority in the app core stays. The replay is kept as the answer to
+the one case with no host to be the authority, Macs that are offline together (phase 5's replicas),
+and its code stays in the harness for when that is built.
+
+## Yjs as the intent log
+
+The question: could a Yjs `Y.Array` of intents replace the replay merge's own log and flooding,
+so that Redlines gets Yjs's sync protocol, offline behavior and providers (WebSocket, IndexedDB,
+WebRTC), with the text **still derived by replay through `trackedEdits`, never merged by Yjs**?
+The earlier finding stands: a CRDT that merges the characters corrupts the marks. Here Yjs would
+only carry and order opaque intents. `packages/collab-sim/src/yjs-replay.ts` runs it (`yjs`
+13.6.33, the one dependency added, to the simulator only).
+
+How it works in the simulation:
+
+- Each replica holds a `Y.Doc` with one `Y.Array` of intents. A new intent is pushed to the end
+  of the local array. Updates (Yjs's binary encoding) are flooded over the same seeded links as
+  before (latency, spikes, drops, offline periods); when a link comes back, the two ends exchange
+  a state vector and the update it asks for, which is Yjs's own sync step. Updates that depend on
+  ones not yet received are held by Yjs until they arrive.
+- Two orders are tried. **Y.Array order**: the replay order is the array's merged order, and
+  intents carry no Lamport time. **Lamport order**: Yjs only carries and deduplicates, and the
+  replay order is the plain log's (Lamport time, then replica), as a control.
+- The text is derived by the same `derive` as before, under the same oracle, on the same seeds,
+  the same network and the same workloads as the plain replay (the three arms run each seed).
+
+What was shrunk, to run in the time there was: **30 sessions per cell** (the earlier tables used
+200), nine cells: the four workloads at 3 replicas, `hot` and `typical` at 5 replicas, `hot`
+never offline, and two cells with long offline periods (`hot/long` and `typical/long`: 3
+replicas, 30 intents each, offline 70% of the time for 15–30 s of a 42 s session, where the
+earlier simulations had 2–8 s). A cell's rows for the other workloads at the same replica count
+share a network schedule (the same seeds), and the reorder, latency and bytes columns come out the same for them. The arms are paired on seed and schedule only: a link draws its randomness per message, and the arms send different numbers of messages, so their networks differ after the first send that differs.
+Percentages from 30 sessions move by 3.3 points for one session; read the corruption columns
+as "the same", not as differences.
+
+### Convergence and corruption
+
+| Cell | Sessions | Plain log: corrupted / invalid (not converged) | Y.Array order | Y.Array, Lamport order |
+| --- | --- | --- | --- | --- |
+| hot | 30 | 13.3% / 0.0% (0) | 20.0% / 3.3% (0) | 13.3% / 0.0% (0) |
+| typical | 30 | 20.0% / 20.0% (0) | 20.0% / 20.0% (0) | 20.0% / 20.0% (0) |
+| spread | 30 | 3.3% / 0.0% (0) | 3.3% / 0.0% (0) | 6.7% / 0.0% (0) |
+| review | 30 | 10.0% / 6.7% (0) | 10.0% / 10.0% (0) | 13.3% / 6.7% (0) |
+| hot, 5 replicas | 30 | 16.7% / 3.3% (0) | 10.0% / 3.3% (0) | 10.0% / 3.3% (0) |
+| typical, 5 | 30 | 20.0% / 30.0% (0) | 10.0% / 20.0% (0) | 13.3% / 23.3% (0) |
+| hot, never offline | 30 | 6.7% / 3.3% (0) | 3.3% / 3.3% (0) | 3.3% / 3.3% (0) |
+| hot, long offline | 30 | 10.0% / 3.3% (0) | 13.3% / 0.0% (0) | 10.0% / 0.0% (0) |
+| typical, long offline | 30 | 13.3% / 20.0% (0) | 13.3% / 16.7% (0) | 13.3% / 16.7% (0) |
+
+- **Convergence held: no replica of 810 sessions (270 per arm) ended with a different text**, long
+  offline periods included. It holds for the same reason as before: the text is a function of the
+  set of intents, and Yjs delivers a set (and, in Y.Array order, one order, which every replica
+  that has the same updates has too).
+- **Corruption is the plain log's, from the same causes** (`render` and `misattributed`). Yjs
+  neither adds a cause nor removes one; the differences above are within the noise of 30 sessions.
+- **Ordering by Y.Array rather than by Lamport time showed no difference in safety that 30 sessions can resolve** (in `hot, long offline`, intents gone in the final order rose from 4.8% to 6.4%, which is a few intents), and Yjs arrays are
+  deterministic once the same updates are known. But the order is chosen by Yjs's conflict rule
+  (concurrent pushes at the same position are ordered by client id), not by anything about the
+  intents, so an intent from a long-offline replica can land in the middle of everyone else's.
+
+### Reordering, and what a person sees
+
+| Cell | Plain log: merges slotted before others; intents re-derived each | Y.Array order | Y.Array, Lamport order |
+| --- | --- | --- | --- |
+| 3 replicas, 2–8 s offline (all four workloads) | 17.0%, 4.1 | 14.2%, 3.8 | 15.8%, 4.2 |
+| 5 replicas | 19.6%, 4.2 | 16.5%, 4.1 | 17.7%, 4.4 |
+| never offline | 9.9%, 1.1 | 9.6%, 1.1 | 9.5%, 1.1 |
+| long offline (3 replicas, 15–30 s) | 34.9%, 13.5 | 21.9%, 22.4 | 33.7%, 13.6 |
+
+| Cell | Plain log: changed the text; gone / appeared in the final order | Y.Array order | Y.Array, Lamport order |
+| --- | --- | --- | --- |
+| hot | 85.9%; 1.3% / 0.0% | 85.8%; 1.4% / 0.0% | 85.9%; 1.3% / 0.0% |
+| typical | 90.3%; 0.5% / 0.0% | 90.5%; 0.4% / 0.0% | 90.3%; 0.5% / 0.0% |
+| hot, long offline | 82.4%; 4.8% / 0.1% | 80.7%; 6.4% / 0.2% | 82.3%; 4.8% / 0.1% |
+| typical, long offline | 88.3%; 2.0% / 0.2% | 88.6%; 2.0% / 0.3% | 88.3%; 2.1% / 0.2% |
+
+- **Reordering is the same as the plain log's**, as it has to be: it is a property of concurrent
+  intents, not of the log. Y.Array order reordered 14.2% of merges against 17.0% with short outages, and re-derived about the same number each time (3.8 against 4.1); at 30 sessions that is within noise.
+- **After long offline periods the picture is the replay's, made worse: nothing about Yjs helps.**
+  A third of merges rewrite history; in Y.Array order fewer do (21.9%) but each re-derives more
+  (22.4 intents), and the share of a person's intents that were seen and are gone in the final
+  order rises from about 1% to 5–6% for `hot`.
+- The "steps re-derived per session" columns of the harness (224 for the plain log against 62 for
+  Yjs, and 1,274 against 85 in the long cells) are **not comparable**: the plain log counts every
+  intent it redoes one at a time, and the Yjs variant counts the work of a batch (a reconnect
+  brings many intents, and they are derived again once). It is a property of batching, which the
+  plain log could have as well; the per-merge figure above is the like-for-like one.
+- **Latency is the same**: a median of 184 ms and a p95 of 5.3 s, against 187 ms and 5.3 s (long
+  offline: a median of 9.7 s and a p95 of 34 s for both).
+
+### Size, memory and bytes
+
+Bytes per session, at the end of a session, per replica:
+
+| Cell | Intents | Plain log: bytes sent | Y.Array: bytes sent | Log as JSON | Y.Doc update |
+| --- | --- | --- | --- | --- | --- |
+| hot, 3 replicas | 80 | 240.7 KB (804 msgs) | 190.0 KB (689 msgs) | 23.5 KB | 18.8 KB |
+| hot, 5 replicas | 100 | 527.6 KB (1,756 msgs) | 415.4 KB (1,516 msgs) | 29.3 KB | 23.4 KB |
+| hot, never offline | 80 | 220.1 KB (733 msgs) | 174.1 KB (731 msgs) | 23.3 KB | 18.7 KB |
+| hot, long offline | 90 | 148.8 KB (498 msgs) | 115.1 KB (284 msgs) | 26.3 KB | 20.9 KB |
+
+Growth (`yjs-growth.ts`, intents of the simulator's workloads, repeated), the log as it grows:
+
+| Intents | Plain log, JSON | Y.Array, one writer | Y.Array, four writers (turns of 25) | Time to load the update into a new doc (four writers) |
+| --- | --- | --- | --- | --- |
+| 100 | 30 KB | 24 KB | 24 KB | 1 ms |
+| 1,000 | 298 KB | 239 KB | 239 KB | 61 ms |
+| 10,000 | 2.9 MB | 2.4 MB | 2.4 MB | 224 ms |
+| 100,000 | 29.5 MB | 23.8 MB | 23.8 MB | 3.4 s |
+
+- **About 20% fewer bytes on the wire and in the document**, since Yjs encodes the intents' JSON
+  compactly (the plain arm's ops also carry a Lamport time, which accounts for some of it). The flood still
+  re-sends what it receives: 477 duplicate updates per session never offline, so most of the
+  messages are duplicates; a real provider would not flood. The sync step's state vector is 4–21
+  bytes in the growth runs; the plain arm's sync request is charged a flat 12 bytes in the
+  simulator, so the two handshakes were not compared.
+- **Growth is linear, at about 240 bytes an intent**, both ways. A Yjs array of whole-intent
+  objects has no overhead worth the name. Yjs's own benefits for text (run-length encoding of
+  consecutive characters) do not apply here, since every intent is a separate element.
+- **Heap is not a clean number** in this harness: the measurements around one writer (about 100 MB
+  for 100,000 intents, four times the plain log's 47 MB) are the only stable ones, and the
+  four-writer and string-array heap readings were swamped by garbage collection (some read
+  negative). Say "a few times the plain log" and don't quote more.
+- The cost is the load of 100,000 intents (3.4 s): that is a very long-lived log, which the checkpoints below are for.
+
+### Offline and reconnect
+
+- **Held-back updates were never left over** (0 replicas at the end, in the three cells that count it: `hot, never offline` and the two long-offline cells, 90 sessions of the Y.Array arm; it checks only updates waiting for missing structs): Yjs
+  holds an update until the ones before it from the same replica arrive, and the sync step brings
+  them.
+- **A long offline period cost the same as the plain log's** in latency and reordering, as above.
+  Yjs sent fewer bytes (115 KB against 149 KB), by about the same share as with no outage (21%),
+  so the saving is the encoding; the fall in messages (284 against 498) is the batching of a
+  reconnect into one update.
+
+### Checkpoints: would a settled point compact a Yjs log?
+
+The sketch: when every known replica has acknowledged up to a point in the order, derive the text
+at that point, store it as the new first text, and delete the prefix of intents.
+
+- **Garbage collection allows deleting.** In the growth experiment, deleting all but the last 100
+  of 10,000 intents took the encoded document from 2.4 MB to 26 KB with the default `gc` on. With
+  `gc` off it stayed 2.4 MB (the deleted items remain as tombstones).
+- **Snapshots do not allow it together.** A Yjs snapshot (18 bytes) is only readable if the doc
+  keeps its deleted content, so it needs `gc` off, and then nothing shrinks. So the checkpoint's
+  proof of what the prefix was cannot be a Yjs snapshot; it would be the derived text, hashed,
+  carried in the intents (a `Checkpoint { text hash, up to id }` intent).
+- **A late intent does not break deletion**: a replica that pushed after the last intent of a
+  prefix, while another replica deleted the prefix, ended with the same array at both in the one case tried (the
+  deleted prefix gone, the late intent kept; with the last intent of the prefix kept, that one
+  stays before it). Other positions of a late intent were not tried.
+- **What Yjs doesn't give is the agreement.** Which replicas are "known", whether one has
+  acknowledged a point, and whether an intent that sorts before the checkpoint may still arrive
+  from a replica that was offline when it was made: Yjs's merge puts such an intent where its
+  neighbours were, and if they are deleted, somewhere unspecified. The rule would be the usual
+  one: a checkpoint is only made when all replicas listed in the session acknowledge it, and a
+  replica returning after being dropped from that list must rebuild from the checkpoint and
+  re-send its intents as new ones, with no claim on their old place. That is the same as with the
+  plain log; Yjs makes the deleting cheap, not the decision.
+- It also leaves what `epoch` of §4.7 is for: the derived text is the base of the next epoch.
+
+### Recommendation
+
+**Don't adopt it for the log alone, and don't rule it out.** What this shows:
+
+1. Nothing in the text-corruption or convergence numbers speaks for or against Yjs. The text is a
+   function of the intents, and every arm converged and corrupted for the same reasons.
+2. What Yjs saves is the plain log's flooding and sync code (the flooding and the reconnect exchange of `replay.ts`), about 20% of the bytes, and a ready sync protocol and
+   providers (WebSocket, IndexedDB persistence, WebRTC). That is worth having only if Redlines
+   chooses the no-host design.
+3. What it costs: a new dependency (its size in a bundle was not measured here) in a core that is held to a size budget; an order
+   chosen by Yjs's conflict rule, not by the intents (Lamport order has to be kept on top, if the
+   order should mean anything, and then Yjs adds nothing to the order); no snapshot with
+   compaction; and every intent opaque to Yjs, so Yjs's own tools for text (its undo manager, for example) would not know their meaning.
+4. Long offline periods stay the hard case with or without it, and need a decision of their own:
+   an intent that was made against a text long gone is, by §4.7, a copy that should be merged
+   as a divergent copy, not replayed.
+
+So: **if** the no-host design is chosen, use `Y.Array` as a transport and persistence layer for
+intents, keep the order by Lamport time and replica (the control arm, which matched the plain
+log within the noise of 30 sessions), and treat checkpoints as an application feature with `gc` on. **If** an
+authority (§4) is chosen, this is moot. It should not be decided by the log: decide the
+architecture first.
+
+Limits: Yjs client ids are fixed (1000 plus the replica's index) in the harness, where real ones are random, so the order of concurrent pushes would vary from session to session; the compaction figures (26 KB, 2.4 MB, 18 bytes) come from `yjs-growth.ts`, which has no assertions; 30 sessions per cell, so differences under about ten points are noise; the growth
+experiment repeats the simulator's intents, not a real corpus; the heap readings are rough;
+and, as with the plain replay, no outside edit takes part.
 
 ## One app as the authority
 

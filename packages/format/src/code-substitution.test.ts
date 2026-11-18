@@ -328,23 +328,34 @@ describe('a block that a pending change holds, and front matter', () => {
     expect(back(text).replace(/\n{3,}/g, '\n\n')).toBe('Intro.\n\nAfter.');
   });
 
-  it('keeps main’s refusal when another person’s change holds the block (#808)', () => {
+  it('writes a replacement that holds another person’s change in the block, sound in every order (#808)', () => {
     const insertion =
       'Intro.\n\n<!--ins m3bd-->\n\n```js\nline one\nline two\n```\n<!--/m3bd-->\n\nAfter.';
     const text = file(insertion, { m3bd: 'bo' });
     const at = text.indexOf('one') + 3;
-    const refused = attempt(text, at, at, 'X');
-    expect(refused.error).toBe(
-      "This would change how Bo Chen's insertion reads. Decide it first, or turn off Track Changes.",
-    );
-    expect(refused.code).toBe('no-legal-placement');
+    const done = attempt(text, at, at, 'X');
+    expect(done.error).toBeUndefined();
+    expect(done.after).toContain('<!--sub');
+    expectEveryOrderAlike('code in Bo’s insertion', done.after ?? '');
   });
 
-  it('is refused for another person in a block that your substitution holds (#808)', () => {
+  it('writes a key in code that another person’s pending code change holds, sound in every order (#285)', () => {
+    const theirs = typeIn(BODY, ['X'], afterOne, bo, { m2bd: 'bo' });
+    const at = theirs.indexOf('oneX') + 4;
+    const done = attempt(theirs, at, at, 'Y', ada);
+    expect(done.error).toBeUndefined();
+    expect(done.after).toContain('<!--sub');
+    expect(views(done.after ?? '').newest).toContain('line oneXY');
+    expectEveryOrderAlike('code in Bo’s substitution', done.after ?? '');
+  });
+
+  it('writes it for another person in a block that your substitution holds (#808)', () => {
     const mine = typeIn(BODY, ['X'], afterOne);
     const at = mine.indexOf('oneX') + 4;
-    // A replacement that would hold Ada's pending change keeps the refusal (#808).
-    expect(attempt(mine, at, at, 'Y', bo).code).toBe('no-legal-placement');
+    // The replacement holds Ada's pending change, which folds into it, and any of Bo's.
+    const done = attempt(mine, at, at, 'Y', bo);
+    expect(done.error).toBeUndefined();
+    expectEveryOrderAlike('code in Ada’s substitution', done.after ?? '');
     // Deciding it first frees the code.
     const decided = applyChanges(mine, accept(mine, 'm2bd'));
     const free = decided.indexOf('oneX') + 4;
@@ -422,17 +433,17 @@ describe('a block whose range holds a marker, and its edges (fix round 1)', () =
   const PRE = 'Intro.\n\n<pre>\nline one\nline two\n</pre><!--del k3x9 \\n\\n-->After.';
   const MARKED = file(PRE, { k3x9: 'bo' });
 
-  it('refuses an edit in a block when another person’s marker is on its closing line', () => {
+  it('writes an edit in a block when another person’s marker is on its closing line', () => {
     const at = MARKED.indexOf('one') + 3;
-    expect(attempt(MARKED, at, at, 'x')).toMatchObject({
-      error:
-        "Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes.",
-      code: 'no-legal-placement',
-    });
+    const done = attempt(MARKED, at, at, 'x');
+    expect(done.error).toBeUndefined();
+    expectEveryOrderAlike('marker on the closing line', done.after ?? '');
     // The same for display math with a marker on a `$$` line, and for your own other marks.
     const math = file('Intro.\n\n$$\nx = 1\n$$<!--del k3x9 \\n\\n-->After.', { k3x9: 'bo' });
     const inMath = math.indexOf('1');
-    expect(attempt(math, inMath, inMath, 'x').error).toContain("Bo Chen's pending change");
+    const written = attempt(math, inMath, inMath, 'x');
+    expect(written.error).toBeUndefined();
+    expectEveryOrderAlike('math with a marker', written.after ?? '');
     const mine = file(PRE, { k3x9: 'ada' });
     // (your own marks are widened over, whole, where another person's are not)
     const own = attempt(mine, mine.indexOf('one') + 3, mine.indexOf('one') + 3, 'x');
@@ -533,23 +544,28 @@ describe('the open line under indented code (fix round 1)', () => {
 });
 
 describe('a marker above indented code (fix round 2)', () => {
-  it('refuses a key in the code, naming the person, and writes nothing', () => {
+  it('writes a key in the code as a replacement, sound in every order, or refuses it in words', () => {
     const text = file('## Head<!--del k3x9 \\n\\n-->    indented one\n    indented two\n\nAfter.', {
       k3x9: 'bo',
     });
     const words =
       "Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes.";
     const end = text.indexOf('indented one') + 'indented one'.length;
+    let written = 0;
     for (const [from, to, insert] of [
       [end, end, '\n'],
       [end, end, 'x'],
       [end + 1, end + 1, '\n'],
     ] as const) {
-      expect(attempt(text, from, to, insert), insert).toMatchObject({
-        error: words,
-        code: 'no-legal-placement',
-      });
+      const done = attempt(text, from, to, insert);
+      if (done.error !== undefined) {
+        expect(done, insert).toMatchObject({ error: words, code: 'no-legal-placement' });
+        continue;
+      }
+      written++;
+      expectEveryOrderAlike(`key ${JSON.stringify(insert)}`, done.after ?? '');
     }
+    expect(written).toBeGreaterThan(0);
   });
 
   it('goes on in the block your own substitution holds', () => {
@@ -667,8 +683,12 @@ describe('the marks that refuse a key in indented code (fix round 3)', () => {
     // Bo's deletion of the break is at it.
     const at = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'bo' });
     const held = at.indexOf('one') + 1;
-    // The refusal stays: a widened replacement would not read alike in every order (#808, #107).
-    expect(type(at, held).code).toBe('no-legal-placement');
+    // It is written as a replacement of the code and the paragraph above, which hold the deleted
+    // break whole, and reads alike in every order of decisions (#265).
+    const done = type(at, held);
+    expect(done.error).toBeUndefined();
+    expect(done.after).toContain('<!--sub');
+    expectEveryOrderAlike('code under Bo’s deleted break', done.after ?? '');
     const own2 = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'ada' });
     expect(type(own2, own2.indexOf('one') + 1).error).toBeUndefined();
   });

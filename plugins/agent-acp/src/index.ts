@@ -53,6 +53,11 @@ export interface AcpConfig {
   args: string[];
   /** Set for OpenClaw's bridge, which has no toolbox. */
   bridge?: Bridge;
+  /**
+   * Set for an OpenClaw connection that the host answers from a Gateway: no program stands behind
+   * it, and its tools reach it through the node, over the run's relay (`nodeTools`).
+   */
+  gateway?: true;
 }
 
 /** The version of the protocol this speaks. */
@@ -125,14 +130,20 @@ export function sessionOf(
 
 /**
  * A session for a bridge: no MCP server, which the bridge rejects, and the key of the thread's
- * session in `_meta`, which it reads (`sessionKey`).
+ * session in `_meta`, which it reads (`sessionKey`). A run at a Gateway also names the relay its
+ * tool calls are answered on (`tools`, the relay's socket): the host connects to it, and the
+ * calls the Gateway forwards from this session go to it for as long as the run is live.
  */
-export function bridgeSessionMessage(folder: string, key: string): object {
+export function bridgeSessionMessage(folder: string, key: string, relay?: string): object {
   return {
     jsonrpc: '2.0',
     id: NEW_SESSION,
     method: 'session/new',
-    params: { cwd: folder, mcpServers: [], _meta: { sessionKey: key } },
+    params: {
+      cwd: folder,
+      mcpServers: [],
+      _meta: relay === undefined ? { sessionKey: key } : { sessionKey: key, tools: relay },
+    },
   };
 }
 
@@ -330,6 +341,8 @@ export interface AcpState {
   tools: McpEndpoint;
   /** Set for OpenClaw's bridge: its sessions have no toolbox. */
   bridge?: Bridge;
+  /** Set for a run at a Gateway: its session names the relay in `tools`. */
+  gateway?: true;
   /**
    * Sends a message. If the host refuses it, `instead` goes in its place; a refusal of that, or of
    * a message with nothing in its place, ends the run with `failure`.
@@ -390,7 +403,11 @@ function fromAnswer(message: Record<string, unknown>, state: AcpState): AgentEve
       }
       state.send(
         state.bridge
-          ? bridgeSessionMessage(state.folder, sessionOf(state.bridge, state.request))
+          ? bridgeSessionMessage(
+              state.folder,
+              sessionOf(state.bridge, state.request),
+              state.gateway === true ? state.tools.args.at(-1) : undefined,
+            )
           : newSessionMessage(state.folder, state.tools),
       );
       return null;
@@ -404,10 +421,15 @@ function fromAnswer(message: Record<string, unknown>, state: AcpState): AgentEve
       const sessionId = result['sessionId'];
       if (error !== undefined || typeof sessionId !== 'string') {
         const why = errorMessage(error);
+        // More than one agent at the Gateway, and none named: say where to name one (#401).
+        const hint =
+          why && /agent-prefixed session key|select an agent explicitly/i.test(why)
+            ? ' Name the agent in Preferences › Agents › OpenClaw.'
+            : '';
         return {
           type: 'error',
           message: why
-            ? `${name} couldn’t open a session: ${why}`
+            ? `${name} couldn’t open a session: ${why}${hint}`
             : `${name} couldn’t open a session.`,
         };
       }
@@ -548,6 +570,8 @@ export function createAcpProvider(
     readLimit: 'machine',
     // OpenClaw's bridge takes no tools of the client's: the host sets none up for it.
     ...(config.bridge === undefined ? {} : { toolbox: false as const }),
+    // A Gateway's agent reaches the tools through the node: the host opens a relay for the run.
+    ...(config.gateway === true ? { nodeTools: true as const } : {}),
 
     // The handshake at each run is what shows an agent works; there is no status command to ask.
     detect() {
@@ -566,6 +590,7 @@ export function createAcpProvider(
         message: '',
         send: () => {},
         ...(config.bridge === undefined ? {} : { bridge: config.bridge }),
+        ...(config.gateway === true ? { gateway: true as const } : {}),
       };
       return runAgent<AcpState>(
         processes,

@@ -16,14 +16,23 @@ mod acp;
 mod acp_gate;
 mod acp_runs;
 mod allowed;
+pub mod connections;
+pub mod gateway;
 mod latest;
 mod log;
+pub mod node;
+mod openclaw_agent;
+mod openclaw_chat;
+mod openclaw_nodes;
+mod openclaw_protocol;
+mod openclaw_tools;
 mod process;
 mod question;
 mod reach;
 pub mod relay;
 mod setup;
 mod skills;
+pub mod tailscale;
 mod which;
 
 use std::path::{Path, PathBuf};
@@ -39,13 +48,18 @@ pub use which::Programs;
 use acp::{AcpAgent, AcpAgents, Found};
 use acp_runs::AcpRuns;
 use allowed::Agent;
+use connections::{Change, Connections, Kind, NewConnection, Secret, View};
 use log::RunInfo;
+use openclaw_nodes::Nodes;
 use process::{ExecOutput, RunMessage, Spec, Started};
 use relay::Relays;
 use setup::{Outcome, Setups};
 
 /// What the windows hear when the list of ACP agents changes, to look for agents again.
-const ACP_AGENTS_CHANGED: &str = "acp-agents-changed";
+pub(crate) const ACP_AGENTS_CHANGED: &str = "acp-agents-changed";
+
+/// What the windows hear when an OpenClaw connection is added, changed or removed.
+const OPENCLAW_CHANGED: &str = "openclaw-connections-changed";
 
 /// Puts what the commands below use in the app's state, and clears out old logs.
 pub fn set_up(app: &AppHandle) {
@@ -61,6 +75,31 @@ pub fn set_up(app: &AppHandle) {
         .unwrap_or_default();
     app.manage(AcpAgents::new(list));
     app.manage(AcpRuns::default());
+    // The OpenClaw connections and what their Gateways gave (connections.rs). With no folder of the
+    // app's own, nothing is kept.
+    let root = app
+        .path()
+        .app_config_dir()
+        .map(|folder| folder.join("openclaw"))
+        .unwrap_or_default();
+    app.manage(Connections::new(root));
+    app.manage(Nodes::default());
+    // A connection that was set up connects again when the app opens, and keeps trying by itself.
+    let starting = app.clone();
+    std::thread::spawn(move || {
+        let computer = this_mac_name();
+        let connections = starting.state::<Connections>();
+        for view in connections.views() {
+            if view.node_token {
+                let _ = starting.state::<Nodes>().connect(
+                    &starting,
+                    &view.connection.handle,
+                    None,
+                    &computer,
+                );
+            }
+        }
+    });
     if let Ok(folder) = log_folder(app) {
         std::thread::spawn(move || log::delete_old_logs(&folder, SystemTime::now()));
     }
@@ -87,6 +126,7 @@ pub fn quitting(app: &AppHandle) {
     app.state::<Runs>().stop_all();
     app.state::<Setups>().stop_all();
     app.state::<Relays>().close_all();
+    app.state::<Nodes>().stop_all();
 }
 
 /// Whether this machine has an agent's program: its path, or null. Only what this returns can run.
@@ -141,8 +181,28 @@ pub fn agent_stop(app: AppHandle, webview: Webview, id: u32) -> Result<(), Strin
 
 /// The Agent Client Protocol agents the person added.
 #[tauri::command(async)]
-pub fn acp_agents(app: AppHandle) -> Vec<AcpAgent> {
-    app.state::<AcpAgents>().list()
+pub fn acp_agents(app: AppHandle) -> Vec<openclaw_agent::Listed> {
+    let mut listed: Vec<openclaw_agent::Listed> = app
+        .state::<AcpAgents>()
+        .list()
+        .into_iter()
+        .map(|agent| openclaw_agent::Listed {
+            agent,
+            gateway: false,
+        })
+        .collect();
+    // An OpenClaw connection that can chat is an agent too: it answers from its Gateway.
+    let taken: Vec<String> = listed.iter().map(|one| one.agent.id.clone()).collect();
+    listed.extend(
+        openclaw_nodes::chat_agents(&app)
+            .into_iter()
+            .filter(|agent| !taken.contains(&agent.id))
+            .map(|agent| openclaw_agent::Listed {
+                agent,
+                gateway: true,
+            }),
+    );
+    listed
 }
 
 /// Adds an Agent Client Protocol agent, as a name and a command, or changes the one of that name,
@@ -164,6 +224,122 @@ pub fn acp_agent_add(
     )?;
     let _ = app.emit(ACP_AGENTS_CHANGED, ());
     Ok(list)
+}
+
+/// The OpenClaw connections, and for each a flag that says which secrets are kept. No secret is
+/// ever returned.
+#[tauri::command(async)]
+pub fn openclaw_connections(app: AppHandle) -> Vec<View> {
+    app.state::<Connections>().views()
+}
+
+pub(crate) fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+/// Adds an OpenClaw connection, once the person has allowed it in a question of the system's. Only
+/// Preferences is granted the command. Returns the list as it then is.
+#[tauri::command(async)]
+pub fn openclaw_connection_add(app: AppHandle, new: NewConnection) -> Result<Vec<View>, String> {
+    let list = app
+        .state::<Connections>()
+        .add(new, now(), |asked| question::ask(&app, asked))?;
+    let _ = app.emit(OPENCLAW_CHANGED, ());
+    Ok(list)
+}
+
+/// Changes a connection's level or folders; giving it more asks the person.
+#[tauri::command(async)]
+pub fn openclaw_connection_change(
+    app: AppHandle,
+    handle: String,
+    change: Change,
+) -> Result<Vec<View>, String> {
+    let list = app
+        .state::<Connections>()
+        .update(&handle, change, |asked| question::ask(&app, asked))?;
+    let _ = app.emit(OPENCLAW_CHANGED, ());
+    Ok(list)
+}
+
+/// Removes a connection and every secret it kept.
+#[tauri::command(async)]
+pub fn openclaw_connection_remove(app: AppHandle, handle: String) -> Result<Vec<View>, String> {
+    app.state::<Nodes>().stop(&handle);
+    let list = app.state::<Connections>().remove(&handle)?;
+    let _ = app.emit(OPENCLAW_CHANGED, ());
+    Ok(list)
+}
+
+/// Keeps a token the person typed, for a Gateway where they can't make a setup code: for the
+/// connection's node and its operator both. It is written to files only this user can read and
+/// never shown or returned.
+#[tauri::command(async)]
+pub fn openclaw_use_token(
+    app: AppHandle,
+    handle: String,
+    token: String,
+) -> Result<Vec<View>, String> {
+    let secret = Secret::new(&token)?;
+    let store = app.state::<Connections>();
+    store.keep(&handle, Kind::NodeToken, &secret)?;
+    store.keep(&handle, Kind::OperatorToken, &secret)?;
+    let _ = app.emit(OPENCLAW_CHANGED, ());
+    Ok(store.views())
+}
+
+/// The name of this Mac as its owner knows it (System Settings › General › About), for what the
+/// Gateway's owner sees in a request: "Redlines on Ada’s MacBook".
+fn this_mac_name() -> String {
+    Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .and_then(|name| openclaw_nodes::computer_name(&name).ok())
+        .unwrap_or_else(|| "this Mac".to_owned())
+}
+
+/// This Mac's name, for the prompt the person sends their agent.
+#[tauri::command(async)]
+pub fn openclaw_this_mac() -> String {
+    this_mac_name()
+}
+
+/// Connects an OpenClaw connection to its Gateway, with the setup code the person pasted (which goes
+/// to the connection and is never kept) or else the token it kept. Only Preferences may ask.
+#[tauri::command(async)]
+pub fn openclaw_node_connect(
+    app: AppHandle,
+    handle: String,
+    setup_code: Option<String>,
+) -> Result<(), String> {
+    let code = setup_code
+        .as_deref()
+        .filter(|code| !code.trim().is_empty())
+        .map(Secret::new)
+        .transpose()
+        .map_err(|_| {
+            "That doesn’t look like a setup code: it is one line with no spaces.".to_owned()
+        })?;
+    app.state::<Nodes>()
+        .connect(&app, &handle, code, &this_mac_name())
+}
+
+/// Where a connection is: connecting, waiting for approval (with the code to compare), connected,
+/// trying again, failed and why, or stopped. Nothing when none is running.
+#[tauri::command(async)]
+pub fn openclaw_node_status(app: AppHandle, handle: String) -> Option<node::Status> {
+    app.state::<Nodes>().status(&handle)
+}
+
+/// Disconnects a connection, which stays in the list.
+#[tauri::command(async)]
+pub fn openclaw_node_stop(app: AppHandle, handle: String) {
+    app.state::<Nodes>().stop(&handle);
 }
 
 /// Removes an Agent Client Protocol agent, once the person has said so in a question of the
@@ -196,6 +372,27 @@ pub fn acp_start(
     let bundled = programs.bundled().ok_or_else(|| {
         "Redlines won't start an agent: it can't find its own program.".to_owned()
     })?;
+    // An agent of the person's own list is a program; failing that, an OpenClaw connection that
+    // can chat is a Gateway.
+    if app.state::<AcpAgents>().get(&agent).is_none()
+        && let Some((bridge, talk)) = openclaw_nodes::chat_for(&app, &agent)
+    {
+        return app.state::<AcpRuns>().start_gateway(
+            &app.state::<Runs>(),
+            owner,
+            &log_folder(&app)?,
+            &log,
+            &cwd,
+            bridge,
+            bundled,
+            talk,
+            app.state::<Nodes>().tools(),
+            || app.get_webview_window(owner).is_some(),
+            move |message| {
+                let _ = on_line.send(message);
+            },
+        );
+    }
     let launch = acp_runs::spec_for(&app.state::<AcpAgents>(), &agent, &cwd, log)?;
     let environment = programs.environment_for(Path::new(&launch.spec.program));
     app.state::<AcpRuns>().start(
@@ -219,8 +416,13 @@ pub fn acp_start(
 #[tauri::command(async)]
 pub fn acp_send(app: AppHandle, webview: Webview, id: u32, line: String) -> Result<(), String> {
     let owner = webview.label();
-    let sockets = app.state::<Relays>().sockets_of(owner);
-    app.state::<AcpRuns>().send(owner, id, &line, &sockets)
+    let relays = app.state::<Relays>();
+    // A run names a relay no other run has claimed, and a run at a Gateway claims the one it names.
+    let sockets = relays.sockets_for(owner, id);
+    app.state::<AcpRuns>()
+        .send(owner, id, &line, &sockets, &|socket| {
+            relays.claim(owner, socket, id)
+        })
 }
 
 /// How long an update may take: a package manager downloads the program.

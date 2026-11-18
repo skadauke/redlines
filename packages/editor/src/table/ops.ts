@@ -12,15 +12,7 @@ import {
   type TransactionSpec,
 } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import {
-  EditError,
-  askedTableEdit,
-  fineTableEdit,
-  tableEdit,
-  type TableOp,
-  type TextChange,
-  untrackedTableEdit,
-} from '@redlines/format';
+import { EditError, type TableOp, type TextChange } from '@redlines/format';
 import {
   authorFacet,
   markupViewFacet,
@@ -35,6 +27,9 @@ import {
   refusedEditEffect,
   trackingField,
 } from '../tracked/typing.ts';
+import type { Unnamed } from '../tracked/intent.ts';
+import { recordedAs } from '../tracked/intent.ts';
+import { type TableIntent, writeTable } from './intent.ts';
 import type { Align, Row, Table } from './model.ts';
 import { rectOf, rectSelection } from './cells.ts';
 import { missingCaret } from './missing.ts';
@@ -43,7 +38,15 @@ import { tablesField } from './model.ts';
 
 /** What `planned` gives: the changes, where the caret goes, and the rows or columns made. */
 export type Planned =
-  | { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[]; untracked?: true }
+  | {
+      changes: TextChange[];
+      caret: number;
+      rows?: number[];
+      cols?: number[];
+      untracked?: true;
+      /** What was asked and how it was written, to record beside the changes. */
+      intent?: Unnamed<TableIntent>;
+    }
   | { refusal: string };
 
 /** The format's changes for `op` on the state's text, as Track Changes says; or the refusal. */
@@ -78,15 +81,31 @@ export function plannedIn(
 ): Planned {
   const text = onText ?? state.doc.toString();
   try {
-    if (state.field(trackingField) && !untracked)
-      return (fine ? fineTableEdit : asked ? askedTableEdit : tableEdit)(text, op, {
-        ...contextFor(state),
-        ...(group ? { group } : {}),
-      });
+    const tracking = state.field(trackingField) && !untracked;
     const { random } = state.facet(editSourceFacet);
     const editing = state.facet(authorFacet);
-    const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
-    return untrackedTableEdit(text, op, { random, author });
+    const written = tracking
+      ? (() => {
+          const ctx = contextFor(state);
+          return writeTable(text, {
+            tracking,
+            op,
+            writer: fine ? 'fine' : asked ? 'asked' : 'tableEdit',
+            ...(group ? { group } : {}),
+            author: ctx.author,
+            time: ctx.time,
+            ...(random ? { random } : {}),
+          });
+        })()
+      : writeTable(text, {
+          tracking,
+          op,
+          writer: fine ? 'fine' : asked ? 'asked' : 'tableEdit',
+          author: editing ? { handle: editing.handle, name: editing.name } : null,
+          time: '',
+          ...(random ? { random } : {}),
+        });
+    return { ...written.edit, intent: written.intent };
   } catch (error) {
     if (error instanceof EditError) return { refusal: error.message };
     throw error;
@@ -164,7 +183,7 @@ function perform(
     changes,
     selection,
     userEvent,
-    annotations,
+    annotations: done.intent ? [...annotations, recordedAs(done.intent)] : annotations,
     // A tracked change made in Clean shows in Redlines, in the look chosen last, as typing's do.
     effects:
       tracked && view.state.field(viewModeField) === 'clean'

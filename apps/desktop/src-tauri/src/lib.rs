@@ -53,6 +53,8 @@ mod project;
 
 // The images the preview loads: those of the project folders the sidebars show.
 mod images;
+// The pictures of a paste from Google Docs, fetched for the page from Google's image hosts.
+mod remote_image;
 
 // Images added to a document: dropped on its window, chosen in a panel or pasted, saved beside it.
 mod image_files;
@@ -64,6 +66,7 @@ mod file_scope;
 // copy can update itself, and starting the new version after an update.
 mod crash;
 mod recovery;
+mod session;
 mod updates;
 
 // Renaming a file, showing it in Finder, and printing the window.
@@ -353,6 +356,7 @@ pub fn run() {
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
+        .manage(session::Sessions::default())
         .manage(zoom::Zoom::default())
         .manage(zoom::WindowZooms::default())
         .manage(project::Projects::default())
@@ -413,6 +417,12 @@ pub fn run() {
             edit_menu::beep,
             crash::crash_environment,
             recovery::recovery_write,
+            session::session_join,
+            session::session_leave,
+            session::session_members,
+            session::session_wal_append,
+            session::session_wal_read,
+            session::session_wal_start,
             recovery::recovery_read,
             recovery::recovery_delete,
             crash::crash_log_page,
@@ -447,6 +457,7 @@ pub fn run() {
             images::image_for_agent,
             images::image_for_crop,
             images::image_stamps,
+            remote_image::fetch_remote_image,
             images::image_sizes,
             project::allow_document,
             image_files::pick_images,
@@ -513,7 +524,20 @@ pub fn run() {
             #[cfg(unix)]
             agents::relay::relay_answer,
             #[cfg(unix)]
-            agents::relay::relay_close
+            agents::relay::relay_close,
+            agents::gateway::gateway_probe,
+            agents::openclaw_connection_add,
+            agents::openclaw_connection_change,
+            agents::openclaw_connection_remove,
+            agents::openclaw_connections,
+            agents::openclaw_node_connect,
+            agents::openclaw_node_status,
+            agents::openclaw_node_stop,
+            agents::openclaw_this_mac,
+            agents::openclaw_use_token,
+            agents::tailscale::tailscale_download,
+            agents::tailscale::tailscale_open_app,
+            agents::tailscale::tailscale_status
         ])
         .on_page_load(|webview, payload| {
             // A window's page that loads again, as a reload does, watches what it needs itself.
@@ -579,6 +603,7 @@ pub fn run() {
             // an unsaved document is kept (recovery.rs).
             if matches!(event, tauri::RunEvent::Exit) {
                 recovery::quit(app);
+                session::quit(app);
             }
             // After an update is installed, the new version starts as this one quits.
             if matches!(event, tauri::RunEvent::Exit) {

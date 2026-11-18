@@ -1,5 +1,7 @@
 export type * from './types.ts';
 export { EditError } from './errors.ts';
+export { dialectOfName } from './dialect.ts';
+export type { MarkdownDialect } from './dialect.ts';
 export type { EditErrorCode } from './errors.ts';
 export { closerRange, frontMatterEnd, openerRange } from './blocks.ts';
 export { deletedBlocks, deletedTable } from './deleted-blocks.ts';
@@ -15,7 +17,7 @@ export type { BlockRead } from './block-read.ts';
 export { idsIn, isId, newId } from './ids.ts';
 export { decodePayload, encodePayload } from './payload.ts';
 export { plainPayload } from './changes.ts';
-export { parse } from './parse.ts';
+export { parse, parseStats } from './parse.ts';
 export type { Change as ParseChange } from './scan.ts';
 export { applyChanges, eolOf } from './changes.ts';
 export {
@@ -46,7 +48,7 @@ export { suggestionOf, suggestions } from './suggestion.ts';
 export { formatChange, NUMBERED_CHILD as OUTDENT_NUMBERED_CHILD } from './format-blocks.ts';
 export { parseFormatOps } from './format-ops.ts';
 export { ALERT_LINE, GITHUB_TYPES, calloutWord, typeOfWord } from './callout.ts';
-export { SHORTCODE_SOURCE, shortcodeAt } from './shortcode.ts';
+export { SHORTCODE_SOURCE, shortcodeAt, startsEmoji } from './shortcode.ts';
 export type {
   AlignedColumn,
   BlockType,
@@ -57,6 +59,29 @@ export type {
 export { fineFormat, trackedFormat, trackedFormatRanges, untrackedFormat } from './formatting.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
+export {
+  applyLedgerOp,
+  applyLedgerOps,
+  emptyLedgerMap,
+  ledgerEntries,
+  ledgerMapOf,
+  ledgerOfMap,
+  ledgerOps,
+  setLedgerEntries,
+  writeLedger,
+} from './ledger-map.ts';
+export type { LedgerMap, LedgerOp, LedgerSettings } from './ledger-map.ts';
+export { applyLog, applyLogEntry, ledgerState } from './ledger-log.ts';
+export type {
+  Decision,
+  DroppedDecision,
+  LedgerState,
+  LogBody,
+  LogEntry,
+  Outcome,
+} from './ledger-log.ts';
+export { mergeLedgers, renameMarkId } from './ledger-merge.ts';
+export type { LedgerMerge, LedgerMergeOptions, LedgerRename, MergeSide } from './ledger-merge.ts';
 export { recordTracking, setView } from './settings.ts';
 export {
   fineEdit,
@@ -67,6 +92,7 @@ export {
   widenedFirstEdits,
 } from './track.ts';
 export type { TrackedEdits } from './track.ts';
+export { emptiedFormats } from './emptied-formats.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';
 export type { UntrackedContext } from './untracked.ts';
 export { newestView, originalView, reviewView, threadEntries } from './views.ts';

@@ -12,6 +12,7 @@
 //    at its start, which a row with markers must not leave bare.
 
 import {
+  blankAt,
   bodyStart,
   lineEnd,
   lineStart,
@@ -84,7 +85,7 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
     tables ??= tablesIn(text, parsed);
     for (const table of tables) {
       if (!inTable(table, edit)) continue;
-      if (edit.from <= table.from && edit.to >= table.to && edit.to > edit.from) continue;
+      if (coversTable(table, edit)) continue;
       // A blank line written before the table or after it only moves it: Return at the first
       // pipe or at the end of the last row.
       if (edit.from === edit.to && edit.from === table.from && /(?:\r?\n){2}$/.test(edit.insert)) {
@@ -129,11 +130,7 @@ export function assertRowsStay(
   const brings = (insert: string) => insert.replace(/<!--[\s\S]*?-->/g, '');
   const count = (s: string, pattern: RegExp) => s.match(pattern)?.length ?? 0;
   const inRows = (change: TextChange, tables: readonly TableRead[]) =>
-    tables.some(
-      (table) =>
-        inTable(table, change) &&
-        !(change.from <= table.from && change.to >= table.to && change.to > change.from),
-    );
+    tables.some((table) => inTable(table, change) && !coversTable(table, change));
   for (const pattern of [/\|/g, /\n/g]) {
     const typed = edits.reduce((sum, edit) => sum + count(edit.insert, pattern), 0);
     const written = changes.reduce((sum, change) => sum + count(brings(change.insert), pattern), 0);
@@ -178,7 +175,7 @@ export function leadingPipeAt(text: string, edit: TextChange, parsed?: Parsed): 
     if (edit.from < table.from || edit.from > table.to) continue;
     // A deletion of the whole table is a deletion of a block, with its marker in front of the block
     // after it: nothing stands at the start of the table's first row, and the pipe is no use.
-    if (edit.from <= table.from && edit.to >= table.to && edit.to > edit.from) continue;
+    if (coversTable(table, edit)) continue;
     const row = table.rows.find((r) => r.from <= edit.from && edit.from <= r.to);
     const cell = row?.cells[0];
     if (!row || !cell || row.leadingPipe) continue;
@@ -318,6 +315,7 @@ function nameOf(parsed: Parsed, handle: string): string {
 export function commentAcrossRows(
   table: TableRead,
   parsed: Parsed,
+  parkedOnly = false,
 ): { mark: MarkRange; name: string } | null {
   const rowOf = (at: number) => table.rows.findIndex((row) => row.from <= at && at <= row.to);
   for (const mark of parsed.marks) {
@@ -326,7 +324,14 @@ export function commentAcrossRows(
       if (!close) continue;
       const a = rowOf(open.from);
       const b = rowOf(close.from);
-      if (a !== -1 && b !== -1 && a !== b) return { mark, name: nameOf(parsed, mark.entry.by) };
+      if (a === -1 || b === -1 || a === b) continue;
+      // Only the opener of a comment that starts the next row, parked at the end of the row it is
+      // in, has no form that a move of rows carries (`parkedOnly`, #295): any other comment
+      // travels with its rows, as a highlight across rows does.
+      const rest = parsed.text.slice(open.to, table.rows[a]?.to ?? open.to);
+      // (Other markers parked beside it are no text.)
+      if (parkedOnly && rest.replace(/<!--[^]*?-->/g, '').trim() !== '') continue;
+      return { mark, name: nameOf(parsed, mark.entry.by) };
     }
   }
   return null;
@@ -394,6 +399,23 @@ export function pastRowMark(table: TableRead, text: string, at: number): number 
     }
   }
   return at;
+}
+
+/**
+ * `at`, or the place before the closing pipe of the header row that it is after: a marker after the pipe
+ * is a cell more than the delimiter row has, and the header and the table are no longer read (#955,
+ * #396). Past the pipe, the marker goes in front of it, at the end of the last cell's text.
+ */
+export function beforeHeaderPipe(table: TableRead, text: string, at: number): number {
+  const header = table.rows[0];
+  if (!header || at <= header.from || at > header.to) return at;
+  const line = text.slice(header.from, header.to);
+  const pipe = /\|\s*$/.exec(line);
+  if (!pipe) return at;
+  const slashes = /\\*$/.exec(line.slice(0, pipe.index))?.[0].length ?? 0;
+  if (slashes % 2 === 1) return at;
+  const pipeAt = header.from + pipe.index;
+  return at > pipeAt ? pipeAt : at;
 }
 
 /** The marks, other than comments and highlights, that have a marker inside `row`. */
@@ -878,9 +900,30 @@ export function commentHasNoPlace(parsed: Parsed, by: string): string {
   return `${nameOf(parsed, by)}'s comment is in this table, and no text next to it can keep it. Delete the comment first, or turn off Track Changes.`;
 }
 
-/** Whether the line that starts at `start` is blank. */
-const blankAt = (text: string, start: number): boolean =>
-  /^[ \t]*$/.test(text.slice(start, lineEnd(text, start)));
+/** Whether a change takes out the whole table (and something): the edit of a block, not of its rows. */
+function coversTable(table: TableRead, change: Range): boolean {
+  return change.from <= table.from && change.to >= table.to && change.to > change.from;
+}
+
+/**
+ * Where the text below a table starts: `stop`, where the text ends (the ledger's start); `right`, the
+ * line right under the table and the closers of marks that end with it (on lines of their own below
+ * it); and `after`, the first line with text from there on (`stop` or more when there is none).
+ */
+function belowTable(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+): { stop: number; right: number; after: number } {
+  const stop = parsed.ledgerRange?.from ?? text.length;
+  let end = tableExtent(text, table).to;
+  const closers = closersBelow(text, end);
+  if (closers !== -1) end = lineEnd(text, closers);
+  const right = nextLineStart(text, end);
+  let after = right;
+  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  return { stop, right, after };
+}
 
 /**
  * Where a point comment of a table that is deleted whole may stand, in the order to try them (format
@@ -890,13 +933,7 @@ const blankAt = (text: string, start: number): boolean =>
  */
 export function pointPlaces(text: string, parsed: Parsed, table: TableRead): number[] {
   const places: number[] = [];
-  const stop = parsed.ledgerRange?.from ?? text.length;
-  // Past the closers of marks that end with the table, which stand on a line of their own below it.
-  let end = tableExtent(text, table).to;
-  const closers = closersBelow(text, end);
-  if (closers !== -1) end = lineEnd(text, closers);
-  let after = nextLineStart(text, end);
-  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  const { stop, after } = belowTable(text, parsed, table);
   if (after < stop) {
     const line = text.slice(after, lineEnd(text, after));
     const heading = /^#{1,6}[ \t]+/.exec(line.slice(prefixLength(line)))?.[0].length ?? 0;
@@ -916,8 +953,8 @@ export function pointPlaces(text: string, parsed: Parsed, table: TableRead): num
   return places;
 }
 
-/** A line that opens a code fence, after at most three spaces. */
-const FENCE_OPEN = /^ {0,3}(?:`{3,}|~{3,})/;
+/** A line that opens a code fence, after at most three spaces, or after a list item's marker. */
+const FENCE_OPEN = /^ {0,3}(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(`{3,}|~{3,})/;
 
 /** A line that ends a code fence or is a rule, in a quote or an item or not. */
 const FENCE_CLOSE_OR_RULE =
@@ -925,8 +962,10 @@ const FENCE_CLOSE_OR_RULE =
 
 /** What stands next to a table, as far as deleting it whole with Track Changes on can tell (rule 6). */
 export interface TableNeighbours {
-  /** The block after the table is a fenced code block. */
+  /** The block after the table is a fenced code block (in a list item or not). */
   fenceAfter: boolean;
+  /** That fence never closes: no line after it closes it before the ledger. */
+  fenceUnclosed: boolean;
   /** Nothing follows the table but blank lines, up to the ledger. */
   endsText: boolean;
   /** The nearest line with text above the table closes a code fence, or is a rule. */
@@ -949,31 +988,57 @@ const HTML_OPENS =
 
 /** What stands next to `table`. */
 export function neighboursOf(text: string, parsed: Parsed, table: TableRead): TableNeighbours {
-  const stop = parsed.ledgerRange?.from ?? text.length;
-  let end = tableExtent(text, table).to;
-  const closers = closersBelow(text, end);
-  if (closers !== -1) end = lineEnd(text, closers);
-  let after = nextLineStart(text, end);
-  while (after < stop && blankAt(text, after)) after = nextLineStart(text, after);
+  const { stop, after, right } = belowTable(text, parsed, table);
   const next = after < stop ? text.slice(after, lineEnd(text, after)) : null;
-  const right = nextLineStart(text, end);
   const directBelow =
     right < stop && !blankAt(text, right) ? text.slice(right, lineEnd(text, right)) : null;
   // The nearest line with text above the table, and whether it is the line right above.
   const first = bodyStart(text);
-  let above: { line: string; directly: boolean } | null = null;
+  let above: { line: string; directly: boolean; at: number } | null = null;
   let line = lineStart(text, table.from);
   for (let directly = true; line > first && above === null; directly = false) {
     line = lineStart(text, line - 1);
-    if (!blankAt(text, line)) above = { line: text.slice(line, lineEnd(text, line)), directly };
+    if (!blankAt(text, line)) {
+      above = { line: text.slice(line, lineEnd(text, line)), directly, at: line };
+    }
+  }
+  // Indented as code: a run of indented lines that a blank line, or the start of the text, comes before
+  // (an indented line under a paragraph's line continues the paragraph, it is no code).
+  let codeAbove = false;
+  if (above !== null && indentOf(above.line) >= 4) {
+    let start = above.at;
+    while (start > first) {
+      const before = lineStart(text, start - 1);
+      if (blankAt(text, before)) break;
+      if (indentOf(text.slice(before, lineEnd(text, before))) < 4) break;
+      start = before;
+    }
+    codeAbove = start <= first || blankAt(text, lineStart(text, start - 1));
+  }
+  const fence = next === null ? null : FENCE_OPEN.exec(next);
+  let fenceUnclosed = false;
+  if (fence?.[1] && after < stop) {
+    const run = fence[1];
+    const close = new RegExp(
+      `^[ \\t>]*${run.charAt(0) === '`' ? '`' : '~'}{${run.length},}[ \\t]*$`,
+    );
+    fenceUnclosed = true;
+    for (let at = nextLineStart(text, after); at < stop; at = nextLineStart(text, at)) {
+      if (close.test(text.slice(at, lineEnd(text, at)))) {
+        fenceUnclosed = false;
+        break;
+      }
+    }
   }
   return {
-    fenceAfter: next !== null && FENCE_OPEN.test(next),
+    fenceAfter: fence !== null,
+    fenceUnclosed,
     endsText: next === null,
     fenceOrRuleAbove: above !== null && FENCE_CLOSE_OR_RULE.test(above.line),
-    indentedAbove: above !== null && indentOf(above.line) >= 4,
+    indentedAbove: codeAbove,
     underText: above?.directly === true,
-    indentedBelow: next !== null && indentOf(next) >= 4,
+    // Indented code needs a blank line before it: right under the table it is a row's lazy text.
+    indentedBelow: next !== null && after > right && indentOf(next) >= 4,
     htmlBelow: directBelow !== null && HTML_OPENS.test(directBelow),
     headingAbove: above?.directly === true && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(above.line),
   };
@@ -985,6 +1050,9 @@ export const NEXT_TO_WORDS = {
   /** A code fence follows the table: a marker in front of it would unread the fence. */
   codeAfter:
     "This table can't be deleted with Track Changes on while a code block follows it with no text between. Put a paragraph between them first, or turn off Track Changes.",
+  /** A code fence follows the table and never closes: the fix is the fence's, not a paragraph. */
+  codeAfterUnclosed:
+    "This table can't be deleted with Track Changes on while a code block that is never closed follows it. Close the code block first, or turn off Track Changes.",
   /** The table ends the text, and what is before it is code or a rule, which no marker may end. */
   codeBefore:
     "This table can't be deleted with Track Changes on while it ends the text right after a code block or a rule. Put a paragraph between them first, or turn off Track Changes.",
@@ -1029,24 +1097,26 @@ export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed)
   if (edit.to > end) return [];
   const line = readLine(text, start, end);
   if (line.lone) return [];
-  // A row of one cell keeps it with a pipe at one end, and needs none besides, but for the mark of an alignment change
-  // that ends the cell of a header. With the text gone the mark alone holds the cell: with no leading pipe it would start
-  // the line, where no marker may stand (format §3.3), and would be put on a line of its own above the table, outside
-  // it; with no closing pipe the header is a lone pipe once the change is accepted, and no table.
+  // A row of one cell keeps it with a pipe at one end, and needs the other once the text is gone: with
+  // none left, a lone pipe is no cell, the header is one cell less than the delimiter row, and the table is
+  // none. (The mark of an alignment change that ends the cell of a header is no text either.)
   const only = line.cells.length === 1 ? line.cells[0] : undefined;
-  if (line.cells.length < 2) {
-    if (!only || alignPointIn(text, only.contentFrom, only.contentTo) === null) return [];
-  }
-  // The cell's text is all in the edit, and none of it is a mark. The mark of an alignment change that
-  // ends the cell stays, and is not text.
+  if (line.cells.length < 2 && !only) return [];
+  // The cell's text is all in the edit. What stays is no text: the mark of an alignment change that ends the
+  // cell, and the markers of other changes, a comment's among them, and the text that another person's
+  // pending deletion holds, which the newest view does not read.
   const emptied = (index: number): boolean => {
     const cell = line.cells[index];
     if (!cell) return false;
     const to = alignPointIn(text, cell.contentFrom, cell.contentTo)?.from ?? cell.contentTo;
     const content = text.slice(cell.contentFrom, to);
-    if (content.trim() === '' || content.includes('<!--')) return false;
-    const first = cell.contentFrom + (content.length - content.trimStart().length);
-    const last = to - (content.length - content.trimEnd().length);
+    // The text of the cell as the newest view has it, each character in its place, the rest blanked.
+    const seen = content
+      .replace(/<!--del (\w{4})\b[^>]*-->[\s\S]*?<!--\/\1-->/g, (m) => ' '.repeat(m.length))
+      .replace(/<!--[\s\S]*?-->/g, (m) => ' '.repeat(m.length));
+    if (seen.trim() === '') return false;
+    const first = cell.contentFrom + (seen.length - seen.trimStart().length);
+    const last = cell.contentFrom + seen.trimEnd().length;
     return edit.from <= first && last <= edit.to;
   };
   const writes: PipeWrite[] = [];
@@ -1058,6 +1128,9 @@ export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed)
   // Only a row of a table has cells.
   const table = tablesIn(text, parsed).find((t) => t.from <= start && end <= t.to);
   const row = table?.rows.find((r) => r.from === start);
+  // A body row of one cell that is a pipe alone stands for the empty cell (and takes a column back);
+  // only a header has to keep its cells.
+  if (line.cells.length === 1 && !row?.header) return [];
   return row ? writes : [];
 }
 

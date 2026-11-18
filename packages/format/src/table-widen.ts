@@ -100,18 +100,32 @@ export function widenedCellFormat(
   if (ranges.some((range) => !inLane(range))) throw first;
   try {
     const view = newestView(text);
-    const edits = ranges.flatMap((range) =>
-      untrackedFormat(
-        view.text,
-        { from: view.map.fromSource(range.from), to: view.map.fromSource(range.to) },
-        op,
-      ),
-    );
+    // Two ranges in one nested mark's text can both reach its delimiters, so the same edit comes
+    // back from each: it is written once, and edits that still overlap have no one write.
+    const seen = new Set<string>();
+    const edits = ranges
+      .flatMap((range) =>
+        untrackedFormat(
+          view.text,
+          { from: view.map.fromSource(range.from), to: view.map.fromSource(range.to) },
+          op,
+        ),
+      )
+      .filter((edit) => {
+        const key = `${edit.from}:${edit.to}:${edit.insert}`;
+        return !seen.has(key) && seen.add(key);
+      })
+      .toSorted((a, b) => a.from - b.from || a.to - b.to);
+    let reach = 0;
+    for (const edit of edits) {
+      if (edit.from < reach) throw first;
+      reach = Math.max(reach, edit.to);
+    }
     if (edits.length === 0) throw first;
     const done = widen(text, edits, ctx);
-    // Outside a table's cells, others' pending marks in the old text keep the refusal (#808).
+    // Outside a table's cells, another person's mark at the unit's edge keeps the refusal (#107).
     if (
-      done.heldByOthers.length > 0 &&
+      done.touchingOthers.length > 0 &&
       ranges.some((r) => scopeOf(text, r.from, r.to) !== 'cell')
     ) {
       throw first;

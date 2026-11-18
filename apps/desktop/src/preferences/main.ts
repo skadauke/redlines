@@ -4,7 +4,12 @@
 
 import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
-import { renderAgentsPane } from '@redlines/agents';
+import {
+  renderAgentsPane,
+  type GuidedDeps,
+  type OpenClawDeps,
+  type SheetStep,
+} from '@redlines/agents';
 import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -14,9 +19,13 @@ import {
   agentSetup,
   agentSkills,
   createDetectionProcesses,
+  gateway,
   homeAccess,
+  openClawConnections,
   openClawEdits,
+  openClawNode,
   openFilesAndFoldersSettings,
+  tailscale,
 } from '../agent-preferences.ts';
 import { copyText } from '../copy-text.ts';
 import { reportIconRotation } from '../dock-icon.ts';
@@ -32,6 +41,7 @@ import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
 import { startsFilter } from './filter-key.ts';
 import { noRingOnClick } from './tabs.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
+import { devGuided, failureGallery } from './dev-openclaw.ts';
 import { createSetupRegistry } from './setup-registry.ts';
 import { forgetShortcutsFilter } from './shortcuts-pane.ts';
 import {
@@ -51,6 +61,7 @@ import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import '../zoom.css';
 import './preferences.css';
+import './openclaw-sheet.css';
 import '../ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
@@ -129,6 +140,76 @@ const defaultAppCommand = <T>(command: string) =>
  */
 const hasQuickLook = isTauri && (await invoke<boolean>('quick_look_available').catch(() => false));
 
+/** The names of the connections the guided sheet knows, for its check that a name is free. */
+let connectionHandles: string[] = [];
+
+/** What the OpenClaw setup sheet asks of the app (plugins/agents/src/openclaw/sheet.ts). */
+function guidedDeps(): GuidedDeps {
+  const remember = <T extends { handle: string }[]>(list: T): T => {
+    connectionHandles = list.map(({ handle }) => handle);
+    return list;
+  };
+  return {
+    owner: settings.identity?.handle ?? git?.handle ?? 'me',
+    taken: () => [
+      ...providers.map(({ id }) => `${id}-${settings.identity?.handle ?? git?.handle ?? 'me'}`),
+      ...connectionHandles,
+    ],
+    thisMac: openClawNode.thisMac,
+    tailscale: {
+      status: tailscale.status,
+      openApp: tailscale.openApp,
+      download: tailscale.download,
+      // Tailscale's own app opens its sign-in page, so no address passes through this window.
+      signIn: tailscale.openApp,
+    },
+    probe: gateway.probe,
+    copy: copyText,
+    paste: () => navigator.clipboard.readText(),
+    connections: {
+      list: () => openClawConnections.list().then(remember),
+      add: (connection) => openClawConnections.add(connection).then(remember),
+      change: (handle, change) => openClawConnections.change(handle, change).then(remember),
+      remove: (handle) => openClawConnections.remove(handle).then(remember),
+      useToken: (handle, token) => openClawConnections.useToken(handle, token).then(remember),
+    },
+    node: openClawNode,
+    chooseFolder: () =>
+      appCommand<string | null>('choose_folder', 'Folders are chosen in the app.', {
+        start: null,
+      }),
+  };
+}
+
+/** In a plain browser, `?oc=<screen>` shows the setup sheet with scripted answers (dev-openclaw.ts). */
+function devOpenClaw(): { openclaw?: OpenClawDeps } {
+  const query = new URLSearchParams(location.search);
+  const screen = query.get('oc');
+  if (!import.meta.env.DEV || screen === null) return {};
+  const refuse = () => Promise.reject(new Error('Only the app adds agents.'));
+  return {
+    openclaw: {
+      list: () => Promise.resolve([]),
+      add: refuse,
+      remove: refuse,
+      guided: devGuided(query),
+      ...(screen === 'card' || screen === 'failures'
+        ? {}
+        : {
+            guidedStart: {
+              step: screen as SheetStep,
+              ...(query.get('where') === 'this-mac' ? { where: 'this-mac' as const } : {}),
+              ...(screen === 'computer' || screen === 'prompt'
+                ? { computer: 'studio-mini.yak-bebop.ts.net' }
+                : {}),
+              agent:
+                query.get('agent') ?? (screen === 'approve' || screen === 'test' ? 'Moby' : ''),
+            },
+          }),
+    },
+  };
+}
+
 const deps: PaneDeps = {
   settings: () => settings,
   update: (change: Partial<Settings>) => {
@@ -191,6 +272,14 @@ const deps: PaneDeps = {
                 status: () => agentSkills.status(provider.id),
                 install: () => agentSkills.install(provider.id),
                 ...(provider.id === 'codex' ? { alsoReadBy: 'OpenClaw' } : {}),
+                // Claude Code lists a plugin's skill beside a personal one: the plugin is
+                // installed from its marketplace, never by this app (#927).
+                ...(provider.id === 'claude'
+                  ? {
+                      alsoAPlugin:
+                        'If you also installed the Redlines plugin in Claude Code, Claude Code lists the skill twice (redlines and redlines:redlines): keep one, either this copy or the plugin.',
+                    }
+                  : {}),
               },
             }
           : {}),
@@ -219,9 +308,10 @@ const deps: PaneDeps = {
                 status: () => agentSkills.status('openclaw'),
                 install: () => agentSkills.install('openclaw'),
               },
+              guided: guidedDeps(),
             },
           }
-        : {}),
+        : devOpenClaw()),
       // No `others`: the row of other agents (Agent Client Protocol) stays off until it works.
       settings: () => settings,
       update: (change) => deps.update(change),
@@ -404,7 +494,11 @@ window.addEventListener('keydown', (event) => {
   showFilter();
 });
 
-show(takePaneRequest() ?? 'general');
+// In development, `?oc=` is a look at the OpenClaw sheet (dev-openclaw.ts), in the Agents pane.
+show(
+  takePaneRequest() ??
+    (import.meta.env.DEV && location.search.includes('oc=') ? 'agents' : 'general'),
+);
 watchPaneRequests((id) => {
   clearFilter();
   show(id);
@@ -427,4 +521,9 @@ if (isTauri) {
   // Shown once its font has loaded too, so that it never flashes another.
   await document.fonts.ready;
   await getCurrentWindow().show();
+}
+
+// In development, `?oc=failures` is every failure card of the OpenClaw sheet in one frame.
+if (import.meta.env.DEV && new URLSearchParams(location.search).get('oc') === 'failures') {
+  document.getElementById('pane')?.replaceChildren(failureGallery());
 }

@@ -13,15 +13,8 @@ import {
   setViewModeEffect,
   viewModeField,
 } from '@redlines/editor';
-import {
-  addHighlight,
-  EditError,
-  type MarkRange,
-  type Parsed,
-  type Range,
-  type Segment,
-} from '@redlines/format';
-import { applyEdit, editContext, openerEnd, type ReviewContext } from './shared.ts';
+import { EditError, type MarkRange, type Parsed, type Range, type Segment } from '@redlines/format';
+import { applyReview, openerEnd, type ReviewContext } from './shared.ts';
 
 /** What the person is told when no text is there to highlight. */
 const NO_TEXT = 'Select some text to highlight.';
@@ -168,8 +161,7 @@ export function toggleHighlight(ctx: ReviewContext): boolean {
     } else {
       const target = highlightTarget(state);
       if (!target) return refuse(NO_TEXT);
-      const { changes } = addHighlight(state.doc.toString(), target, editContext(ctx.author));
-      applyEdit(view, changes, 'review.highlight');
+      applyReview(view, ctx.author, { op: 'highlight', range: target }, 'review.highlight');
     }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;

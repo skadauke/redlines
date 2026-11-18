@@ -152,8 +152,13 @@ const recent: { text: string; tables: TableRead[] }[] = [];
 function tablesIn(text: string): TableRead[] {
   // A table has a delimiter row under its header row: a payload with no such line has none.
   if (!DELIMITER_LINE.test(text)) return [];
-  const known = recent.find((entry) => entry.text === text);
-  if (known) return known.tables;
+  const at = recent.findIndex((entry) => entry.text === text);
+  const known = at === -1 ? undefined : recent[at];
+  if (known) {
+    // The one just asked about is the last to go.
+    if (at > 0) recent.unshift(...recent.splice(at, 1));
+    return known.tables;
+  }
   const tables = readTables(text, parse(text));
   recent.unshift({ text, tables });
   recent.length = Math.min(recent.length, 16);
@@ -355,7 +360,7 @@ export function deletedBlocks(
   const lines = linesOf(payload);
   let from = 0;
   let to = lines.length;
-  if (first.carrier) {
+  if (first.carrier && !context.alone) {
     // The opener of a block that starts here: the payload ends with the break and the prefix of
     // the block after it, and never starts with one.
     if (lines.length < 2 || BLANK.test(lines[0]!.text)) return null;

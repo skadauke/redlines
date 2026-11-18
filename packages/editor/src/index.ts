@@ -3,7 +3,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
 import type { LanguageSupport } from '@codemirror/language';
 import {
-  type ChangeSet,
+  ChangeSet,
   Compartment,
   EditorSelection,
   EditorState,
@@ -16,15 +16,12 @@ import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { acceptAndStop, changesToAccept, trackingBack } from './accept-stop.ts';
 import {
-  accept as acceptChange,
-  acceptMarks,
-  reject as rejectChange,
-  rejectMarks,
   recordTracking as recordTrackingInFile,
   setView as viewInFile,
   type TextChange,
 } from '@redlines/format';
 import type {
+  AgentEditOutcome,
   Author,
   DocumentKind,
   Editor,
@@ -43,9 +40,12 @@ import {
   disabledReasons,
 } from './commands.ts';
 import { followText } from './anchor.ts';
+import { agentIntent, agentIntentAnnotation } from './tracked/agent-intent.ts';
+import { rebaseAgentEdit } from './tracked/agent-rebase.ts';
 import { htmlWithoutComments } from './html-comments.ts';
 import { untrackedAskFacet } from './tracked/ask.ts';
 import { frontMatter, inFrontMatter } from './blocks/front-matter.ts';
+export { dialectFacet } from './dialect.ts';
 export { inFrontMatter };
 export {
   type Container,
@@ -56,10 +56,10 @@ export {
 } from './blocks/containers.ts';
 import { tabItems } from './blocks/tab-items.ts';
 import { tableMarkers } from './table/markers.ts';
-import { images, imageSpot } from './images.ts';
+import { imageFetcherFacet, images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
 import { blockKeys } from './blocks/keys.ts';
-import { openBlocks, throughOpen } from './blocks/open.ts';
+import { openBlock, openBlocks, takeBackChanges, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
 import { typedSyntax } from './blocks/typed.ts';
 import { lineChanges } from './diff.ts';
@@ -81,9 +81,20 @@ import {
   undoName,
   undoSayingWhy,
 } from './history/index.ts';
-import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
+import {
+  addLineBreakStyles,
+  fileLineBreak,
+  fileText,
+  type LoadedFile,
+  loadFile,
+  mixedFileText,
+} from './line-breaks.ts';
+import { FileView } from './tracked/file-view.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { quartoCites } from './preview/quarto-cites.ts';
+import { quartoRefs } from './preview/quarto-refs.ts';
+import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -97,7 +108,8 @@ import { tableFill } from './table/fill.ts';
 import { imageSizeCommands } from './image-commands.ts';
 import { imageInSelection } from './image-size.ts';
 import { CROP_NO_IMAGE, CROP_RAW, CROP_REMOTE, startCrop } from './image-crop.ts';
-import { dialectFacet, noticeFacet } from './image-size.ts';
+import { dialectFacet } from './dialect.ts';
+import { noticeFacet } from './image-size.ts';
 import { likelyParsing } from './likely/parse.ts';
 import {
   imageOpening,
@@ -138,7 +150,12 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
+import { intentOf, plainIntent, recordedAs } from './tracked/intent.ts';
+import { guardDecision, seenOf, writeReview } from './tracked/review-intent.ts';
+import { DecidedLog, skippedMessage } from './tracked/decided.ts';
+import type { DecisionOutcome } from './tracked/decided.ts';
 import {
+  editSourceFacet,
   editingKeymap,
   refusedEditEffect,
   setTrackingEffect,
@@ -166,6 +183,7 @@ export {
   joinsNewestStep,
   redo,
   redoDepth,
+  remoteStep,
   undo,
   undoDepth,
 } from './history/index.ts';
@@ -177,6 +195,7 @@ export {
   calloutOf,
   type CalloutMenuRequest,
 } from './preview/callout.ts';
+export { QUARTO_CALLOUTS } from './preview/divs.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { emojiLookup, type EmojiLookup } from './preview/emoji.ts';
 export {
@@ -252,7 +271,70 @@ export {
   viewModeField,
 } from './tracked/field.ts';
 export { baseTitle } from './commands.ts';
-export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
+export {
+  deriveIntent,
+  refusedEditEffect,
+  setTrackingEffect,
+  trackingField,
+} from './tracked/typing.ts';
+export { editSourceFacet } from './tracked/typing.ts';
+export {
+  intentAnnotation,
+  intentOf,
+  newIntentId,
+  plainIntent,
+  recordedAs,
+} from './tracked/intent.ts';
+export {
+  deriveReview,
+  guardDecision,
+  markSignature,
+  seenOf,
+  writeReview,
+} from './tracked/review-intent.ts';
+export { DecidedLog, skippedMessage } from './tracked/decided.ts';
+export type { DecidedNote, DecisionOutcome } from './tracked/decided.ts';
+export type {
+  DerivedReview,
+  ReviewIntent,
+  ReviewOp,
+  ReviewRequest,
+} from './tracked/review-intent.ts';
+export { deriveFormat, writeFormat } from './tracked/format-intent.ts';
+export { deriveTable, writeTable } from './table/intent.ts';
+export { deriveSteps } from './table/paste-intent.ts';
+export { deriveMove, writeMove } from './blocks/move-intent.ts';
+export type { MoveIntent, MoveRequest } from './blocks/move-intent.ts';
+export { deriveWidenedPaste, writeWidenedPaste } from './table/widened-paste.ts';
+export type { WidenedPasteIntent, WidenedPasteRequest } from './table/widened-paste.ts';
+export type { TableIntent, TableRequest, TableWriter, WrittenTable } from './table/intent.ts';
+export type { FormatIntent, FormatRequest, FormatWriter } from './tracked/format-intent.ts';
+export { agentIntentAnnotation, agentIntentOf } from './tracked/agent-intent.ts';
+export type { AgentIntent } from './tracked/agent-intent.ts';
+export { anchorChanges, rebaseAgentEdit } from './tracked/agent-rebase.ts';
+export { anchorIntent, rederiveIntent } from './tracked/rederive.ts';
+export type { AnchoredIntent, Part, Rederived } from './tracked/rederive.ts';
+export { addLineBreakStyles, docFileText, fileLineBreak, loadFile } from './line-breaks.ts';
+export type { BreakStyle } from './line-breaks.ts';
+export { FileView } from './tracked/file-view.ts';
+export {
+  anchorFormat,
+  anchorMove,
+  rederiveFormat,
+  rederiveMove,
+} from './tracked/rederive-other.ts';
+export type { AnchoredFormat, AnchoredMove } from './tracked/rederive-other.ts';
+export {
+  anchorPaste,
+  anchorReview,
+  anchorTable,
+  rederivePaste,
+  rederiveReview,
+  rederiveSteps,
+  rederiveTable,
+} from './tracked/rederive-tables.ts';
+export type { AnchoredPaste, AnchoredReview, AnchoredTable } from './tracked/rederive-tables.ts';
+export type { Intent, IntentEdit, StepsIntent, TypingIntent, Unnamed } from './tracked/intent.ts';
 export {
   UNTRACKED_DETAILS,
   UNTRACKED_TITLE,
@@ -290,7 +372,8 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   a.redo === b.redo &&
   a.canUndo === b.canUndo &&
   a.canRedo === b.canRedo &&
-  a.canAcceptAll === b.canAcceptAll;
+  a.canAcceptAll === b.canAcceptAll &&
+  a.acceptAllCount === b.acceptAllCount;
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
@@ -311,6 +394,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let dialect: MarkdownDialect = options.dialect ?? 'gfm';
   let kind: DocumentKind = options.kind ?? 'markdown';
   let author = options.author;
+  /** Who decided which marks, for "Ada accepted this a moment ago" (tracked/decided.ts). */
+  const decided = new DecidedLog();
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
   const saveTracking = options.saveTracking ?? false;
@@ -365,6 +450,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
     images(options.onImageFiles, options.onNotice, options.projectImageLink),
+    imageFetcherFacet.of(options.onFetchImage),
     noticeFacet.of(options.onNotice),
     options.onError
       ? EditorView.exceptionSink.of((error) => {
@@ -386,10 +472,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableMouse(),
     tableReach(),
     tableWidths(),
+    quartoRefs(),
+    quartoCites(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
+    options.includes ? includeFacet.of(options.includes) : [],
+    quartoIncludes(),
     imageSelection(),
     undoHistory(),
     trackingBack,
@@ -499,6 +589,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
     const reasons = disabledReasons(commands.list(), state);
+    const acceptable = changesToAccept(state).length;
     return {
       kind: state.facet(plainOnlyFacet) ? 'plain-only' : 'markdown',
       view: state.field(viewModeField),
@@ -522,7 +613,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       redo: redoName(state),
       canUndo: undoHasSomething(state),
       canRedo: redoHasSomething(state),
-      canAcceptAll: changesToAccept(state).length > 0,
+      canAcceptAll: acceptable > 0,
+      acceptAllCount: acceptable,
     };
   };
   let reported = uiFor(initial);
@@ -532,8 +624,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // An undo or redo that would break the file doesn't happen, and says why (see history/guard.ts).
     dispatchTransactions: (transactions, view) => {
       const refused = transactions.map(refusedStep).find((reason) => reason !== null);
-      if (!refused) view.update(transactions);
-      else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
+      if (!refused) {
+        view.update(transactions);
+        noteDecisions(transactions, view);
+      } else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
     },
   });
   shownLook = lookOf(view.state);
@@ -547,6 +641,22 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     for (const handle of handles) asked.add(handle);
     options.onNewPeople(handles);
   }
+  /** Notes who decided what, from the decisions among `transactions`, whoever made them. */
+  function noteDecisions(transactions: readonly Transaction[], from: EditorView): void {
+    for (const tr of transactions) {
+      const intent = intentOf(tr);
+      if (intent?.kind !== 'review' || intent.op.op !== 'decide') continue;
+      // Only the marks it decided: those it was asked about that it left alone are not its own.
+      const before = new Set(tr.startState.field(parsedField).marks.map((mark) => mark.id));
+      const after = new Set(tr.state.field(parsedField).marks.map((mark) => mark.id));
+      for (const id of intent.op.ids) {
+        if (!before.has(id) || after.has(id)) continue;
+        decided.note(id, { by: intent.author.name, kind: intent.op.decision });
+      }
+    }
+    // A decision taken back by Undo puts its marks back, and nothing is said of them again.
+    decided.prune(from.state.field(parsedField));
+  }
   /** Tells the host when the view, tracking, the pending changes or a command's state changed. */
   function report(): void {
     const ui = uiFor(view.state);
@@ -554,14 +664,101 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     reported = ui;
     options.onUiState?.(ui);
   }
-  /** Applies a decision as one step to undo, apart from the typing around it. */
-  const decide = (changes: TextChange[], userEvent: string) => {
-    if (!changes.length) return;
+  /**
+   * Applies a decision as one step to undo, apart from the typing around it. `seen` is each
+   * mark's signature as the person saw it; without it, the marks as they are now. A mark that
+   * changed since, or is gone, is left alone and says why (the review guard, §4.4).
+   */
+  const decide = (
+    decision: 'accept' | 'reject',
+    id: string | readonly string[],
+    seen?: readonly string[],
+    bulk = false,
+  ): DecisionOutcome => {
+    const who = author;
+    const { random, now } = view.state.facet(editSourceFacet);
+    const ids = typeof id === 'string' ? [id] : id;
+    const text = view.state.doc.toString();
+    const time = `${now().toISOString().slice(0, 16)}Z`;
+    const op = {
+      op: 'decide' as const,
+      decision,
+      ids,
+      seen: seen ?? seenOf(text, ids),
+      ...(typeof id === 'string' && !bulk ? {} : { many: true as const }),
+      ...(bulk ? { bulk: true as const } : {}),
+    };
+    // Without what was seen, the marks are decided as they are, and the format refuses a missing one.
+    const guarded = seen ? guardDecision(text, op) : { apply: [...ids], skipped: [] };
+    const skipped = guarded.skipped.map((one) => ({
+      ...one,
+      message: skippedMessage(text, one, decided),
+    }));
+    if (guarded.apply.length === 0) return { applied: [], skipped };
+    const keep = guarded.apply.length === ids.length;
+    // A file with line breaks of more than one kind is decided on its own text, so that what a
+    // payload names comes back as it was (#924).
+    const file = mixedFileText(view.state, true);
+    const onFile = file !== null && text === view.state.doc.toString() ? new FileView(file) : null;
+    const made = writeReview(
+      onFile ? onFile.text : text,
+      {
+        ...op,
+        ids: guarded.apply,
+        seen: keep ? op.seen : guarded.apply.map((one) => op.seen[ids.indexOf(one)] ?? ''),
+      },
+      { author: who, time, ...(random ? { random } : {}) },
+    );
+    if (!made.changes.length) return { applied: [], skipped };
+    // A decision that rewrites the open empty paragraph's line would leave that line in the file
+    // for good (the open block is dropped when a change takes its line apart, and its blank lines
+    // stay: walk seed 294 of `REDLINES_FUZZ=300`, a rejected insertion above an open Return).
+    // The open block is taken back in the same step, and the decision is made on the file's text.
+    const open = onFile ? null : openBlock(view.state);
+    const taken = open ? takeBackChanges(view.state, true) : null;
+    if (open && taken) {
+      const whole = ChangeSet.of(made.changes, text.length);
+      let touched = false;
+      whole.iterChangedRanges((from, to) => {
+        if (from <= open.empty.to && to >= open.empty.from) touched = true;
+      });
+      if (touched) {
+        const without = taken.apply(view.state.doc).toString();
+        const again = writeReview(
+          without,
+          {
+            ...op,
+            ids: guarded.apply,
+            seen: keep ? op.seen : guarded.apply.map((one) => op.seen[ids.indexOf(one)] ?? ''),
+          },
+          { author: who, time, ...(random ? { random } : {}) },
+        );
+        if (again.changes.length) {
+          view.dispatch({
+            changes: taken.compose(ChangeSet.of(again.changes, without.length)),
+            annotations: [
+              trackedEditAnnotation.of(true),
+              isolateHistory.of('full'),
+              recordedAs(again.intent),
+            ],
+            userEvent: decision,
+          });
+          return { applied: guarded.apply, skipped };
+        }
+      }
+    }
+    const brought = onFile?.changesToDoc(made.changes, fileLineBreak(view.state) ?? '\n');
     view.dispatch({
-      changes,
-      annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
-      userEvent,
+      changes: brought ? brought.changes : made.changes,
+      ...(brought?.styles.length ? { effects: [addLineBreakStyles.of(brought.styles)] } : {}),
+      annotations: [
+        trackedEditAnnotation.of(true),
+        isolateHistory.of('full'),
+        recordedAs(made.intent),
+      ],
+      userEvent: decision,
     });
+    return { applied: guarded.apply, skipped };
   };
 
   /**
@@ -585,6 +782,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       annotations: [
         trackedEditAnnotation.of(true),
         Transaction.remote.of(true),
+        recordedAs(plainIntent(state, state.changes(changes))),
         ...(joins
           ? [joinsNewestStep.of(true), isolateHistory.of('after')]
           : [Transaction.addToHistory.of(false)]),
@@ -632,7 +830,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         // history starts over.
         effects: changed ? [...next.effects, ...effects, ...startOver(state)] : next.effects,
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
-        annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
+        annotations: [
+          Transaction.addToHistory.of(false),
+          Transaction.remote.of(true),
+          ...(changes.empty ? [] : [recordedAs(plainIntent(state, changes))]),
+        ],
         userEvent: 'reload',
       });
       // A file that newly asks everyone to track changes is read as one that is opened: Track
@@ -649,19 +851,62 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         trackingChosen = null;
       }
     },
-    applyAgentEdit: (doc, step) => {
-      if (doc === fileText(view.state)) return;
+    applyAgentEdit: (written, step, base) => {
+      const was = fileText(view.state);
+      let doc = written;
+      let dropped: AgentEditOutcome['dropped'] = [];
+      // An edit that changes nothing of what the agent read leaves the document as it is, whatever
+      // was typed since.
+      if (base !== undefined && written === base) return { rebased: false, dropped: [] };
+      const rebased = base !== undefined && base !== was;
+      if (rebased) {
+        const placed = rebaseAgentEdit(was, base, written);
+        doc = placed.text;
+        dropped = placed.dropped.map(({ removed, insert }) => ({ removed, insert }));
+      }
+      const outcome = { rebased, dropped };
+      if (doc === was) return outcome;
       const next = loadFile(doc, plain());
-      const { state } = view;
-      const { changes, selection, effects } = newVersion(state, next.doc);
+      // An edit that comes down on the open empty paragraph's lines would leave what the Return
+      // wrote (a tracked break and its blank lines) in the file for good, the open block gone
+      // from under it (walk seed 201 of `REDLINES_FUZZ=300`): the paragraph is taken back in the
+      // same step, which Undo gives back whole.
+      let { state } = view;
+      let made = newVersion(state, next.doc);
+      const open = openBlock(state);
+      const back = open ? takeBackChanges(state, true) : null;
+      if (open && back) {
+        let touched = false;
+        made.changes.iterChangedRanges((from, to) => {
+          if (from < open.empty.to && to > open.empty.from) touched = true;
+        });
+        if (touched) {
+          state = state.update({ changes: back, filter: false }).state;
+          const rest = newVersion(state, next.doc);
+          made = { ...rest, changes: back.compose(rest.changes) };
+        }
+      }
+      const { changes, selection, effects } = made;
       view.dispatch({
         changes,
         selection,
         // The file and its line breaks, which the history gives back with the step.
         effects: [...next.effects, ...effects],
         // A step of the agent's, which Track Changes leaves as the agent wrote it.
-        annotations: [agentStep.of(step), trackedEditAnnotation.of(true)],
+        annotations: [
+          agentStep.of(step),
+          trackedEditAnnotation.of(true),
+          recordedAs(plainIntent(view.state, changes)),
+          ...(base === undefined
+            ? []
+            : [
+                agentIntentAnnotation.of(
+                  agentIntent({ group: step.group, agent: step.agent, base, next: written }),
+                ),
+              ]),
+        ],
       });
+      return outcome;
     },
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),
@@ -739,19 +984,27 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       tellNewPeople();
     },
     accept: (id) => {
-      const text = view.state.doc.toString();
-      decide(typeof id === 'string' ? acceptChange(text, id) : acceptMarks(text, id), 'accept');
+      decide('accept', id);
     },
     acceptAllAndStopTracking: () => {
-      const tr = acceptAndStop(view.state);
+      const { now } = view.state.facet(editSourceFacet);
+      const tr = acceptAndStop(view.state, {
+        author,
+        time: `${now().toISOString().slice(0, 16)}Z`,
+      });
       if (!tr) return false;
       view.dispatch(tr);
       if (saveTracking) trackingChosen = false;
       return true;
     },
     reject: (id) => {
-      const text = view.state.doc.toString();
-      decide(typeof id === 'string' ? rejectChange(text, id) : rejectMarks(text, id), 'reject');
+      decide('reject', id);
+    },
+    decideSeen: (decision, ids, seen, options) =>
+      decide(decision, ids, seen, options?.bulk === true),
+    seenOf: (ids) => seenOf(view.state.doc.toString(), ids),
+    noteDecided: (id, by, kind) => {
+      decided.note(id, { by, kind });
     },
     addExtension: (extension) => {
       const entry = { extension };

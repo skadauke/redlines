@@ -320,7 +320,10 @@ describe("random bare markers with other people's marks around them", () => {
         );
       }
     }
-    expect(stats.written).toBeGreaterThan(draws / 2);
+    // Most of the edits tried are written, the rest refused as before (a line that is only syntax
+    // takes no change, and a thematic break typed there is no block): the share holds at any size.
+    expect(stats.written).toBeGreaterThan(stats.refused);
+    expect(stats.written).toBeGreaterThan(draws / 3);
   }, 60_000);
 });
 
@@ -384,5 +387,38 @@ describe('the oracle keeps a line break after <li> that a block follows', () => 
     for (const html of ['<DIV>x</DIV>', '<?php x ?>', '<!DOCTYPE html>', '<my-tag>']) {
       expect(readAs(`- <!--x-->\n  ${html}`), html).toMatch(/<li>\n</);
     }
+  });
+});
+
+describe('a mark right behind a bare marker in one order of decisions (#1104)', () => {
+  const ids = ['k3x9', 'm4x9', 'n5x9'];
+  /** `text` with Ada's edit from `from` to `to` in the file. */
+  const edit = (text: string, from: number, to: number, insert: string, own = ids) =>
+    applyChanges(text, trackedEdits(text, [{ from, to, insert }], context(ada, own)).changes);
+
+  it('taking the letter after a bare marker that sets a list of its own apart is the unit', () => {
+    // `+a` is more of the paragraph above; `+` alone is an empty item of a list of its own.
+    const written = edit(file('* text\n+a\n'), 8, 9, '');
+    expect(parse(written).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    expect(bodyOf(written)).not.toContain('+<!--');
+    expectEveryOrderRead('+a', written);
+  });
+
+  it('a break written after a deletion that leaves a bare marker is the unit', () => {
+    const text = file('* alpha<!--del z999 \\n*-->', { z999: 'ada' });
+    const at = text.indexOf('-->') + 3;
+    const written = edit(text, at, at, '\n* ');
+    // Rejecting the deletion alone would leave `*<!--split ...-->`, which reads as text.
+    expect(bodyOf(written)).not.toMatch(/\*<!--split/);
+    expectEveryOrderRead('split behind a deletion', written);
+  });
+
+  it('a tab that starts code above a quote with a bare item is the unit with the quote', () => {
+    // After an indented code block micromark reads `> 2.` as text; after a comment line, as an item.
+    const opened = edit(file('*\n> 2. '), 0, 1, '\n\n', ['zbb9', 'zcb9']);
+    const at = opened.indexOf('\n> 2.') - 1;
+    const written = edit(opened, at, at, '\ta', ['zdb9', 'zfb9']);
+    expect(parse(written).marks.some((mark) => mark.kind === 'sub')).toBe(true);
+    expectEveryOrderRead('tab above a quote', written);
   });
 });

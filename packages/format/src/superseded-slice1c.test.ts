@@ -8,11 +8,13 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { rejectAll } from './decide.ts';
 import { expectEveryOrderRead } from './oracle.ts';
+import { emphasisReadsAlike } from './emphasis-orders.ts';
 import { ada, bo, bodyOf, context, exactly, expectEveryOrderAlike, file } from './test-helpers.ts';
 import type { Person } from './types.ts';
 import { trackedEdits } from './track.ts';
 
 const IDS = ['m2bd', 'n8fx', 'p5qm', 'q6rs', 'r7st'];
+const MORE = [...IDS, 's8tu', 't9uv', 'u2vw'];
 
 /** A tracked edit of `text` by `who`, as the editor writes it; the new file. */
 function press(text: string, from: number, to: number, insert: string, who: Person = ada): string {
@@ -89,6 +91,66 @@ describe('#276: next to chains of another person’s marks', () => {
     const two = at(before, 'two');
     held('M3 star', before, press(before, two, two, '*', ada));
   }, 60_000);
+});
+
+describe('#276 M2: a cluster of four or more adjacent marks is read to the end', () => {
+  it('judges a chain of 4 or 5 of Bo’s insertions after a plain *, from a mark in the middle', () => {
+    for (const n of [4, 5]) {
+      const ids = IDS.slice(0, n);
+      const chain = ids.map((id, i) => `<!--ins ${id}-->${'abcdef'[i]}<!--/${id}-->`).join('');
+      const before = file(`one *${chain} two`, Object.fromEntries(ids.map((id) => [id, 'bo'])));
+      expect(emphasisReadsAlike(before, new Set([ids[Math.floor(n / 2)] ?? '']))).toBe(true);
+    }
+  });
+});
+
+describe('#1071: the walk of states in a chain of marks', () => {
+  const chainOf = (n: number) => {
+    const ids = MORE.slice(0, n);
+    const chain = ids.map((id, i) => `<!--ins ${id}-->${'abcdefgh'[i]}<!--/${id}-->`).join('');
+    return {
+      ids,
+      before: file(`one *${chain} two`, Object.fromEntries(ids.map((id) => [id, 'bo']))),
+    };
+  };
+
+  it('reads a chain of five to the end, and a key beside it is written', () => {
+    const { ids, before } = chainOf(5);
+    expect(emphasisReadsAlike(before, new Set(ids))).toBe(true);
+    const two = at(before, 'two');
+    const done = trackedEdits(
+      before,
+      [{ from: two, to: two, insert: '*' }],
+      context(ada, ['v2bd', 'w8fx', 'x5qm', 'y6rs', 'z7st', 'k3x9', 'k4x9', 'k5x9']),
+    );
+    held('1071 star', before, applyChanges(before, done.changes));
+  }, 60_000);
+
+  // The timing runs with REDLINES_COST=check, as the other cost tests do: a chain of 8 costs about
+  // what a chain of 5 does (the cluster reaches two steps), so a ratio holds it, not milliseconds.
+  it.skipIf(!process.env['REDLINES_COST'])(
+    'reads a chain of 8 of Bo’s marks in at most 3 times what a chain of 5 takes',
+    () => {
+      const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1]!;
+      const run = (n: number) => {
+        const { ids, before } = chainOf(n);
+        const start = performance.now();
+        // The walk reads to the end (true), so that a walk that gave up early can't pass fast.
+        expect(emphasisReadsAlike(before, new Set(ids))).toBe(true);
+        return performance.now() - start;
+      };
+      run(5);
+      run(8);
+      // The two chains take turns, five of each, so that a slow moment slows both.
+      const five: number[] = [];
+      const eight: number[] = [];
+      for (let turn = 0; turn < 5; turn++) {
+        five.push(run(5));
+        eight.push(run(8));
+      }
+      expect(median(eight)).toBeLessThan(median(five) * 3 + 5);
+    },
+  );
 });
 
 describe('#142: a line break typed after a file’s final line break, in a file with mixed endings', () => {

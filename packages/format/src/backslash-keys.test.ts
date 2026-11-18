@@ -106,6 +106,26 @@ describe('keys right after a hard break’s backslash (#235)', () => {
     ]);
   });
 
+  it('a backslash in front of a hard break whose next line is the last word, ending in one (#913)', () => {
+    expectRows([
+      [
+        'a two path‸\\  \npath\\',
+        { insert: '\\' },
+        'a two path<!--sub m2bd \\  \\npath\\-->\\\\  \npath\\\n<!--/m2bd-->',
+      ],
+      [
+        'a two path‸\\  \npath\\\n',
+        { insert: '\\' },
+        'a two path<!--sub m2bd \\  \\npath\\\\\\n-->\\\\  \npath\\\n<!--/m2bd-->',
+      ],
+      [
+        '- a\n  a two path‸\\  \n  path\\',
+        { insert: '\\' },
+        '- a\n  a two path<!--sub m2bd \\  \\n  path\\-->\\\\  \n  path\\\n<!--/m2bd-->',
+      ],
+    ]);
+  });
+
   it('typing a backslash in front of a hard break’s own', () => {
     expectRows([['One‸\\\ntwo', { insert: '\\' }, 'One<!--sub m2bd \\-->\\\\<!--/m2bd-->\ntwo']]);
   });
@@ -687,6 +707,21 @@ describe('random keys next to backslashes read as micromark reads them (#223, #2
           if (at !== undefined) {
             const mark = below(2) === 0 ? '<!--ins b2zz-->yy<!--/b2zz-->' : '<!--del b2zz yy-->';
             body = `${body.slice(0, at)}${mark}${body.slice(at)}`;
+            marks['b2zz'] = 'bo';
+          }
+        }
+        // A quarter more have Bo's pending deletion of a backslash, or of the break between two blocks
+        // (a join), which a change that takes in the text after a backslash can go on over (#265).
+        if (marks['b2zz'] === undefined && below(4) === 0) {
+          const slashes = [...body.matchAll(/\\/g)].map((m) => m.index);
+          const breaks = [...body.matchAll(/\n\n/g)].map((m) => m.index);
+          if (below(2) === 0 && slashes.length > 0) {
+            const at = slashes[below(slashes.length)] as number;
+            body = `${body.slice(0, at)}<!--del b2zz \\\\-->${body.slice(at + 1)}`;
+            marks['b2zz'] = 'bo';
+          } else if (breaks.length > 0) {
+            const at = breaks[below(breaks.length)] as number;
+            body = `${body.slice(0, at)}<!--del b2zz \\n\\n-->${body.slice(at + 2)}`;
             marks['b2zz'] = 'bo';
           }
         }

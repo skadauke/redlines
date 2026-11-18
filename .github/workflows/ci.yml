@@ -192,7 +192,9 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # A full run (a pull request to main, a schedule, a dispatch) runs every test and the timing tests:
+    # at the end of Epic #930 that took just over 25 minutes on a shared runner.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:

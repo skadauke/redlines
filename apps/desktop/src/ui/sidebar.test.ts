@@ -162,7 +162,7 @@ describe('sidebar', () => {
     expect(rows()).toEqual(['README.md', 'run.py']);
   });
 
-  it("lists the document's own folder when the root is too broad", async () => {
+  it('shows no folder when the root is too broad: the file is on its own (#451)', async () => {
     const { sidebar, list, rows, label } = setUp({
       '/Users/ada': ['Library/', 'notes/'],
       '/Users/ada/notes': ['plan.md', 'trip/'],
@@ -173,9 +173,9 @@ describe('sidebar', () => {
     });
     sidebar.setOpen(true);
     await sidebar.refresh();
-    expect(label()).toBe('notes');
-    expect(rows()).toEqual(['plan.md', 'trip/']);
-    expect(list.mock.calls).toEqual([['/Users/ada/notes', '/Users/ada/notes']]);
+    expect(label()).toBe('');
+    expect(rows()).toEqual([expect.stringContaining('opens on its own')]);
+    expect(list).not.toHaveBeenCalled();
   });
 
   it('reads a folder only when expanded', async () => {
@@ -406,14 +406,14 @@ describe('sidebar', () => {
     expect(list.mock.calls.map(([folder]) => folder)).toEqual(['/repo/docs']);
   });
 
-  it('shows the disk’s root for a document there', async () => {
+  it('shows nothing for a document in the disk’s root', async () => {
     const { sidebar, rows, label, list } = setUp({ '/': ['Users/', 'plan.md'] });
     sidebar.setDocument({ path: '/plan.md', root: { folder: '/', isRepo: false, tooBroad: true } });
     sidebar.setOpen(true);
     await sidebar.refresh();
-    expect(list.mock.calls).toEqual([['/', '/']]);
-    expect(rows()).toEqual(['plan.md', 'Users/']);
-    expect(label()).toBe('Files');
+    expect(list).not.toHaveBeenCalled();
+    expect(rows()).toEqual([expect.stringContaining('opens on its own')]);
+    expect(label()).toBe('');
   });
 
   it('opens a new window instead of replacing the document while a run is live', async () => {

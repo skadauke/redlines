@@ -801,3 +801,170 @@ fn relay_says_when_it_cant_reach_the_app() {
         )
     );
 }
+
+/// A one-pixel PNG, for a picture beside a document.
+const DOT: [u8; 70] = [
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc, 0xcf, 0xc0, 0x50,
+    0x0f, 0x00, 0x04, 0x85, 0x01, 0x80, 0x84, 0xa9, 0x8c, 0x21, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+    0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+];
+
+/// A Word file that holds one picture, `media/image1.png`, described as "A dot".
+const PICTURE_DOCX: &[u8] = include_bytes!("fixtures/picture.docx");
+
+#[test]
+fn export_docx_writes_a_word_file_that_import_docx_reads_back() {
+    let folder = Folder::new();
+    let file = folder.file("plan.md", PLAIN);
+    suggest(&file);
+    let args = [
+        &["--quote", "importer", "--text", "Which one?"],
+        &AS_CLAUDE[..],
+    ]
+    .concat();
+    works(&file, "comment", &args);
+    let before = fs::read(&file).unwrap();
+
+    let docx = folder.at("plan.docx");
+    let printed = works(&file, "export-docx", &[]);
+    assert_eq!(printed, format!("{}\n", docx.display()));
+    let bytes = fs::read(&docx).unwrap();
+    assert_eq!(&bytes[..2], b"PK", "a .docx is a zip");
+    assert_eq!(
+        fs::read(&file).unwrap(),
+        before,
+        "the export left the file alone"
+    );
+
+    let back = folder.at("back.md");
+    works(&docx, "import-docx", &["-o", back.to_str().unwrap()]);
+    let text = fs::read_to_string(&back).unwrap();
+    assert!(text.contains("April"), "{text}");
+    assert!(text.contains(" March-->April<!--/"), "{text}");
+    assert!(text.contains("Which one?"), "{text}");
+}
+
+#[test]
+fn export_docx_takes_the_name_from_dash_o_and_refuses_the_file_itself() {
+    let folder = Folder::new();
+    let file = folder.file("plan.md", PLAIN);
+    let out = folder.at("sub").join("x.docx");
+    works(&file, "export-docx", &["-o", out.to_str().unwrap()]);
+    assert!(fs::metadata(&out).unwrap().len() > 100);
+    let done = redlines(&file, "export-docx", &["-o", file.to_str().unwrap()]);
+    assert_eq!(done.code, Some(1), "{}", done.stderr);
+    assert_eq!(fs::read(&file).unwrap(), PLAIN.as_bytes());
+    assert_eq!(redlines(&file, "export-docx", &["--nope"]).code, Some(2));
+}
+
+#[test]
+fn export_docx_never_replaces_a_docx_unless_dash_o_names_it() {
+    let folder = Folder::new();
+    let file = folder.file("plan.md", PLAIN);
+    let docx = folder.file("plan.docx", "mine");
+    let done = redlines(&file, "export-docx", &[]);
+    assert_eq!(done.code, Some(1), "{}", done.stderr);
+    assert!(done.stderr.contains("-o"), "{}", done.stderr);
+    assert_eq!(fs::read(&docx).unwrap(), b"mine");
+    works(&file, "export-docx", &["-o", docx.to_str().unwrap()]);
+    assert_eq!(&fs::read(&docx).unwrap()[..2], b"PK");
+}
+
+#[test]
+fn export_docx_embeds_a_picture_that_lies_beside_the_document() {
+    let folder = Folder::new();
+    fs::create_dir(folder.at("media")).unwrap();
+    folder.file("media/dot.png", DOT);
+    let file = folder.file("pic.md", "Before.\n\n![A dot](media/dot.png)\n\nAfter.\n");
+    let done = redlines(&file, "export-docx", &[]);
+    assert_eq!(done.code, Some(0), "{}", done.stderr);
+    assert!(
+        !done.stderr.contains("not in the Word file"),
+        "{}",
+        done.stderr
+    );
+
+    // Read back, the picture is in the Word file: import writes it beside the Markdown.
+    let back = folder.at("out").join("back.md");
+    works(
+        &folder.at("pic.docx"),
+        "import-docx",
+        &["-o", back.to_str().unwrap()],
+    );
+    let png = fs::read(folder.at("out").join("media").join("image1.png")).unwrap();
+    assert_eq!(&png[1..4], b"PNG");
+
+    // A picture outside the document's folder is not read, by an absolute path or by `..`.
+    folder.file("above.png", DOT);
+    let wild = format!(
+        "![Up](../above.png)\n\n![Abs]({}/above.png)\n",
+        folder.0.display()
+    );
+    let inner = folder.at("inner");
+    fs::create_dir(&inner).unwrap();
+    let wild = {
+        let path = inner.join("wild.md");
+        fs::write(&path, wild).unwrap();
+        path
+    };
+    let done = redlines(&wild, "export-docx", &[]);
+    assert_eq!(done.code, Some(0), "{}", done.stderr);
+    assert_eq!(
+        done.stderr
+            .matches("An image is written as its description")
+            .count(),
+        2,
+        "{}",
+        done.stderr
+    );
+
+    // A picture that isn't there is written as its description, and the program says so.
+    let lost = folder.file("lost.md", "![Gone](media/gone.png)\n");
+    let done = redlines(&lost, "export-docx", &[]);
+    assert_eq!(done.code, Some(0), "{}", done.stderr);
+    assert!(
+        done.stderr
+            .contains("An image is written as its description"),
+        "{}",
+        done.stderr
+    );
+}
+
+#[test]
+fn import_docx_writes_the_pictures_beside_the_markdown_and_never_over_a_file() {
+    let folder = Folder::new();
+    let docx = folder.file("pic.docx", PICTURE_DOCX);
+    let md = folder.at("out").join("pic.md");
+    works(&docx, "import-docx", &["-o", md.to_str().unwrap()]);
+    let text = fs::read_to_string(&md).unwrap();
+    assert!(text.contains("![A dot](media/image1.png)"), "{text}");
+    let png = fs::read(folder.at("out").join("media").join("image1.png")).unwrap();
+    assert_eq!(&png[1..4], b"PNG");
+
+    // The picture's name is taken, and so is the Markdown's: nothing is written over.
+    let again = folder.at("out").join("again.md");
+    let done = redlines(&docx, "import-docx", &["-o", again.to_str().unwrap()]);
+    assert_eq!(done.code, Some(1), "{}", done.stderr);
+    assert!(!again.exists());
+    let done = redlines(&docx, "import-docx", &["-o", md.to_str().unwrap()]);
+    assert_eq!(done.code, Some(1), "{}", done.stderr);
+}
+
+#[test]
+fn import_docx_says_when_a_file_is_no_word_file_or_isnt_there() {
+    let folder = Folder::new();
+    let bad = folder.file("bad.docx", "not a zip");
+    let done = redlines(&bad, "import-docx", &[]);
+    assert_eq!(done.code, Some(1), "{}", done.stderr);
+    assert!(
+        done.stderr.contains("is not a Word file"),
+        "{}",
+        done.stderr
+    );
+    assert!(!folder.at("bad.md").exists());
+    let done = redlines(&folder.at("gone.docx"), "import-docx", &[]);
+    assert_eq!(done.code, Some(1), "{}", done.stderr);
+    assert!(done.stderr.contains("Cannot read"), "{}", done.stderr);
+}

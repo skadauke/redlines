@@ -11,9 +11,14 @@ use std::ffi::CString;
 use std::fs::{self, OpenOptions, Permissions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const BUNDLE: &str = include_str!("../bundle/redlines.js");
+
+/// `@redlines/word`, which only `import-docx` and `export-docx` need: it is evaluated when one of
+/// them asks (`load_word`), so that no other command pays for reading it.
+const WORD: &str = include_str!("../bundle/word.js");
 
 /// The most stack QuickJS may use, of the 8 MiB that the system gives the main thread.
 const MAX_STACK: usize = 4 * 1024 * 1024;
@@ -77,6 +82,9 @@ fn host<'js>(ctx: &Ctx<'js>) -> Result<Object<'js>> {
     host.set("remove", Func::from(remove))?;
     host.set("readStdin", Func::from(read_stdin))?;
     host.set("randomHex", Func::from(random_hex))?;
+    host.set("readBytes", Func::from(read_bytes))?;
+    host.set("writeBytes", Func::from(write_bytes))?;
+    host.set("loadWord", Func::from(load_word))?;
     Ok(host)
 }
 
@@ -197,6 +205,46 @@ fn read_stdin(ctx: Ctx<'_>) -> Result<String> {
         .read_to_end(&mut bytes)
         .map_err(|error| thrown(&ctx, &error))?;
     text_of(&ctx, bytes)
+}
+
+/// The bytes of a file, as they are: a .docx or a picture.
+fn read_bytes<'js>(
+    ctx: Ctx<'js>,
+    path: String,
+    max: Opt<Option<f64>>,
+) -> Result<TypedArray<'js, u8>> {
+    // A file longer than `max` bytes (when given) is not read at all.
+    if let Some(Some(max)) = max.0 {
+        let length = fs::metadata(&path)
+            .map_err(|error| thrown(&ctx, &error))?
+            .len();
+        if length as f64 > max {
+            return Err(Exception::throw_message(&ctx, "the file is too large"));
+        }
+    }
+    let bytes = fs::read(path).map_err(|error| thrown(&ctx, &error))?;
+    TypedArray::new(ctx, bytes)
+}
+
+/// Writes a file of bytes, and the folders above it that aren't there yet, as the command line in a
+/// checkout does. A file that is there is replaced.
+fn write_bytes(ctx: Ctx<'_>, path: String, bytes: TypedArray<'_, u8>) -> Result<()> {
+    // SAFETY: the slice is used for the write below only, and no JavaScript runs meanwhile.
+    let Some(bytes) = (unsafe { bytes.as_bytes() }) else {
+        return Err(Exception::throw_message(&ctx, "the bytes were detached"));
+    };
+    let written = (|| {
+        if let Some(folder) = Path::new(&path).parent() {
+            fs::create_dir_all(folder)?;
+        }
+        fs::write(&path, bytes)
+    })();
+    written.map_err(|error| thrown(&ctx, &error))
+}
+
+/// Evaluates the Word half of the program, which sets `__redlinesWord`.
+fn load_word(ctx: Ctx<'_>) -> Result<()> {
+    ctx.eval::<(), _>(WORD)
 }
 
 /// Fills `bytes` from the operating system.

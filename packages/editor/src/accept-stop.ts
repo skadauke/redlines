@@ -3,8 +3,10 @@
 
 import { invertedEffects, isolateHistory } from '@codemirror/commands';
 import { type EditorState, Transaction } from '@codemirror/state';
-import { acceptAll, changesIn, type MarkRange } from '@redlines/format';
+import { acceptAll, changesIn, type MarkRange, type Person } from '@redlines/format';
 import { parsedField, trackedEditAnnotation } from './tracked/field.ts';
+import { plainIntent, recordedAs } from './tracked/intent.ts';
+import { seenOf } from './tracked/review-intent.ts';
 import { trackingField, trackingStepEffect } from './tracked/typing.ts';
 
 /**
@@ -31,21 +33,42 @@ export const trackingBack = invertedEffects.of((tr) => {
 
 /**
  * The transaction that accepts `changesToAccept` and turns Track Changes off, or null when that
- * would change nothing.
+ * would change nothing. With `who` it is recorded as a decision of the ids at the click, so that a
+ * window that applies it to newer text decides the marks that still stand.
  * @throws EditError when the format can't write the decision.
  */
-export function acceptAndStop(state: EditorState) {
+export function acceptAndStop(state: EditorState, who?: { author: Person; time: string }) {
   const ids = new Set(changesToAccept(state).map((mark) => mark.id));
   if (!ids.size) return null;
   const changes = acceptAll(state.doc.toString(), (mark) => ids.has(mark.id));
   if (!changes.length) return null;
+  const done = state.changes(changes);
   return state.update({
-    changes,
+    changes: done,
     effects: trackingStepEffect.of({ set: false, back: state.field(trackingField) }),
     annotations: [
       trackedEditAnnotation.of(true),
       isolateHistory.of('full'),
       Transaction.userEvent.of('accept'),
+      // Kept as the click's decision: the ids it had, as they looked, each decided on its own.
+      ...(who
+        ? [
+            recordedAs({
+              kind: 'review',
+              op: {
+                op: 'decide',
+                decision: 'accept',
+                ids: [...ids],
+                seen: seenOf(state.doc.toString(), [...ids]),
+                many: true,
+                bulk: true,
+              },
+              author: who.author,
+              time: who.time,
+              drawn: [],
+            }),
+          ]
+        : [recordedAs(plainIntent(state, done))]),
     ],
   });
 }

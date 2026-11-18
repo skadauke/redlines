@@ -1332,7 +1332,7 @@ describe('the Redlines skill', () => {
     renderAgentsPane(container, deps);
     await settle();
     expect(words(container)).toContain(
-      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak.',
+      'Redlines skill installed in ~/.claude/skills/redlines, and this app has a newer one. Update replaces SKILL.md, keeping the old file as SKILL.md.bak (or the next free SKILL.md.bak.1, .2 …), so no earlier backup is lost.',
     );
     expect(buttons(container)).toEqual(['Check Again', 'Update Skill']);
     press(container, 'Update Skill');
@@ -1509,6 +1509,27 @@ describe('the Redlines skill', () => {
       'Redlines skill installed in ~/.agents/skills/redlines.',
     );
     expect(words(container, 'Codex')).toContain('OpenClaw reads that folder too.');
+  });
+
+  it('says that a plugin with the same skill is listed twice, beside an installed skill only', async () => {
+    const note = 'Keep one: the plugin lists the skill again.';
+    const claude = host(skillState('current'));
+    claude.skill.alsoAPlugin = note;
+    const { deps, container } = setup(
+      { claude: claudeState, codex: claudeState },
+      {},
+      { claude: claude.skill },
+    );
+    renderAgentsPane(container, deps);
+    await settle();
+    expect(words(container)).toContain(note);
+    // Not installed: nothing is listed twice yet.
+    const none = host(skillState('missing'));
+    none.skill.alsoAPlugin = note;
+    const second = setup({ claude: claudeState, codex: claudeState }, {}, { claude: none.skill });
+    renderAgentsPane(second.container, second.deps);
+    await settle();
+    expect(words(second.container)).not.toContain(note);
   });
 
   it('installs once, however often the button is pressed while it writes', async () => {

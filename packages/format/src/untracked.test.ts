@@ -458,6 +458,22 @@ describe('deleting with Track Changes off (format §3.10, issue #24)', () => {
   });
 });
 
+describe('deleting the only body line of a callout with Track Changes off (#1112)', () => {
+  it('leaves an empty quote line, as every view reads it', () => {
+    const text = 'x\n\n> [!info]\n> 42 gamma\n\ndelta\n';
+    const from = text.indexOf('42 gamma');
+    const next = untrack(text, remove(from, from + 8));
+    expect(next).toBe('x\n\n> [!info]\n> \n\ndelta\n');
+    expect(newest(next)).toBe('x\n\n> [!info]\n> \n\ndelta');
+  });
+
+  it('still takes a wrapped line of a longer body with its break', () => {
+    const text = '> [!info]\n> one\n> two\n';
+    const from = text.indexOf('two');
+    expect(untrack(text, remove(from, from + 3))).toBe('> [!info]\n> one\n');
+  });
+});
+
 describe('what has no legal form with Track Changes off is refused (format §3.10)', () => {
   /** The message an untracked edit is refused with. */
   function message(text: string, edit: TextChange, author = bo): string {
@@ -586,6 +602,24 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
       const enter = untrack(text, type(text.indexOf('\n\ntwo') + 1, '\n'));
       expect(newest(enter), by).toBe('one \n\n\ntwo');
     }
+  });
+
+  it('says why a block typed at the start of the paragraph after a split is refused (#107)', () => {
+    const text = file('alpha <!--split s3vb-->\n\nbeta', { s3vb: 'bo' });
+    const at = text.indexOf('beta');
+    for (const [typed, word] of [
+      ['## x', 'heading'],
+      ['- x', 'list item'],
+      ['> x', 'quote'],
+      ['1. x', 'list item'],
+    ] as const) {
+      expect(refusal(text, type(at, typed)), typed).toBe('no-legal-placement');
+      expect(message(text, type(at, typed), ada), typed).toBe(
+        `This edit can't be made with Track Changes off: it would turn the start of the paragraph after Bo Chen's line break into a ${word}, and deciding that line break would then read it otherwise. Accept or reject the line break first, or turn on Track Changes.`,
+      );
+    }
+    // Plain text there is written.
+    expect(newest(untrack(text, type(at, 'x')))).toBe('alpha \n\nxbeta');
   });
 
   it('throws a RangeError for an edit outside the text', () => {

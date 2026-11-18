@@ -70,6 +70,25 @@ type DocumentEditor = Pick<
   | 'recordTracking'
 >;
 
+/**
+ * What the controller needs of a session: this document in several windows, one of which, the
+ * leader, saves the file (src/session.ts). In a session the other windows never read, watch or
+ * write the file: they ask the leader.
+ */
+export interface DocumentSession {
+  /** This window runs the session's authority and writes the file. */
+  readonly leading: boolean;
+  /** Everything this window made is confirmed by the authority: closing it loses none of it. */
+  readonly confirmed: boolean;
+  /** How many windows the session has, for the leader. */
+  readonly members: number;
+  /** Has the file written, by the leader: the text it holds, or null when it couldn't. */
+  save(): Promise<string | null>;
+}
+
+/** Line breaks as the session keeps them, for a window that has only the session's text. */
+const lf = (text: string): string => text.replace(/\r\n?/g, '\n');
+
 export interface DocumentOptions {
   /**
    * Whether an agent's run is live in this window. Its tools act on this document, so nothing may
@@ -133,6 +152,10 @@ export class DocumentController {
   #diskSteps = 0;
   /** Counts the documents this window has held: a new one each time another replaces it. */
   #generation = 0;
+  /** The session this document is in, with other windows, or null. */
+  #session: DocumentSession | null = null;
+  /** The leader has said what the file holds, for a window that joined a session. */
+  #sessionSaved = false;
   /** Agent edits being written to the file, one after another. */
   #agentWrites: Promise<void> = Promise.resolve();
   /** How many agent edits are waiting to be written, or being written. */
@@ -264,6 +287,16 @@ export class DocumentController {
     await this.#agentWrites;
     const path = this.#state.path;
     if (path === null) return this.saveAs();
+    // A window that doesn't lead its session never writes: the leader does, once, for all.
+    if (this.#session && !this.#session.leading) {
+      const text = await this.#session.save();
+      if (text === null) {
+        this.#update({ notice: `Couldn’t save ${this.#state.name}.` });
+        return false;
+      }
+      this.savedBySession(text);
+      return true;
+    }
     // Nothing to write, unless the file is gone: then Save puts it back.
     if (!this.#state.dirty && this.#disk !== null) return true;
     // The watcher may not have reported a change yet, or ever: look at the disk now.
@@ -363,7 +396,8 @@ export class DocumentController {
    * without edits, and the notice that spoke of the edits goes.
    */
   markEdited(text: string = this.#editor.getDoc()): void {
-    const dirty = text !== this.#base;
+    const dirty =
+      this.#session?.leading === false ? lf(text) !== lf(this.#base) : text !== this.#base;
     const disk = this.#disk;
     // While an agent's edits are being written, the disk is behind the base on purpose.
     if (!dirty && disk !== null && disk !== this.#base && this.#agentPending === 0) {
@@ -380,6 +414,8 @@ export class DocumentController {
    * the edits stay in the editor, the file stays as it is, and a notice says so.
    */
   async externalChange(): Promise<void> {
+    // The leader sees the file; this window gets what it saved, and what changed arrives as edits.
+    if (this.#session && !this.#session.leading) return;
     // The change may be an agent's edit landing while a later one is already on screen: look once
     // they are all on disk, when the echo of one is known for what it is.
     if (this.#agentPending > 0) await this.#agentEditsWritten();
@@ -460,10 +496,13 @@ export class DocumentController {
    * the order they came, and never over a file that changed elsewhere meanwhile, which instead
    * leaves them unsaved, with the notice that says so. Resolves once it is written, or isn't to be.
    */
-  applyAgentEdit(next: string, step: AgentStep): Promise<void> {
+  applyAgentEdit(next: string, step: AgentStep, base?: string): Promise<void> {
     const path = this.#state.path;
-    if (path === null || this.#state.dirty || this.#disk === null) {
-      this.#editor.applyAgentEdit(next, step);
+    // A document that is no longer the text the agent worked from has the edit placed on it
+    // (`base`), so what was typed meanwhile stays; it is then not the file's text to write.
+    const stale = base !== undefined && base !== this.#editor.getDoc();
+    if (path === null || this.#state.dirty || this.#disk === null || stale) {
+      this.#applyToEditor(next, step, base);
       return Promise.resolve();
     }
     // Set first: the edit reports an edit, which compares against it, and must find a write
@@ -472,7 +511,7 @@ export class DocumentController {
     this.#base = next;
     this.#pending(1);
     try {
-      this.#editor.applyAgentEdit(next, step);
+      this.#applyToEditor(next, step, base);
     } catch (error) {
       // Nothing changed, and nothing is to be written.
       this.#base = before;
@@ -483,6 +522,12 @@ export class DocumentController {
     // A write that went wrong doesn't hold up the next, or Save.
     this.#agentWrites = written.catch(() => {});
     return written;
+  }
+
+  /** Hands the edit to the editor, with the text its tool read when it has one. */
+  #applyToEditor(next: string, step: AgentStep, base?: string): void {
+    if (base === undefined) this.#editor.applyAgentEdit(next, step);
+    else this.#editor.applyAgentEdit(next, step, base);
   }
 
   async #writeAgentEdit(path: string, next: string): Promise<void> {
@@ -582,6 +627,17 @@ export class DocumentController {
     // An agent's edit being written looks saved already: it is only once it is on disk.
     if (this.#agentPending > 0) await this.#agentEditsWritten();
     if (!this.#state.dirty) return true;
+    // In a session what is unsaved is the session's, not this window's: the authority has what this
+    // window made, and the leader saves it. A leader that closes writes the file first, and the
+    // next window leads on; a window with edits the authority doesn't have yet asks as ever.
+    if (this.#session) {
+      if (!this.#session.leading && this.#session.confirmed) return true;
+      // A save that did not happen (the person said no to overwriting, the write failed) is not one:
+      // the question is asked, and closing waits for the answer.
+      if (this.#session.leading && this.#session.members > 1) {
+        if (await this.save().catch(() => false)) return true;
+      }
+    }
     this.#question ??= this.#askAboutEdits().finally(() => {
       this.#question = null;
     });
@@ -609,6 +665,83 @@ export class DocumentController {
     const choice = await this.#host.askToSave(this.#state.name);
     if (choice === 'save') return this.save();
     return choice === 'discard';
+  }
+
+  /**
+   * This window is a window of a session, as its leader or as one of the others. Edits that came
+   * from the session are the person's own and unsaved until the leader saves them.
+   */
+  enterSession(session: DocumentSession): void {
+    this.#session = session;
+    if (!session.leading) this.dispose();
+  }
+
+  /** The window leads, now: the leader before it closed. It sees the file again. */
+  becameLeader(): void {
+    if (this.#state.path !== null) this.#watch(this.#state.path);
+    // What this window had of the file's text may be older than the session's: look again.
+    this.markEdited();
+  }
+
+  /** The window is out of its session and holds the document alone again. */
+  leaveSession(): void {
+    const was = this.#session;
+    this.#session = null;
+    if (was && !was.leading && this.#state.path !== null) this.#watch(this.#state.path);
+  }
+
+  /**
+   * Starts a window that was opened to join a session: it holds the document at `path` with no
+   * text yet. The text comes from the session (`sessionLoaded`), and the file isn't read.
+   */
+  followSession(path: string): void {
+    this.#sessionSaved = false;
+    this.#generation++;
+    this.#diskSteps = 0;
+    this.#base = '';
+    this.#disk = '';
+    this.#savedAt = null;
+    this.#onLoading(path);
+    this.#editor.setKind(documentKind(path) ?? 'markdown', markdownDialect(path) ?? 'gfm');
+    this.#state = {
+      path,
+      name: basename(path),
+      dirty: false,
+      notice: null,
+      writing: false,
+    };
+    this.#onState(this.#state);
+  }
+
+  /** The session's text is in the editor: it is the file's, as far as this window knows. */
+  sessionLoaded(): void {
+    // The leader may have told what the file holds already: then the session's text is not it.
+    if (!this.#sessionSaved) {
+      const text = this.#editor.getDoc();
+      this.#base = text;
+      this.#disk = text;
+    }
+    this.#update({ dirty: lf(this.#editor.getDoc()) !== lf(this.#base) });
+  }
+
+  /** What the file holds, as far as this window knows; null when it is gone or unreadable. */
+  get diskText(): string | null {
+    return this.#disk;
+  }
+
+  /** The leader wrote the file, and `text` is what it holds. */
+  savedBySession(text: string): void {
+    this.#sessionSaved = true;
+    // The session's text has LF line breaks; a file with CRLF ones keeps them in this window too, or
+    // the window that leads next would write the file with other ones.
+    const shown = this.#editor.getDoc();
+    if (/\r\n/.test(text) && !shown.includes('\r')) {
+      this.#editor.reloadDoc(shown.replace(/\n/g, '\r\n'));
+    }
+    this.#savedAt = new Date();
+    this.#base = text;
+    this.#disk = text;
+    this.#update({ dirty: lf(this.#editor.getDoc()) !== lf(text), notice: null });
   }
 
   /** Stops watching the file. */

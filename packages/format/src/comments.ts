@@ -3,7 +3,10 @@
 // only the ledger; deleting a thread removes both. Where the anchor's markers go is the same for a
 // highlight (anchors.ts).
 
+import { withDialect } from './dialect.ts';
 import { closerRange, openerRange } from './blocks.ts';
+import { aroundFences } from './div-ends.ts';
+import { awayFromIncludes, type AroundInclude } from './include.ts';
 import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { addPerson, commitEdit, markerRanges, visibleText, workingLedger } from './edit-support.ts';
@@ -12,10 +15,23 @@ import { anchorRange, assertRange, checkAnchor } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
+import {
+  decisionsHold,
+  hasTableChange,
+  marksOfTablesAt,
+  nearRanges,
+  refusalsOf,
+} from './table-settle.ts';
 import { readTables } from './table.ts';
-import { commentAcrossRows, inPendingRow, pastRowMark, rowWidenings } from './table-rules.ts';
+import {
+  beforeHeaderPipe,
+  commentAcrossRows,
+  inPendingRow,
+  pastRowMark,
+  rowWidenings,
+} from './table-rules.ts';
 import type { TableRead } from './table.ts';
-import { applyChanges } from './changes.ts';
+import { applyChanges, eolOf } from './changes.ts';
 import type { EditContext, Ledger, Parsed, Range, TextChange, Thread } from './types.ts';
 
 /** The thread with this id. When there is none, a ledger that can't be read is the reason to give
@@ -62,57 +78,95 @@ export function addComment(
   body: string,
   ctx: EditContext,
   rowsWidened = false,
+  settled = false,
 ): { changes: TextChange[]; id: string } {
-  const recorded = recordIds(ctx);
-  if (!rowsWidened) ctx = recorded.ctx;
-  assertRange(text, range);
-  const parsed = parse(text);
-  const markers = markerRanges(parsed);
-  let placed = anchorRange(text, parsed, markers, range, COMMENT_WORDS);
-  placed = pastPendingRowMarks(text, parsed, markers, placed);
-  const { from, to } = placed;
-  const point = from === to;
-
-  const id = newId(idsIn(text), ctx.random);
-  const thread: Thread = {
-    id,
-    by: ctx.author.handle,
-    at: ctx.time,
-    likes: [],
-    replies: [],
-    text: body,
-  };
-  const quote = point ? '' : visibleText(text, markers, from, to);
-  if (quote !== '') thread.quote = quote;
-  const ledger = workingLedger(parsed.ledger);
-  addPerson(ledger, ctx.author);
-  ledger.comments.push(thread);
-
-  const anchors: TextChange[] = [{ from, to: from, insert: `<!--cmt ${id}-->` }];
-  if (!point) anchors.push({ from: to, to, insert: `<!--/${id}-->` });
-  const changes = commitEdit(text, anchors, ledger, {
-    parsed,
-    created: [id],
-    verify: (after) => checkAnchor(after, id, !point, IN_CODE),
-    inCode: IN_CODE,
-  });
-  const after = applyChanges(text, changes);
-  const across = acrossMovedRows(after, id, rowsWidened);
-  if (!across) return { changes, id };
-  // A comment that runs from one row into another while a move is pending can't be left as a point
-  // when the move is decided: its ends are taken to rows that are not pending (format §3.12).
-  if (rowsWidened) throw across.error;
-  const table = readTables(text, parsed).find(
-    (read) => range.from <= read.to && read.from <= range.to,
-  );
-  for (const candidate of table ? rowWidenings(table, text, range) : []) {
-    try {
-      return addComment(text, candidate, body, recorded.replay(), true);
-    } catch (error) {
-      if (!(error instanceof EditError)) throw error;
+  return withDialect(ctx.dialect, () => {
+    const recorded = recordIds(ctx);
+    if (!rowsWidened) ctx = recorded.ctx;
+    assertRange(text, range);
+    const parsed = parse(text);
+    const markers = markerRanges(parsed);
+    // An end on a `:::` fence goes to the whole div, or into its body (div-ends.ts); an end on the
+    // line of a Quarto include goes around it (include.ts).
+    const fenced = aroundFences(text, range);
+    let around: AroundInclude;
+    if (fenced.whole) around = fenced.whole;
+    else {
+      let placed = anchorRange(text, parsed, markers, fenced.inner, COMMENT_WORDS);
+      placed = pastPendingRowMarks(text, parsed, markers, placed);
+      placed = beforePipes(text, parsed, markers, placed, COMMENT_WORDS);
+      around = fenced.apply(awayFromIncludes(text, placed));
     }
-  }
-  throw across.error;
+    const { from, to } = around;
+    const point = from === to;
+
+    const id = newId(idsIn(text), ctx.random);
+    const thread: Thread = {
+      id,
+      by: ctx.author.handle,
+      at: ctx.time,
+      likes: [],
+      replies: [],
+      text: body,
+    };
+    const quote = point ? '' : visibleText(text, markers, from, to);
+    if (quote !== '') thread.quote = quote;
+    const ledger = workingLedger(parsed.ledger);
+    addPerson(ledger, ctx.author);
+    ledger.comments.push(thread);
+
+    // Next to an include, each marker is a line of its own, and the line break goes with it.
+    const eol = eolOf(text, parsed.ledgerRange);
+    const anchors: TextChange[] = [
+      { from, to: from, insert: `<!--cmt ${id}-->${around.openerLine ? eol : ''}` },
+    ];
+    if (!point) {
+      anchors.push({
+        from: to,
+        to,
+        insert: `${around.closerLine ? eol : ''}<!--/${id}-->`,
+      });
+    }
+    const changes = commitEdit(text, anchors, ledger, {
+      parsed,
+      created: [id],
+      verify: (after) => checkAnchor(after, id, !point, IN_CODE),
+      inCode: IN_CODE,
+    });
+    const after = applyChanges(text, changes);
+    const across = acrossMovedRows(after, id, rowsWidened);
+    if (!across) {
+      // In a table with a change pending, the ends stand where no decision of it becomes impossible (#376).
+      if (settled || !hasTableChange(text)) return { changes, id };
+      const scope = marksOfTablesAt(text, range);
+      if (scope.size === 0) return { changes, id };
+      const before = refusalsOf(text, scope);
+      if (decisionsHold(text, changes, before, scope)) return { changes, id };
+      for (const candidate of nearRanges(text, range, 60)) {
+        try {
+          const found = addComment(text, candidate, body, recorded.replay(), rowsWidened, true);
+          if (decisionsHold(text, found.changes, before, scope)) return found;
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+        }
+      }
+      return { changes, id };
+    }
+    // A comment that runs from one row into another while a move is pending can't be left as a point
+    // when the move is decided: its ends are taken to rows that are not pending (format §3.12).
+    if (rowsWidened) throw across.error;
+    const table = readTables(text, parsed).find(
+      (read) => range.from <= read.to && read.from <= range.to,
+    );
+    for (const candidate of table ? rowWidenings(table, text, range) : []) {
+      try {
+        return addComment(text, candidate, body, recorded.replay(), true);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+    }
+    throw across.error;
+  });
 }
 
 /**
@@ -137,6 +191,38 @@ function pastPendingRowMarks(
   // Where the ends are now, the rules of every anchor hold again.
   const range = { from, to: Math.max(from, to) };
   return anchorRange(text, parsed, markers, range, COMMENT_WORDS);
+}
+
+/**
+ * `placed`, with an end after the closing pipe of a header moved in front of it (`beforeHeaderPipe`).
+ */
+export function beforePipes(
+  text: string,
+  parsed: Parsed,
+  markers: readonly MarkerRange[],
+  placed: Range,
+  words: AnchorWords,
+): Range {
+  let { from, to } = placed;
+  const tables = readTables(text, parsed);
+  for (const table of tables) {
+    from = beforeHeaderPipe(table, text, from);
+    to = beforeHeaderPipe(table, text, to);
+  }
+  if (from === placed.from && to === placed.to) return placed;
+  // Where the rules of an anchor hold again, which may be after the pipe once more (a delimiter run
+  // that the marker would split): then the end goes on, further in front of the pipe.
+  const after = (at: number) => tables.some((table) => beforeHeaderPipe(table, text, at) !== at);
+  let want = Math.max(from, to);
+  let moved = anchorRange(text, parsed, markers, { from, to: want }, words);
+  for (let step = 0; step < 24 && (after(moved.to) || after(moved.from)); step++) {
+    // In front of the marker that it is in or after, or a character back.
+    const inside = markers.find((marker) => marker.from < want && want <= marker.to);
+    want = Math.max(0, inside ? inside.from : want - 1);
+    from = Math.min(from, want);
+    moved = anchorRange(text, parsed, markers, { from, to: Math.max(from, want) }, words);
+  }
+  return moved;
 }
 
 /**

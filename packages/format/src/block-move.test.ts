@@ -10,7 +10,7 @@ import { applyChanges } from './changes.ts';
 import { Untrackable } from './widen.ts';
 import { expectEveryOrderRead, expectSound } from './oracle.ts';
 import { parse } from './parse.ts';
-import { ada, bo, bodyOf, context, file, problemsOf } from './test-helpers.ts';
+import { ada, bo, bodyOf, context, file, problemsOf, thread } from './test-helpers.ts';
 import { newestView, originalView } from './views.ts';
 
 /** A deterministic random source of its own, for ids. */
@@ -157,5 +157,95 @@ describe('moving blocks that bring two lists side by side (#871)', () => {
     const swapped = moved(file('- a\n\n1. b'), '- a', false);
     expect(viewOf(swapped)).toBe('1. b\n\n- a\n');
     expect(problemsOf(parse(swapped))).toEqual([]);
+  });
+});
+
+describe('moving blocks that hold comments or pending changes (#1052)', () => {
+  const ASKED = file(
+    '- alpha <!--cmt k6hg-->x<!--/k6hg-->\n- beta <!--cmt k6hj-->y<!--/k6hj-->',
+    {},
+    [...thread('k6hg', 'bo', 'One.'), ...thread('k6hj', 'bo', 'Two.')],
+  );
+
+  it('moves the text without tracking with the markers of its comments (verbatim edits)', () => {
+    const view = viewOf(ASKED);
+    const at = view.indexOf('alpha');
+    const run = blockRunAt(ASKED, { from: at, to: at })!;
+    const plan = moveBlockEdits(ASKED, run, neighbourGap(run, false)!)!;
+    expect(plan.verbatim).toBe(true);
+    const after = applyChanges(ASKED, plan.edits);
+    expect(bodyOf(after)).toContain(
+      '- beta <!--cmt k6hj-->y<!--/k6hj-->\n- alpha <!--cmt k6hg-->x<!--/k6hg-->',
+    );
+    expect(problemsOf(parse(after))).toEqual([]);
+  });
+
+  it('carries a comment that starts at the first character of a paragraph, and a highlight that ends one', () => {
+    const text = file(
+      '<!--cmt k6hg-->Alpha<!--/k6hg--> one\n\nBeta <!--hl k6hj-->two<!--/k6hj-->',
+      { k6hj: 'ada' },
+      thread('k6hg', 'bo', 'One.'),
+    );
+    for (const [at, up, expected] of [
+      [
+        'Alpha',
+        false,
+        'Beta <!--hl k6hj-->two<!--/k6hj-->\n\n<!--cmt k6hg-->Alpha<!--/k6hg--> one',
+      ],
+      ['Beta', true, 'Beta <!--hl k6hj-->two<!--/k6hj-->\n\n<!--cmt k6hg-->Alpha<!--/k6hg--> one'],
+    ] as const) {
+      const view = viewOf(text);
+      const from = newestView(text).map.toSource(view.indexOf(at), 1);
+      const run = blockRunAt(text, { from, to: from })!;
+      const plan = moveBlockEdits(text, run, neighbourGap(run, up)!)!;
+      expect(plan.verbatim, at).toBe(true);
+      expect(bodyOf(applyChanges(text, plan.edits)).trim(), at).toBe(expected);
+    }
+  });
+
+  it('writes a plain move that holds no comment as it did', () => {
+    const plain = file('- alpha\n- beta');
+    const run = blockRunAt(plain, { from: 3, to: 3 })!;
+    expect(moveBlockEdits(plain, run, neighbourGap(run, false)!)!.verbatim).toBeUndefined();
+  });
+
+  it('is one replacement where the blocks hold pending changes, which read alike in every order', () => {
+    const text = file(
+      'One.\n\ndelta <!--ins m94w-->new\ncafé <!--del bv23 gone--><!--/m94w-->\n\nLast.',
+      { m94w: 'bo', bv23: 'ada' },
+    );
+    const out = moved(text, 'delta', true);
+    expect(bodyOf(out)).toContain('<!--sub ');
+    expectEveryOrderRead('pending', out);
+  });
+});
+
+describe('a fence that nothing closes (#1103)', () => {
+  const text = file('alpha\n\n```js\ncode\n');
+
+  it('has no place to go, and nothing goes below it', () => {
+    const view = viewOf(text);
+    const fence = blockRunAt(text, { from: view.indexOf('code'), to: view.indexOf('code') })!;
+    expect(fence.unclosed).toBe(true);
+    expect(fence.gaps).toEqual([]);
+    const alpha = blockRunAt(text, { from: 1, to: 1 })!;
+    expect(alpha.gaps.some((gap) => gap.index > 1)).toBe(false);
+  });
+});
+
+describe('a block taken from between a line of text and a list (#586, block-move-random seed 142)', () => {
+  const text = file('para\n<div>\nx\n</div>\n\n- item one\n\nlast\n');
+
+  it('leaves the list a list, which a join of the line above to the item would not', () => {
+    const view = newestView(text);
+    const at = viewOf(text).indexOf('x');
+    const run = blockRunAt(text, { from: view.map.toSource(at, 1), to: view.map.toSource(at, 1) })!;
+    const gap = neighbourGap(run, false)!;
+    const out = applyChanges(
+      text,
+      trackedBlockMove(text, run, gap, { ...context(ada), random: source(7) })!.changes,
+    );
+    expect(viewOf(out)).toContain('para\n- item one');
+    expectEveryOrderRead('html block down', out);
   });
 });

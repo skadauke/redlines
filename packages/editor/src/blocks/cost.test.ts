@@ -135,6 +135,22 @@ function held(first: Held, again: () => Held): Held {
 }
 
 /**
+ * A timing against main's recorded number, scaled by how fast this machine runs the calibration, the
+ * two taking turns (#432): the median of five runs of the timing, and of five of the calibration,
+ * each pair one after the other. A runner slowed for a few seconds slows both, where a calibration
+ * timed once before the runs left the bound as it was; and one slow run is not the median.
+ */
+function againstMain(timing: () => number, main: number, baseline: number): Held {
+  const ours: number[] = [];
+  const speed: number[] = [];
+  for (let turn = 0; turn < 5; turn++) {
+    ours.push(timing());
+    speed.push(calibrate());
+  }
+  return { ours: median(ours), limit: 2 * main * (median(speed) / baseline) + 1 };
+}
+
+/**
  * Main's own numbers (`4ca53fc`), milliseconds per pair of keys, on the machine whose calibration
  * is `CALIBRATION`. Keyed `size, Track Changes, where, pair`.
  */
@@ -169,7 +185,6 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Return, typing and B
     (size, bytes) => {
       const doc = documentOf(bytes, 200);
       expect((doc.match(/<!--ins /g) ?? []).length).toBe(200);
-      const scale = record ? 1 : calibrate() / CALIBRATION;
       for (const tracking of [true, false]) {
         const parent = document.createElement('div');
         document.body.append(parent);
@@ -186,7 +201,7 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Return, typing and B
             const before = editor.view.state.doc.toString();
             time(editor, at, pair);
             const runs: number[] = [];
-            for (let i = 0; i < 7; i++) runs.push(time(editor, at, pair));
+            if (record) for (let i = 0; i < 7; i++) runs.push(time(editor, at, pair));
             // Main's Backspace takes its own Return back, but its tracked layer may leave marks.
             if (!record && pair !== 'type') {
               expect(editor.view.state.doc.toString(), 'the keys put it back').toBe(before);
@@ -194,21 +209,16 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Return, typing and B
               console.log(`changed: ${editor.view.state.doc.length - text.length}`);
             }
             const label = `${size}, Track Changes ${tracking ? 'on' : 'off'}, ${where}, ${pair}`;
-            const ours = median(runs);
             if (record && pair === 'shift') continue;
             if (record) {
-              console.log(`MAIN ${JSON.stringify(label)}: ${ours.toFixed(2)},`);
+              console.log(`MAIN ${JSON.stringify(label)}: ${median(runs).toFixed(2)},`);
               continue;
             }
             // Shift-Return is measured against main's Return, which it replaces at a block's end.
             const main = MAIN[label.replace('shift', 'return')];
             expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-            const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
-              const limit = 2 * main! * (calibrate() / CALIBRATION) + 1;
-              const more: number[] = [];
-              for (let i = 0; i < 7; i++) more.push(time(editor, at, pair));
-              return { ours: median(more), limit };
-            });
+            const attempt = () => againstMain(() => time(editor, at, pair), main!, CALIBRATION);
+            const result = held(attempt(), attempt);
             console.log(
               `cost: ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
             );
@@ -237,7 +247,6 @@ const TABLE_MAIN: Record<string, number> = {
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a table', () => {
   it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
     const { doc } = longDocument({ table: true });
-    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
     for (const tracking of [true, false]) {
       const parent = document.createElement('div');
       document.body.append(parent);
@@ -246,22 +255,17 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a tab
       const text = editor.view.state.doc.toString();
       const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
       time(editor, at, 'type');
-      const runs: number[] = [];
-      for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
       const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
-      const ours = median(runs);
       if (record) {
-        console.log(`MAIN ${JSON.stringify(label)}: ${ours.toFixed(2)},`);
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        console.log(`MAIN ${JSON.stringify(label)}: ${median(runs).toFixed(2)},`);
         continue;
       }
       const main = TABLE_MAIN[label];
       expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-      const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
-        const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
-        const more: number[] = [];
-        for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
-        return { ours: median(more), limit };
-      });
+      const attempt = () => againstMain(() => time(editor, at, 'type'), main!, TABLE_CALIBRATION);
+      const result = held(attempt(), attempt);
       console.log(
         `cost: ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
       );
@@ -279,7 +283,6 @@ describe.skipIf(!process.env['REDLINES_COST'])(
   () => {
     it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
       const { doc } = longDocument({ table: true });
-      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
       for (const tracking of [true, false]) {
         const parent = document.createElement('div');
         document.body.append(parent);
@@ -301,19 +304,12 @@ describe.skipIf(!process.env['REDLINES_COST'])(
         const text = view.state.doc.toString();
         const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
         time(editor, at, 'type');
-        const runs: number[] = [];
-        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
         const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
-        const ours = median(runs);
         if (record) continue;
         const main = TABLE_MAIN[label];
         expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-        const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
-          const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
-          const more: number[] = [];
-          for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
-          return { ours: median(more), limit };
-        });
+        const attempt = () => againstMain(() => time(editor, at, 'type'), main!, TABLE_CALIBRATION);
+        const result = held(attempt(), attempt);
         console.log(
           `cost: columns pending, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
         );
@@ -326,11 +322,11 @@ describe.skipIf(!process.env['REDLINES_COST'])(
 // A letter typed and deleted with Track Changes off in a cell of a pending move's copy (tables, Stage 3b):
 // the edit is written in both halves of the move (the cell and the kept copy), and must cost what a
 // keystroke in any other cell costs on main. A timing test: it runs with REDLINES_COST set, and a run over
-// the bound is timed twice more, each time with the calibration, before it fails.
+// the median of five runs is taken in turns with the calibration (`againstMain`), and a run over
+// the bound is taken twice more before it fails.
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a moved cell', () => {
   it('costs at most twice what main’s build costs, in a moved column and a moved row', () => {
     const { doc } = longDocument({ table: true });
-    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
     for (const axis of ['column', 'row'] as const) {
       const parent = document.createElement('div');
       document.body.append(parent);
@@ -355,12 +351,8 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a mov
       const label = 'Track Changes off, cell, type';
       const main = TABLE_MAIN[label];
       expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-      const attempt = (yardstick: number): Held => {
-        const runs: number[] = [];
-        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
-        return { ours: median(runs), limit: 2 * main! * yardstick + 1 };
-      };
-      const result = held(attempt(scale), () => attempt(calibrate() / TABLE_CALIBRATION));
+      const attempt = () => againstMain(() => time(editor, at, 'type'), main!, TABLE_CALIBRATION);
+      const result = held(attempt(), attempt);
       console.log(
         `cost: moved ${axis}, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
       );
@@ -379,7 +371,6 @@ describe.skipIf(!process.env['REDLINES_COST'])(
   () => {
     it('costs at most twice what main’s keystroke costs, over a 300-row table', () => {
       const { doc } = longDocument({ table: true });
-      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
       for (const tracking of [true, false]) {
         const parent = document.createElement('div');
         document.body.append(parent);
@@ -403,19 +394,12 @@ describe.skipIf(!process.env['REDLINES_COST'])(
         expect(selectedCells(view.state)).toHaveLength(1500);
         view.dispatch({ selection: EditorSelection.cursor(first) });
         round();
-        const runs: number[] = [];
-        for (let i = 0; i < 7; i++) runs.push(round());
         const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
-        const ours = median(runs);
         if (record) continue;
         const main = TABLE_MAIN[label];
         expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-        const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
-          const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
-          const more: number[] = [];
-          for (let i = 0; i < 7; i++) more.push(round());
-          return { ours: median(more), limit };
-        });
+        const attempt = () => againstMain(round, main!, TABLE_CALIBRATION);
+        const result = held(attempt(), attempt);
         console.log(
           `cost: rectangle over the table, ${label}: main's keystroke ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
         );
@@ -436,19 +420,38 @@ describe.skipIf(!process.env['REDLINES_COST'])(
 // more, each time with the parse, before it fails.
 const MOVE_PARSES = 6;
 
+function parseOnce(doc: string): number {
+  const start = performance.now();
+  const view = new EditorView({
+    state: EditorState.create({ doc, extensions: [markdown({ extensions: [GFM] })] }),
+    parent: document.body,
+  });
+  forceParsing(view, doc.length, 10_000);
+  const took = performance.now() - start;
+  view.destroy();
+  return took;
+}
+
 function parseTime(doc: string): number {
+  parseOnce(doc);
   const runs: number[] = [];
-  for (let i = 0; i < 6; i++) {
-    const start = performance.now();
-    const view = new EditorView({
-      state: EditorState.create({ doc, extensions: [markdown({ extensions: [GFM] })] }),
-      parent: document.body,
-    });
-    forceParsing(view, doc.length, 10_000);
-    if (i > 0) runs.push(performance.now() - start);
-    view.destroy();
-  }
+  for (let i = 0; i < 5; i++) runs.push(parseOnce(doc));
   return median(runs);
+}
+
+/**
+ * A timing against a multiple of the document's parse, the two taking turns (#432): a runner slowed
+ * for a few seconds slows both, as it did the code key and the paragraph key, where the parse timed
+ * once before the runs left the bound as it was. Each is the median of its turns.
+ */
+function againstParse(timing: () => number, doc: () => string, parses: number): Held {
+  const ours: number[] = [];
+  const parse: number[] = [];
+  for (let turn = 0; turn < 5; turn++) {
+    ours.push(timing());
+    parse.push(parseOnce(doc()));
+  }
+  return { ours: median(ours), limit: parses * median(parse) + 2 };
 }
 
 describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a row in a table', () => {
@@ -478,12 +481,8 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a row in a ta
         return (performance.now() - start) / 8;
       };
       pair();
-      const attempt = (): Held => {
-        const limit = MOVE_PARSES * parseTime(view.state.doc.toString()) + 2;
-        const runs: number[] = [];
-        for (let i = 0; i < 5; i++) runs.push(pair());
-        return { ours: median(runs), limit };
-      };
+      parseOnce(view.state.doc.toString());
+      const attempt = (): Held => againstParse(pair, () => view.state.doc.toString(), MOVE_PARSES);
       const result = held(attempt(), attempt);
       console.log(
         `cost: row move, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
@@ -534,12 +533,9 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a
         return (performance.now() - start) / 8;
       };
       pair();
-      const attempt = (): Held => {
-        const limit = COLUMN_PARSES * parseTime(view.state.doc.toString()) + 2;
-        const runs: number[] = [];
-        for (let i = 0; i < 5; i++) runs.push(pair());
-        return { ours: median(runs), limit };
-      };
+      parseOnce(view.state.doc.toString());
+      const attempt = (): Held =>
+        againstParse(pair, () => view.state.doc.toString(), COLUMN_PARSES);
       const result = held(attempt(), attempt);
       console.log(
         `cost: column move, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
@@ -585,12 +581,9 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in
         return (performance.now() - start) / 8;
       };
       pair();
-      const attempt = (): Held => {
-        const limit = COLUMN_PARSES * parseTime(view.state.doc.toString()) + 2;
-        const runs: number[] = [];
-        for (let i = 0; i < 5; i++) runs.push(pair());
-        return { ours: median(runs), limit };
-      };
+      parseOnce(view.state.doc.toString());
+      const attempt = (): Held =>
+        againstParse(pair, () => view.state.doc.toString(), COLUMN_PARSES);
       const result = held(attempt(), attempt);
       console.log(
         `cost: alignment, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
@@ -624,7 +617,6 @@ describe.skipIf(!process.env['REDLINES_COST'])(
         ).changes,
       );
       expect(doc).toMatch(/\| Owner<!--fmt \w+ align=/);
-      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
       for (const tracking of [true, false]) {
         const parent = document.createElement('div');
         document.body.append(parent);
@@ -635,19 +627,12 @@ describe.skipIf(!process.env['REDLINES_COST'])(
         const text = view.state.doc.toString();
         const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
         time(editor, at, 'type');
-        const runs: number[] = [];
-        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
         const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
-        const ours = median(runs);
         if (record) continue;
         const main = TABLE_MAIN[label];
         expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-        const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
-          const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
-          const more: number[] = [];
-          for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
-          return { ours: median(more), limit };
-        });
+        const attempt = () => againstMain(() => time(editor, at, 'type'), main!, TABLE_CALIBRATION);
+        const result = held(attempt(), attempt);
         console.log(
           `cost: alignment pending, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
         );
@@ -680,7 +665,6 @@ describe.skipIf(!process.env['REDLINES_COST'])(
         trackedEdit(aligned, { from: end, to: end, insert: '!' }, bo),
       );
       expect(doc).toMatch(/\| Owner<!--ins \w{4}-->!<!--\/\w{4}--><!--fmt \w{4} align=/);
-      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
       const parent = document.createElement('div');
       document.body.append(parent);
       const editor = createEditor(parent, { doc, author: ada, tracking: true });
@@ -699,19 +683,12 @@ describe.skipIf(!process.env['REDLINES_COST'])(
       );
       press(view, 'Backspace');
       time(editor, at, 'type');
-      const runs: number[] = [];
-      for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
       const label = 'Track Changes on, cell, type';
-      const ours = median(runs);
       if (record) return;
       const main = TABLE_MAIN[label];
       expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-      const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
-        const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
-        const more: number[] = [];
-        for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
-        return { ours: median(more), limit };
-      });
+      const attempt = () => againstMain(() => time(editor, at, 'type'), main!, TABLE_CALIBRATION);
+      const result = held(attempt(), attempt);
       console.log(
         `cost: alignment pending, last header cell, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
       );
@@ -794,14 +771,23 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Tab in a numbered li
       return performance.now() - start;
     };
     const measure = (text: string) => {
-      for (let i = 0; i < 5; i++) tab(text);
       const runs: number[] = [];
-      for (let i = 0; i < 15; i++) runs.push(tab(text));
+      for (let i = 0; i < 5; i++) runs.push(tab(text));
       return median(runs);
     };
+    // The numbered list and the bulleted one take turns, five of each, so that a runner slowed for
+    // a few seconds slows both (#432); each is the median of its turns.
     const attempt = (): Held => {
-      const bulleted = measure(list(false));
-      return { ours: measure(list(true)), limit: 2 * bulleted + 1 };
+      const [numbered, bulleted] = [list(true), list(false)];
+      measure(numbered);
+      measure(bulleted);
+      const ours: number[] = [];
+      const yardstick: number[] = [];
+      for (let turn = 0; turn < 5; turn++) {
+        ours.push(measure(numbered));
+        yardstick.push(measure(bulleted));
+      }
+      return { ours: median(ours), limit: 2 * median(yardstick) + 1 };
     };
     const result = held(attempt(), attempt);
     console.log(
@@ -815,7 +801,7 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Tab in a numbered li
 // paragraphs around it (Stage 6, format rule 9). With Track Changes on the first key replaces the
 // block whole, and the keys after it edit the newest code, which the block's own pending substitution
 // holds. With Track Changes off the pair is held to what the long-document tests hold an update to:
-// twice the document's markdown parse and two milliseconds for noise (`bound`, as in
+// twice the document's markdown parse and two milliseconds for noise (as in
 // `preview/long-document.test.ts`); on CI it stands at 0.44 of that bound on a median run and 0.73
 // at worst (41 runs). With Track Changes on it was held to the same, and CI failed it once, 6.35 ms
 // against 5.99: there a key costs 2.6 times the parse (the median of 41 runs), so the best of its
@@ -827,7 +813,6 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Tab in a numbered li
 // CI's own load, 0.60 alone on a runner, 0.53 on a development Mac), so the bound is about twice
 // what it costs. Timing tests: they run with REDLINES_COST set, and a run over the bound is timed
 // twice more, each time with its yardstick, before it fails.
-const bound = (parse: number) => 2 * parse + 2;
 
 function codeDocument(lines = 200): string {
   const paragraph = (n: number) => `${WORDS} ${n}, with *emphasis* and more.`;
@@ -928,12 +913,13 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in code'
   it('is at most twice the document’s parse plus 2 ms: Track Changes off', () => {
     const editor = codeEditor(false);
     codeTime(editor, false);
-    const attempt = (): Held => {
-      const limit = bound(parseTime(doc));
-      const runs: number[] = [];
-      for (let i = 0; i < 7; i++) runs.push(codeTime(editor, false));
-      return { ours: median(runs), limit };
-    };
+    parseTime(doc);
+    const attempt = (): Held =>
+      againstParse(
+        () => codeTime(editor, false),
+        () => doc,
+        2,
+      );
     const result = held(attempt(), attempt);
     console.log(
       `cost: code, Track Changes off: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,

@@ -262,6 +262,15 @@ describe('an Ask', () => {
     expect(session.state.turns[0]?.answer).toBe('Codex says.');
   });
 
+  it('keeps the name in the answered question: the turn holds the person’s own words (#384)', async () => {
+    const { session } = setup();
+    session.ask('@Codex what does this mean?');
+    expect(session.state.pending).toBe('@Codex what does this mean?');
+    await done(session);
+    expect(session.state.pending).toBeNull();
+    expect(session.state.turns[0]?.question).toBe('@Codex what does this mean?');
+  });
+
   it('keeps each answer with the agent that gave it, though a follow-up names another', async () => {
     const { session, claude, codex } = setup();
     session.ask('What is a lien?');
@@ -743,6 +752,18 @@ describe('the model an Ask runs (#507)', () => {
     session.ask('What?');
     await done(session);
     expect(lastRequest(claude).model).toBeUndefined();
+  });
+
+  it('follows the agent a follow-up names while it is typed, and back (#837)', async () => {
+    const { session } = setup({ claudeModels: MODELS });
+    await vi.waitFor(() => expect(session.state.choice?.agent).toEqual(CLAUDE));
+    session.setModel('opus');
+    session.draft('@codex what about it?');
+    expect(session.state.choice).toEqual({ agent: CODEX, models: [], model: undefined });
+    session.draft('@claude what about it?');
+    expect(session.state.choice).toEqual({ agent: CLAUDE, models: MODELS, model: 'opus' });
+    session.draft('');
+    expect(session.state.choice?.agent).toEqual(CLAUDE);
   });
 
   it('names no model for an agent that lists none', async () => {

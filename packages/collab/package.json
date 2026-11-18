@@ -1,0 +1,18 @@
+{
+  "name": "@redlines/collab",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The session authority for multiuser editing: it orders every edit and decision in a live session.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@codemirror/state": "^6.7.6",
+    "@redlines/format": "workspace:*"
+  }
+}

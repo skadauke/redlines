@@ -641,6 +641,21 @@ describe('OpenClaw’s bridge', () => {
     expect(createAcpProvider(processes, bridgeConfig).readLimit).toBe('machine');
   });
 
+  it('names the relay of its tools in the session of a Gateway run, and in no other', () => {
+    const processes = fakeHost(() => {}).processes;
+    expect(createAcpProvider(processes, { ...bridgeConfig, gateway: true })).toMatchObject({
+      toolbox: false,
+      nodeTools: true,
+    });
+    expect(createAcpProvider(processes, bridgeConfig)).not.toHaveProperty('nodeTools');
+    expect(bridgeSessionMessage('/p', 'k')).toMatchObject({
+      params: { mcpServers: [], _meta: { sessionKey: 'k' } },
+    });
+    expect(bridgeSessionMessage('/p', 'k', '/tmp/rl-1-0/s')).toMatchObject({
+      params: { mcpServers: [], _meta: { sessionKey: 'k', tools: '/tmp/rl-1-0/s' } },
+    });
+  });
+
   it('opens a session of its own for the document, with no MCP server, and no folder put in the prompt', async () => {
     const seen: { meta?: unknown; prompt?: Message } = {};
     const host = fakeHost(
@@ -742,6 +757,38 @@ describe('OpenClaw’s bridge', () => {
     expect(events.at(-1)).toEqual({
       type: 'done',
       finalText: '[OpenClaw interruption] is what the log said.',
+    });
+  });
+
+  it('says where to name the agent when the Gateway has more than one (#401)', async () => {
+    const inner = bridgeThat(() => {});
+    const host = fakeHost((message, agent) => {
+      if (message.method !== 'session/new') return inner(message, agent);
+      agent.say({
+        jsonrpc: '2.0',
+        id: message.id,
+        error: {
+          code: -32603,
+          message: 'Internal error',
+          data: {
+            details: 'Use an agent-prefixed session key or select an agent explicitly',
+          },
+        },
+      });
+    });
+    const provider = createAcpProvider(host.processes, bridgeConfig, {
+      emptyFolder: () => Promise.resolve('/var/folders/T/redlines-run.x'),
+      removeFolder: () => Promise.resolve(),
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of provider.run(asked, tools, new AbortController().signal)) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      message: expect.stringContaining(
+        'Name the agent in Preferences › Agents › OpenClaw.',
+      ) as string,
     });
   });
 

@@ -7,7 +7,7 @@
 import { EditorSelection, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import type { BlockGap, BlockRun } from '@redlines/format';
-import { moveRunTo, runOfSelection } from './move.ts';
+import { asFile, type FileRead, moveRunTo, runOfSelection } from './move.ts';
 
 /** The pointer must move this far from the press before it is a drag and not a click. */
 export const DRAG_SLOP = 4;
@@ -58,10 +58,22 @@ export function pickGap(
 
 /** Whether the selection covers the text of whole blocks, and which. */
 export function draggableRun(view: EditorView): BlockRun | undefined {
+  return draggableRead(view)?.run;
+}
+
+/**
+ * The run in the text as the file has it, with the empty paragraph that Return opened taken back
+ * (#888), and the read that dropping it needs. Undefined with the caret in that paragraph.
+ */
+export function draggableRead(view: EditorView): { run: BlockRun; read: FileRead } | undefined {
   const { main } = view.state.selection;
   if (main.empty) return undefined;
-  const run = runOfSelection(view.state);
-  return run && main.from <= run.textFrom && main.to >= run.to ? run : undefined;
+  const read = asFile(view.state);
+  if (!read) return undefined;
+  const run = runOfSelection(read.file);
+  // The run is in the file's text, so the selection is compared as the file has it.
+  const sel = read.file.selection.main;
+  return run && sel.from <= run.textFrom && sel.to >= run.to ? { run, read } : undefined;
 }
 
 /** A drag of blocks in progress: the line, and the gap it is at. */
@@ -72,11 +84,19 @@ export class BlockDrag {
   private readonly view: EditorView;
   private readonly run: BlockRun;
   private readonly geometry: DragGeometry;
+  private readonly read: FileRead | undefined;
 
-  constructor(view: EditorView, run: BlockRun, geometry: DragGeometry = pageGeometry) {
+  /** `run` is in the file's text; `read` says how the view's text differs from it (#888). */
+  constructor(
+    view: EditorView,
+    run: BlockRun,
+    geometry: DragGeometry = pageGeometry,
+    read?: FileRead,
+  ) {
     this.view = view;
     this.run = run;
     this.geometry = geometry;
+    this.read = read;
     view.dom.classList.add('rl-block-dragging');
   }
 
@@ -88,9 +108,11 @@ export class BlockDrag {
   /** The pointer is at client `y`: the line goes to the nearest gap. */
   move(y: number): void {
     const { view, geometry } = this;
-    this.places = this.run.gaps.map((gap) => ({ gap, y: geometry.gapY(view, gap) }));
+    // The page lays out the view's text, which has the open paragraph in it.
+    const shown = this.shown.bind(this);
+    this.places = this.run.gaps.map((gap) => ({ gap, y: geometry.gapY(view, shown(gap)) }));
     // The run's extent is measured now, not at the press: the editor may have scrolled since.
-    this.target = pickGap(this.places, geometry.extent(view, this.run), y);
+    this.target = pickGap(this.places, geometry.extent(view, this.shownRun()), y);
     const at = this.places.find((place) => place.gap === this.target);
     if (!at) {
       this.line?.remove();
@@ -103,6 +125,25 @@ export class BlockDrag {
     line.style.top = `${at.y - scroller.top + view.scrollDOM.scrollTop - 1.5}px`;
     line.style.left = `${content.left - scroller.left + view.scrollDOM.scrollLeft}px`;
     line.style.width = `${content.width}px`;
+  }
+
+  private place(pos: number): number {
+    return this.read?.back ? this.read.back.invertedDesc.mapPos(pos, 1) : pos;
+  }
+
+  private shown(gap: BlockGap): BlockGap {
+    if (!this.read?.back) return gap;
+    const { above } = gap;
+    return {
+      ...gap,
+      at: this.place(gap.at),
+      ...(above === undefined ? {} : { above: this.place(above) }),
+    };
+  }
+
+  private shownRun(): BlockRun {
+    if (!this.read?.back) return this.run;
+    return { ...this.run, from: this.place(this.run.from), to: this.place(this.run.to) };
   }
 
   private makeLine(): HTMLElement {
@@ -128,7 +169,7 @@ export class BlockDrag {
   drop(): boolean {
     const gap = this.target;
     this.end();
-    return gap ? moveRunTo(this.view, this.run, gap) : false;
+    return gap ? moveRunTo(this.view, this.run, gap, this.read) : false;
   }
 
   /** Lets the blocks go where they were. */
@@ -166,8 +207,9 @@ export function blockDrag(): Extension {
         if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
         // Nothing moves in a document that can't be edited.
         if (view.state.readOnly || !view.contentDOM.isContentEditable) return false;
-        const run = draggableRun(view);
-        if (!run) return false;
+        const found = draggableRead(view);
+        if (!found) return false;
+        const { run, read } = found;
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
         const { main } = view.state.selection;
         if (pos < main.from || pos > main.to) return false;
@@ -209,7 +251,7 @@ export function blockDrag(): Extension {
           y = e.clientY;
           if (!drag && Math.hypot(e.clientX - start.x, y - start.y) < DRAG_SLOP) return;
           if (!view.state.doc.eq(pressed)) return abandon();
-          drag ??= new BlockDrag(view, run);
+          drag ??= new BlockDrag(view, run, pageGeometry, read);
           drag.move(y);
           if (!frame && win) frame = win.requestAnimationFrame(tick);
         };

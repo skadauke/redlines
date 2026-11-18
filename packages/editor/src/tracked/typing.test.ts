@@ -947,6 +947,23 @@ describe('line breaks and blocks (format §3.4)', () => {
     expect(newestView(editor.getDoc()).text).toBe('One two \nxthree.\n');
   });
 
+  it('replaces two selected spaces on Enter, as any key does (#1030)', () => {
+    const editor = load('One  two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
+    editor.view.dispatch({ selection: { anchor: 3, head: 5 } });
+    press(editor, 'Enter');
+    // The spaces are struck, or replaced: they are no longer in the newest text, the break is.
+    const text = newestView(editor.getDoc()).text;
+    expect(text).toBe('One\ntwo.\n');
+    expect(editor.getParsed().marks.length).toBeGreaterThan(0);
+  });
+
+  it('replaces only the selected spaces on Enter, when more spaces follow (#1030)', () => {
+    const editor = load('One   two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
+    editor.view.dispatch({ selection: { anchor: 3, head: 5 } });
+    press(editor, 'Enter');
+    expect(newestView(editor.getDoc()).text).toBe('One\n two.\n');
+  });
+
   it('keeps the spaces before the caret when Enter continues a list', () => {
     const editor = load('- one \n- two\n', { ids: ['q4gt', 'r5tw'] });
     caret(editor, '- one '.length);

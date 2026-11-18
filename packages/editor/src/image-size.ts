@@ -12,16 +12,13 @@ import { isolateHistory } from '@codemirror/commands';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { Facet, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { MarkdownDialect } from './api.ts';
+import { dialectFacet } from './dialect.ts';
 import { destination } from './images.ts';
 import { refusedEditEffect } from './tracked/typing.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
-/** The open file's dialect (`EditorOptions.dialect`); default GitHub's. */
-export const dialectFacet = Facet.define<MarkdownDialect, MarkdownDialect>({
-  combine: (values) => values[0] ?? 'gfm',
-});
+export { dialectFacet };
 
 /**
  * A pandoc attribute block right after an image, `{width=50%}`: `{`, anything but braces, angle

@@ -3,6 +3,7 @@
 // name. `old_str` must match the newest view exactly once. The replacement is compared with it
 // word by word, and only the words that changed become marks.
 
+import { withDialect } from './dialect.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -17,6 +18,7 @@ import { fineEdits as fineTrackedEdits, trackedEdits as widenedEdits } from './t
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Parsed, Range, TextChange } from './types.ts';
 import { closerRange } from './blocks.ts';
+import { emptiedFormats } from './emptied-formats.ts';
 import { newestView, originalView } from './views.ts';
 
 export type { Hunk } from './join.ts';
@@ -84,7 +86,9 @@ export function suggestReplace(
   newStr: string,
   ctx: EditContext,
 ): TrackedEdits {
-  return suggestReplaceWith(text, oldStr, newStr, ctx, joinedHunks);
+  return withDialect(ctx.dialect, () => {
+    return suggestReplaceWith(text, oldStr, newStr, ctx, joinedHunks);
+  });
 }
 
 /** `suggestReplace` with the joining rule given: a test gives one that writes what the format
@@ -97,19 +101,21 @@ export function suggestReplaceWith(
   join: (before: string, after: string, guards: JoinGuards) => Hunk[],
   guarded = true,
 ): TrackedEdits {
-  const ids = replayable(ctx.random);
-  const edits = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.first }, join);
-  if (!guarded || keepsDecidable(text, edits)) return edits;
-  // The marks next to the edit, written at the grain of the words, leave a decision that could be
-  // made before it impossible (#251). Written as a replacement of the unit that holds them, they
-  // may not; where that is no better, the edit is refused (#246).
-  try {
-    const wide = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.again }, join, widenedEdits);
-    if (keepsDecidable(text, wide)) return wide;
-  } catch (error) {
-    if (!(error instanceof EditError)) throw error;
-  }
-  throw new EditError(INSERTION_STUCK, 'no-legal-placement');
+  return withDialect(ctx.dialect, () => {
+    const ids = replayable(ctx.random);
+    const edits = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.first }, join);
+    if (!guarded || keepsDecidable(text, edits)) return edits;
+    // The marks next to the edit, written at the grain of the words, leave a decision that could be
+    // made before it impossible (#251). Written as a replacement of the unit that holds them, they
+    // may not; where that is no better, the edit is refused (#246).
+    try {
+      const wide = suggestForms(text, oldStr, newStr, { ...ctx, ...ids.again }, join, widenedEdits);
+      if (keepsDecidable(text, wide)) return wide;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    throw new EditError(INSERTION_STUCK, 'no-legal-placement');
+  });
 }
 
 function suggestForms(
@@ -129,7 +135,7 @@ function suggestForms(
   const tableEdits = tableSuggestion(text, view, before, after, start, ctx);
   if (tableEdits) return tableEdits;
 
-  const editsOf = (hunks: readonly Hunk[]): TextChange[] =>
+  const hunkEdits = (hunks: readonly Hunk[]): TextChange[] =>
     hunks.map((hunk) => {
       if (hunk.from === hunk.to) {
         // An insertion belongs to the word before it, or to the word after it at the start.
@@ -142,12 +148,16 @@ function suggestForms(
         insert: hunk.insert,
       };
     });
+  // A deletion that empties an inline format takes its delimiters too, as a key does (#584),
+  // unless `emptied` is off: see `written`.
+  const editsOf = (hunks: readonly Hunk[], emptied = true): TextChange[] =>
+    emptied ? [...emptiedFormats(text, hunkEdits(hunks))] : hunkEdits(hunks);
   // A change that takes the break in front of a block takes the block's marker with it, as a
   // person's backspace does; an edit that keeps the marker in the new text asks for the marker as
   // text of the paragraph. Each form is written so, or is refused (#245).
   const asked = view.text.slice(0, start) + after + view.text.slice(start + before.length);
-  const written = (hunks: readonly Hunk[], c: EditContext): TrackedEdits => {
-    const edits = trackedEdits(text, editsOf(hunks), c);
+  const writtenWith = (hunks: readonly Hunk[], c: EditContext, emptied: boolean): TrackedEdits => {
+    const edits = trackedEdits(text, editsOf(hunks, emptied), c);
     if (!hunks.some((hunk) => joinsBlock(before, hunk))) return edits;
     const reads = (result: TrackedEdits) =>
       readsAs(newestView(applyChanges(text, result.changes)).text, asked);
@@ -158,12 +168,26 @@ function suggestForms(
       return { from: hunk.from, to: hunk.to + marker.length, insert: hunk.insert + marker };
     });
     try {
-      const again = trackedEdits(text, editsOf(kept), c);
+      const again = trackedEdits(text, editsOf(kept, emptied), c);
       if (reads(again)) return again;
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
     }
     throw new EditError(JOIN_REFUSED, 'no-legal-placement');
+  };
+  // Where taking an emptied format's delimiters makes a block join read otherwise than asked (the
+  // delimiters the new text keeps are gone), the edit is written as it was before that step: the
+  // agent's own edit, which is never refused for it. No input reaches this yet: a brute-force search
+  // (every unique substring of eight documents with a bold, strike, code span, list item, heading,
+  // quote and fence, against each deletion of a range of it) found none (likely because the closer stands
+  // between the emptied text and a break, so the hunks that join and that empty never meet).
+  const written = (hunks: readonly Hunk[], c: EditContext): TrackedEdits => {
+    try {
+      return writtenWith(hunks, c, true);
+    } catch (error) {
+      if (!(error instanceof EditError) || error.message !== JOIN_REFUSED) throw error;
+      return writtenWith(hunks, c, false);
+    }
   };
   const words = wordHunks(before, after);
   if (words.length === 0) return { changes: [], markIds: [], extendedIds: [] };
@@ -398,17 +422,19 @@ export function suggestReplaceAsOne(
   added: string,
   ctx: EditContext,
 ): TrackedEdits {
-  const edits = suggestReplace(text, old, added, ctx);
-  if (edits.markIds.length < 2) return edits;
-  // An id that nothing in the file or in the new marks has.
-  const taken = idsIn(applyChanges(text, edits.changes));
-  for (;;) {
-    const group = newId(taken);
-    // The same edit with a group: the first has been checked.
-    const grouped = suggestReplaceWith(text, old, added, { ...ctx, group }, joinedHunks, false);
-    if (!grouped.markIds.includes(group)) return grouped;
-    taken.add(group);
-  }
+  return withDialect(ctx.dialect, () => {
+    const edits = suggestReplace(text, old, added, ctx);
+    if (edits.markIds.length < 2) return edits;
+    // An id that nothing in the file or in the new marks has.
+    const taken = idsIn(applyChanges(text, edits.changes));
+    for (;;) {
+      const group = newId(taken);
+      // The same edit with a group: the first has been checked.
+      const grouped = suggestReplaceWith(text, old, added, { ...ctx, group }, joinedHunks, false);
+      if (!grouped.markIds.includes(group)) return grouped;
+      taken.add(group);
+    }
+  });
 }
 
 /**
@@ -451,12 +477,14 @@ export function commentOnQuote(
   body: string,
   ctx: EditContext,
 ): { changes: TextChange[]; id: string } {
-  const newest = newestView(text);
-  const wanted = inEol(quote, eolOf(text));
-  const start = uniqueMatch(newest.text, wanted);
-  const range = {
-    from: newest.map.toSource(start, 1),
-    to: newest.map.toSource(start + wanted.length, -1),
-  };
-  return addComment(text, range, body, ctx);
+  return withDialect(ctx.dialect, () => {
+    const newest = newestView(text);
+    const wanted = inEol(quote, eolOf(text));
+    const start = uniqueMatch(newest.text, wanted);
+    const range = {
+      from: newest.map.toSource(start, 1),
+      to: newest.map.toSource(start + wanted.length, -1),
+    };
+    return addComment(text, range, body, ctx);
+  });
 }

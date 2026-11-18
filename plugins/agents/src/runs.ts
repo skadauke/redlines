@@ -13,12 +13,13 @@ import {
   answerMcp,
   callTool,
   fitReply,
+  nodeToolsPrompt,
   replyOnlyPrompt,
   replyOnlyRequest,
 } from '@redlines/agent-tools';
 import type { ToolContext, ToolDocument } from '@redlines/agent-tools';
 import type { AgentStep, Author } from '@redlines/editor';
-import { parse } from '@redlines/format';
+import { dialectOfName, parse } from '@redlines/format';
 import type { Parsed, Person } from '@redlines/format';
 import type {
   AgentEvent,
@@ -115,7 +116,7 @@ export interface RunDeps {
     parsed(): Parsed;
     save(): Promise<boolean>;
     /** An edit of a run: a step of the run's (`step.group`), which Undo takes back. */
-    applyAgentEdit(next: string, step: AgentStep): Promise<void>;
+    applyAgentEdit(next: string, step: AgentStep, base?: string): Promise<void>;
   };
   projectRoot(path: string): Promise<ProjectRoot>;
   /**
@@ -193,6 +194,8 @@ interface Run {
   logPath?: string;
   /** The reads already told of, by cause and place, so that each is told once. */
   told?: Set<string>;
+  /** The text the run's tools last read: the base of the edit they write next. */
+  lastRead?: string;
 }
 
 interface ThreadState {
@@ -385,11 +388,18 @@ export function createRuns(deps: RunDeps): RunController {
     return {
       read() {
         check();
-        return deps.document.read();
+        run.lastRead = deps.document.read();
+        return run.lastRead;
       },
       write(next) {
         check();
-        return deps.document.applyAgentEdit(next, { group: run.id, agent: run.job.agent.name });
+        // What the tool read is the text it worked from: a document that moved on since keeps
+        // what was typed meanwhile (an edit is a push, not a whole-text write).
+        return deps.document.applyAgentEdit(
+          next,
+          { group: run.id, agent: run.job.agent.name },
+          run.lastRead,
+        );
       },
     };
   }
@@ -582,6 +592,7 @@ export function createRuns(deps: RunDeps): RunController {
       now: () => new Date(),
       requestedBy: me,
       plainOnly: () => deps.document.plainOnly(),
+      dialect: () => dialectOfName(deps.document.path() ?? ''),
       onStatus: (status) => running(run, status),
       onReply: () => {
         run.replied = true;
@@ -601,7 +612,11 @@ export function createRuns(deps: RunDeps): RunController {
       const unread = [thread, view].find((read) => read.isError);
       if (unread) return finish(run, failed(run, `${agent.name} didn't start: ${unread.text}`));
       prompt = replyOnlyRequest({ thread: thread.text, document: view.text, request: job.text });
-      systemPrompt = replyOnlyPrompt({ documentName, quote: threadOf?.quote });
+      // An agent whose tools reach it through a node has them for as long as the run is live.
+      systemPrompt = (agent.nodeTools === true ? nodeToolsPrompt : replyOnlyPrompt)({
+        documentName,
+        quote: threadOf?.quote,
+      });
     } else {
       systemPrompt = agentPrompt({
         documentName,

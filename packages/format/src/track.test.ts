@@ -34,6 +34,7 @@ import {
   renumbered,
   squash,
   thread,
+  viewBlocks,
 } from './test-helpers.ts';
 import { SELF_CHECK, fineEdit as trackedEdit, fineEdits as trackedEdits } from './track.ts';
 import type { EditContext, Person, TextChange } from './types.ts';
@@ -1333,7 +1334,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
     let refused = 0;
     let checked = 0;
     let undecided = 0;
-    for (let seed = 1; seed <= documents; seed++) {
+    // REDLINES_SEED starts the run at one seed.
+    for (let seed = Number(process.env['REDLINES_SEED'] ?? 1); seed <= documents; seed++) {
       const random = seeded(seed * 7919);
       const below = (n: number) => Math.floor(random() * n);
       let text = randomDocument(seeded(seed));
@@ -1384,15 +1386,67 @@ describe('on random documents', { timeout: 600_000 }, () => {
         // A file with a ledger ends with the line break after the ledger, which the views show,
         // so they are compared without their final line breaks.
         const body = (s: string) => s.replace(/\n+$/, '');
-        const expected = applyChanges(view.text, [wanted.blocks ?? wanted]);
+        // An empty item whose break is a split of the author's own, and nothing else: deleting the
+        // item with its break undoes the Enter that made it, which gives the line it was split from
+        // back, prefix and all (#438).
+        const undoesEnter =
+          wanted.blocks !== undefined &&
+          /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*\n+$/.test(
+            view.text.slice(wanted.blocks.from, wanted.blocks.to),
+          ) &&
+          before.marks.some((mark) => mark.kind === 'split' && mark.entry.by === author.handle);
+        const expected = applyChanges(view.text, [
+          undoesEnter ? wanted : (wanted.blocks ?? wanted),
+        ]);
         // A deletion of all the text of a block takes the block with a break (format §3.4): the
         // empty block that the plain edit leaves is not there. Nothing else is different, but
         // that the blocks around deleted ones are as far apart as they were and a list is numbered
         // from its first item.
         const same = wanted.blocks ? blocksOnly : renumbered;
-        expect(squash(same(dropEmptyBlocks(newestView(after).text))), label).toBe(
-          squash(same(dropEmptyBlocks(expected))),
-        );
+        // A deletion next to a delimiter may take one space beside it, which keeps the emphasis
+        // as the newest view reads it (format §3.1, rule 5, #814).
+        const asked = [expected];
+        if (wanted.from < wanted.to && wanted.insert === '' && !wanted.blocks) {
+          if (/[ \t]/.test(view.text[wanted.from - 1] ?? '')) {
+            asked.push(applyChanges(view.text, [{ ...wanted, from: wanted.from - 1 }]));
+          }
+          if (/[ \t]/.test(view.text[wanted.to] ?? '')) {
+            asked.push(applyChanges(view.text, [{ ...wanted, to: wanted.to + 1 }]));
+          }
+          // A deletion of all the text of a block, with its break, takes the block with it: the
+          // empty item or paragraph is not left (format §3.4).
+          const whole = viewBlocks(view.text).find(
+            (b) => b.text === wanted.from && b.next === wanted.to,
+          );
+          if (whole) {
+            asked.push(applyChanges(view.text, [{ from: whole.line, to: whole.next, insert: '' }]));
+          }
+          // A deletion of all the text of a wrapped line, a middle or the last line of a
+          // paragraph, takes the break in front of it, so that the paragraph is not parted by the
+          // empty line that the text alone would leave (format §3.2, #427).
+          let lineStart = wanted.from;
+          while (/[ \t]/.test(view.text[lineStart - 1] ?? '')) lineStart--;
+          let lineEnd = wanted.to;
+          while (/[ \t]/.test(view.text[lineEnd] ?? '')) lineEnd++;
+          const above =
+            view.text
+              .slice(0, lineStart - 1)
+              .split('\n')
+              .pop() ?? '';
+          if (
+            view.text[lineStart - 1] === '\n' &&
+            (view.text[lineEnd] === '\n' || lineEnd === view.text.length) &&
+            /\S/.test(above) &&
+            !/^[ \t>]*(?:#{1,6}[ \t]|[-*+][ \t]|\d+[.)][ \t]|```|~~~|<|\||\[[^\]]*\]:|(?:-{3,}|\*{3,}|_{3,})\s*$)/.test(
+              above,
+            )
+          ) {
+            asked.push(applyChanges(view.text, [{ ...wanted, from: lineStart - 1 }]));
+          }
+        }
+        const got = squash(same(dropEmptyBlocks(newestView(after).text)));
+        const wants = asked.map((view) => squash(same(dropEmptyBlocks(view))));
+        expect(wants.includes(got) ? got : wants[0], label).toBe(got);
         // The views are compared without their empty blocks, which hides a prefix that the edit
         // left behind: the file has no more lines of nothing but a prefix than it had.
         expect(emptyBlockLines(after), `${label}: a prefix is left`).toBeLessThanOrEqual(
@@ -1418,13 +1472,17 @@ describe('on random documents', { timeout: 600_000 }, () => {
         if (rejected !== undefined) {
           expect(flat(rejected), `${label}: rejecting`).toBe(flat(originalView(after).text));
         }
-        // No mark is lost, except an insertion, deletion or split of the author's own that was used
-        // up, or cancelled.
+        // No mark is lost, except an insertion, deletion, substitution or split of the author's own
+        // that was used up, or cancelled (a substitution whose new text is taken away is the old
+        // text again; one dropped with its new text differing from its old would break the
+        // original or the newest view, which are held above).
         const kept = new Set(parsed.marks.map((m) => m.id));
         for (const mark of before.marks) {
           if (kept.has(mark.id)) continue;
           expect(mark.entry.by, `${label}: ${mark.id} was lost`).toBe(author.handle);
-          expect(['ins', 'del', 'split'], `${label}: ${mark.id} was lost`).toContain(mark.kind);
+          expect(['ins', 'del', 'sub', 'split'], `${label}: ${mark.id} was lost`).toContain(
+            mark.kind,
+          );
         }
         text = after;
         edits++;
@@ -1598,10 +1656,10 @@ describe('on random documents', { timeout: 600_000 }, () => {
       const end = at + typed.lastIndexOf('\n') + 1;
       // One Backspace at most: a second one in a row grows the deletion of another person's break
       // with the text after it, which is no longer read as that deletion (#109). And one text at
-      // most, and none in the text of a first edit that typed words: text typed at the start of a
-      // block of another insertion stacks the own-line openers of two insertions, whose carriers
-      // read otherwise once the other's markers go (#108).
-      const once = new Set<string>(/\S/.test(typed) ? ['text'] : []);
+      // most. Text typed at the start of a block of another insertion, which stacked the own-line
+      // openers of two insertions whose carriers read otherwise once the other's markers went, is
+      // widened now (#108).
+      const once = new Set<string>();
       const kind = (again: string) =>
         again === 'backspace' ? 'delete' : /\S| /.test(again.replace(/\n/g, '')) ? 'text' : 'break';
       for (let step = 1; step <= 1 + below(3); step++) {
@@ -1651,7 +1709,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
         .map((line) => line.replace(/^[ \t>]*/, '').replace(/[ \t]+$/, ''))
         .join('\n')
         .replace(/\n+$/, '');
-    for (let seed = 1; seed <= documents; seed++) {
+    // REDLINES_SEED starts the run at one seed.
+    for (let seed = Number(process.env['REDLINES_SEED'] ?? 1); seed <= documents; seed++) {
       const random = seeded(seed * 5113);
       const below = (n: number) => Math.floor(random() * n);
       const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
@@ -2517,5 +2576,32 @@ describe('on random documents', { timeout: 600_000 }, () => {
     expect(pressed).toBeGreaterThan(documents);
     expect(walked).toBeGreaterThan(documents / 3);
     expect(joinsRefused).toBeLessThan(cuts / 4);
+  });
+});
+
+describe('seeds of the random suites, as units (#438)', () => {
+  it('deleting an empty item with the break of its own split undoes the Enter, prefix and all', () => {
+    // Seed 364: Bo deletes the item that his Enter made, and its break. The line it was split
+    // from stays whole, as `1. alpha`; the item's prefix is the line's, not a block of its own.
+    const text = file('---\ntitle: Notes\n...\n1. <!--split pq3v-->\n\nalpha', { pq3v: 'bo' });
+    const from = text.indexOf('\n\nalpha');
+    const after = track(text, remove(from, from + 2), bo, ['k3x9']);
+    expect(newestView(after).text).toBe('---\ntitle: Notes\n...\n1. alpha\n');
+    expect(originalView(after).text).toBe(originalView(text).text);
+  });
+
+  it('puts words typed at the start of the line after a break in a substitution after its indent', () => {
+    // Seed 2914: Bo's substitution of `\*` holds a hard break and a blank line, then the indent of
+    // the item's continuation line and the `*`. Words typed at the start of that line go after the
+    // indent, as they do after a split.
+    const text = file('1. café <!--sub vk7p \\*-->\\\n\n   *<!--/vk7p-->literal\\*  a-b', {
+      vk7p: 'bo',
+    });
+    const view = newestView(text);
+    const at = view.text.indexOf('   *literal');
+    for (const side of [-1, 1] as const) {
+      const after = track(text, type(view.map.toSource(at, side), '😀'), bo, ['k3x9']);
+      expect(newestView(after).text).toBe('1. café \\\n\n   😀*literal\\*  a-b\n');
+    }
   });
 });

@@ -90,15 +90,15 @@ with its changes intact.
 ## 4. How Redlines compares
 
 Redlines as built on `main`, and what it plans: ✅ is built, and Planned is designed but not built
-yet; a row is built when all of it works on `main`. The other products as of October 2026, from
+yet; a row is built when all of it works on `main`. The other products as of November 2026, from
 their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The
-website shows eleven of these rows, and `npm run compare:check` in `website/` fails when they differ
+website shows eleven of these rows, those only Redlines has first, and `npm run compare:check` in `website/` fails when they differ
 from this table.
 
 | Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
 | ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
 | Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
-| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
+| Edits R Markdown and Quarto files           |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 | Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
@@ -113,7 +113,11 @@ from this table.
 | Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 
-The Mac app is built; Windows and Linux are planned (§10).
+The Mac app is built; Windows and Linux are planned (§10). Live collaboration with people is built between windows of one Mac and planned across networks (§7). The editor is not yet published as a
+package others can embed: the packages are private, and the website's embed is a demo. R Markdown
+and Quarto files are edited with their divs, callouts, citations, cross-references and includes
+drawn; running their code cells is not what Redlines does. Several windows of one document on one
+Mac work, but live collaboration with people means people on different computers.
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
 Docs, the AI edits only when asked, and its edits count as yours: Copilot edits the document under
@@ -184,7 +188,12 @@ The window, on the desktop:
   what `.gitignore` ignores; text and code files are in the secondary ink, and Preferences › General
   can leave them out (all but the open one). The project's images are listed after the documents
   and before the folders (#681): a row is dragged into the document, never opened (§5.10). No
-  other file is listed. The sidebar's edge resizes it, down to closed (#721). Choosing a document opens it in the same window, and ⌘-click
+  other file is listed. A folder that is the home folder, a folder above it or the disk's root is
+  never taken as a project (#451): a document directly in it opens on its own, the sidebar has no
+  folder, and a notice says why. A repository at home is passed over the same way, and the
+  document's own folder is the project. A window never gets more of the disk than its sidebar
+  shows, so none of these is listed, read or opened through the project commands. The sidebar's
+  edge resizes it, down to closed (#721). Choosing a document opens it in the same window, and ⌘-click
   opens it in a new one, as does a click while an agent is working in the window. A text or code
   file is saved under its own name as it is, with no Track Changes, comments or ledger (§5.3). A document dropped on a window opens as one from Finder does, but for
   the file that the window's own document icon dragged, which opens nothing when it is dropped
@@ -480,8 +489,8 @@ Redlines covers everything in the Markdown Guide's
   to make one. Changing the type is a block format change ([format §2.6](format.md#26-format-changes),
   "Alerts"): in Redlines the title is in the author's color until it is decided. The source shows
   while the caret is in the title line. Two alerts one blank line apart are two boxes with the space
-  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are not drawn in the editor yet; the Quick Look preview draws a
-  `.callout-*` div as a quiet labelled box and any other div as its text.
+  between blocks between them, outside the tint. Quarto callouts in `.qmd` and `.Rmd` are drawn in the same box, with their type and title; Quick Look
+  draws a `.callout-*` div as a quiet labelled box and any other div as its text.
 - **Image size:** while the pointer is over an image or it is selected, a handle on its left edge and
   one on its right edge, standing just outside it (inside it, where the image is as wide as the
   column), resize it, with its aspect kept; an aligned image has no handle on the edge it is
@@ -506,7 +515,7 @@ Redlines covers everything in the Markdown Guide's
   Preferences › Editor › Suggest emoji after a colon turns it off; macOS's own picker (fn-E) is
   not touched. A shortcode that a file already has (`:tent:`) is kept as written and drawn as its
   emoji in every view but Plain, as an entity is drawn as its character, and shows as written while
-  the caret is on it; one that a letter or a digit is before (`a:tent:`) is text, as GitHub shows
+  the caret is on it; one that a letter, a digit or punctuation is before (`a:tent:`, `(:tent:`) is text, as GitHub shows
   it. An emoji and a shortcode are one character for a change: no marker parts either
   ([format §3.1](format.md#31-inside-a-line)).
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
@@ -584,7 +593,7 @@ README-style snippets) holds the editor to it.
   or an end of a selection is inside the block, while the current match of Find is in it, and while
   a pending change touches it (a change is seen and decided in its text, never drawn away). Edits
   in the source are ordinary edits, tracked or not, written by the same rules as any text; none is
-  refused. An image in a rendered block is a small box with its alt text: nothing is loaded.
+  refused. An image in a rendered block is drawn when it is a local one, through the host's resolver, at its numeric `width` and `height`; a `<picture>` draws the `<source>` that matches the window's appearance (`prefers-color-scheme`), else its `<img>`. Any other image is a small box with its alt text: nothing remote is loaded.
 - **Security.** The source is never inserted as HTML. Allowed nodes and attributes are rebuilt from
   WebKit's DOMParser, nothing runs, and links and sources use GitHub's protocols only (`http`,
   `https`, `mailto` and relative addresses). Not done: `style`, `class`, microdata and in-page `id`
@@ -727,7 +736,7 @@ mode has no counterpart in the desktop app.
   Make Edit accepts them (never rejects) and makes the edit, as one step to undo, and it is asked
   every time. A host with no sheet refuses as before, and an agent's edit is never made untracked.
   A refusal is kept only where every write would leave the file wrong, and, for now, where the
-  unit a widened edit would replace holds another person's pending change ([hardening](hardening.md)).
+  unit a widened edit would replace has another person's pending mark at its edge ([hardening](hardening.md)).
 - **Track changes for everyone,** like Word's "For Everyone", is what the setting means: everyone
   who opens such a file starts with Track Changes on, under a notice that says so. Without an app
   that enforces roles, anyone can still turn it off, which changes the file for everyone, so the
@@ -1377,8 +1386,8 @@ ordinary copy writes the HTML that Word and Docs draw well); File › Print and 
   a hidden one included. An image dragged in from elsewhere is copied in, never moved, and nothing
   is ever replaced: a taken name gets `-2`, `-3` and on, and an image that is there already, byte
   for byte, is linked and not copied again. A document that is in no project keeps an `images`
-  folder beside it. A document in the home folder or at the disk's root, whose project is too broad
-  to load images from but for its own folder, takes images in that folder alone. The setting can't
+  folder beside it. A document in the home folder or at the disk's root has no project (#451): the
+  preview loads the images in its own folder alone, where an image added to it is copied. The setting can't
   name another place on the disk. Only image files go in, by their
   names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
   or in Plain while Track Changes is on, and the editor says why before anything is saved. Images
@@ -1389,7 +1398,10 @@ ordinary copy writes the HTML that Word and Docs draw well); File › Print and 
   never copied: the link is its path from the document. It is one step to undo, and a tracked
   insertion with Track Changes on, and is refused where an image may not go (in code, say).
 - **Cropping an image** (#624). Image › Crop… puts a crop box with a handle at each corner and edge over a
-  local image; Return or Done applies it, Escape cancels. The app writes the part inside the box as
+  local image; Return or Done applies it, Escape cancels. With the keys alone: the arrow keys move the
+  box, Tab reaches each of the eight handles (named, "Top left corner, crop handle"), and the arrow keys
+  on a handle resize from that side or corner (Shift for larger steps); the box's size is spoken once
+  after a run of key presses. The app writes the part inside the box as
   a copy beside the others in the project's folder for images (`photo-crop.png`, numbered when the
   name is taken), and the Markdown points at the copy, keeping the text, the title, the width and
   the alignment. The original stays, so rejecting the change gets it back. With Track Changes on
@@ -1459,10 +1471,9 @@ a new email under the same name becomes an alias in the ledger
 - heading and list folding, per viewer, with a count of hidden changes on a folded heading;
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
-- captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's and Obsidian's are built, Quarto's
-  are not drawn yet); Mermaid editing with a live preview;
+- captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's, Obsidian's and Quarto's are built); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
-- citations from the document's bibliography in `.qmd` and `.Rmd`;
+- a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (citations are drawn as chips);
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
   step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
@@ -1471,7 +1482,7 @@ a new email under the same name becomes an alias in the ledger
 
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
-changes); link cards; chips for Quarto shortcodes and cross-references; a form
+changes); link cards; chips for Quarto shortcodes; a form
 for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
 reading width, a dark page).
 
@@ -1551,8 +1562,8 @@ syntax Markdown needs, and never shows them.
   gives `<!--del * -->⏎⏎note<!--sub \n    - a-->⏎  - a<!--/-->`), which reads the same in every
   order of decisions; where fenced or indented code stands among the lines that move, or the
   tracked layer can't hold the lines, the key is written as a replacement of the whole item
-  (format §3.12), and only where another person's change is pending in the item does it say so in
-  words and write nothing (#808). Shift-Tab and the first Backspace in a nested
+  (format §3.12), and only where another person's change ends at the item's edge does it say so in
+  words and write nothing (#808, #107). Shift-Tab and the first Backspace in a nested
   list move what is nested in the item along, as before. Shift-Tab in indented code outdents it
   to a paragraph, and where a line stands right under the code (an item, or text) it keeps the four
   columns that make it code and says so, since the line would else join the paragraph.
@@ -1564,7 +1575,7 @@ syntax Markdown needs, and never shows them.
 
 Where Redlines departs from Word, and why: Return in an empty paragraph does nothing, because
 Markdown has no form for a second empty paragraph; a hard break is a backslash, not two trailing
-spaces, because it survives editors that trim spaces; Backspace never joins text into code or a
+spaces, because it survives editors that trim spaces; Backspace and Delete never take a character out of a code fence (the code would stop being code, and the fences after it would pair up differently) nor join text into code or a
 table; and Return in a table cell writes a line break in the cell (`<br>`), as the other word
 processors start a new paragraph there (§5.8).
 
@@ -1608,14 +1619,21 @@ without the editor.
 | `@redlines/render`     | Static HTML rendering and pagination, for print, PDF, HTML export and previews                                                              | Browsers, Node          |
 | `@redlines/clipboard`  | HTML-to-Markdown conversion for paste, and the copy formats: Redlines' own, Word's HTML, generic HTML, Markdown, plain text                 | Browsers                |
 | `@redlines/word`       | Word (`.docx`) export (`exportDocx`), import (a reader that turns a `.docx` into blocks and runs with its revisions and comments, and a mapper from that model to Markdown with its marks and ledger) and the Google Docs differences (§5.10; [export](word-export/README.md)). File › Export to Word… and Open .docx… call it; it is kept out of the editor's bundle | Browsers, Node          |
-| `@redlines/collab`     | The collaboration server and its client protocol                                                                                           | Node; client in browsers |
+| `@redlines/collab`     | The session authority that orders every edit and decision of a live session, with its hub, the window client, the write-ahead log and the transports (memory, and the app's events). A server that hosts sessions across networks is not built (§7.2) | Anywhere (the authority runs in a window of the app) |
+| `@redlines/collab-sim` | The session simulation harness: seeded live sessions over the real format library, with an oracle that checks every run. Research tooling, not shipped | Node                    |
 | `@redlines/mcp`        | The MCP server, for agents outside Redlines                                                                                                | Node                    |
-| `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
+| `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject, and `export-docx` and `import-docx` (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
 | `apps/website-embed`   | The editor with the review interface and a scripted agent, built as a bundle for the website; no desktop code, which the lint rule that keeps Tauri out of shared code checks (it covers `apps/embed-smoke`, the smallest embed, which holds the core's size, too) | Browsers                |
 | `apps/desktop`         | The desktop app: a Tauri v2 shell, in Rust, around the editor                                                                               | macOS, Windows, Linux   |
 | `apps/desktop/quicklook` | The Mac app's Quick Look preview of Markdown, R Markdown and Quarto files: the Clean view as HTML, made by a bundle of `@redlines/format`, micromark and the Default theme's CSS, and the Swift extension that runs it in JavaScriptCore (§10) | macOS (the system's JavaScriptCore) |
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
+
+Written so far: `format`, `editor`, `plugin-api`, `agent-tools`, `agent-process`, `collab`,
+`collab-sim`, `word` and `redlines`. `@redlines/react` and `@redlines/render` are not written. The paste
+converter and the copy formats that `@redlines/clipboard` names are in `@redlines/editor`
+(`clipboard/`), the MCP server that `@redlines/mcp` names is in `@redlines/agent-tools`, and print
+paginates in the desktop app.
 
 The desktop app carries the command line as `Redlines.app/Contents/MacOS/redlines`, a small Rust
 program (`apps/desktop/redlines`) that runs the same bundled TypeScript (`packages/cli` and
@@ -1675,10 +1693,12 @@ the same identity and the sandbox entitlement that an app extension must have
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
 table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu and the grips), `emoji`,
-`toolbar`, `agents` and the three providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
-written. The `word` row is a library so far, `@redlines/word` (§6.3), and no plugin: nothing in the
-app calls it yet, and neither `print` nor `export` is written as a plugin (the app's File › Print
-is its own).
+`toolbar`, `agents`, the three providers and `sync` (a window's side of a live session, §7.1a; the
+`collab` row below is the invitations and presence across networks, still to come) (`plugins/`). The `ai` row is what
+`agents` is growing toward: its chat panel isn't
+written. The `word` row is a library so far, `@redlines/word` (§6.3), and no plugin: the app's File ›
+Export to Word… and Open .docx… call it, and neither `print` nor `export` is written as a plugin (the
+app's File › Print and Export as PDF are its own).
 
 | Plugin       | Adds                                                                         | Needs from the host        |
 | ------------ | ---------------------------------------------------------------------------- | -------------------------- |
@@ -1707,7 +1727,8 @@ is its own).
 
 Where the desktop app's own features live:
 
-- **Printing and PDF** are the `print` plugin, built on `@redlines/render`. The host supplies the
+- **Printing and PDF** are to be the `print` plugin, built on `@redlines/render`; today File › Print and
+  Export as PDF are the desktop app's own. The host supplies the
   printing capability: the desktop app prints and writes PDF files through its webview (WebKit on
   macOS, WebView2 on Windows, WebKitGTK on Linux), and a browser host uses the browser's print.
 - **The first run** is the `onboarding` plugin, which only the desktop app turns on.
@@ -1864,14 +1885,15 @@ optional rules for document elements. People can add their own themes.
 
 ## 7. Collaboration
 
-Status: nothing in this section is on `main` as a feature. The simulations behind it are in
-[research](research/collaboration.md), and [the multiuser study](research/multiuser.md) (November
-2026) says what it would take: one authority per session that orders edits and decisions, with
-roles (viewer, commenter, editor) and a guard on accept and reject; its first Epic is the
-foundations and one document in several windows of one Mac, and its first decisions are taken
-(iroh's public relays, no accounts of our own). The authority, its protocol and its roles are being
-written on an integration branch (`packages/collab`) and are not merged. The text below is the
-design they follow.
+Status: one document in several windows of one Mac is built (§7.1a): the authority, its protocol,
+its hub, the client and the write-ahead log are `packages/collab`, a window's side of a session is
+`plugins/sync`, and `packages/collab-sim` is the simulation harness that tests them (research
+tooling, not shipped). Sessions between people, across networks (§7.2), are not built. The
+simulations behind this section are in [research](research/collaboration.md), and
+[the multiuser study](research/multiuser.md) (November 2026) says what the rest would take: one
+authority per session that orders edits and decisions, with roles (viewer, commenter, editor) and a
+guard on accept and reject; its first decisions are taken (iroh's public relays, no accounts of our
+own). The text below is the design they follow.
 
 ### 7.1 Live sessions
 
@@ -1896,6 +1918,48 @@ design they follow.
   - agents with an agent badge, and their cursor while they work.
 
   Who looked at what is never stored in the file.
+
+### 7.1a One document in several windows
+
+File › Open in Another Window shows the document in a second window of the app, and the two are
+one session on one Mac, with no network, no account and no invitation.
+
+- **One window leads.** It runs the authority (the TypeScript in `packages/collab`) and is the
+  only one that writes the file. The others are its clients: they take the text from it, send
+  their edits to it, and ask it to save. They never read, watch or write the file.
+- **The app keeps the order of leaders.** It says which window leads (`src-tauri/src/session.rs`),
+  counts the epochs and keeps the authority's write-ahead log. When the leading window closes,
+  the next one takes over from the log, in a new epoch, with what was confirmed. A leader that was
+  replaced and is slow to learn it can't write the log: its appends name its epoch.
+- **Save is once, after a pause.** The leader saves when the log has been quiet for a second and
+  its own edits are confirmed. Save in another window asks the leader. A window closes without a
+  question when the authority has everything it made; the leader that closes writes the file first.
+- **Each window is a person to the others.** It has a name ("Ada (window 2)") and a color of its own,
+  chosen by the authority and the same in every window, which follow the window through a
+  handover. The others show its caret with its name on a flag that fades after five seconds, and
+  its selection tinted, in that color. A caret is sent as a position in the confirmed text at a
+  version, and every window places it again among its own text, so it stays among the same words
+  while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
+  windows", or that edits are kept while the session can't be reached.
+- **Undo is each window's own.** A step knows whose it is, and a change that came from another window
+  is never undone by this one (§5.13): a tracked step is taken back by rejecting its own marks, and
+  an untracked step that the other window changed since is left alone, with the name of the window
+  that did.
+- **Tabs of a browser are windows too.** With no app to say who leads, the tabs of a document do it
+  with what a browser has: a Web Lock held by the leader, a BroadcastChannel between them, and
+  IndexedDB for the epoch and the log (`apps/desktop/src/session-tabs.ts`). The leader says it is
+  alive every second; a follower that hears nothing for five steals the lock (a page that hangs
+  keeps its lock), takes over from the log in a new epoch, and the old leader, when it runs again,
+  hosts no more and can no longer write the log.
+- **A person who works alone is untouched.** A document has no session until it is opened in a
+  second window, and a session with one window left works as it did: the file is byte for byte what
+  the editor writes.
+- **What is built,** and what is not: a window's edits go to the authority one at a time, and an
+  edit that someone else's change touched is derived again on the newest text, among its words
+  (§5.13's intents). Typing, deleting and replacing are placed again; a command that has no intent
+  to place yet (a few table operations) is kept if it still fits, and otherwise taken back, with a
+  notice. There is no host-less design: the replay merge the research tested is not built (its
+  verdict is in [research](research/collaboration.md)).
 
 ### 7.2 Inviting people
 
@@ -2204,12 +2268,38 @@ when a login shell can't find the `redlines` command, which the skill runs, and 
 where the command line is installed; Install Skill doesn't install it itself, which may ask for an
 administrator's password. Each copy ends with the version it has (`<!-- redlines-skill 1 -->`), and
 the app carries its own, so that an installed copy that is older shows Update Skill, which keeps the
-old file as `SKILL.md.bak` (a copy edited by hand reads as older, and is replaced). Only a copy of
+old file as `SKILL.md.bak`, or as the next free `SKILL.md.bak.1`, `.2` …, so that no earlier backup is lost (a copy edited by hand reads as older, and is replaced). Only a copy of
 this skill is replaced: a skill of someone's own with the same name, a link (a skills folder kept
 in a repository of dotfiles is one), and a newer copy are left as they are, and the row says so.
 The Claude Code skill is also a plugin, and this repository a marketplace for it
-(`.claude-plugin/marketplace.json`); publishing the skill on ClawHub, OpenClaw's registry, is its
+(`.claude-plugin/marketplace.json`). Claude Code loads both a plugin's skill and a personal one, so
+someone who has both sees it listed twice (`redlines` and `redlines:redlines`); the app installs the
+copy only, never the plugin, and the Claude Code row says to keep one. Publishing the skill on ClawHub, OpenClaw's registry, is its
 owner's, and the steps are written down (`integrations/README.md`), not done.
+
+**OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks
+a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a sheet
+([research note](research/openclaw-connection.md), screens 1 to 7, and a gray card for every
+failure): whether this Mac has Tailscale installed, is signed in and sees other computers
+(`tailscale status --json`, read only: Redlines never starts, stops or changes Tailscale); which
+computer, found by opening its WebSocket and reading its greeting (nothing is sent); a prompt to
+send the person's agent, which holds no secret and asks for the private road only (Tailscale
+Serve, auth on, one command, the tools for one agent); a secure field for the setup code the agent
+answers with, used once; the short code to compare when the agent approves this Mac; and a test.
+Redlines then connects out to the Gateway as a node and offers the six tools; nothing listens on
+this Mac. The connection is a record (the name it writes as, the computer, a level that starts at
+Suggest, the folders its tools may reach) with its tokens and device key in files only this user
+can read, never shown and never returned to a window; adding a connection or giving one more asks
+in a question of the system's, as adding an Agent Client Protocol agent does. The agent's card in
+Preferences shows the level, the folders, when it was last used and where the connection is, and
+Remove deletes every file. An @-mention or Ask goes to the agent through the Gateway (#966), and
+the run it starts edits as itself through the node's tools (the tool bridge, #971): the node's tool
+calls carry the run's session key, and the host answers them in the window the run was asked from,
+with the same six tools, gate, author, thread and edit path as a local agent, for that run only
+(Stop, cancel and the run's end drop it, and a call outside a live run is refused). The `openclaw
+acp` agent below stays for a Mac that has the `openclaw` command, and has no tools. The wire's
+shapes were checked against a throwaway Gateway with a stand-in model, not a real one (the
+research note's First live test).
 
 **OpenClaw.** An OpenClaw agent, such as one a person calls Moby, is reached through the Gateway
 that runs it, which may be on another machine, by `openclaw acp`. Preferences › Agents › OpenClaw
@@ -2493,7 +2583,11 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     exception for files (§11), loads the images itself (`PreviewImages.swift`), and hands them to
     Quick Look as the attachments of its answer, which the page names by `cid:` and which its
     Content-Security-Policy allows and nothing else (`img-src cid:`).
-  - **Not yet:** thumbnails in Finder, which are a separate extension.
+  - **Thumbnails in Finder** are a second extension, `RedlinesThumbnail.appex`
+    (`QLThumbnailProvider`, `apps/desktop/quicklook/swift/thumbnail`). It draws the first blocks of
+    the Clean view as a page, from a script of its own in JavaScriptCore, reads the one file it is
+    asked for (64 KB at most), has the sandbox and no network, and never calls the app or the
+    `redlines` program. The same script builds, signs and checks both extensions.
 
 ## 11. Security and privacy
 

@@ -62,6 +62,30 @@ it attaches.
 A pre-release (`--prerelease`) gets its files too, but it never becomes the latest release, so
 neither the website nor installed copies take any notice of it.
 
+## Before a release: the real-agent limits check
+
+By hand, on a Mac that has the agent programs installed and Claude signed in, never in CI: a Claude
+run costs a cent or two and needs a sign-in, and CI has neither. It shows that what an agent may
+read at "This folder and my home folder" still holds with the current versions of the programs
+(a newer one may change how a limit reads). Nothing in it reads a credential.
+
+1. Install, or update to, the version each provider names as its minimum
+   (`MIN_VERSION` in `plugins/agent-claude/src/index.ts` and `plugins/agent-codex/src/index.ts`)
+   and, as a second run, the newest version. The test looks for the programs at
+   `/opt/homebrew/bin/codex` and `~/.local/bin/claude`.
+2. From the repository root, run:
+
+   ```sh
+   REDLINES_REAL_AGENTS=codex,claude pnpm vitest run apps/desktop/src/agent-limits.real.node.test.ts
+   ```
+
+3. Every check must pass: a file inside the scope is read, and a file in a hidden folder, a `.env`
+   and `~/Library`'s own are refused. A failure is a limit that no longer holds: fix the provider's
+   command line (`claudeArgs`, `codexArgs`) before releasing, or raise `MIN_VERSION` if only older
+   versions fail.
+
+The checks that need cloud files in online-only mode or a clean Mac are steps of the Test Drive.
+
 ## Test builds
 
 Actions › Release › Run workflow, on `main`, or:
@@ -207,7 +231,8 @@ architecture, and 2.5 MB in the universal app.
 
 The app carries a Quick Look preview of Markdown, R Markdown and Quarto files, an app extension at
 `Redlines.app/Contents/PlugIns/RedlinesPreview.appex` (`apps/desktop/quicklook`; what it shows and
-why is design §10). Tauri builds no app extensions, so the build does it:
+why is design §10), and a second one, `RedlinesThumbnail.appex`, for the thumbnails Finder draws. The
+same script builds, signs and checks both, and `bundle.macOS.files` copies both. Tauri builds no app extensions, so the build does it:
 
 - `scripts/build-quicklook` bundles the renderer (TypeScript that runs in JavaScriptCore),
   compiles the Swift extension with `swiftc` for Apple silicon and Intel, joins them with `lipo`,

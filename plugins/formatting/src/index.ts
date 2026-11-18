@@ -7,7 +7,7 @@
 
 import { isolateHistory } from '@codemirror/commands';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { ChangeSet, type EditorState, Transaction } from '@codemirror/state';
+import { type EditorState, Transaction } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
 import {
@@ -15,6 +15,7 @@ import {
   boxChange,
   calloutMenuEffect,
   calloutName,
+  QUARTO_CALLOUTS,
   calloutOf,
   type CalloutMenuRequest,
   checkBoxEffect,
@@ -29,18 +30,22 @@ import {
   indentReason,
   inFrontMatter,
   selectionInTable,
+  dialectFacet,
   setFold,
   setViewModeEffect,
   tablesOf,
+  editSourceFacet,
+  recordedAs,
   trackedEditAnnotation,
   trackingField,
+  type Unnamed,
   viewModeField,
+  writeFormat,
 } from '@redlines/editor';
 import {
   type BlockType,
   EditError,
   GITHUB_TYPES,
-  applyChanges,
   type FormatOp,
   idsIn,
   type InlineFormat,
@@ -48,9 +53,6 @@ import {
   type Person,
   type Range,
   type TextChange,
-  trackedFormat,
-  trackedFormatRanges,
-  untrackedFormat,
 } from '@redlines/format';
 import type { Plugin } from '@redlines/plugin-api';
 import { calloutMenuTheme, closeCalloutMenu, openCalloutMenu } from './callout-menu.ts';
@@ -408,13 +410,22 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
    * library made, markers and all, and Track Changes must not take them for typing; otherwise they
    * count as typing, which Track Changes records as insertions or writes plainly.
    */
-  const put = (changes: readonly TextChange[], userEvent: string, final: boolean): boolean => {
+  const put = (
+    changes: readonly TextChange[],
+    userEvent: string,
+    final: boolean,
+    intent?: Unnamed,
+  ): boolean => {
     if (changes.length === 0) return false;
     const before = view.state.doc;
     const tracked = view.state.field(trackingField);
     view.dispatch({
       changes: changes.map(({ from, to, insert }) => ({ from, to, insert })),
-      annotations: [isolateHistory.of('full'), ...(final ? [trackedEditAnnotation.of(true)] : [])],
+      annotations: [
+        isolateHistory.of('full'),
+        ...(final ? [trackedEditAnnotation.of(true)] : []),
+        ...(intent ? [recordedAs(intent)] : []),
+      ],
       userEvent,
       scrollIntoView: true,
     });
@@ -423,6 +434,12 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       view.dispatch({ effects: setViewModeEffect.of(view.state.facet(markupViewFacet)) });
     }
     return view.state.doc !== before;
+  };
+
+  /** Where ids come from: the editor's source when it has one (a session, a test), else the system's. */
+  const sourceOf = () => {
+    const { random } = view.state.facet(editSourceFacet);
+    return random ? { random } : {};
   };
 
   /** Changes the format of `range`: tracked, or written directly with Track Changes off. */
@@ -436,20 +453,47 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const text = view.state.doc.toString();
     const person = personOf(options.author);
     try {
-      if (view.state.field(trackingField)) {
-        const { changes } = trackedFormat(text, range, op, {
-          author: person,
-          time: ledgerTime(new Date()),
-        });
-        // What the format library made is final, markers and all: Track Changes must not see it
-        // as typing.
-        return put(changes, userEvent, true);
-      }
-      return put(untrackedFormat(text, range, op, { author: person }), userEvent, true);
+      // What the format library made is final, markers and all: Track Changes must not see it as
+      // typing. The intent says what was asked, to derive it again.
+      const { changes, intent } = writeFormat(text, {
+        tracking: view.state.field(trackingField),
+        ranges: [range],
+        op,
+        author: person,
+        time: ledgerTime(new Date()),
+        dialect: view.state.facet(dialectFacet),
+        ...sourceOf(),
+      });
+      return put(changes, userEvent, true, intent);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
       notice(explain(error));
       return false;
+    }
+  };
+
+  /** Why a format change can't be written at `range`, or undefined where it can: asked before a menu
+   * offers it, so that an item is disabled with the reason, and no click is refused. It changes
+   * nothing and tells no one: no notice, and ids from a source of its own, so that the ids the editor
+   * draws are not spent. */
+  const whyNot = (range: Range, op: FormatOp): string | undefined => {
+    if (view.state.field(trackingField) && view.state.field(viewModeField) === 'raw') {
+      return RAW_READ_ONLY;
+    }
+    try {
+      writeFormat(view.state.doc.toString(), {
+        tracking: view.state.field(trackingField),
+        ranges: [range],
+        op,
+        author: personOf(options.author),
+        time: ledgerTime(new Date()),
+        dialect: view.state.facet(dialectFacet),
+        random: (n) => crypto.getRandomValues(new Uint8Array(n)),
+      });
+      return undefined;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      return error.message;
     }
   };
 
@@ -471,53 +515,30 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     if (ranges.length === 0) return false;
     const person = personOf(options.author);
     const tracked = view.state.field(trackingField);
-    let text = view.state.doc.toString();
-    let total = ChangeSet.empty(text.length);
+    const text = view.state.doc.toString();
     // The changes of several ranges are decided together (format §3.7).
     const group = tracked && ranges.length > 1 ? newId(idsIn(text)) : undefined;
-    // The formats of text are made at once: the format library reads the text once, and checks
-    // each cell of a table against its own marks.
-    if (tracked && (op.kind === 'inline' || op.kind === 'clear')) {
-      try {
-        const made = trackedFormatRanges(text, ranges, op, {
-          author: person,
-          time: ledgerTime(new Date()),
-          ...(group === undefined ? {} : { group }),
-        });
-        return put(made.changes, userEvent, true);
-      } catch (error) {
-        if (!(error instanceof EditError)) throw error;
-        notice(explain(error));
-        return false;
-      }
-    }
     try {
-      for (const found of ranges.toReversed()) {
-        const range = { from: total.mapPos(found.from, -1), to: total.mapPos(found.to, 1) };
-        const made = tracked
-          ? trackedFormat(text, range, op, {
-              author: person,
-              time: ledgerTime(new Date()),
-              ...(group === undefined ? {} : { group }),
-            }).changes
-          : untrackedFormat(text, range, op, { author: person });
-        const step = ChangeSet.of(
-          made.map(({ from, to, insert }) => ({ from, to, insert })),
-          text.length,
-        );
-        text = applyChanges(text, made);
-        total = total.compose(step);
-      }
+      // The formats of text are made at once: the format library reads the text once, and checks
+      // each cell of a table against its own marks.
+      const { changes, intent } = writeFormat(text, {
+        tracking: tracked,
+        ranges,
+        op,
+        compose: true,
+        writer: tracked && (op.kind === 'inline' || op.kind === 'clear') ? 'ranges' : 'tracked',
+        ...(group === undefined ? {} : { group }),
+        author: person,
+        time: ledgerTime(new Date()),
+        dialect: view.state.facet(dialectFacet),
+        ...sourceOf(),
+      });
+      return put(changes, userEvent, true, intent);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
       notice(explain(error));
       return false;
     }
-    const changes: TextChange[] = [];
-    total.iterChanges((from, to, _fromB, _toB, inserted) =>
-      changes.push({ from, to, insert: inserted.toString() }),
-    );
-    return put(changes, userEvent, true);
   };
 
   /**
@@ -1168,10 +1189,48 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
    * button, and choosing a type is a block format change of the alert, tracked or plain.
    */
   function listenForCalloutMenu(): () => void {
-    const ask = ({ pos, type, anchor }: CalloutMenuRequest) => {
+    const ask = ({ pos, type, anchor, quarto }: CalloutMenuRequest) => {
       const { doc } = view.state;
       // The place is the alert's, if it still is: the text may have changed since the press.
       if (!Number.isInteger(pos) || pos < 0 || pos > doc.length) return;
+      if (quarto) {
+        // A Quarto callout: its five types, and its title. The place is still its opening fence.
+        if (!/^:{3,}[ \t]*(?:\{|callout-)/.test(doc.lineAt(pos).text)) return;
+        const here = { from: pos, to: pos };
+        openCalloutMenu(view, {
+          anchor,
+          types: QUARTO_CALLOUTS.map((each) => {
+            const reason =
+              each === type ? undefined : whyNot(here, { kind: 'callout', type: each });
+            return { type: each, name: calloutName(each), ...(reason ? { disabled: reason } : {}) };
+          }),
+          current: type,
+          choose: (to) => void format(here, { kind: 'callout', type: to }, 'format.callout'),
+          title: {
+            current: quarto.title,
+            ...(() => {
+              // Asked with a title other than the one it has, which would be no change at all.
+              const set = whyNot(here, {
+                kind: 'callout-title',
+                title: quarto.title === null ? 'x' : `${quarto.title}\u200b`,
+              });
+              const clear =
+                quarto.title === null
+                  ? undefined
+                  : whyNot(here, { kind: 'callout-title', title: null });
+              return {
+                check: (typed: string | null) =>
+                  whyNot(here, { kind: 'callout-title', title: typed }),
+                ...(set ? { disabled: set } : {}),
+                ...(clear ? { clearDisabled: clear } : {}),
+              };
+            })(),
+            set: (title) =>
+              void format(here, { kind: 'callout-title', title }, 'format.callout-title'),
+          },
+        });
+        return;
+      }
       if (!/^>[ \t]?\[![A-Za-z]/.test(doc.lineAt(pos).text)) return;
       // GitHub's types, and any other that a file has already: it is the file's to offer.
       const others: string[] = [];

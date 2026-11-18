@@ -28,6 +28,8 @@ const STACKS: Record<string, string> = {
 
 /** The stack for a CSS `font-family` value such as `'Gelasio', serif`: its first font's twins. */
 export function fontStack(family: string): string {
+  // A program that pastes can't resolve a CSS variable: a value that still holds one is no font.
+  if (/\bvar\(/.test(family)) return STACKS.carlito!;
   const first =
     family
       .split(',')[0]
@@ -410,7 +412,7 @@ function render(
           const align = aligns[i];
           const css =
             (office
-              ? `${OFFICE_CELL}width:${Math.floor(100 / columns)}%;${tag === 'th' ? 'background:#f2f2f2;font-weight:bold;' : ''}`
+              ? `${OFFICE_CELL}font-family:${escape(fonts.body)};width:${Math.floor(100 / columns)}%;${tag === 'th' ? 'background:#f2f2f2;font-weight:bold;' : ''}`
               : '') + (align ? `text-align:${align}` : '');
           return `<${tag}${css ? ` style="${css}"` : ''}>${inlines(cell)}</${tag}>`;
         })

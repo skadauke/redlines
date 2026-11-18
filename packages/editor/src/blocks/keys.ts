@@ -26,6 +26,7 @@ import {
 } from '../tracked/field.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import { heldEditEffect, wasHeld } from '../tracked/ask.ts';
+import { recordedAs } from '../tracked/intent.ts';
 import {
   caretKeptFromEnd,
   probeAnnotation,
@@ -68,6 +69,8 @@ import { convertTwin, htmlListMoves } from './twin.ts';
 import { bareMarkerAt, pastedItems, planListPaste } from './paste.ts';
 import {
   closeOpen,
+  locateOf,
+  type Locate,
   openBlock,
   openAnnotation,
   type OpenRequest,
@@ -223,8 +226,20 @@ export function applyKeyEdit(
   if (edit.record ?? edit.userEvent.startsWith('input.break')) {
     annotations.push(returnAnnotation.of(true));
   }
-  if (edit.open) annotations.push(openAnnotation.of(edit.open));
+  let located = edit.open;
+  if (edit.open) {
+    // Where the line stands in the text the key planned, for a write that replaces the text round it.
+    let locate: Locate | undefined;
+    if (!edit.open.item && !edit.open.line && !edit.final) {
+      const planned = view.state.update({ changes: edit.changes, filter: false });
+      const at = locateOf(planned.newDoc, requestedLine(planned, edit.open));
+      if (at) locate = at;
+    }
+    located = locate ? { ...edit.open, locate } : edit.open;
+    annotations.push(openAnnotation.of(located));
+  }
   if (edit.open?.line) annotations.push(holdViewAnnotation.of(true));
+  if (edit.intent) annotations.push(recordedAs(edit.intent));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
   if (edit.widenFirst) annotations.push(widenFirstAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
@@ -233,7 +248,7 @@ export function applyKeyEdit(
     annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
   else if (edit.caretInOpen && edit.open)
-    annotations.push(caretAnnotation.of({ inOpen: edit.open }));
+    annotations.push(caretAnnotation.of({ inOpen: located ?? edit.open }));
   else if (edit.caretOnLine) annotations.push(caretAnnotation.of({ onLine: edit.caretOnLine }));
   else if (edit.caretAfterText) {
     annotations.push(caretAnnotation.of({ afterText: edit.caretAfterText }));

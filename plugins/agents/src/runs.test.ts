@@ -49,6 +49,8 @@ interface Options {
   codex?: FakeScript;
   /** An agent that answers in text and has no toolbox, as an OpenClaw agent: absent unless given. */
   moby?: FakeScript;
+  /** Moby's tools reach it through a Gateway's node (`AgentProvider.nodeTools`). */
+  mobyNodeTools?: boolean;
   claudeReads?: 'folder' | 'machine';
   /** The folders of the home folder the host lists; none where the host can't, or fails to. */
   homeRoots?: readonly string[] | Error;
@@ -89,6 +91,8 @@ interface Setup {
     edits: string[];
     /** The step each edit was handed over as. */
     steps: AgentStep[];
+    /** The text each edit's tool had read: what the edit is placed from. */
+    bases: (string | undefined)[];
   };
   consent: Record<string, AgentScope | 'no'>;
   /** What the runs told of reads the agents couldn't make. */
@@ -142,6 +146,7 @@ function setup(options: Options = {}): Setup {
         name: 'Moby',
         readLimit: 'machine',
         toolbox: false,
+        ...(options.mobyNodeTools === true ? { nodeTools: true as const } : {}),
         script: options.moby,
       })
     : undefined;
@@ -152,6 +157,7 @@ function setup(options: Options = {}): Setup {
     saves: 0,
     edits: [],
     steps: [],
+    bases: [],
   };
   const consent = options.consent ?? { 'claude|/repo': 'folder', 'codex|/repo': 'folder' };
   let ended = 0;
@@ -171,10 +177,11 @@ function setup(options: Options = {}): Setup {
         await options.saving;
         return doc.saveAnswer;
       },
-      applyAgentEdit: (next, step) => {
+      applyAgentEdit: (next, step, base) => {
         doc.edits.push(next);
         doc.steps.push(step);
-        editor.applyAgentEdit(next, step);
+        doc.bases.push(base);
+        editor.applyAgentEdit(next, step, base);
         return Promise.resolve();
       },
     },
@@ -1196,6 +1203,24 @@ describe('a run', () => {
     expect(s.editor.view.state.selection.main.head).toBe('Today '.length);
   });
 
+  it('hands each edit over with the text its tool read, so that it is a push', async () => {
+    const s = setup({
+      async *claude({ tools }) {
+        await tools.initialize();
+        await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        await tools.call('str_replace', { old_str: 'CI', new_str: 'the nightly build' });
+        yield { type: 'done' };
+      },
+    });
+    ask(s, '@Claude edit');
+    // The comment that asked is in what the tool reads.
+    const before = s.editor.getDoc();
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    // The first edit is made from the document as it was, the second from what the first left.
+    expect(s.doc.bases[0]).toBe(before);
+    expect(s.doc.bases[1]).toBe(s.doc.edits[0]);
+  });
+
   it('hands each agent edit to the document, in order', async () => {
     const s = setup({
       async *claude({ tools }) {
@@ -2094,6 +2119,44 @@ describe('an agent with no toolbox', () => {
     expect(s.doc.edits).toHaveLength(1);
     expect(s.editor.getDoc()).not.toMatch(/<!--(?:ins|del|sub) /);
     expect(s.claude.requests).toHaveLength(0);
+  });
+
+  it('is told of its tools, for as long as the run is live, when they reach it through a node', async () => {
+    const seen: { request?: AgentRequest } = {};
+    const s = setup({
+      moby: answering('Fixed.', seen),
+      mobyNodeTools: true,
+      consent: { 'moby|/repo': 'folder' },
+    });
+    ask(s, '@Moby fix the typo');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    const { request } = seen;
+    expect(request?.systemPrompt).toContain('`str_replace`');
+    expect(request?.systemPrompt).toContain('The tools work only while this run does');
+    expect(request?.systemPrompt).not.toContain("You have no tools of Redlines'");
+    // It is still sent the thread and the document, and a relay is opened for its run.
+    expect(request?.prompt).toContain('----- document -----');
+    expect(s.relay.counts()).toEqual({ opened: 1, closed: 1 });
+  });
+
+  it('writes a Gateway run’s edit through the same push path as a local run, in the agent’s name', async () => {
+    const s = setup({
+      moby: async function* ({ tools }) {
+        await tools.call('str_replace', { old_str: 'run in CI', new_str: 'run nightly' });
+        await tools.call('reply', { text: 'Changed to nightly.' });
+        yield await Promise.resolve<AgentEvent>({ type: 'done' });
+      },
+      mobyNodeTools: true,
+      consent: { 'moby|/repo': 'folder' },
+    });
+    const thread = ask(s, '@Moby make it nightly');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    // The edit went through `applyAgentEdit`, as a local agent's does, with a step to push.
+    expect(s.doc.steps.length).toBeGreaterThan(0);
+    const doc = s.editor.getDoc();
+    expect(parse(doc).text).toContain('nightly');
+    expect(parse(doc).marks.some((mark) => mark.entry.by === 'moby-ada')).toBe(true);
+    expect(entries(s.editor, thread).at(-1)?.text).toBe('Changed to nightly.');
   });
 
   it('has its longer answer folded behind More, as an agent that never called reply has', async () => {

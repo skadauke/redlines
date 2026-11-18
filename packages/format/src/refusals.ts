@@ -47,6 +47,12 @@ export function tierOfCode(code: EditErrorCode | undefined): RefusalTier {
 
 export const REFUSALS: readonly RefusalEntry[] = [
   [
+    'packages/format/src/inline.ts',
+    'DIV_FENCE',
+    'widen',
+    "a marker can't stand on a `:::` line (rule 9): the edit is a replacement of the paragraph or div that holds the fence (§3.12), written by the widened path (Q0)",
+  ],
+  [
     'packages/editor/src/image-crop.ts',
     'CROP_RAW',
     'disable',
@@ -142,7 +148,19 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   ['packages/editor/src/blocks/tab.ts', 'FIRST_ITEM', 'disable', 'inventory #14'],
   ['packages/editor/src/blocks/tab.ts', 'NOT_UNDER_TEXT', 'disable', 'inventory #15'],
+  [
+    'packages/editor/src/blocks/tab.ts',
+    'READS_OTHERWISE',
+    'disable',
+    'Tab under an empty item whose pending split is on its line: neither the fine nor the widened write reads as the view (#1052)',
+  ],
   ['packages/editor/src/blocks/tab.ts', 'THEIR_SPLIT', 'widen', 'inventory #1'],
+  [
+    'packages/editor/src/blocks/move.ts',
+    'UNCLOSED_FENCE',
+    'disable',
+    'a fence nothing closes holds the blocks after it wherever the move puts it (#1103)',
+  ],
   [
     'packages/editor/src/blocks/tab.ts',
     'error.message',
@@ -455,6 +473,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/format/src/format-blocks.ts', 'AT_START', 'widen', 'inventory #37'],
   ['packages/format/src/format-blocks.ts', 'AT_START_OWN', 'widen', 'inventory #38'],
   ['packages/format/src/format-blocks.ts', 'BREAK_PENDING', 'widen', 'inventory #26'],
+  [
+    'packages/format/src/format-blocks.ts',
+    'EMPTIED_CHILD',
+    'alert',
+    'an item that a pending change empties would follow the outdented text as an underline in some orders of decisions (#433); decide the change first, as for a first prefix',
+  ],
   ['packages/format/src/format-blocks.ts', 'FIRST_ITEM', 'disable', 'inventory #14'],
   ['packages/format/src/format-blocks.ts', 'INDENTED', 'widen', 'inventory #32'],
   ['packages/format/src/format-blocks.ts', 'INSIDE', 'widen', 'inventory #23'],
@@ -591,12 +615,6 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'reason',
     'widen',
     'no fine form reads alike in every order: written as a replacement of its unit (format §3.12)',
-  ],
-  [
-    'packages/format/src/table-cols.ts',
-    'A table keeps at least one column.',
-    'disable',
-    'inventory #110; since #477 only where rejecting the last inserted column would leave more than one deleted column, or another change, pending in the table',
   ],
   [
     'packages/format/src/table-diff.ts',
@@ -829,6 +847,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ],
   ['packages/format/src/track.ts', 'HARD_BREAK_SEPARATED', 'widen', 'inventory #52'],
   ['packages/format/src/track.ts', 'IN_CODE', 'widen', 'inventory #123'],
+  [
+    'packages/format/src/track.ts',
+    'UNDERLINING_SPLIT',
+    'alert',
+    'a raw line break at the start of a bullet under text reads two ways, and no unit holds it so that both read alike: the words say to type the text first, or decide the other change first (#443)',
+  ],
   ['packages/format/src/track.ts', 'MIXED_BREAKS', 'widen', 'inventory #128'],
   ['packages/format/src/track.ts', 'NOT_CODE', 'widen', 'inventory #127'],
   ['packages/format/src/track.ts', 'SELF_CHECK', 'widen', 'inventory #76'],

@@ -52,22 +52,23 @@ import {
   openerRange,
   parse,
   type Parsed,
+  type Person,
   type Range,
   rangeEdge,
   type TextChange,
   fineEdit,
   fineEdits,
-  fineFormat,
   trackedEdit,
-  trackedFormat,
   type UnitKind,
   unitsOf,
   untrackedEdit,
-  untrackedFormat,
   readsOtherAtBoundary,
   widenedFirstEdits,
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
+import { dialectFacet } from '../dialect.ts';
+import { mixedFileText } from '../line-breaks.ts';
+import { FileView } from './file-view.ts';
 import { lineChanges } from '../diff.ts';
 import {
   annotationsOfTransaction,
@@ -83,6 +84,16 @@ import {
   type UntrackedWords,
 } from './ask.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
+import {
+  intentAnnotation,
+  newIntentId,
+  recordedAs,
+  recording,
+  replaying,
+  type TypingIntent,
+  type Unnamed,
+} from './intent.ts';
+import { type FormatIntent, writeFormat } from './format-intent.ts';
 import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
@@ -170,7 +181,12 @@ export function contextFor(state: EditorState): EditContext {
   const author = state.facet(authorFacet);
   if (!author) throw new EditError('Track Changes needs to know who is editing.');
   const { now, random } = state.facet(editSourceFacet);
-  return { author, time: `${now().toISOString().slice(0, 16)}Z`, random };
+  return {
+    author,
+    time: `${now().toISOString().slice(0, 16)}Z`,
+    random,
+    dialect: state.facet(dialectFacet),
+  };
 }
 
 /**
@@ -186,15 +202,43 @@ export function blockFormatChanges(
   op: FormatOp,
   widening = false,
 ): TextChange[] {
+  return blockFormat(state, range, op, widening).changes;
+}
+
+/** `blockFormatChanges`, with the intent that wrote them, for the transaction that makes them. */
+export function blockFormat(
+  state: EditorState,
+  range: Range,
+  op: FormatOp,
+  widening = false,
+): { changes: TextChange[]; intent: Unnamed<FormatIntent> } {
   const text = state.doc.toString();
-  if (state.field(trackingField)) {
-    const write = widening ? trackedFormat : fineFormat;
-    return write(text, range, op, contextFor(state)).changes;
-  }
+  const tracking = state.field(trackingField);
   const { random } = state.facet(editSourceFacet);
   const editing = state.facet(authorFacet);
-  const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
-  return untrackedFormat(text, range, op, { random, author });
+  const author = editing ? { handle: editing.handle, name: editing.name } : null;
+  if (tracking) {
+    const ctx = contextFor(state);
+    return writeFormat(text, {
+      tracking,
+      ranges: [range],
+      op,
+      writer: widening ? 'tracked' : 'fine',
+      author: ctx.author,
+      time: ctx.time,
+      dialect: state.facet(dialectFacet),
+      ...(random ? { random } : {}),
+    });
+  }
+  return writeFormat(text, {
+    tracking,
+    ranges: [range],
+    op,
+    author,
+    time: '',
+    dialect: state.facet(dialectFacet),
+    ...(random ? { random } : {}),
+  });
 }
 
 /** A change of a transaction, in its start document's offsets. */
@@ -335,13 +379,27 @@ function pastHiddenText(state: EditorState, edits: Edit[], forward: boolean): Ed
 /**
  * Enter, whose commands delete the spaces after the caret, or before it when they continue a list,
  * keeps them while Track Changes is on: the line break goes after them, the caret to the start of
- * the new line, and no deletion of a space appears beside the break.
+ * the new line, and no deletion of a space appears beside the break. Spaces that are selected are
+ * replaced by the break, as by any key.
  */
 function keepingSpaces(tr: Transaction, edits: Edit[]): Edit[] {
   // CodeMirror's Enter commands, and only they, give their edits this user event.
   if (tr.annotation(Transaction.userEvent) !== 'input') return edits;
-  const { doc } = tr.startState;
+  const { doc, selection } = tr.startState;
   return edits.map((edit) => {
+    // Spaces that are selected are Enter's to replace, as any key replaces them (#1030): only the
+    // spaces that Enter itself takes besides, after or before the caret, are kept. Enter's edit may
+    // reach past the selection (to the spaces after it, or back to the line's start).
+    const range = selection.ranges.find(
+      (r) => r.from < r.to && r.from >= edit.from && r.to <= edit.to,
+    );
+    if (
+      range &&
+      edit.insert.startsWith('\n') &&
+      /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to))
+    ) {
+      return { ...edit, from: range.from, to: range.to };
+    }
     const spaces = edit.from < edit.to && /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to));
     return spaces && edit.insert.startsWith('\n') ? { ...edit, from: edit.to } : edit;
   });
@@ -579,6 +637,15 @@ interface Tracked {
   changes: ChangeSet;
   /** Where the caret goes, when the main edit made a change. */
   caret: number | null;
+  /** What the filter was given, for the intent recorded beside these changes. */
+  intent?: Omit<TypingIntent, 'id'>;
+}
+
+/** Who edits, when, and where the ids come from: what an intent is derived again with. */
+interface Replay {
+  author: Person | null;
+  time: string;
+  random: (n: number) => Uint8Array;
 }
 
 /**
@@ -597,40 +664,94 @@ function trackEdits(
   backward: boolean,
   grouped: boolean | string = false,
   widening: boolean | 'first' = false,
+  replay?: Replay,
 ): Tracked {
-  let ctx = contextFor(state);
+  const base: EditContext = replay
+    ? {
+        author: replay.author as Person,
+        time: replay.time,
+        random: replay.random,
+        dialect: state.facet(dialectFacet),
+      }
+    : contextFor(state);
+  // Every id the format draws is kept, so that the edit can be derived again with the same ones.
+  const drawing = recording(base.random);
+  const tracked = trackEditsWith(state, text, parsed, edits, backward, grouped, widening, {
+    ...base,
+    random: drawing.random,
+  });
+  return {
+    ...tracked,
+    intent: {
+      kind: 'typing',
+      tracking: true,
+      edits,
+      backward,
+      grouped,
+      widening,
+      author: base.author,
+      time: base.time,
+      drawn: drawing.drawn,
+    },
+  };
+}
+
+function trackEditsWith(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  backward: boolean,
+  grouped: boolean | string,
+  widening: boolean | 'first',
+  context: EditContext,
+): Tracked {
+  let ctx = context;
   // A group of its own for several edits, or the one a caller has made for them.
   if (typeof grouped === 'string') ctx = { ...ctx, group: grouped };
   else if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
-  const together = widening === false ? deletedTogether(text, parsed, edits, ctx) : null;
+  const together = widening === false ? deletedTogether(state, text, parsed, edits, ctx) : null;
   if (together) return together;
-  return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
-    // Text typed beside the hidden markers of a comment's or a highlight's range lands where
-    // format §4 says, whichever side of them the caret rests on; the format knows the place.
-    const write =
-      widening === 'first'
-        ? (at: string, change: TextChange, made: typeof ctx) =>
-            widenedFirstEdits(at, [change], made).changes
-        : widening
-          ? trackedEdit
-          : (at: string, change: TextChange, made: typeof ctx) => {
-              const fine = fineEdit(at, change, made);
-              // A fine write that micromark reads otherwise than the newest view is replaced by the
-              // write of the whole unit (#597, #601, #588); where no unit holds it, the fine write
-              // stays, as it was.
-              if (readsOtherAtBoundary(at, [change], fine)) {
-                try {
-                  return trackedEdit(at, change, made);
-                } catch {
-                  return fine;
+  return formatEdits(
+    text,
+    parsed,
+    edits,
+    backward,
+    (doc, edit, read) => {
+      // Text typed beside the hidden markers of a comment's or a highlight's range lands where
+      // format §4 says, whichever side of them the caret rests on; the format knows the place.
+      const write =
+        widening === 'first'
+          ? (at: string, change: TextChange, made: typeof ctx) =>
+              widenedFirstEdits(at, [change], made).changes
+          : widening
+            ? trackedEdit
+            : (at: string, change: TextChange, made: typeof ctx) => {
+                const fine = fineEdit(at, change, made);
+                // A fine write that micromark reads otherwise than the newest view is replaced by the
+                // write of the whole unit (#597, #601, #588); where no unit holds it, the fine write
+                // stays, as it was.
+                if (readsOtherAtBoundary(at, [change], fine)) {
+                  try {
+                    return trackedEdit(at, change, made);
+                  } catch {
+                    return fine;
+                  }
                 }
-              }
-              return fine;
-            };
-    if (edit.from !== edit.to) return write(doc, edit, ctx);
-    const at = rangeEdge(read, edit.from, edit.insert);
-    return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
-  });
+                return fine;
+              };
+      if (edit.from !== edit.to) return write(doc, edit, ctx);
+      const at = rangeEdge(read, edit.from, edit.insert);
+      return write(doc, { from: at, to: at, insert: edit.insert }, ctx);
+    },
+    fileTextFor(state, text),
+  );
+}
+
+/** The file's text where it has line breaks of more than one kind and `text` is the document. */
+function fileTextFor(state: EditorState, text: string): string | null {
+  const file = mixedFileText(state);
+  return file !== null && text === state.doc.toString() ? file : null;
 }
 
 /** How many deletions are written together (below it, one at a time, as each is checked). */
@@ -644,6 +765,7 @@ const TOGETHER = 8;
  * The caret goes where the last deletion starts; the tracked layer moves it out of hidden text.
  */
 function deletedTogether(
+  state: EditorState,
   text: string,
   parsed: Parsed,
   edits: readonly Edit[],
@@ -658,11 +780,24 @@ function deletedTogether(
   ) {
     return null;
   }
+  // A file with line breaks of more than one kind is written on its own text, so that a payload
+  // names the kind of each break a deletion takes out (#924, #1057).
+  const file = fileTextFor(state, text);
+  const view = file === null ? null : new FileView(file);
+  const on = view ? view.text : text;
+  const onParsed = view ? parse(on) : parsed;
   try {
-    const written = fineEdits(text, edits, ctx).changes;
-    const changes = ChangeSet.of(written, text.length);
-    const after = parse(applyChanges(text, written), parsed);
-    if (lineStartMarkers(after) > lineStartMarkers(parsed)) return null;
+    const written = fineEdits(
+      on,
+      view ? edits.map((edit) => ({ ...edit, ...view.changeToFile(edit) })) : edits,
+      ctx,
+    ).changes;
+    const changes = ChangeSet.of(
+      view ? written.map((change) => view.changeToDoc(change)) : written,
+      text.length,
+    );
+    const after = parse(applyChanges(on, written), onParsed);
+    if (lineStartMarkers(after) > lineStartMarkers(onParsed)) return null;
     const main = edits.find((edit) => edit.main);
     return { changes, caret: main ? changes.mapPos(main.from, -1) : null };
   } catch (error) {
@@ -684,14 +819,82 @@ function untrackEdits(
   parsed: Parsed,
   edits: readonly Edit[],
   backward: boolean,
+  replay?: Replay,
 ): Tracked {
-  const { random } = state.facet(editSourceFacet);
+  const drawing = recording(replay ? replay.random : state.facet(editSourceFacet).random);
+  const { random } = drawing;
   // Who edits is not recorded; a refusal names their own changes "yours".
-  const editing = state.facet(authorFacet);
+  const editing = replay ? replay.author : state.facet(authorFacet);
   const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
-  return formatEdits(text, parsed, edits, backward, (doc, edit) =>
-    untrackedEdit(doc, edit, { random, author }),
+  const made = formatEdits(
+    text,
+    parsed,
+    edits,
+    backward,
+    (doc, edit) => untrackedEdit(doc, edit, { random, author, dialect: state.facet(dialectFacet) }),
+    fileTextFor(state, text),
   );
+  return {
+    ...made,
+    intent: {
+      kind: 'typing',
+      tracking: false,
+      edits,
+      backward,
+      grouped: false,
+      widening: false,
+      author: editing ?? null,
+      time: '',
+      drawn: drawing.drawn,
+    },
+  };
+}
+
+/**
+ * The changes an intent makes on `state`'s text, with the author, time and ids it was recorded
+ * with: what the tracking filter wrote for it, byte for byte, on the text it was made on. On other
+ * text they are the changes it would have made there, and the ids that are taken there are drawn
+ * past.
+ *
+ * @throws EditError when the format refuses the edits there.
+ */
+export function deriveIntent(state: EditorState, intent: TypingIntent): ChangeSet {
+  const replay: Replay = {
+    author: intent.author,
+    time: intent.time,
+    random: replaying(intent),
+  };
+  const revert = intent.revert
+    ? ChangeSet.of(
+        intent.revert.map(({ from, to, insert }) => ({ from, to, insert })),
+        state.doc.length,
+      )
+    : null;
+  // The text the edits were made to: the start text, or with a composition taken back.
+  const text = revert ? revert.apply(state.doc).toString() : state.doc.toString();
+  if (intent.exact) {
+    const written = ChangeSet.of(
+      intent.edits.map(({ from, to, insert }) => ({ from, to, insert })),
+      text.length,
+    );
+    return revert ? revert.compose(written) : written;
+  }
+  const parsed = revert ? parse(text, state.field(parsedField)) : state.field(parsedField);
+  const made = (
+    intent.tracking
+      ? trackEdits(
+          state,
+          text,
+          parsed,
+          intent.edits,
+          intent.backward,
+          intent.grouped,
+          intent.widening,
+          replay,
+        )
+      : untrackEdits(state, text, parsed, intent.edits, intent.backward, replay)
+  ).changes;
+  return revert ? revert.compose(made) : made;
 }
 
 /**
@@ -704,7 +907,13 @@ function formatEdits(
   edits: readonly Edit[],
   backward: boolean,
   make: (text: string, edit: TextChange, parsed: Parsed) => TextChange[],
+  file: string | null = null,
 ): Tracked {
+  // A file with line breaks of more than one kind is written on its own text, so that the format
+  // sees the kind of each break a change takes out (#924); what it writes comes back as the
+  // document's changes.
+  let view = file === null ? null : new FileView(file);
+  let fileParsed = view ? parse(view.text) : null;
   let changes = ChangeSet.empty(text.length);
   let caret: number | null = null;
   let before = parsed;
@@ -723,7 +932,15 @@ function formatEdits(
         'no-legal-placement',
       );
     }
-    const result = make(text, mapped, before);
+    let result: TextChange[];
+    let fileNext: string | null = null;
+    if (view && fileParsed) {
+      const made = make(view.text, view.changeToFile(mapped), fileParsed);
+      result = made.map((change) => view!.changeToDoc(change));
+      if (made.length) fileNext = applyChanges(view.text, made);
+    } else {
+      result = make(text, mapped, before);
+    }
     if (!result.length) continue;
     const step = ChangeSet.of(result, text.length);
     const next = applyChanges(text, result);
@@ -739,6 +956,10 @@ function formatEdits(
     changes = changes.compose(step);
     text = next;
     before = after;
+    if (view && fileNext !== null) {
+      fileParsed = parse(fileNext, fileParsed ?? undefined);
+      view = new FileView(fileNext);
+    }
   }
   return { changes, caret };
 }
@@ -763,6 +984,7 @@ function rewritten(
   changes: ChangeSet,
   caret: number | null,
   effects: readonly StateEffect<unknown>[] = [],
+  intent?: Omit<TypingIntent, 'id'>,
 ): TransactionSpec {
   // From the transaction's new document back to its start, and on to the rewritten one.
   const mapping = tr.changes.invertedDesc.composeDesc(changes.desc);
@@ -770,7 +992,10 @@ function rewritten(
     changes,
     selection: caret === null ? tr.newSelection.map(mapping) : EditorSelection.cursor(caret),
     effects: [...StateEffect.mapEffects(tr.effects, mapping), ...effects],
-    annotations: annotationsOf(tr),
+    annotations: [
+      ...annotationsOf(tr),
+      ...(intent ? [intentAnnotation.of({ ...intent, id: newIntentId() })] : []),
+    ],
     scrollIntoView: tr.scrollIntoView,
   };
 }
@@ -798,11 +1023,22 @@ export function authoredChanges(
   edits: readonly TextChange[],
   group?: string,
 ): ChangeSet {
+  return authoredWrite(state, text, parsed, edits, group).changes;
+}
+
+/** `authoredChanges`, with the typing intent that wrote them, to record beside them. */
+export function authoredWrite(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+  group?: string,
+): { changes: ChangeSet; intent: Omit<TypingIntent, 'id'> } {
   const made = edits.map((edit): Edit => ({ ...edit, main: false }));
-  if (state.field(trackingField)) {
-    return trackEdits(state, text, parsed, made, false, group ?? made.length > 1).changes;
-  }
-  return untrackEdits(state, text, parsed, made, false).changes;
+  const done = state.field(trackingField)
+    ? trackEdits(state, text, parsed, made, false, group ?? made.length > 1)
+    : untrackEdits(state, text, parsed, made, false);
+  return { changes: done.changes, intent: done.intent! };
 }
 
 /** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
@@ -813,13 +1049,24 @@ export function untrackedChanges(
   parsed: Parsed,
   edits: readonly TextChange[],
 ): ChangeSet {
-  return untrackEdits(
+  return untrackedWrite(state, text, parsed, edits).changes;
+}
+
+/** `untrackedChanges`, with the typing intent that wrote them. */
+export function untrackedWrite(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly TextChange[],
+): { changes: ChangeSet; intent: Omit<TypingIntent, 'id'> } {
+  const done = untrackEdits(
     state,
     text,
     parsed,
     edits.map((edit): Edit => ({ ...edit, main: false })),
     false,
-  ).changes;
+  );
+  return { changes: done.changes, intent: done.intent! };
 }
 
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
@@ -871,7 +1118,7 @@ function trackedSpec(
     tr.annotation(holdViewAnnotation) !== true && suggests(start, start.doc, edits, tracked.changes)
       ? [setViewModeEffect.of(start.facet(markupViewFacet))]
       : [];
-  return rewritten(tr, tracked.changes, tracked.caret, toRedlines);
+  return rewritten(tr, tracked.changes, tracked.caret, toRedlines, tracked.intent);
 }
 
 /** An edit in front matter: made at once without tracking when the person answered already, and
@@ -1044,9 +1291,18 @@ function untrackedSpec(
   if (JSON.stringify(result.changes.toJSON()) === JSON.stringify(tr.changes.toJSON())) {
     // Marked so that the caret moves out of hidden text, which the edit can leave it in when it
     // brings markers together.
-    return [tr, { annotations: trackedEditAnnotation.of(true), sequential: true }];
+    return [
+      tr,
+      {
+        annotations: [
+          trackedEditAnnotation.of(true),
+          ...(result.intent ? [intentAnnotation.of({ ...result.intent, id: newIntentId() })] : []),
+        ],
+        sequential: true,
+      },
+    ];
   }
-  return rewritten(tr, result.changes, result.caret);
+  return rewritten(tr, result.changes, result.caret, [], result.intent);
 }
 
 /** Closers of marks and nothing else: what ends the body's text, in front of the hidden ledger. */
@@ -1212,6 +1468,7 @@ function finishComposition(view: EditorView): void {
   const effects: StateEffect<unknown>[] = [composedEffect.of(null)];
   let changes = back;
   let selection: SelectionRange | undefined;
+  let intent: Unnamed<TypingIntent> | undefined;
   const inRaw = state.field(viewModeField) === 'raw';
   const asker = state.facet(untrackedAskFacet);
   /** The composition taken back, and held for the sheet (design §3.1). */
@@ -1278,6 +1535,12 @@ function finishComposition(view: EditorView): void {
       return;
     }
     changes = back.compose(made.changes);
+    if (made.intent) {
+      intent = {
+        ...made.intent,
+        revert: [{ from: pending.from, to: pending.to, insert: pending.replaced }],
+      };
+    }
     if (made.caret !== null) selection = EditorSelection.cursor(made.caret);
     if (tracking && !kept && suggests(state, base, edits, made.changes)) {
       effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
@@ -1290,7 +1553,11 @@ function finishComposition(view: EditorView): void {
     changes,
     selection,
     effects,
-    annotations: [trackedEditAnnotation.of(true), Transaction.userEvent.of('input.type.compose')],
+    annotations: [
+      trackedEditAnnotation.of(true),
+      Transaction.userEvent.of('input.type.compose'),
+      ...(intent ? [recordedAs(intent)] : []),
+    ],
   });
 }
 

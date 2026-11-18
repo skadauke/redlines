@@ -58,6 +58,9 @@ pub struct Conversation {
     session: Option<Session>,
     /// Set for OpenClaw's bridge: no toolbox, and a session of its own for the document.
     bridge: Option<Bridge>,
+    /// Set for a run that is a thread at a Gateway (`openclaw_agent.rs`): its session may name one
+    /// of this window's relays in `_meta.tools`, the line its tool calls are answered on.
+    gateway_tools: bool,
 }
 
 enum Asked {
@@ -82,7 +85,15 @@ impl Conversation {
             waiting: HashMap::new(),
             session: None,
             bridge: None,
+            gateway_tools: false,
         }
+    }
+
+    /// The same conversation with a run that is a thread at a Gateway, whose tools reach it through
+    /// the node (`openclaw_tools.rs`) and so may name a relay of the window's.
+    pub fn with_gateway_tools(mut self) -> Self {
+        self.gateway_tools = true;
+        self
     }
 
     /// The same conversation with an agent that is OpenClaw's bridge, if it is one.
@@ -228,7 +239,7 @@ impl Conversation {
     fn check_new_session(&self, params: &Value, sockets: &[String]) -> Result<PathBuf, String> {
         let refused = |why: &str| format!("Redlines won't start an agent's session {why}.");
         if let Some(bridge) = &self.bridge {
-            return self.check_bridge_session(params, bridge);
+            return self.check_bridge_session(params, bridge, sockets);
         }
         let params = params
             .as_object()
@@ -264,7 +275,12 @@ impl Conversation {
 
     /// The folder of a `session/new` to OpenClaw's bridge: the run's folder, no MCP server, which
     /// the bridge rejects and which has none to name, and the thread's session key in `_meta`.
-    fn check_bridge_session(&self, params: &Value, bridge: &Bridge) -> Result<PathBuf, String> {
+    fn check_bridge_session(
+        &self,
+        params: &Value,
+        bridge: &Bridge,
+        sockets: &[String],
+    ) -> Result<PathBuf, String> {
         let refused = |why: &str| format!("Redlines won't start an agent's session {why}.");
         let params = params
             .as_object()
@@ -281,9 +297,17 @@ impl Conversation {
         }
         // The key only: a label names a session that has to be there already, and wins over the
         // key, so a session with one fails to open (and any other `_meta` is the window's to say).
+        // A run at a Gateway may add the relay its tool calls are answered on, one of the window's.
         let meta = params["_meta"]
             .as_object()
-            .filter(|meta| has_exactly(meta, &["sessionKey"]))
+            .filter(|meta| {
+                has_exactly(meta, &["sessionKey"])
+                    || (self.gateway_tools
+                        && has_exactly(meta, &["sessionKey", "tools"])
+                        && meta["tools"]
+                            .as_str()
+                            .is_some_and(|socket| sockets.iter().any(|ours| ours == socket)))
+            })
             .ok_or_else(|| refused("with more than a session's key"))?;
         let key = meta["sessionKey"].as_str().unwrap_or_default();
         if !session_key_is_ours(key, bridge) {
@@ -292,6 +316,22 @@ impl Conversation {
             ));
         }
         Ok(folder)
+    }
+
+    /// The relay a run at a Gateway names in a line `check` has let through (`session/new`'s
+    /// `_meta.tools`), if it does: the one `Relays::claim` is asked about.
+    pub fn tools_socket(&self, line: &str) -> Option<String> {
+        if !self.gateway_tools {
+            return None;
+        }
+        let message: Value = serde_json::from_str(line).ok()?;
+        (message["method"] == "session/new")
+            .then(|| {
+                message["params"]["_meta"]["tools"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .flatten()
     }
 
     /// Whether this is the id of the session the agent opened for this run.
@@ -1044,6 +1084,45 @@ mod tests {
                 .is_err(),
             "a session with no toolbox, to an agent that has one"
         );
+    }
+
+    #[test]
+    fn a_run_at_a_gateway_may_name_a_relay_of_the_windows_for_its_tools_and_a_local_bridge_may_not()
+    {
+        let key = "agent:moby:redlines-0a1b2c3d4e5f6071";
+        let with_tools =
+            |socket: &str| bridge_new_session_with(json!({ "sessionKey": key, "tools": socket }));
+        let gateway = || {
+            let mut talk = for_openclaw(Some("moby")).with_gateway_tools();
+            talk.check(&line(&initialize()), &sockets()).unwrap();
+            talk
+        };
+        let ours = sockets()[0].clone();
+        assert!(
+            gateway()
+                .check(&line(&with_tools(&ours)), &sockets())
+                .is_ok()
+        );
+        // A relay that isn't this window's, or a socket that isn't a string, is not.
+        assert!(
+            gateway()
+                .check(&line(&with_tools("/tmp/rl-9-9/s")), &sockets())
+                .is_err()
+        );
+        assert!(
+            gateway()
+                .check(
+                    &line(&bridge_new_session_with(
+                        json!({ "sessionKey": key, "tools": 5 })
+                    )),
+                    &sockets()
+                )
+                .is_err()
+        );
+        // And never for `openclaw acp`, which has no node to answer a call.
+        let mut local = for_openclaw(Some("moby"));
+        local.check(&line(&initialize()), &sockets()).unwrap();
+        assert!(local.check(&line(&with_tools(&ours)), &sockets()).is_err());
     }
 
     #[test]

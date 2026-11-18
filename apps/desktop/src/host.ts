@@ -65,6 +65,8 @@ export interface DroppedImages {
 export interface WindowStart {
   path: string | null;
   line: number | null;
+  /** The window was opened to join the session of `path`, whose text it takes from its leader. */
+  session?: boolean;
   /**
    * The text of the Untitled document the window starts with, which is unsaved: never an empty
    * string, and null for a window opened for a file or for nothing. A page that reloads asks again
@@ -208,7 +210,7 @@ export interface Host {
    * an Untitled document that holds `text`, which is unsaved. A window opens for a file or for
    * text, not both: the app refuses that, and this rejects with its reason.
    */
-  openWindow(path?: string, line?: number, text?: string): Promise<void>;
+  openWindow(path?: string, line?: number, text?: string, session?: boolean): Promise<void>;
   /** What this window was opened for. */
   windowStart(): Promise<WindowStart>;
   /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
@@ -591,8 +593,13 @@ function createTauriHost(): Host {
       getCurrentWebviewWindow().listen<DroppedImages>('images-dropped', ({ payload }) =>
         onDrop(payload),
       ),
-    async openWindow(path, line, text) {
-      await invoke('open_window', { path: path ?? null, line: line ?? null, text: text ?? null });
+    async openWindow(path, line, text, session) {
+      await invoke('open_window', {
+        path: path ?? null,
+        line: line ?? null,
+        text: text ?? null,
+        ...(session ? { session } : {}),
+      });
     },
     windowStart: () => invoke<WindowStart>('window_start'),
     // Through the app: the menu bar is not a gesture in the page, which the page's own clipboard
@@ -853,9 +860,12 @@ function createBrowserHost(): Host {
     // file or a line), so no tab is ever opened for either (`windowStart`). It can't be given text,
     // which it would lose without a word: the request is refused, as the app refuses what it can't
     // open. An empty text is none, as it is for the app.
-    openWindow: (_path, _line, text) => {
+    openWindow: (path, _line, text, session) => {
       if (text) return Promise.reject(new Error('A browser tab can’t be opened for text.'));
-      window.open(location.href);
+      // Another tab on the same document: it joins the session of this one (src/session-tabs.ts).
+      window.open(
+        session && path ? `${location.pathname}?join=${encodeURIComponent(path)}` : location.href,
+      );
       return Promise.resolve();
     },
     windowStart: () => Promise.resolve({ path: null, line: null, text: null }),

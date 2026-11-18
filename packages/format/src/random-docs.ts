@@ -117,8 +117,58 @@ const ALERT_LINES = [
   '[!info] A title',
 ];
 
+/** Inline constructs of pandoc's dialect that Quarto uses (format §3.1, rule 9, §9.1): citations,
+ * cross-references, shortcodes, `~x~` and `^x^` (#1039), spans with attributes and inline code with
+ * a language. Marks may stand around them, never inside. Drawn only with `dialect: 'pandoc'`. */
+const PANDOC_CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => string)[] = [
+  () => '@fig-plot',
+  () => '@sec-intro.',
+  (pick) => `@tbl-${pick(['a', 'b', 'results'])}`,
+  () => '@eq-energy',
+  () => '[@smith2020, p. 4]',
+  () => '[@smith2020; @doe2021]',
+  () => '[-@smith2020]',
+  (pick) => `see @smith2020 and ${pick(WORDS)}`,
+  () => '{{< var version >}}',
+  () => '{{< meta title >}}',
+  (pick) => `${pick(WORDS)} {{< pagebreak >}}`,
+  () => 'H~2~O',
+  () => 'x~i~',
+  (pick) => `~${pick(['a', 'b1', 'n'])}~`,
+  () => 'E = mc^2^',
+  (pick) => `^${pick(['th', '3', 'n+1'])}^`,
+  (pick) => `[${pick(WORDS)}]{.mark}`,
+  () => '`r 1 + 1`',
+  () => '`python x`',
+];
+
+/** The attribute blocks of divs that Quarto and pandoc know. */
+const DIV_ATTRIBUTES = [
+  '{.callout-note}',
+  '{.callout-tip}',
+  '{.callout-warning title="Careful"}',
+  '{.callout-important collapse="true"}',
+  '{#fig-panel .column width="40%"}',
+  '{.panel-tabset}',
+  'columns',
+  '{.hidden}',
+];
+
+/** Fenced code chunks, with and without options, whose lines hold no marker. */
+const CHUNKS = [
+  '```{r}\nx <- 1:10\nplot(x)\n```',
+  '```{r}\n#| label: fig-plot\n#| fig-cap: "A plot"\nplot(1:3)\n```',
+  '```{python}\n#| echo: false\nprint(42)\n```',
+  '````{r}\n```\nnested\n```\n````',
+];
+
 /** What a random document holds besides the blocks every one may have. */
 export interface RandomDocumentOptions {
+  /** The dialect of the file the document is in (format §9.1). In the pandoc dialect the document
+   * mixes ordinary Markdown with what Quarto has: `:::` divs and callouts (a nested one too), code
+   * chunks, includes, headings with attributes, and, inside the text, citations, cross-references,
+   * shortcodes, `~x~` and `^x^`. A document of the default dialect is as it always was. */
+  dialect?: 'gfm' | 'pandoc';
   /** Draw only what the generator drew before the forms of #310 and #311, so that a test that pins
    * a seed it found by a long run makes the document it was found with. The other documents of
    * every suite hold the newer forms (`NEWER_CONSTRUCTS`). */
@@ -139,7 +189,12 @@ export interface RandomDocumentOptions {
  * no marker starts a line. */
 export function randomDocument(random: () => number, options: RandomDocumentOptions = {}): string {
   const taken = new Set<string>();
-  const constructs = options.legacy === true ? CONSTRUCTS : [...CONSTRUCTS, ...NEWER_CONSTRUCTS];
+  const pandoc = options.dialect === 'pandoc';
+  const constructs = [
+    ...CONSTRUCTS,
+    ...(options.legacy === true ? [] : NEWER_CONSTRUCTS),
+    ...(pandoc ? PANDOC_CONSTRUCTS : []),
+  ];
   const marks: Ledger['marks'] = {};
   const comments: Thread[] = [];
   const below = (n: number) => Math.floor(random() * n);
@@ -247,12 +302,35 @@ export function randomDocument(random: () => number, options: RandomDocumentOpti
     return lines.join('\n');
   }
 
+  /** A block of Quarto: a div or callout (with a heading, a list or a quote in it, or another div),
+   * an include, a code chunk, or a heading with an attribute. */
+  function quarto(line: (prefix: string | null) => string): string {
+    const roll = below(10);
+    if (roll < 5) {
+      const parts = [line('')];
+      if (below(3) === 0) parts.push(`- ${line('  ')}\n- ${line('  ')}`);
+      if (below(4) === 0) parts.push(`> ${line('> ')}`);
+      if (below(4) === 0) parts.unshift(`## ${line(null)}`);
+      if (below(4) === 0) parts.push(line(''));
+      const gap = below(3) === 0 ? '\n\n' : '\n';
+      return `::: ${pick(DIV_ATTRIBUTES)}${gap}${parts.join('\n\n')}${gap}:::`;
+    }
+    if (roll < 6) {
+      const inner = `::: ${pick(DIV_ATTRIBUTES)}\n${line('')}\n:::`;
+      return `::::: {.outer}\n${inner}\n\n${line('')}\n:::::`;
+    }
+    if (roll < 7) return pick(['{{< include _part.qmd >}}', '{{< include "chapters/two.qmd" >}}']);
+    if (roll < 9) return pick(CHUNKS);
+    return `## ${line(null)} {#sec-${pick(['intro', 'methods', 'a1'])}}`;
+  }
+
   /** A block: its lines, each with the prefix of the block. */
   function block(): string {
     const line = (prefix: string | null) => {
       wrapPrefix = prefix;
       return `${pick(WORDS)} ${inline(0)}`;
     };
+    if (pandoc && below(5) < 2) return quarto(line);
     if (options.indentedCode === true && below(4) === 0) {
       const where = below(5);
       if (where === 0) return code('    ');

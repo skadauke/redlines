@@ -1165,6 +1165,7 @@ describe('ui state', () => {
       canUndo: false,
       canRedo: false,
       canAcceptAll: false,
+      acceptAllCount: 0,
     });
   });
 

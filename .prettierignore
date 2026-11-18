@@ -14,3 +14,6 @@ apps/desktop/redlines/bundle/
 
 # Captured clipboard HTML, kept as the app wrote it
 packages/editor/src/clipboard/fixtures/
+# Upstream source kept as its author formats it
+packages/collab/src/vendor/collab.ts
+packages/collab/src/vendor/upstream.ts

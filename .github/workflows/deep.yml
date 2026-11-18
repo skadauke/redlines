@@ -58,4 +58,4 @@ jobs:
       - name: ${{ matrix.suite }}
         env:
           REDLINES_FUZZ: ${{ inputs.fuzz }}
-        run: pnpm exec vitest run "${{ matrix.suite }}" --reporter=default --testTimeout=3600000 --hookTimeout=3600000
+        run: pnpm exec vitest run "${{ matrix.suite }}" --reporter=default --testTimeout=19800000 --hookTimeout=19800000

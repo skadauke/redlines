@@ -1,9 +1,9 @@
 // Reading the ledger (format §5): finding the comment, parsing its YAML, and turning the result into
 // a `Ledger`. Nothing here throws: a ledger that can't be read becomes an empty one and a warning.
 
-import { parse as parseYaml } from 'yaml';
+import { isScalar, parseDocument, visit } from 'yaml';
 import { isId } from './ids.ts';
-import { decodePayload } from './payload.ts';
+import { decodeText } from './payload.ts';
 import { scan } from './scan.ts';
 import type { Scan } from './scan.ts';
 import type {
@@ -166,7 +166,7 @@ function isMap(value: unknown): value is Raw {
 function decodeValue(value: string): string {
   return value
     .split('\n')
-    .map((line) => (line === '\\' ? '' : decodePayload(line)))
+    .map((line) => (line === '\\' ? '' : decodeText(line)))
     .join('\n');
 }
 
@@ -202,13 +202,39 @@ function byAt(value: string): { by: string; at: string } {
 const yamlRead = new Map<string, { doc: unknown } | { error: unknown }>();
 const YAML_KEPT = 64;
 
+/**
+ * The YAML of `source`, read with every value a string, and an error for a key that a map holds
+ * twice. The `yaml` package's own check (`uniqueKeys`) compares each key with every key before it,
+ * so a ledger of 20,000 marks took 12 s to read, against 1 s with the check made here, with a set.
+ */
+function parseYamlUnique(source: string): unknown {
+  const document = parseDocument(source, {
+    schema: 'failsafe',
+    uniqueKeys: false,
+    logLevel: 'error',
+  });
+  const [error] = document.errors;
+  if (error !== undefined) throw error;
+  visit(document, {
+    Map(_, map) {
+      const seen = new Set<unknown>();
+      for (const pair of map.items) {
+        // Only scalar keys repeat: the `yaml` package takes two collections or aliases for two keys.
+        if (!isScalar(pair.key)) continue;
+        const name: unknown = pair.key.value;
+        if (seen.has(name)) throw new Error('Map keys must be unique');
+        seen.add(name);
+      }
+    },
+  });
+  return document.toJS();
+}
+
 function yamlOf(source: string): unknown {
   let found = yamlRead.get(source);
   if (found === undefined) {
     try {
-      found = {
-        doc: parseYaml(source, { schema: 'failsafe', uniqueKeys: true, logLevel: 'error' }),
-      };
+      found = { doc: parseYamlUnique(source) };
     } catch (error) {
       found = { error };
     }
@@ -275,14 +301,23 @@ export function readLedger(source: string, range: Range): LedgerRead {
     const found: [string, YamlValue][] = [];
     for (const [name, value] of Object.entries(map)) {
       if (known.has(name)) continue;
-      warn('unknown-key', `The key ${name} in ${where} is not known and is kept`);
+      if (!newer) warn('unknown-key', `The key ${name} in ${where} is not known and is kept`);
       found.push([name, toYamlValue(value)]);
     }
     return found.length > 0 ? Object.fromEntries(found) : undefined;
   };
 
+  // A ledger of a later version is never downgraded (format §5.2): its number is kept as it was
+  // read (in `extra`, where `serializeLedger` writes it back in `version`'s place), so are the fields
+  // it has that this version doesn't know, and the reader warns once, not for each of them.
   const version = str(doc['version']);
-  if (version !== undefined && version !== '1')
+  const newer = version !== undefined && /^[0-9]+$/.test(version) && Number(version) > 1;
+  if (newer)
+    warn(
+      'bad-ledger',
+      `This file's ledger is version ${version}, newer than this Redlines reads (1). Its fields are kept as they are and its version number is not changed; update Redlines to read it fully.`,
+    );
+  else if (version !== undefined && version !== '1')
     warn('bad-ledger', `Unsupported ledger version ${version}`);
 
   const tracking = str(doc['tracking']);
@@ -335,10 +370,11 @@ export function readLedger(source: string, range: Range): LedgerRead {
   const extra: [string, YamlValue][] = [];
   for (const [key, value] of Object.entries(doc)) {
     if (TOP_KEYS.has(key)) continue;
-    if (!KEPT_KEYS.has(key))
+    if (!KEPT_KEYS.has(key) && !newer)
       warn('unknown-key', `The key ${key} in the ledger is not known and is kept`);
     extra.push([key, toYamlValue(value)]);
   }
+  if (newer) extra.unshift(['version', version]);
   if (extra.length > 0) ledger.extra = Object.fromEntries(extra);
 
   return { ledger, warnings, valid: true };

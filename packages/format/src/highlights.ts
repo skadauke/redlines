@@ -4,13 +4,25 @@
 // comment's go (anchors.ts), and accepting or rejecting it, which dismisses it and leaves the text
 // (decide.ts), is how it is taken away.
 
+import { eolOf } from './changes.ts';
+import { withDialect } from './dialect.ts';
+import { aroundFences } from './div-ends.ts';
+import { awayFromIncludes, type AroundInclude } from './include.ts';
 import { anchorRange, assertRange, checkAnchor, withinBody } from './anchors.ts';
 import type { AnchorWords } from './anchors.ts';
 import { addPerson, commitEdit, markerRanges, workingLedger } from './edit-support.ts';
+import { beforePipes } from './comments.ts';
 import { recordIds } from './edits-widen.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
+import {
+  decisionsHold,
+  hasTableChange,
+  marksOfTablesAt,
+  nearRanges,
+  refusalsOf,
+} from './table-settle.ts';
 import { readTables } from './table.ts';
 import { highlightAgainstRows, inPendingRow, rowWidenings } from './table-rules.ts';
 import type { TableRead } from './table.ts';
@@ -122,61 +134,95 @@ export function addHighlight(
   range: Range,
   ctx: EditContext,
   rowsWidened = false,
+  settled = false,
 ): { changes: TextChange[]; id: string } {
-  const recorded = recordIds(ctx);
-  if (!rowsWidened) ctx = recorded.ctx;
-  assertRange(text, range);
-  const parsed = parse(text);
-  // A range that reaches into the ledger ends where the body does, and one that is only in it is none.
-  const wanted = withinBody(text, parsed, range);
-  if (wanted.from === wanted.to) throw new EditError(NO_TEXT, 'empty-range');
-  const markers = markerRanges(parsed);
-  let placed: Range;
-  try {
-    placed = anchorRange(text, parsed, markers, wanted, HIGHLIGHT_WORDS);
-  } catch (error) {
-    // Where a marker can't go is told in words that every edit shares, which say why but not what
-    // to do (format §3.1): a highlight says that too.
-    if (error instanceof EditError && error.code === 'no-legal-placement') {
-      throw new EditError(`${error.message} ${SELECT_OTHER}`, error.code);
+  return withDialect(ctx.dialect, () => {
+    const recorded = recordIds(ctx);
+    if (!rowsWidened) ctx = recorded.ctx;
+    assertRange(text, range);
+    const parsed = parse(text);
+    // A range that reaches into the ledger ends where the body does, and one that is only in it is none.
+    const wanted = withinBody(text, parsed, range);
+    if (wanted.from === wanted.to) throw new EditError(NO_TEXT, 'empty-range');
+    const markers = markerRanges(parsed);
+    // An end on a `:::` fence goes to the whole div, or into its body (div-ends.ts); an end on the
+    // line of a Quarto include goes around it (include.ts).
+    const fenced = aroundFences(text, wanted);
+    let around: AroundInclude;
+    if (fenced.whole) around = fenced.whole;
+    else {
+      let placed: Range;
+      try {
+        placed = anchorRange(text, parsed, markers, fenced.inner, HIGHLIGHT_WORDS);
+        placed = beforePipes(text, parsed, markers, placed, HIGHLIGHT_WORDS);
+      } catch (error) {
+        // Where a marker can't go is told in words that every edit shares, which say why but not what
+        // to do (format §3.1): a highlight says that too.
+        if (error instanceof EditError && error.code === 'no-legal-placement') {
+          throw new EditError(`${error.message} ${SELECT_OTHER}`, error.code);
+        }
+        throw error;
+      }
+      around = fenced.apply(awayFromIncludes(text, placed));
     }
-    throw error;
-  }
-  const { from, to } = placed;
-  // The ends moved together, or what is between them is not text of the newest view: the range was
-  // white space between blocks, or lines, or markers, or a deletion, and nothing that reads.
-  if (from === to || !coversText(text, from, to)) throw new EditError(NO_TEXT, 'empty-range');
+    const placed: Range = { from: around.from, to: around.to };
+    const { from, to } = around;
+    // The ends moved together, or what is between them is not text of the newest view: the range was
+    // white space between blocks, or lines, or markers, or a deletion, and nothing that reads.
+    if (from === to || !coversText(text, from, to)) throw new EditError(NO_TEXT, 'empty-range');
 
-  const id = newId(idsIn(text), ctx.random);
-  const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };
-  if (ctx.group !== undefined) entry.group = ctx.group;
-  if (ctx.note !== undefined) entry.note = ctx.note;
-  const ledger = workingLedger(parsed.ledger);
-  addPerson(ledger, ctx.author);
-  ledger.marks[id] = entry;
+    const id = newId(idsIn(text), ctx.random);
+    const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };
+    if (ctx.group !== undefined) entry.group = ctx.group;
+    if (ctx.note !== undefined) entry.note = ctx.note;
+    const ledger = workingLedger(parsed.ledger);
+    addPerson(ledger, ctx.author);
+    ledger.marks[id] = entry;
 
-  const anchors: TextChange[] = [
-    { from, to: from, insert: `<!--hl ${id}-->` },
-    { from: to, to, insert: `<!--/${id}-->` },
-  ];
-  const changes = commitEdit(text, anchors, ledger, {
-    parsed,
-    created: [id],
-    verify: (after) => checkAnchor(after, id, true, HIGHLIGHT_WORDS.inCode),
-    inCode: HIGHLIGHT_WORDS.inCode,
+    const eol = eolOf(text, parsed.ledgerRange);
+    const anchors: TextChange[] = [
+      { from, to: from, insert: `<!--hl ${id}-->${around.openerLine ? eol : ''}` },
+      {
+        from: to,
+        to,
+        insert: `${around.closerLine ? eol : ''}<!--/${id}-->`,
+      },
+    ];
+    const changes = commitEdit(text, anchors, ledger, {
+      parsed,
+      created: [id],
+      verify: (after) => checkAnchor(after, id, true, HIGHLIGHT_WORDS.inCode),
+      inCode: HIGHLIGHT_WORDS.inCode,
+    });
+    const across = refuseAcrossPendingRows(text, parsed, wanted, placed, rowsWidened);
+    if (!across) {
+      // In a table with a change pending, the ends stand where no decision of it becomes impossible (#396).
+      if (settled || !hasTableChange(text)) return { changes, id };
+      const scope = marksOfTablesAt(text, wanted);
+      if (scope.size === 0) return { changes, id };
+      const before = refusalsOf(text, scope);
+      if (decisionsHold(text, changes, before, scope)) return { changes, id };
+      for (const candidate of nearRanges(text, wanted, 60)) {
+        try {
+          const found = addHighlight(text, candidate, recorded.replay(), rowsWidened, true);
+          if (decisionsHold(text, found.changes, before, scope)) return found;
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+        }
+      }
+      return { changes, id };
+    }
+    // A highlight can't leave one row for another while a row is inserted or moved, and has no point
+    // form to be left as: its ends are taken to rows that are not pending, so that no decision of a
+    // row can take a marker away (format §3.12).
+    if (rowsWidened) throw across.error;
+    for (const candidate of rowWidenings(across.table, text, wanted)) {
+      try {
+        return addHighlight(text, candidate, recorded.replay(), true);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+    }
+    throw across.error;
   });
-  const across = refuseAcrossPendingRows(text, parsed, wanted, placed, rowsWidened);
-  if (!across) return { changes, id };
-  // A highlight can't leave one row for another while a row is inserted or moved, and has no point
-  // form to be left as: its ends are taken to rows that are not pending, so that no decision of a
-  // row can take a marker away (format §3.12).
-  if (rowsWidened) throw across.error;
-  for (const candidate of rowWidenings(across.table, text, wanted)) {
-    try {
-      return addHighlight(text, candidate, recorded.replay(), true);
-    } catch (error) {
-      if (!(error instanceof EditError)) throw error;
-    }
-  }
-  throw across.error;
 }

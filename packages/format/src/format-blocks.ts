@@ -34,8 +34,11 @@ import {
   readCalloutWas,
   typeOfWord,
 } from './callout.ts';
-import { eolOf } from './changes.ts';
+import { closeOfDiv, readFenceLine, readFenceWas, rewriteFence, titleOf } from './callout-fence.ts';
+import { eolOf, plainPayload } from './changes.ts';
+import { isPandoc } from './dialect.ts';
 import { EditError } from './errors.ts';
+import { decodePayload } from './payload.ts';
 import {
   encodeValue,
   isAlignOps,
@@ -90,6 +93,9 @@ const NO_PARENT = "This item can't be outdented: it isn't under another item.";
  * editor's Backspace says it in the same words (it reads the refusal, not its text). */
 export const NUMBERED_CHILD =
   "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.";
+/** Why an item can't be outdented: the item after it is empty in one reading of the file and not in another. */
+const EMPTIED_CHILD =
+  "This item can't be outdented while the item after it is changed: a pending change empties that item in some readings, and right under this text it would turn the text into a heading. Accept or reject that change first.";
 const QUOTE_TIGHT =
   "A list in a quote written with no space after the `>` can't be indented or outdented, because the lines would need a space the quote doesn't have. Add the space after each `>` first.";
 const TABS = "Lines indented with tabs can't be moved. Indent them with spaces first.";
@@ -128,6 +134,39 @@ const isHeading = (type: BlockType) => /^h[1-6]$/.test(type);
 
 /** A list item's marker and the spaces after it, then its box. */
 const ITEM = /^((?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$))(\[[ xX]\](?:[ \t]+|$))?/;
+
+/** The markers of changes and comments, as the newest view drops them (a deletion with its text). */
+const MARKERS = /<!--(?:\/[a-z0-9]+|(?:split|ins|del|sub|fmt|cmt|hl) [a-z0-9]+(?: [^]*?)?)-->/g;
+
+/** A line as the original view reads it: every change on it rejected; null where one line can't tell. */
+function originalLine(row: string): string | null {
+  const text = row
+    .replace(/<!--ins ([a-z0-9]+)-->[^]*?<!--\/\1-->/g, '')
+    .replace(
+      /<!--sub ([a-z0-9]+) ([^]*?)-->[^]*?<!--\/\1-->/g,
+      (_all, _id: string, payload: string) => plainPayload(decodePayload(payload)),
+    )
+    .replace(/<!--del [a-z0-9]+ ([^]*?)-->/g, (_all, payload: string) =>
+      plainPayload(decodePayload(payload)),
+    )
+    .replace(/<!--\/[a-z0-9]+-->|<!--(?:cmt|hl) [a-z0-9]+(?: [^]*?)?-->/g, '');
+  return /<!--(?:split|fmt) /.test(text) ? null : text;
+}
+
+/**
+ * Whether a line holding a marker is an item with no text in some readings of the file (as it is,
+ * the newest view, the original view) and an item with text in others: right under text it is an
+ * underline of a heading in the first and a list in the other (outdenting an item, #433).
+ */
+function readsOtherwise(row: string): boolean {
+  if (!/<!--/.test(row)) return false;
+  const original = originalLine(row);
+  const noNotes = row.replace(/<!--(?:cmt|hl) [a-z0-9]+(?: [^]*?)?-->/g, '');
+  const readings = [noNotes, row.replace(MARKERS, ''), ...(original === null ? [] : [original])];
+  const empty = readings.map((r) => /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]*$/.test(r));
+  const item = readings.map((r) => ITEM.test(r.trimStart()));
+  return empty.some(Boolean) && item.some((is, i) => is && !empty[i]);
+}
 const HEADING = /^#{1,6}(?:[ \t]+|$)/;
 /** A line that would make the paragraph above it a setext heading. */
 const UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
@@ -1016,6 +1055,15 @@ function planIndent(
       throw refused(NUMBERED_CHILD);
     }
   }
+  if (by === -1) {
+    const next = nextLine(reader, last);
+    if (next !== undefined && quoteDepth(text, next) === depth) {
+      const after = unquoted(text, next);
+      if ((/^[ \t]*/.exec(after)?.[0].length ?? 0) === lead && readsOtherwise(after)) {
+        throw refused(EMPTIED_CHILD);
+      }
+    }
+  }
   assertPlace(reader, last);
   const delta = target - lead;
   if (delta < 0 && lines.some((at) => spaces(at).length < -delta)) throw refused(NO_ROOM);
@@ -1297,9 +1345,181 @@ function calloutUndo(reader: FormatReader, segment: Segment, was: CalloutWas): T
   );
 }
 
+/** A callout of a pandoc file as a change of its type or its title sees it. */
+interface FenceDiv {
+  /** The start of the opening fence's line. */
+  line: number;
+  /** The attribute text, where it is in the file, and what it says. */
+  attrs: Range;
+  text: string;
+  /** The end of the closing fence's line, and the start of the line after it. */
+  end: number;
+  after: number;
+  /** The author's pending change of it. */
+  own?: { mark: MarkRange; segment: Segment; was: string };
+  /** The start of the first line it takes, with the opener of its own mark. */
+  top: number;
+}
+
+/** The callout whose opening fence starts the paragraph, or undefined where the line is no fence. */
+function fenceAt(reader: BlockReader, paragraph: Range, asked: Range): FenceDiv | undefined {
+  const { text, parsed } = reader;
+  // The line asked on, which is the fence's where text goes on from the line above it (no blank
+  // line between them), and else the paragraph's first.
+  let line = lineStart(text, asked.from);
+  let found = readFenceLine(lineAt(text, line));
+  if (!found || line < paragraph.from) {
+    line = lineStart(text, paragraph.from);
+    found = readFenceLine(lineAt(text, line));
+  }
+  if (!found) return undefined;
+  const starts: number[] = [line];
+  for (let at = nextLine(reader, line); at !== undefined; at = nextLine(reader, at))
+    starts.push(at);
+  const close = closeOfDiv(
+    starts.map((at) => lineAt(text, at).replace(/\r$/, '')),
+    0,
+  );
+  if (close === undefined) throw refused(NOT_AN_ALERT);
+  const end = lineEnd(text, starts[close] ?? line);
+  const lineBreak = text.indexOf('\n', end);
+  const fence: FenceDiv = {
+    line,
+    top: line,
+    attrs: { from: line + found.from, to: line + found.to },
+    text: found.text,
+    end,
+    after: lineBreak === -1 ? text.length : lineBreak + 1,
+  };
+  // A mark that starts the callout: the author's own change of it, alone on the line before it.
+  for (const mark of parsed.marks) {
+    for (const segment of mark.segments) {
+      if ((segment.carrier?.to ?? segment.open.to) !== line || segment.open.to > line) continue;
+      const ops = mark.kind === 'fmt' ? opsOf(mark, segment) : [];
+      const was =
+        ops.length === 1 && ops[0]?.name === 'was' ? readFenceWas(ops[0].value) : undefined;
+      if (was === undefined || mark.entry.by !== reader.owner) throw refused(AT_START);
+      if (!segment.close || segment.close.from !== fence.after) throw refused(OWN_FIRST);
+      fence.top = lineStart(text, segment.open.from);
+      fence.own = { mark, segment, was };
+    }
+  }
+  return fence;
+}
+
+/**
+ * The plan of a change of a callout's type or title, or undefined where it has them already. The
+ * mark is the whole div's: its opener alone on the line before the opening fence, with a blank line
+ * after it, and its closer alone on the blank line after the closing fence, so that no marker is on a
+ * `:::` line and every line of the div is as it was (§3.1, rule 9). The old attribute text is its
+ * payload, and rejecting writes it back.
+ *
+ * @throws EditError where the callout can't stand on its own between blank lines.
+ */
+function planFence(
+  reader: BlockReader,
+  fence: FenceDiv,
+  change: { type?: string; title?: string | null },
+  tracked: boolean,
+): BlockPlan | undefined {
+  const { text } = reader;
+  const { own } = fence;
+  const next = rewriteFence(fence.text, change);
+  const extent = { from: fence.top, to: fence.after };
+  const replaced: TextChange = { ...fence.attrs, insert: next };
+  if (own) {
+    if (!tracked) throw refused(OWN_FIRST);
+    if (next === own.was) {
+      return {
+        kind: 'edit',
+        at: fence.top,
+        extent,
+        id: own.mark.id,
+        kept: false,
+        changes: fenceUndo(reader, own.segment, own.was),
+      };
+    }
+    if (next === fence.text) return undefined;
+    return {
+      kind: 'edit',
+      at: fence.top,
+      extent,
+      id: own.mark.id,
+      kept: true,
+      changes: [replaced],
+    };
+  }
+  if (next === fence.text) return undefined;
+  if (tracked) {
+    const stands = standsAfterBlank(text, fence.top) || endsBlockAbove(text, fence.top);
+    // The closer takes the blank line after the div, which must be there.
+    if (!stands || fence.after <= fence.end || !isBlank(text, fence.after))
+      throw refused(ALERT_ON_ITS_OWN);
+    const block: Block = {
+      type: 'p',
+      line: fence.line,
+      indent: fence.line,
+      prefix: fence.line,
+      head: fence.line,
+      start: fence.line,
+      end: fence.end,
+      lines: [],
+      syntax: '',
+      top: fence.top,
+    };
+    const before = linesBefore(reader, block);
+    const blankOr = (line: string | undefined) => line === undefined || line.trim() === '';
+    if (before && !(blankOr(before.previous) || before.ends)) throw refused(ALERT_ON_ITS_OWN);
+  }
+  const was = `was=fence=${encodeValue(fence.text)}`;
+  const eol = eolOf(text, reader.parsed.ledgerRange);
+  return {
+    kind: 'mark',
+    at: fence.top,
+    extent,
+    write: (open, close) =>
+      open === ''
+        ? [replaced]
+        : [
+            {
+              from: fence.line,
+              to: fence.line,
+              insert: `${open.replace('{op}', was)}${eol}${eol}`,
+            },
+            replaced,
+            { from: fence.after, to: fence.after, insert: close },
+          ].toSorted((a, b) => a.from - b.from || a.to - b.to),
+  };
+}
+
+/**
+ * The changes that reject one segment of a change of a callout: its markers go, and the opening
+ * fence has the attribute text it had.
+ *
+ * @throws EditError when the callout no longer has a fence with attributes on its first line.
+ */
+function fenceUndo(reader: FormatReader, segment: Segment, was: string): TextChange[] {
+  const { text } = reader;
+  const head = segment.carrier?.to ?? segment.open.to;
+  const found = readFenceLine(lineAt(text, head));
+  if (!found) throw refused(ALERT_LOST);
+  const close = segment.close ?? { from: segment.content.to, to: segment.content.to };
+  return merged(
+    [
+      { from: segment.open.from, to: head, insert: '' },
+      { from: head + found.from, to: head + found.to, insert: was },
+      { ...close, insert: '' },
+    ].toSorted((a, b) => a.from - b.from || a.to - b.to),
+  );
+}
+
 /** Whether an operation is one of a block format change. */
 export const isBlockOp = (op: FormatOp): boolean =>
-  op.kind === 'block' || op.kind === 'callout' || op.kind === 'check' || op.kind === 'indent';
+  op.kind === 'block' ||
+  op.kind === 'callout' ||
+  op.kind === 'callout-title' ||
+  op.kind === 'check' ||
+  op.kind === 'indent';
 
 /**
  * What a block format change does to the block of `paragraph`: undefined where it has what is asked
@@ -1315,7 +1535,15 @@ export function planBlock(
   tracked: boolean,
   range: Range,
 ): BlockPlan | undefined {
-  if (op.kind === 'callout') return planCallout(reader, paragraph, op.type, tracked);
+  if (op.kind === 'callout' || op.kind === 'callout-title') {
+    const fence = isPandoc() ? fenceAt(reader, paragraph, range) : undefined;
+    if (fence) {
+      const change = op.kind === 'callout' ? { type: op.type } : { title: op.title };
+      return planFence(reader, fence, change, tracked);
+    }
+    if (op.kind === 'callout-title') throw refused(NOT_AN_ALERT);
+    return planCallout(reader, paragraph, op.type, tracked);
+  }
   const block = readBlock(reader, paragraph, op.kind === 'indent' || op.kind === 'check');
   switch (op.kind) {
     case 'block':
@@ -1411,6 +1639,8 @@ export function blockUndo(
   }
   const alert = readCalloutWas(op.value);
   if (alert) return calloutUndo(reader, segment, alert);
+  const fence = readFenceWas(op.value);
+  if (fence !== undefined) return fenceUndo(reader, segment, fence);
   const read = readWas(op.value);
   if (!read) throw refused(LOST);
   const was = { type: read.type, syntax: read.syntax ?? SYNTAX[read.type] };
@@ -1483,6 +1713,17 @@ function segmentChange(text: string, mark: MarkRange, segment: Segment): FormatO
       const lead = /^ */.exec(unquoted(text, line))?.[0].length ?? 0;
       const was = Number(op.value.slice('indent='.length));
       if (lead !== was) done.push({ kind: 'indent', by: lead > was ? 1 : -1 });
+    } else if (op.name === 'was' && readFenceWas(op.value) !== undefined) {
+      // What the fence has now, against what it had: the type, and the title.
+      const old = readFenceLine(`::: ${readFenceWas(op.value)}`);
+      const head = segment.carrier?.to ?? segment.open.to;
+      const now = readFenceLine(lineAt(text, head));
+      if (old && now) {
+        if (old.type !== now.type) done.push({ kind: 'callout', type: now.type });
+        if (titleOf(old.text) !== titleOf(now.text)) {
+          done.push({ kind: 'callout-title', title: titleOf(now.text) });
+        }
+      }
     } else if (op.name === 'was' && readCalloutWas(op.value)) {
       // The type the alert has now, on the line the mark's carrier ends at.
       const head = segment.carrier?.to ?? segment.open.to;

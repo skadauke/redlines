@@ -63,13 +63,15 @@ own (`xml.ts`, which resolves namespaces, so the code never depends on a file's 
 | Comment + `commentsExtended` parent               | Comment thread with flat replies                                                   |
 | `w15:done="1"`                                    | Resolved thread                                                                    |
 | Like in `commentsExtensible.xml`                  | Like reaction                                                                      |
-| `w:author` + `people.xml` presence info           | Author, with a stable id when Word has one                                         |
+| `w:author` (`people.xml` presence info is read, not kept) | Author: display name and handle; no account id                              |
 
-Authors: Word's `w:author` is only a display name. Where `people.xml` has a
+Authors: Word's `w:author` is only a display name, and the importer makes the
+author from it: the name and a handle. Where `people.xml` has a
 `w15:presenceInfo` (provider and user id, present for signed-in Microsoft 365
-users), the importer uses it as the stable author id. Otherwise it falls back
-to the name, so two different people with the same name and no account merge
-into one author. The format has to allow for this (see
+users), the importer does **not** write it: that is a person's account id, and a
+Markdown file is committed and shared. The import report says "Word's account
+ids for the people in this file were not kept." So two different people with the
+same name merge into one author. The format has to allow for this (see
 [below](#implications-for-the-format)).
 
 Dates: revisions carry `w:date`, which Word for Mac writes in local time with
@@ -91,6 +93,13 @@ export the exporter embeds what the importer needs to restore the source:
   understand when it saves.
 - A **hidden bookmark** (`_rl_<blockId>`) around each block. Word keeps
   bookmarks whose names start with an underscore and hides them in its UI.
+
+Two things come back from the part beyond untouched blocks. A block that holds
+a picture the export could not embed was written as `[Image: alt]`; when that
+text is all Word still has, the block is restored with its `![alt](path)` link.
+A thread Word shows as done is resolved by the person and at the time the
+ledger recorded, when the thread is the same one (author, time and text), since
+Word keeps no resolver; otherwise it is resolved by its author at its time.
 
 Both behaviors are standard Word practice. Word for Mac keeps both through a
 tracked edit and a save, and after Accept All only the bookmark of a deleted
@@ -126,7 +135,9 @@ everything, which is case 2.
 
 Reported in an import report rather than failing:
 
-- Formatting with no Markdown form: fonts, sizes, colors, alignment,
+- Formatting with no Markdown form: fonts, sizes, colors, alignment outside a table (a table
+  column's alignment is read from its cells' justification, `right` and `center`, when every cell
+  of the column agrees; where they differ it is dropped and reported),
   indentation, page and section breaks, headers and footers.
 - Merged or split table cells: the table is imported as raw HTML, and changes
   inside it become a whole-table substitution.
@@ -146,7 +157,7 @@ The format has to cover these, so the importer has somewhere to put what Word
 gives it:
 
 1. **Stable author identity** separate from the display name, with optional
-   provider ids (Word's `presenceInfo`, Syrus users, git identities).
+   provider ids (Syrus users, git identities; never Word's `presenceInfo`, which the import does not write).
 2. **Moves** as a linked deletion/insertion pair.
 3. **Format changes** with old and new values (bold, italic, strike, code,
    heading level, list type).
@@ -168,7 +179,14 @@ adds the Google Docs normalizer (`normalizeGoogleBytes`) and the source part.
 
 - Ids are new, and a handle comes from the name (`ada-lovelace`, `-2` on a clash). A person the
   source part's ledger knows keeps the handle, email and organization it had there. Word's
-  `presenceInfo` becomes `accounts`.
+  `presenceInfo` is not written (no provider account ids go into the file); the report says so.
+  A person's `accounts` already in the source part's ledger stay.
+- A change's `note` has no place in Word's revisions. The export keeps the ledger in the source
+  part (`customXml/redlines-source.xml`), and the import gives a note back to the change with the
+  same author and time, the n-th to the n-th, when the file and the source hold as many changes by
+  that author at that time; otherwise it reports the notes not restored. It is not written as a Word
+  comment: the export writes no note as a comment, and a comment would be a second thing in the file
+  that a reader could change or resolve. A file exported without the carriers reports its notes.
 - Text with revisions: `w:ins` is `ins`, `w:del` is `del` with the old text as its payload, a `w:del`
   followed by a `w:ins` by the same person is `sub`. A moved pair is a deletion and an insertion
   with `move:` in the ledger. Text that one person added and another deleted is left out (the

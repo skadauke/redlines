@@ -1,8 +1,9 @@
 # Connecting to an OpenClaw agent on another computer
 
-Status: research and design note, November 16, 2026. Nothing here is built. It is the design for
-next Epic's work, written from the vendors' own documentation; nothing was installed or run, and
-no machine, agent or configuration of anyone's was touched.
+Status: research and design note, November 16, 2026. Built since, November 17, in Epic #930 (lane
+OC), short of a live connection: see [First live test](#first-live-test). The design below is from
+the vendors' own documentation; nothing was installed or run, and no machine, agent or
+configuration of anyone's was touched.
 
 [agent-connections.md](agent-connections.md) asked how any agent should connect, and recommended a
 Redlines MCP endpoint on a loopback port plus a tunnel the person runs. For OpenClaw that is
@@ -30,9 +31,11 @@ and plans the work. The findings of the earlier note stand.
   takes). The person pastes the code into a secure field once. Redlines exchanges it, keeps what it
   gets in 0600 files, and never shows it again. The agent then approves a pairing request, which
   Redlines shows a short code for, so the person can check it is the right one.
-- **Replies and mentions go the other way** over the same WebSocket, as an _operator_ client (send a
-  message to a session, stream the answer), so a Mac without the `openclaw` program needs nothing
-  else. Today's `openclaw acp` bridge stays for a Mac that has it.
+- **Replies and mentions go the other way** over a second connection of the same device, as an
+  _operator_ client (`chat.send` into a session, then the run's `chat` events), because a node may
+  not chat. A Mac without the `openclaw` program needs nothing else. Built and checked live; see
+  [The other direction](#the-other-direction-redlines-asks-the-agent). Today's `openclaw acp` bridge
+  stays for a Mac that has it.
 - **Open points, all to be settled on a throwaway Gateway** (list below): the exact frames of the
   node and operator calls (the docs name them; the schemas are in OpenClaw's source), whether a
   third-party app may be a node at all (the docs describe only OpenClaw's own), which agent a tool
@@ -323,11 +326,10 @@ Two ways to be the node, in order:
   the Mac and a token file, and the agent's tools are the node's. Together, the node (for edits) and
   the bridge (for replies) already give a mention: Redlines sends the thread and document text
   through the bridge, the agent edits through the node's tools.
-- **Then native:** Redlines as an _operator_ client on the same WebSocket, sending the job to a
-  session and reading the streamed answer (the docs list session control, with run lifecycle, among
-  the RPC families; the method names are in the schema and were not in the pages read). An operator
-  always needs manual approval, so the approval flow has two requests: the node and the operator.
-  The setup code carries both, as the iPhone's does.
+- **Then native (built; see [The other direction](#the-other-direction-redlines-asks-the-agent)):**
+  Redlines as an _operator_ client, on a second connection, sending the message to a session with
+  `chat.send` and reading the run's `chat` events. The first guess here, that it could share the
+  node's WebSocket, was wrong: the Gateway gives a node no chat methods.
 - Each job keeps today's isolation: its own session key per thread
   (`redlines-<hash>`, never the document's path), the slash-directive escaping, one report back.
 
@@ -418,3 +420,262 @@ and are marked in the text.
 - In this repository: design §8, in particular §8.6;
   [agent-connections.md](agent-connections.md); `apps/desktop/src-tauri/src/agents/acp.rs`,
   `acp_gate.rs`, `which.rs`; `packages/agent-tools`; issues #322 and #401
+
+## First live test
+
+What Epic #930 built, and what waits for a real Gateway. Nothing below has been done: each step
+installs something, opens a connection or touches his accounts, so each waits for Stephan's yes.
+
+**Built, and tested without a Gateway:** the Tailscale reading (fixture JSON), the address rules and
+the Gateway probe (a stub server), the connection record and its 0600 files, the node client
+(handshake, signature, pairing, tools, calls, retries) against a fake Gateway that checks the
+signature as a Gateway would, the prompts, the setup sheet with every failure card, and the
+agent's card.
+
+**Not built:** the tool bridge (which document a Gateway agent's call acts on, with the author fixed
+by the connection and the folders and level enforced), mentions through the connection (the
+operator client, per-thread sessions, the @ picker), and the sheet's practice-note test (the sheet
+finishes without it and says so).
+
+**Where the code guesses**, all in `apps/desktop/src-tauri/src/agents/openclaw_protocol.rs` (frames,
+the signed text, the refusals' words), `gateway.rs` (`is_challenge`) and `tailscale.rs` (the words
+of `Health`):
+
+1. The greeting, `connect.challenge` with a `nonce`.
+2. `connect`'s fields, the device id (SHA-256 of the key), the signed text (`v2|id|client|role|...`),
+   `auth.token` and `auth.bootstrapToken`, and `hello-ok` with `auth.deviceToken`.
+3. `node.pluginTools.update`, `node.invoke.request` and `node.invoke.result`.
+4. Which words and codes a Gateway uses for a pending approval, a used code, a bad token and a newer
+   protocol.
+5. Whether a used setup code is spent by a connection that ended in "pairing required" (the node
+   offers it again), and whether a Gateway takes a third party as a node at all.
+6. What Tailscale's `Health` says on a network that blocks it.
+
+### What the live test found
+
+Run November 17, 2026, against a throwaway `openclaw@2026.11.5` Gateway on loopback (own state
+directory, shared token, no model), with `live_gateway` in `node.rs`. What the Gateway accepted:
+the handshake, Redlines as a node (`client.id: node-host`, `mode: node`), a v2-signed device, a
+device token in `hello-ok`, six tools published, and a call routed to Redlines with
+`openclaw nodes invoke --command mcp.tools.call.v1`, which came back with the tool's answer.
+`system.run` is refused by the Gateway for a node ("reserved for shell execution").
+
+What differed from the guesses, now fixed:
+
+1. `client.id` is a closed list; a third party can't have its own. Redlines says `node-host`, and
+   is told apart by its display name and its device.
+2. A published tool is a closed object: `pluginId: "node-mcp"`, `parameters` (not `inputSchema`) and
+   `mcp: {server, tool}`, with `command: "mcp.tools.call.v1"`.
+3. A call's `paramsJSON` is `{server, tool, arguments}`, not `{name, arguments}`.
+4. A `hello-ok` answers protocol 4 to a node that offered 3, so it is no sign of a newer Gateway; a
+   Gateway that can't speak ours refuses `connect`.
+5. A setup code is base64url of `{url, bootstrapToken, expiresAtMs}`; only the token goes in
+   `auth.bootstrapToken`. Redlines now decodes it (a bare token still works).
+
+Refusals read live: a wrong token is told as a bad token, and a used setup code as a used code.
+
+**Not seen:** an approval wait. On loopback a shared token or a fresh setup code pairs the node
+silently, so "pairing required" (its words are in OpenClaw's source: `NOT_PAIRED`, "pairing
+required: ...", with `requestId`) waits for a Gateway reached from another machine. Nor was a call
+from a real agent seen: that needs a model, which the throwaway Gateway didn't have.
+
+**The steps Stephan would take, in this order, each with a throwaway Gateway** (as the first list in
+"Hands-on tests that need Stephan's OK" says: its own `OPENCLAW_STATE_DIR`, a spare loopback port,
+no model key, removed afterwards):
+
+1. Build and open the app (`pnpm tauri dev` in `apps/desktop`), open Preferences › Agents, and choose
+   Connect OpenClaw… › On this Mac. Nothing is contacted until a setup code is pasted.
+2. On the throwaway Gateway, `openclaw qr --setup-code-only`; paste the code in the sheet. Watch the
+   sheet's status and the Gateway's `openclaw devices list`: does a request appear, with a device id
+   that starts with the code the sheet shows? Approve it (`openclaw devices approve <id>`, then
+   `openclaw nodes approve <id>`). Does the sheet reach Test with six tools published
+   (`openclaw nodes`)? If it stops, Details has what the Gateway said: put it into
+   `openclaw_protocol.rs` and the tests that mirror it.
+3. Call a tool from the Gateway's agent: the app answers that it isn't connected to a document yet,
+   which shows the road works end to end. Check that a `system.run` is never approvable for it.
+4. Read-only look at Tailscale on his Mac: open Connect OpenClaw… › On another computer and read the
+   three checks; compare with `tailscale status --json` in Terminal.
+5. With Tailscale Serve on a second machine's throwaway Gateway, the whole road; then his real agent
+   once, with the prompt of step 4, to see what it does and whether it can scope the tools to one
+   agent.
+6. From a network that blocks Tailscale, the words `Health` gives.
+
+## The other direction: Redlines asks the agent
+
+Written November 17, 2026 from OpenClaw's source (`openclaw@2026.11.5`, read in its `dist/`) and a
+live check on a throwaway Gateway (own state directory, loopback, a stand-in model on a local port,
+no key). Where [the node connection](#first-live-test) carries the agent's tool calls *to*
+Redlines, this carries Redlines' message *to* the agent: an @-mention in a comment, or Ask.
+
+**How a client sends a message to an agent.** The method is `chat.send`, with `sessionKey`,
+`message` and an `idempotencyKey`. The Gateway answers `{runId, status: "started"}` (the run's id is
+the key), and then sends `chat` events for that run: `status` steps (`preparing_workspace`,
+`starting_model`), `delta` with `deltaText`, and an end that is `final` (with the whole `message`,
+whose `content` is a list of `{type, text}`), `aborted` or `error` (with `errorMessage`). A send the
+Gateway can't take at all (no model signed in) fails the request itself with
+`UNAVAILABLE`. `chat.abort` with `sessionKey` and `runId` stops a run. `sessions.send` also exists;
+`chat.send` is what OpenClaw's own apps use, and it needs the scope `operator.sessions.write`
+(which the client scopes `operator.write` give).
+
+**One connection can't do both.** The Gateway keeps node methods and operator methods apart
+(`isRoleAuthorizedForMethod`): a node that sends `chat.send` is answered `unauthorized role: node`
+(seen live). So Redlines opens a **second connection of the same device** as an operator:
+
+| | node connection | operator connection |
+|---|---|---|
+| `client.id`, `mode` | `node-host`, `node` | `gateway-client`, `backend` |
+| `role`, `scopes` | `node`, none | `operator`, `operator.read` and `operator.write` (never `operator.admin`) |
+| protocol | 3 (4 is also taken) | **4**: a live Gateway refuses an operator that offers 3 |
+| signed text | `v2\|id\|node-host\|node\|node\|\|at\|credential\|nonce` | `v2\|id\|gateway-client\|backend\|operator\|operator.read,operator.write\|at\|credential\|nonce` |
+| used for | the agent's tool calls | `chat.send`, the run's events, `chat.abort` |
+
+It needs no token of its own to be set up: the Gateway gave the same **setup code** both roles,
+and each role gets its own device token back in `hello-ok` (`auth.deviceToken`), which Redlines
+keeps as the connection's operator token (`Kind::OperatorToken`, a 0600 file, never shown).
+
+**The order matters.** Used by the node first, a setup code was then refused to the operator
+("already used") and the operator's request waited for approval ("role upgrade"). Used by the
+operator first, the same code then connected the node too, with both tokens issued. So when the
+person pastes a setup code, Redlines opens the operator connection first, keeps its token and
+closes it, and then starts the node with the same code. If the operator step fails (a Gateway on
+another computer asks to approve the operator device, as it does for any operator), the node still
+connects and Ask and @-mentions of this agent use `openclaw acp` if it was added, or aren't
+offered; a new setup code, with the request approved, adds chat. On loopback the operator is
+approved silently, as the node was. **A device that is already paired as a node only** (a
+connection made before this) asks its Gateway's owner to approve the upgrade: `openclaw devices
+approve <id>`.
+
+**How it runs in the app.** An OpenClaw connection that holds an operator token is one more agent
+in the @ picker and in Ask, by its handle (`openclaw_nodes::chat_agents`, listed by `acp_agents`
+with `gateway: true`). Starting it (`acp_start`) makes a run that is a thread of the app rather than
+a program (`Runs::start_thread`): it has a log, an owner, a Stop and an end like any run, and the
+window's messages pass the same gate as for `openclaw acp` (`acp_gate.rs`, no toolbox, one session
+key for each thread, `agent:<id>:redlines-<hash>` or `redlines-<hash>`). The run speaks the Agent
+Client Protocol to the window (`openclaw_agent.rs`): `session/new` keeps the thread's session key,
+`session/prompt` becomes one `chat.send` on a connection opened for that message
+(`openclaw_chat.rs`), the run's final text comes back as the agent's message and ends the turn, a
+failure comes back as an error in the Gateway's words, and `session/cancel` or Stop sends
+`chat.abort`. The window needs no change to draw the reply in the thread or in Ask's bubble, and
+everything it already does with a reply (the author as the agent, tracked suggestions) is the
+page's.
+
+**Editing.** The agent works on the document through the node's tools: see "The tool bridge" below. Streaming isn't shown: the answer arrives whole.
+
+**Checked live** (the stand-in model answers every request with one fixed sentence): a setup code
+used for an operator connection gave an operator token; a second connection with that token sent
+`chat.send` into a new session `agent:main:redlines-<hex>` and received the run's events up to
+`final`, whose text was the model's sentence (`live_chat` in `openclaw_chat.rs`, by hand:
+`REDLINES_LIVE_GATEWAY`, `REDLINES_LIVE_CODE`). An operator that offered protocol 3 was refused; a
+node's `chat.send` was refused. Not seen: a real model, a real tool call from the agent, an
+approval wait for the operator, a Gateway on another computer. The fake Gateway of the unit tests
+checks the operator's signature as a Gateway would, the scopes, the filtering of other runs'
+events, a refused send, a failed run and an abort.
+
+## The tool bridge: a Gateway run edits through the node
+
+A run asked through the Gateway can now change the document it was asked from, with the same six
+tools, gate, author and thread as a local agent, and only while its run is live.
+
+**How OpenClaw routes a run's tool call to a node** (read from `openclaw@2026.11.5`, read only).
+The node's descriptors become the agent's tools (`dist/openclaw-plugin-tools-*.mjs`, the loop over
+`listConnectedNodePluginTools()`). Each tool's `execute` calls `node.invoke` with the node id, the
+command, `{server, tool, arguments}` **and the run's `sessionKey`** (same file, the `callGatewayTool
+("node.invoke", ...)` call, `...S ? { sessionKey: S } : {}`). The Gateway copies it into the
+`node.invoke.request` event the node receives (`dist/node-invoke-request-*.mjs`,
+`buildNodeInvokeRequest`: `sessionKey`; `dist/node-registry-private-*.mjs`). So node tools *are*
+session-scoped: no run token in the prompt is needed. Two things seen live: the Gateway reports the
+canonical key (`agent:main:redlines-<hex>`) even when the run was started with the bare
+`redlines-<hex>`, so a call is matched on the whole key (a bare key's is learned from the run's `chat`
+events), never on the part after the agent; and by default OpenClaw defers
+tool schemas behind `tool_search`/`dispatch_action` (`tools.toolSearch`), which the live check turned
+off to let a stand-in model call the tool directly.
+
+**What Redlines does** (`openclaw_tools.rs`).
+- The window opens a relay for the run as for any agent and names its socket in the session's
+  `_meta.tools`. The gate (`acp_gate.rs`) allows that only for a Gateway run and only for one of
+  the window's own relays.
+- The host connects to the relay as the program does and registers it under the run's session. The
+  node's `tools/call` goes to the registered run's relay, so the window's own tools answer it (the
+  gate, the author, the thread, the edit path). Nothing here knows a tool.
+- Stop, cancel and the end of the run end the registration at once, and let go of a call that is
+  waiting. A call with no session, another session, or an ended run is refused as the tool's own
+  error: "This call is not part of a live Redlines run, so it can't change any document...".
+- The prompt (`nodeToolsPrompt`) names the six tools, still carries the thread and the document, and
+  says they work only while the run does. Agents that have the tools this way list `nodeTools`.
+
+**Checked live** (`live_tools` in `openclaw_nodes.rs`, by hand, throwaway Gateway, stand-in model
+that calls `str_replace` once): a run edited the stand-in document through the node and ended with
+the tool's answer; a call with no session and one with another run's session were refused and
+changed nothing; a run with a bare key was found by its thread; a run that was stopped (aborted at
+the Gateway, its registration ended) had its next call refused, and no call reached the window. The
+window there is a stand-in (a document in memory behind a relay's socket); the real tools answering
+a relay are covered by the page's tests.
+
+**Late calls of an aborted run.** The call carries the session key and nothing of the run: the
+node request has `id`, `nodeId`, `command`, `paramsJSON`, `timeoutMs`, `idempotencyKey` (a turn id
+and a tool call id) and `sessionKey` (`buildNodeInvokeRequest`), no run id. The thread's session is
+reused by its next run, so Redlines closes the gap itself: Stop ends the run's tools at once, and
+the thread's next run does not register until the aborted run's final `chat` event has come (the
+run's wait for it ends at `ABORT_GRACE`, 5 s) or `SETTLE_TIMEOUT` (8 s) has passed; calls in
+between are refused (`a_late_call_of_an_aborted_run_never_reaches_the_threads_next_run`).
+
+A run the Gateway never reported on (a dropped connection, or no `aborted` event within the grace)
+leaves its thread waiting for the full `SETTLE_TIMEOUT`; one that was reported on frees it at once.
+**Follow-ups of the bridge** (issue #976).
+- **Calls are answered off the read loop** (`node.rs`). Each `node.invoke.request` is answered on a
+  thread of its own, and the answer goes back to the one thread that writes, with its own call's id,
+  in the order the calls finish. Each call has its own deadline (`Timing::call`, 125 s, a little over
+  the window's 120 s), at which the Gateway is told it failed and a late answer is dropped. A slow
+  call so holds back neither another run's call nor the pings (`a_slow_call_holds_back_neither...`).
+  One run's own calls still go one at a time, in the order they came (a ticket for each), on its line, and the wait for a turn counts in the call's 120 s: a call that spent it waiting is never made.
+- **A run answers on its own relay.** The first run at a Gateway to name a relay of the window
+  claims it (`Relays::claim`, from `acp_send`, after the gate has passed the line); a relay another
+  run has claimed, or that a program is already connected to, is neither named nor taken, so a
+  `session/new` can't point a run's calls at another run's line. What remains: the window opens a
+  relay before its run starts, so the claim is the first run's to make, and a page that names an
+  unclaimed relay that a local agent's program has not yet connected to could take it. A page can
+  already do anything its own relays do, so this is not a door, only a mix-up that is now caught.
+  The node's call goes to the line registered for that run's session, as before.
+- **Stop ends a registration that is still waiting.** Registering waits for the thread's last run (up
+  to 8 s) and for the window's handshake (up to 20 s); it now looks every 50 ms at whether the run
+  was stopped, and gives up at once. An edit already in flight when Stop is pressed may still land:
+  the window had begun it, and Stop ends the run's tools, not the page's work in progress; the
+  agent is told the call was refused only if it hadn't been answered yet.
+- **Keys are matched whole** (`canonical` in `openclaw_tools.rs`). A key that names an agent
+  (`agent:<id>:redlines-<hash>`) is matched exactly, so a call from one agent's session never acts
+  for another agent's session that shares the part after the agent
+  (`two_agents_sessions_that_share_the_name_after_the_agent_are_two_runs`). A bare key is filed by
+  the Gateway under its default agent, which isn't always `main`, so Redlines doesn't assume it:
+  the run's `chat` events carry the `sessionKey` the Gateway really filed it under (`ChatEvent` in
+  `openclaw_protocol.rs`), `ask_seen` passes it on, and `RunTools::adopt` registers the run under
+  it (only when it is the run's own session under some agent). Until the first event the run is
+  held under `agent:main:<key>`, a guess; once adopted, only the reported key reaches it
+  (`a_bare_key_run_is_found_by_the_key_its_gateway_files_it_under`). A model often calls a tool
+  before it writes a word, so the run's first call can come before any event: a call under
+  `agent:<any>:<the run's bare key>`, when no run is registered under exactly that key, gives the
+  run that key too (`a_first_call_before_any_chat_event_gives_a_bare_key_run_its_key`). A bare-key
+  run belongs to the first agent the Gateway reports for it, by event or by call; a later call under
+  another agent is refused, and a run that names its agent is never taken this way. The Gateway
+  states no default agent on connect that the code reads, so none is used.
+- **A follow-up prompt in the same run keeps the tools.** OpenClaw offers the node's tools to every
+  run, resolved afresh from the connected nodes with that run's session key (`resolvePluginTools`
+  and the loop over `listConnectedNodePluginTools()` in `openclaw-plugin-tools-*.mjs`), so a second
+  `chat.send` in the session has them on the Gateway's side. The limit was Redlines': the
+  registration ended with the first prompt. It now ends with the run, or at once at a cancel or a
+  failure (`a_follow_up_prompt_in_the_same_run_still_has_the_tools`). A later run of the same thread
+  registers afresh, as before.
+
+**Checked live again** (`live_tools`, a throwaway Gateway, the stand-in model): a slow call (4 s)
+and a call of another run at the same time were answered fast first (0.5 s) and slow after (4.0 s);
+a second prompt in one session, under one registration, edited the document; Stop during a
+registration against a window that never answers ended it in 0.3 s; the earlier checks held.
+
+**Tool search on** (OpenClaw's default, `tools.toolSearch` unset): the six tools are deferred
+behind `tool_search`, `tool_describe` and `dispatch_action` as `mcp:redlines:<tool>`. The live
+check was repeated that way, the stand-in model calling `dispatch_action` with
+`mcp:redlines:str_replace`: the edit landed, and the stopped run and the bare key behaved as before.
+
+**Edits** go through the page's `answerMcp` of the run, so a Gateway run's edit is written by
+`applyAgentEdit` as a local agent's is (the push path of #954); `runs.test.ts` shows it.
+
+**Not checked:** a real model, the whole path in the app's window, a Gateway on another computer.

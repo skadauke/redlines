@@ -105,6 +105,17 @@ pub(super) fn command_for(
         .envs(environment.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
         .process_group(0);
+    // SIGINT is what a stop sends first. A signal ignored here stays ignored across `exec`, so an app
+    // started in the background (`nohup`, a script's `&`, a service) would hand every agent a
+    // SIGINT that does nothing, and the stop would wait out its grace and fall to SIGTERM (#929).
+    // SAFETY: the closure only calls `signal`, which is async-signal-safe, between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGINT, libc::SIG_DFL);
+            libc::signal(libc::SIGTERM, libc::SIG_DFL);
+            Ok(())
+        });
+    }
     command
 }
 
@@ -244,7 +255,8 @@ pub struct Runs {
 struct Run {
     /// The label of the window that started it.
     owner: String,
-    group: i32,
+    /// The process group of the program; none for a run that is a thread (`start_thread`).
+    group: Option<i32>,
     /// Someone has asked it to stop.
     stopping: AtomicBool,
     over: Over,
@@ -281,15 +293,19 @@ impl Run {
         if self.stopping.swap(true, Ordering::SeqCst) {
             return;
         }
+        // A thread sees `stopping` for itself, and ends.
+        let Some(group) = self.group else {
+            return;
+        };
         let run = Arc::clone(self);
         thread::spawn(move || {
             for signal in [libc::SIGINT, libc::SIGTERM] {
-                signal_group(run.group, signal);
+                signal_group(group, signal);
                 if run.over.wait(grace) {
                     return;
                 }
             }
-            signal_group(run.group, libc::SIGKILL);
+            signal_group(group, libc::SIGKILL);
         });
     }
 }
@@ -376,16 +392,17 @@ impl Runs {
         };
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let group = group_of(&child);
         let run = Arc::new(Run {
             owner: owner.to_owned(),
-            group: group_of(&child),
+            group: Some(group),
             stopping: AtomicBool::new(false),
             over: Over::default(),
         });
         self.running().insert(id, Arc::clone(&run));
         // `stop_all` says it's closing before it looks, so it can't miss this and this not see that.
         if self.closing.load(Ordering::SeqCst) {
-            signal_group(run.group, libc::SIGKILL);
+            signal_group(group, libc::SIGKILL);
         }
 
         let started = Started {
@@ -399,7 +416,7 @@ impl Runs {
             stderr: Arc::default(),
         };
         let input = child.stdin.take().map(|stdin| Input {
-            stdin: Mutex::new(stdin),
+            way: Way::Stdin(Mutex::new(stdin)),
             log: Arc::clone(&following.log),
         });
         let (reader_ended, readers) = mpsc::channel::<()>();
@@ -411,8 +428,79 @@ impl Runs {
         let running = Arc::clone(&self.running);
         thread::spawn(move || {
             let status = child.wait().ok();
-            remove_what_is_left(run.group, &readers);
+            remove_what_is_left(group, &readers);
             following.finish(status, run.stopping.load(Ordering::SeqCst));
+            running
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&id);
+            run.over.set();
+        });
+        Ok((started, input))
+    }
+
+    /// Starts a run that is a thread of this program, not a program: an agent at a Gateway
+    /// (`openclaw_chat.rs`), which speaks the Agent Client Protocol to the window as a program
+    /// would. It has a log, an owner, a stop and an end like any run; the body gets the lines the
+    /// window sends, and says its own with [`ThreadRun::say`], and when it returns the run is over.
+    /// `program` is what the log names, in place of a program.
+    pub fn start_thread(
+        &self,
+        owner: &str,
+        log_folder: &Path,
+        info: &RunInfo,
+        program: &str,
+        send: impl Fn(RunMessage) + Send + Sync + 'static,
+        body: impl FnOnce(Receiver<String>, &ThreadRun) + Send + 'static,
+    ) -> Result<(Started, Input), String> {
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(QUITTING.to_owned());
+        }
+        let log = RunLog::create(log_folder, &info.agent, SystemTime::now()).map_err(|error| {
+            format!("Couldn't start a log in {}: {error}", log_folder.display())
+        })?;
+        log.started(info, program, &[], None);
+        let log = Arc::new(log);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let run = Arc::new(Run {
+            owner: owner.to_owned(),
+            group: None,
+            stopping: AtomicBool::new(false),
+            over: Over::default(),
+        });
+        self.running().insert(id, Arc::clone(&run));
+        // `stop_all` says it's closing before it looks, so it can't miss this and this not see that.
+        if self.closing.load(Ordering::SeqCst) {
+            run.stopping.store(true, Ordering::SeqCst);
+        }
+        let started = Started {
+            id,
+            log_path: log.path().to_string_lossy().into_owned(),
+        };
+        let (lines_in, lines) = mpsc::channel::<String>();
+        let send: Arc<dyn Fn(RunMessage) + Send + Sync> = Arc::new(send);
+        let input = Input {
+            way: Way::Thread(Mutex::new(lines_in)),
+            log: Arc::clone(&log),
+        };
+        let ours = ThreadRun {
+            log: Arc::clone(&log),
+            send: Arc::clone(&send),
+            run: Arc::clone(&run),
+        };
+        let running = Arc::clone(&self.running);
+        thread::spawn(move || {
+            body(lines, &ours);
+            let stopped = run.stopping.load(Ordering::SeqCst);
+            log.ended(RunEnd {
+                code: Some(0),
+                signal: None,
+                stopped,
+            });
+            send(RunMessage::Ended {
+                code: Some(0),
+                stderr: String::new(),
+            });
             running
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -461,21 +549,57 @@ impl Runs {
 /// The way in to a run started with its stdin open. What goes in goes in its log too, and dropping
 /// this closes the program's stdin.
 pub struct Input {
-    stdin: Mutex<ChildStdin>,
+    way: Way,
     log: Arc<RunLog>,
+}
+
+/// Where a line goes: a program's stdin, or the thread that is the run.
+enum Way {
+    Stdin(Mutex<ChildStdin>),
+    Thread(Mutex<mpsc::Sender<String>>),
 }
 
 impl Input {
     /// Writes a line to the program, and to its log.
     pub fn send(&self, line: &str) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap_or_else(PoisonError::into_inner);
-        stdin
-            .write_all(line.as_bytes())
-            .and_then(|()| stdin.write_all(b"\n"))
-            .and_then(|()| stdin.flush())
-            .map_err(|error| format!("Couldn't write to the program: {error}"))?;
+        match &self.way {
+            Way::Stdin(stdin) => {
+                let mut stdin = stdin.lock().unwrap_or_else(PoisonError::into_inner);
+                stdin
+                    .write_all(line.as_bytes())
+                    .and_then(|()| stdin.write_all(b"\n"))
+                    .and_then(|()| stdin.flush())
+                    .map_err(|error| format!("Couldn't write to the program: {error}"))?;
+            }
+            Way::Thread(lines) => lines
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .send(line.to_owned())
+                .map_err(|_| "That agent has stopped.".to_owned())?,
+        }
         self.log.stdin(line);
         Ok(())
+    }
+}
+
+/// What the thread of a run that is no program holds: a way to say something to the window, and
+/// whether someone has stopped it. (The lines the window sends come apart from it, so that this can
+/// be shared with the threads a run starts.)
+pub struct ThreadRun {
+    log: Arc<RunLog>,
+    send: Arc<dyn Fn(RunMessage) + Send + Sync>,
+    run: Arc<Run>,
+}
+
+impl ThreadRun {
+    /// A line to the window, and to the log.
+    pub fn say(&self, line: String) {
+        self.log.stdout(&line);
+        (self.send)(RunMessage::Line { line });
+    }
+
+    pub fn stopped(&self) -> bool {
+        self.run.stopping.load(Ordering::SeqCst)
     }
 }
 
@@ -1154,15 +1278,25 @@ mod tests {
         assert_eq!(last["redlines"], "end");
         assert_eq!(last["stopped"], true);
         assert_eq!(last["code"], serde_json::Value::Null);
-        // A stop sends SIGINT, and SIGTERM when that doesn't end the run in the grace. Which of the
-        // two ends it was seen to depend on the system (on Ubuntu 26.04 the run ended by SIGTERM; the
-        // cause was not found), so the test holds to what a stop guarantees: the run ends by one of
-        // the two, never by SIGKILL.
-        let signal = last["signal"].as_i64().unwrap();
-        assert!(
-            signal == i64::from(libc::SIGINT) || signal == i64::from(libc::SIGTERM),
-            "{signal}"
-        );
+        // A stop sends SIGINT first, and a program that doesn't ignore it ends by it. On Ubuntu 26.04
+        // this was seen ending by SIGTERM: a SIGINT ignored by the app is inherited (#929).
+        assert_eq!(last["signal"].as_i64(), Some(i64::from(libc::SIGINT)));
+    }
+
+    #[test]
+    fn a_stop_ends_a_run_by_sigint_though_the_app_ignores_sigint() {
+        // An app started in the background ignores SIGINT, and a program inherits that (#929).
+        let folder = TempFolder::new("run-ignored-sigint");
+        let runs = Runs::default();
+        let before = unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
+        let (started, receiver) = start(&runs, folder.path(), &script("echo up; sleep 300", ""));
+        unsafe { libc::signal(libc::SIGINT, before) };
+        assert_eq!(next_line(&receiver), "up");
+        runs.stop("main", started.id).unwrap();
+        to_the_end(&receiver);
+        let log = fs::read_to_string(&started.log_path).unwrap();
+        let last: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+        assert_eq!(last["signal"].as_i64(), Some(i64::from(libc::SIGINT)));
     }
 
     #[test]

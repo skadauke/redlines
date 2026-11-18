@@ -2,7 +2,17 @@
 // write to the ledger, and how a refused action shows.
 
 import type { EditorView, Rect } from '@codemirror/view';
-import { calloutName, type Author, type Editor } from '@redlines/editor';
+import {
+  calloutName,
+  dialectFacet,
+  editSourceFacet,
+  recordedAs,
+  type Author,
+  type Editor,
+  type ReviewRequest,
+  writeReview,
+} from '@redlines/editor';
+import type { MarkdownDialect } from '@redlines/format';
 import {
   type BlockType,
   EditError,
@@ -328,6 +338,8 @@ export function formatLabel(ops: readonly FormatOp[]): string {
         return BLOCK_NAMES[op.to];
       case 'callout':
         return `Alert: ${calloutName(op.type)}`;
+      case 'callout-title':
+        return op.title === null ? 'No callout title' : 'Callout title';
       case 'indent':
         return op.by > 0 ? 'Indent' : 'Outdent';
       case 'check':
@@ -349,12 +361,16 @@ function ledgerTime(date: Date): Time {
 }
 
 /** An edit by `author`, now. Only the fields `author` has are written to the ledger's people. */
-export function editContext(author: Author): EditContext {
+export function editContext(author: Author, dialect?: MarkdownDialect): EditContext {
   const person: Person = { handle: author.handle, name: author.name };
   if (author.email !== undefined) person.email = author.email;
   if (author.agent !== undefined) person.agent = author.agent;
   if (author.for !== undefined) person.for = author.for;
-  return { author: person, time: ledgerTime(new Date()) };
+  return {
+    author: person,
+    time: ledgerTime(new Date()),
+    ...(dialect === undefined ? {} : { dialect }),
+  };
 }
 
 /**
@@ -363,6 +379,34 @@ export function editContext(author: Author): EditContext {
  */
 export function applyEdit(view: EditorView, changes: TextChange[], userEvent: string): void {
   if (changes.length) view.dispatch({ changes, userEvent });
+}
+
+/**
+ * A review action by `author`, now: a comment, a highlight, a reply, a resolve or a reopen. Written
+ * by the format and applied as one step, with what was asked recorded beside it. Returns the id of
+ * the comment or highlight made.
+ *
+ * @throws EditError when the format refuses it.
+ */
+export function applyReview(
+  view: EditorView,
+  author: Author,
+  request: ReviewRequest,
+  userEvent: string,
+): string | undefined {
+  const { author: person } = editContext(author);
+  const { random, now } = view.state.facet(editSourceFacet);
+  const time = ledgerTime(now());
+  const made = writeReview(view.state.doc.toString(), request, {
+    author: person,
+    time,
+    dialect: view.state.facet(dialectFacet),
+    ...(random ? { random } : {}),
+  });
+  if (made.changes.length) {
+    view.dispatch({ changes: made.changes, userEvent, annotations: [recordedAs(made.intent)] });
+  }
+  return made.id;
 }
 
 /** How long the message of a refused action shows. */

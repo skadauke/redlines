@@ -36,6 +36,11 @@ tauri-plugin-updater = "2.14.1"
 # The app's own update checks run on Tauri's runtime, which is tokio's, and wait with its timers
 # (updates/checks.rs). Tauri's own dependency, with its timers turned on.
 tokio = { version = "1", features = ["rt", "sync", "time"] }
+# Fetches the pictures of a paste from Google Docs (remote_image.rs). The updater's own HTTP client,
+# with the same features, so nothing more is built for it; the updater's `ring` provider is
+# installed the way it installs it.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Reads what `hdiutil` says about disk images, and app versions, when installing from a disk image.
 plist = "1.10.1"
 tauri-plugin-clipboard-manager = "2"
@@ -49,6 +54,13 @@ percent-encoding = "2.3.2"
 infer = "0.22.0"
 # A picture an agent is shown to describe is sent in base64 (images.rs, `image_for_agent`).
 base64 = "0.23"
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake", "rustls-tls-native-roots"] }
+ed25519-dalek = "3.0.0"
+sha2 = "0.11.1"
+# The device key of a connection is random bytes of the operating system's (agents/connections.rs).
+getrandom = "0.4"
+# `geteuid` and `O_NOFOLLOW`, to read a secret only if it is ours and not a link (agents/connections.rs).
+libc = "0.2"
 
 # The window's icon, off the Mac, is read from a PNG (dock_icon.rs). The Mac sets the Dock icon
 # without it, and the tests of the icon family read its PNGs the same way.

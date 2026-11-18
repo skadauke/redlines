@@ -7,7 +7,15 @@
 // Nothing calls this yet: the writers that refuse today will call it in their turn. It is the one
 // writer all of them share: they differ in why the fine form failed, not in what to write.
 
-import { scaffold, continuationPrefix, bodyStart, lineEnd, lineStart } from './blocks.ts';
+import { isPandoc, withDialect } from './dialect.ts';
+import {
+  INCLUDE_LINE,
+  scaffold,
+  continuationPrefix,
+  bodyStart,
+  lineEnd,
+  lineStart,
+} from './blocks.ts';
 import { micromark } from 'micromark';
 import {
   gfmAutolinkLiteral,
@@ -25,7 +33,7 @@ import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { intact, ledgerFor, payloadFile, payloadIdsOf, payloadOfFile } from './payload-marks.ts';
-import { encodePayload } from './payload.ts';
+import { decodePayload, encodePayload } from './payload.ts';
 import { shapeOf, unitsOf } from './widen-units.ts';
 import type { Unit, UnitKind } from './widen-units.ts';
 import type { EditContext, MarkEntry, MarkRange, Parsed, Range, TextChange } from './types.ts';
@@ -85,9 +93,11 @@ export interface Widened {
   unit: WidenedUnit;
   /** The ids of other people's pending changes that are in its old text. */
   held: string[];
-  /** The part of `held` that is not the author's own, and others' marks that touch the unit's edges:
-   * those keep a widened edit refused (#808, #107). */
-  heldByOthers: string[];
+  /** The ids of other people's pending changes that end at the unit's edge without being in its old
+   * text (a split's break right in front of it, an insertion right after it): they are decided
+   * with the block next to them, and the replacement does not read alike in every order of
+   * decisions with them (#107), so a widened edit keeps its refusal (#808). */
+  touchingOthers: string[];
   /** The ids of the author's own pending changes in the unit, which folded into the replacement:
    * its old text has them rejected. */
   folded: string[];
@@ -101,7 +111,23 @@ export interface Widened {
  *
  * @throws Untrackable when no unit holds the edit; EditError when the ledger can't be read.
  */
-export function widen(text: string, edits: readonly TextChange[], ctx: EditContext): Widened {
+export function widen(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  /** Where another person's mark ends at the unit's edge, the unit with the block beside it, which
+   * holds the mark whole, is tried before the unit is given with the mark left out (#265). */
+  beside = false,
+): Widened {
+  return withDialect(ctx.dialect, () => widenIn(text, edits, ctx, beside));
+}
+
+function widenIn(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  beside: boolean,
+): Widened {
   const parsed = parse(text);
   const view = newestView(text);
   const sorted = edits.toSorted((a, b) => a.from - b.from || a.to - b.to);
@@ -129,6 +155,16 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
   ) {
     sourceFrom = Math.min(sourceFrom, view.map.toSource(spanFrom, -1));
   }
+  // The end of the body right after a deletion that rejecting would leave a bare marker behind: the
+  // point is before the deletion, as it is for an item with no text (#1104).
+  if (
+    spanFrom === spanTo &&
+    parsed.ledgerRange &&
+    sourceFrom > parsed.ledgerRange.from &&
+    afterBareDeletion(text, parsed.ledgerRange.from)
+  ) {
+    sourceFrom = Math.min(sourceFrom, view.map.toSource(spanFrom, -1));
+  }
   const sourceTo = Math.max(sourceFrom, view.map.toSource(spanTo, -1));
   if (
     sourceFrom < bodyStart(text) ||
@@ -144,15 +180,47 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
   let rung = rungOf(units, sourceFrom, sourceTo);
   // Where no unit of its own holds the edit, the unit and the block after it are replaced together.
   let fromSpare = false;
-  let spare =
-    rung && atBlockBoundary(text, edits) && !(rung.parent && rung.kind === 'code')
-      ? withNext(units, rung)
-      : undefined;
+  const boundary =
+    rung !== undefined &&
+    (atBlockBoundary(text, edits) ||
+      // Indented code started in an empty line (the edits are in the newest view's places, and the
+      // file's are those of the block's start).
+      (sorted.some((edit) => /^(?: {4}|\t)/.test(edit.insert)) &&
+        atBlockBoundary(
+          text,
+          sorted.map((edit) => ({
+            ...edit,
+            from: view.map.toSource(edit.from, 1),
+            to: Math.max(view.map.toSource(edit.from, 1), view.map.toSource(edit.to, -1)),
+          })),
+        ))) &&
+    !(rung.parent && rung.kind === 'code');
+  const spares: Rung[] = [];
+  if (rung && boundary) {
+    const spare = withNext(units, rung);
+    if (spare) spares.push(spare);
+  }
+  // The opener of a replacement that starts right under a bare marker's line is read as that item's
+  // text by the shape check (a mark stands right behind a bare marker): the block before goes with it.
+  if (rung && boundary && endsInBare(lineBefore(text, rung.lineFrom))) {
+    const [only] = rung.units;
+    const siblings = rung.parent ? rung.parent.children : units;
+    const at = only ? siblings.indexOf(only) : -1;
+    const before = siblings[at - 1];
+    const after = siblings[at + 1];
+    if (only && rung.units.length === 1 && before && at > 0) {
+      spares.push(rungOfUnits(after ? [before, only, after] : [before, only], rung.parent));
+    }
+  }
   // A unit that closure brought back to one already tried would go up and down for ever.
   const tried = new Set<string>();
+  // The first write that another person's mark touches at the edge, kept if no wider unit holds it.
+  let touching: Widened | undefined;
+  const besides: Rung[] = [];
+  let besideTried = false;
   for (let index = 0; rung; index++) {
     const closed = closure(parsed, units, rung, sourceFrom, sourceTo, region);
-    const key = `${closed.lineFrom}:${closed.to}`;
+    const key = `${closed.lineFrom}:${closed.to}${ofOneParagraph(closed) ? ':list' : ''}`;
     if (tried.has(key)) {
       rung = widerThan(rung);
       continue;
@@ -182,12 +250,55 @@ export function widen(text: string, edits: readonly TextChange[], ctx: EditConte
     );
     // The unit with the block after it is kept only where micromark reads its file as the newest
     // view (the check of the oracle's reader), else the ladder ends in an alert.
-    if (done && !(fromSpare && readsOtherMicromark(text, done.changes))) return done;
+    // A fence in the unit is read too where an edit starts in a line's indentation: one that leaves
+    // the fence open (a line of its code less deep than its item) makes the closer a line of the
+    // code, where the newest view reads the text otherwise. A keystroke in code costs what it did.
+    const fenced =
+      /^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to)) &&
+      sorted.some((edit) => /^[ \t>]*$/.test(text.slice(lineStart(text, edit.from), edit.from)));
+    // A line break typed in a unit that holds code is read too: the text after it may stand less deep
+    // than the container, and the blocks after the unit read otherwise beside the closer (#586).
+    const broken =
+      sorted.some(
+        (edit) => edit.insert.includes('\n') || text.slice(edit.from, edit.to).includes('\n'),
+      ) && /^(?: {4,}|\t)\S|^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to));
+    const kept =
+      done && !((fromSpare || fenced || broken) && readsOtherMicromark(text, done.changes))
+        ? done
+        : undefined;
+    if (kept && (!beside || kept.touchingOthers.length === 0)) return kept;
+    if (
+      beside &&
+      !besideTried &&
+      (kept
+        ? kept.touchingOthers.length > 0
+        : parsed.marks.some(
+            (mark) =>
+              mark.entry.by !== ctx.author.handle &&
+              touches(mark, { from: closed.lineFrom - 2, to: closed.to + 2 }),
+          ))
+    ) {
+      // A rung that another person's mark touches at its edge, or that its decisions with the mark
+      // do not read alike for (#107), is tried with the block beside it, which holds the mark.
+      besideTried = true;
+      for (const next of [withNext(units, rung), withPrev(units, rung)]) {
+        if (next) besides.push(next);
+      }
+    }
+    touching ??= kept;
+    const next = besides.shift();
+    if (next) {
+      rung = next;
+      fromSpare = false;
+      continue;
+    }
     const wider = widerThan(closed);
-    fromSpare = !wider && spare !== undefined;
+    const spare = wider ? undefined : spares.shift();
+    if (wider) spares.length = 0;
+    fromSpare = spare !== undefined;
     rung = wider ?? spare;
-    spare = undefined;
   }
+  if (touching) return touching;
   trace?.('ladder-end');
   throw new Untrackable(
     'no-unit',
@@ -274,6 +385,16 @@ function withNext(units: Unit[], rung: Rung): Rung | undefined {
   const at = siblings.indexOf(only);
   const next = siblings[at + 1];
   return at < 0 || !next ? undefined : rungOfUnits([only, next], rung.parent);
+}
+
+/** A unit with the one before it (see `withNext`). */
+function withPrev(units: Unit[], rung: Rung): Rung | undefined {
+  const [only] = rung.units;
+  if (rung.units.length !== 1 || !only) return undefined;
+  const siblings = rung.parent ? rung.parent.children : units;
+  const at = siblings.indexOf(only);
+  const previous = siblings[at - 1];
+  return at < 1 || !previous ? undefined : rungOfUnits([previous, only], rung.parent);
 }
 
 function widerThan(rung: Rung): Rung | undefined {
@@ -407,7 +528,7 @@ function tryRung(
   const range = { from: rung.lineFrom, to: rung.to };
   // The new text is one unit of the kind the old one was: an edit that makes an item two, or takes
   // a block of it out of its container, is a change of the unit around it.
-  if (!sameFrame(rung.kind, rung.prefix, now)) return giveUp('frame');
+  if (!sameFrame(rung.kind, rung.prefix, now, ofOneParagraph(rung))) return giveUp('frame');
   // Your own pending changes in the unit fold into the replacement: they are rejected in its old
   // text, as they would be by rejecting them, and their text is in the new text.
   const own = parsed.marks.filter(
@@ -471,7 +592,10 @@ function tryRung(
   // (a setext underline or a rule is a line of its own, which the closer cannot join)
   const bare =
     endsInBare(now) && !/(?:^|\n)[ \t>]*(?:[-*+][ \t]+)*(?:-{2,}|={2,})[ \t]*$/.test(now);
-  if (html && (rung.prefix !== '' || rung.kind === 'table')) return giveUp('html');
+  // (a table that is deleted leaves the lines after it, the HTML block that was its next line, which
+  // is a block of its own once the table is gone: no table's closer is then in its way)
+  const tableLeft = rung.kind === 'table' && now.includes('|');
+  if (html && (rung.prefix !== '' || tableLeft)) return giveUp('html');
   const atomic =
     html ||
     rung.atomic ||
@@ -521,22 +645,20 @@ function tryRung(
     id,
     unit: { kind: rung.kind, rung: index, from: rung.from, to: rung.to, blocks },
     held,
-    heldByOthers: [
-      ...held.filter(
-        (held_id) => parsed.marks.find((m) => m.id === held_id)?.entry.by !== ctx.author.handle,
-      ),
-      // Another person's mark that ends at the unit's edge (a split's break right in front of it,
-      // an insertion right after it) is decided with the block next to it: the replacement would
-      // read differently in some order (#107).
-      ...parsed.marks
-        .filter(
-          (mark) =>
-            mark.entry.by !== ctx.author.handle &&
-            !held.includes(mark.id) &&
-            touches(mark, { from: rung.lineFrom - 2, to: rung.to + 2 }),
-        )
-        .map((mark) => mark.id),
-    ],
+    // Another person's mark that ends at the unit's edge (a split's break right in front of it, an
+    // insertion right after it) is decided with the block next to it: the replacement would read
+    // differently in some order (#107).
+    touchingOthers: parsed.marks
+      .filter(
+        (mark) =>
+          mark.entry.by !== ctx.author.handle &&
+          !held.includes(mark.id) &&
+          // A change that holds the unit in its new text is no neighbour: the unit is written
+          // inside it (format §3.12).
+          !encloses(mark, { from: rung.from, to: rung.to }) &&
+          touches(mark, { from: rung.lineFrom - 2, to: rung.to + 2 }),
+      )
+      .map((mark) => mark.id),
     folded: own.map((mark) => mark.id),
   };
 }
@@ -544,7 +666,7 @@ function tryRung(
 /** Whether the new text of a unit makes one unit of its kind after the prefix of the old: an item
  * stays one item, a list stays a list, a block of text stays one block. An edit that makes an item
  * two, or takes its text out of the list, belongs to the unit around it. */
-function sameFrame(kind: UnitKind, prefix: string, now: string): boolean {
+function sameFrame(kind: UnitKind, prefix: string, now: string, single = false): boolean {
   // Code in a container that an edit makes text of is no code: its closer, on a line of its own,
   // would end a paragraph that the closer is no part of, so the unit around it takes it.
   if (kind === 'code' && /^ +$/.test(prefix)) {
@@ -561,8 +683,34 @@ function sameFrame(kind: UnitKind, prefix: string, now: string): boolean {
   let top: readonly Unit[] = units;
   while (top.length === 1 && top[0]?.kind === 'quote') top = top[0].children;
   const [only] = top;
+  // A list at the top of the document may turn into several blocks: nothing around it holds them.
+  if (single && top.length > 1 && top.every((unit) => unit.kind === 'list')) return true;
   if (top.length !== 1 || only?.kind !== 'list') return false;
   return kind === 'list' || only.children.length === 1;
+}
+
+/** Whether a rung is a list at the top of the document with one item that holds one paragraph: the
+ * same range as the paragraph's and the item's, which may turn into several lists (#1104). */
+function ofOneParagraph(rung: Rung): boolean {
+  const [list] = rung.units;
+  const [item] = list?.children ?? [];
+  const [text] = item?.children ?? [];
+  return (
+    rung.kind === 'list' &&
+    rung.prefix === '' &&
+    rung.units.length === 1 &&
+    list?.children.length === 1 &&
+    item?.children.length === 1 &&
+    text?.children.length === 0
+  );
+}
+
+/** The line before the one that starts at `at`, without the markers of changes in it. */
+function lineBefore(text: string, at: number): string {
+  if (at <= 0) return '';
+  const from = lineStart(text, at - 1);
+  const end = text[at - 2] === '\r' ? at - 2 : at - 1;
+  return text.slice(from, end).replace(/<!--[^]*?-->/g, '');
 }
 
 /** Whether the last line of a text closes a fenced block: a closer written after it would be read
@@ -618,6 +766,10 @@ function lastLineOf(text: string, prefix: string): string {
 
 function riskyEnd(text: string, prefix: string): boolean {
   const line = lastLineOf(text, prefix);
+  // The fence of a pandoc div: nothing but the fence may be on its line (format §3.1, rule 9).
+  if (isPandoc() && /^[ \t>]*:{3,}/.test(line)) return true;
+  // A Quarto include line, alone on its line, takes no marker after it either (#1087).
+  if (isPandoc() && INCLUDE_LINE.test(line)) return true;
   return RISKY_LINES.some((risky) => risky.test(line));
 }
 
@@ -733,9 +885,16 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     ) {
       return true;
     }
+    // Indented code started on an empty line (a tab or four spaces first) with a list line close
+    // below it: micromark reads that line as text after the code, and as an item once a comment
+    // line stands between (#1104).
+    const startsCode =
+      /^(?: {4}|\t)/.test(edit.insert) &&
+      prefix === '' &&
+      /^[ \t]*(?:<!--[^]*?-->[ \t]*)*(?:\r?\n|$)/.test(text.slice(edit.to));
     // Text typed in indented code or an item's text never changes the blocks: only a line break can.
-    if (!edit.insert.includes('\n') && edit.from === edit.to) return false;
-    if (!/^(?: {4}|\t)/.test(text.slice(start))) return false;
+    if (!startsCode && !edit.insert.includes('\n') && edit.from === edit.to) return false;
+    if (!startsCode && !/^(?: {4}|\t)/.test(text.slice(start))) return false;
     let at = lineEnd(text, edit.to);
     for (let i = 0; i < 4 && at < text.length; i++) {
       const next = lineEnd(text, at + 1);
@@ -746,10 +905,153 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
   });
 }
 
-/** Whether micromark reads the file the changes make otherwise than its newest view. */
-export function readsOtherMicromark(text: string, changes: readonly TextChange[]): boolean {
+/**
+ * Whether the text before `at` ends in pending deletions that, put back, leave its line a bare list
+ * marker (`alpha<!--del k3x9 ⏎*-->`): rejecting them would put whatever is written there behind it.
+ */
+export function afterBareDeletion(text: string, at: number): boolean {
+  const line = text.slice(lineStart(text, at), at);
+  const tail = /(?:<!--del [a-z][a-z0-9]* (?:(?!-->)[^])*-->)+$/.exec(line);
+  if (!tail) return false;
+  let put = line.slice(0, tail.index).replace(/<!--[^]*?-->/g, '');
+  for (const found of tail[0].matchAll(/<!--del [a-z][a-z0-9]* ((?:(?!-->)[^])*)-->/g)) {
+    put += decodePayload(found[1] ?? '');
+  }
+  return /(?:^|\n)[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]*)*(?:[-*+]|\d{1,9}[.)])$/.test(put);
+}
+
+/**
+ * Whether an edit is made at an emphasis delimiter in a paragraph that holds a marker: it replaces
+ * or deletes a `*`, `_` or `~`, types one, or sits right against one (a marker between them does not
+ * part them). A fine write there can leave the delimiter run cut by a marker, which micromark reads
+ * otherwise than the newest view (#299, #265). Only these are read by micromark, so that a
+ * keystroke elsewhere costs what it did.
+ */
+export function atDelimiter(text: string, edits: readonly TextChange[]): boolean {
+  const DELIMITER = /[*_~]/;
+  return edits.some((edit) => {
+    let from = text.lastIndexOf('\n\n', Math.max(0, edit.from - 1));
+    from = from < 0 ? 0 : from;
+    let to = text.indexOf('\n\n', edit.to);
+    to = to < 0 ? text.length : to;
+    const paragraph = text.slice(from, to);
+    // A marker in the paragraph, or just over its edge (a split's break, a deletion of one).
+    const near = text.slice(Math.max(0, edit.from - 100), edit.to + 100);
+    if (!paragraph.includes('<!--') && !/<!--(?:split|del)/.test(near)) return false;
+    if (DELIMITER.test(edit.insert) || DELIMITER.test(text.slice(edit.from, edit.to))) return true;
+    const before = text.slice(from, edit.from).replace(/<!--[^]*?-->/g, '');
+    const after = text.slice(edit.to, to).replace(/<!--[^]*?-->/g, '');
+    return DELIMITER.test(before.slice(-1)) || DELIMITER.test(after.slice(0, 1));
+  });
+}
+
+/**
+ * Whether an edit that types or touches a delimiter run stands right against a pending split or
+ * deletion (a block break, a word): deciding it reads the run in another place than the file shows
+ * it, which only the replacement of the blocks that hold it keeps alike (#265). Not gated by
+ * micromark's reading of the file as written: it reads alike as written, and not after the break
+ * is decided.
+ */
+export function delimiterBesideBreak(text: string, edits: readonly TextChange[]): boolean {
+  const DELIMITER = /[*_~]/;
+  return edits.some((edit) => {
+    const before = text.slice(Math.max(0, edit.from - 400), edit.from);
+    const after = text.slice(edit.to, edit.to + 40);
+    const beside =
+      /<!--(?:split|del) [^>]*-->\s*$/.test(before) || /^\s*<!--(?:split|del) /.test(after);
+    if (!beside) return false;
+    const around = `${before.replace(/<!--[^]*?-->/g, '').slice(-1)}${after.replace(/<!--[^]*?-->/g, '').slice(0, 1)}`;
+    return (
+      DELIMITER.test(edit.insert) ||
+      DELIMITER.test(text.slice(edit.from, edit.to)) ||
+      DELIMITER.test(around)
+    );
+  });
+}
+
+/** Where each change of `changes` ends up in the text they make: the stretch they touch there. */
+function changedStretch(
+  changes: readonly TextChange[],
+  limit: number,
+): { from: number; to: number } | undefined {
+  let delta = 0;
+  let from = Infinity;
+  let to = -Infinity;
+  for (const change of changes.toSorted((a, b) => a.from - b.from || a.to - b.to)) {
+    // (the ledger is no text of the file's body)
+    if (change.from + delta < limit) {
+      from = Math.min(from, change.from + delta);
+      to = Math.max(to, change.from + delta + change.insert.length);
+    }
+    delta += change.insert.length - (change.to - change.from);
+  }
+  return from === Infinity ? undefined : { from, to };
+}
+
+/** Raw HTML that goes on past a blank line: a tag of raw text, a processing instruction, a declaration. */
+const RAW_HTML = /<(?:pre|script|style|textarea)\b|<\?|<![A-Za-z[]/i;
+
+/**
+ * Whether text above a stretch can leave a block open in it: a fence that isn't plainly one (not
+ * at the start of a line, or of the other kind, or not closed), raw HTML, or a comment that
+ * isn't closed.
+ */
+function opensBlock(above: string): boolean {
+  const fences = above.match(/^.*(?:`{3,}|~{3,}).*$/gm) ?? [];
+  if (fences.length % 2 === 1) return true;
+  let kind = '';
+  for (const line of fences) {
+    const plain = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (!plain) return true;
+    if (kind && kind !== plain[1]![0]) return true;
+    kind = plain[1]![0]!;
+  }
+  return RAW_HTML.test(above) || above.split('<!--').length !== above.split('-->').length;
+}
+
+/**
+ * The paragraphs the changes are in, between blank lines, of `body` (the file without its ledger),
+ * where reading them alone reads them as the file does: no fence or raw HTML open above or in them,
+ * no mark across their edges, no CRLF; undefined where it is not so.
+ */
+function stretchOf(
+  body: string,
+  parsed: Parsed,
+  changes: readonly TextChange[],
+): string | undefined {
+  const stretch = changedStretch(changes, body.length);
+  if (!stretch || stretch.to > body.length || body.length <= 2000 || body.includes('\r')) {
+    return undefined;
+  }
+  const lastBreak = body.lastIndexOf('\n\n', Math.max(0, stretch.from - 1));
+  const nextBreak = body.indexOf('\n\n', stretch.to);
+  const from = lastBreak < 0 ? 0 : lastBreak + 2;
+  const to = nextBreak < 0 ? body.length : nextBreak;
+  const here = body.slice(from, to);
+  if (opensBlock(body.slice(0, from)) || opensBlock(here)) return undefined;
+  // A mark that runs across a blank line is cut in two by the stretch.
+  const across = (at: number) =>
+    parsed.marks.some((mark) =>
+      mark.segments.some(
+        (segment) => segment.open.from < at && (segment.close?.to ?? Infinity) > at,
+      ),
+    );
+  return across(from) || across(to) ? undefined : here;
+}
+
+/**
+ * Whether micromark reads the file the changes make otherwise than its newest view. Only the
+ * paragraphs the changes are in are read (`stretchOf`); otherwise, or with `whole`, the whole file,
+ * which costs the size of the file: 380 ms for a key in 100 KB.
+ */
+export function readsOtherMicromark(
+  text: string,
+  changes: readonly TextChange[],
+  whole = false,
+): boolean {
   const file = applyChanges(text, changes);
-  const ledger = parse(file).ledgerRange;
+  const parsed = parse(file);
+  const ledger = parsed.ledgerRange;
   const read = (source: string) =>
     micromark(source, {
       allowDangerousHtml: true,
@@ -765,5 +1067,36 @@ export function readsOtherMicromark(text: string, changes: readonly TextChange[]
       .replace(/\s+/g, ' ')
       .replace(/ ?(<[^>]*>) ?/g, '$1')
       .trim();
-  return read(ledger ? file.slice(0, ledger.from) : file) !== read(newestView(file).text);
+  const body = ledger ? file.slice(0, ledger.from) : file;
+  const here = whole ? undefined : stretchOf(body, parsed, changes);
+  const afterRead = here ?? body;
+  const afterNewest = here !== undefined ? newestView(here).text : newestView(file).text;
+  if (read(afterRead) === read(afterNewest)) return false;
+  // A paragraph that begins with a marker is raw HTML to micromark, and reads otherwise than its
+  // newest view before the change as well (#1092). That is the file's, not the change's: the change
+  // reads otherwise only if it is read in the file differently than it is in the newest view.
+  const old = parse(text);
+  const oldBody = old.ledgerRange ? text.slice(0, old.ledgerRange.from) : text;
+  const same = changes.map((c) => ({ from: c.from, to: c.to, insert: ' '.repeat(c.to - c.from) }));
+  const oldHere = here !== undefined ? stretchOf(oldBody, old, same) : undefined;
+  if (here !== undefined && oldHere === undefined) return true;
+  const oldRead = oldHere ?? oldBody;
+  const oldNewest = oldHere !== undefined ? newestView(oldHere).text : newestView(text).text;
+  if (read(oldRead) === read(oldNewest)) return true;
+  const alike = (a: string, b: string): [string, string] => {
+    let start = 0;
+    while (start < a.length && start < b.length && a[start] === b[start]) start++;
+    let end = 0;
+    while (
+      end < a.length - start &&
+      end < b.length - start &&
+      a[a.length - 1 - end] === b[b.length - 1 - end]
+    ) {
+      end++;
+    }
+    return [a.slice(start, a.length - end), b.slice(start, b.length - end)];
+  };
+  const [markedA, markedB] = alike(read(oldRead), read(afterRead));
+  const [viewA, viewB] = alike(read(oldNewest), read(afterNewest));
+  return markedA !== viewA || markedB !== viewB;
 }

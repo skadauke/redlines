@@ -9,13 +9,14 @@
 // that the keys of other kinds of block (code, tables) can be tried beside it.
 
 import { type ChangeSpec, EditorSelection, type EditorState } from '@codemirror/state';
-import { EditError, type FormatOp, widenedFirstEdits } from '@redlines/format';
 import {
-  blockFormatChanges,
-  caretKeptFromEnd,
-  contextFor,
-  trackingField,
-} from '../tracked/typing.ts';
+  applyChanges,
+  EditError,
+  type FormatOp,
+  type TextChange,
+  widenedFirstEdits,
+} from '@redlines/format';
+import { blockFormat, caretKeptFromEnd, contextFor, trackingField } from '../tracked/typing.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
 import { EMPTY_ITEM, unsoundEmptyItem } from './empty-item.ts';
 import { type Item, itemsAround, type KeyEdit, nothing } from './edits.ts';
@@ -42,6 +43,8 @@ const FIRST_ITEM = "The first item of a list can't be indented: there is no item
 const THEIR_SPLIT =
   "Another person's pending change made this item. Accept or reject it before indenting or outdenting it.";
 const NOT_UNDER_TEXT = "An empty item can't go under a line of text. Type in the item first.";
+const READS_OTHERWISE =
+  "This item can't go under the empty item above it: Markdown ends an empty item at a blank line, so the file would read it as nested and the text as not. Type in that item first.";
 const NOT_ITEM = 'Only a list item can be indented or outdented.';
 const NO_PARENT =
   "This item isn't under another item. Backspace at its start takes the bullet away.";
@@ -189,14 +192,36 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
   const op: FormatOp = { kind: 'indent', by: outdent ? -1 : 1 };
   const range = { from: Math.min(first.at, from), to: Math.max(last.at, to) };
   let changes;
+  let intent;
   let widened = false;
   try {
     try {
-      changes = blockFormatChanges(state, range, op);
+      ({ changes, intent } = blockFormat(state, range, op));
+      // A fine write that the file reads otherwise than the view (an item put under an empty item
+      // whose pending split stands on its line, which the view reads as no item to nest under:
+      // walk seed 159, #1052) is widened to the list as well (format §3.12); where that reads
+      // otherwise too, the key says why it does nothing, as it does for an empty item.
+      if (state.field(trackingField)) {
+        const text = state.doc.toString();
+        const worse = (made: TextChange[]) => readsWorse(text, applyChanges(text, made));
+        if (worse(changes)) {
+          let again: ReturnType<typeof blockFormat> | undefined;
+          try {
+            again = blockFormat(state, range, op, true);
+          } catch (error) {
+            if (!(error instanceof EditError)) throw error;
+          }
+          if (!again || worse(again.changes)) {
+            return { ...nothing(state), userEvent: 'indent', refusal: READS_OTHERWISE };
+          }
+          ({ changes, intent } = again);
+          widened = true;
+        }
+      }
     } catch (error) {
       // No fine form: the item or the list is replaced (format §3.12).
       if (!(error instanceof EditError)) throw error;
-      changes = blockFormatChanges(state, range, op, true);
+      ({ changes, intent } = blockFormat(state, range, op, true));
       widened = true;
     }
   } catch (error) {
@@ -212,6 +237,7 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
       selection: EditorSelection.single(caretKeptFromEnd(state, changes, head)),
       userEvent: 'indent',
       final: true,
+      intent,
     };
   }
   return {
@@ -219,6 +245,7 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
     selection: EditorSelection.single(head),
     userEvent: 'indent',
     final: true,
+    intent,
     ...kept,
   };
 }

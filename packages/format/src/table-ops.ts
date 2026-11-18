@@ -2,6 +2,7 @@
 // tracked as Word tracks them, or plain with Track Changes off (§3.10). An operation gives the
 // changes of the file and where the caret goes. This file has inserting rows; the others join it.
 
+import { withDialect } from './dialect.ts';
 import { assertPointsRead } from './align-point.ts';
 import { lineEnd } from './blocks.ts';
 import { applyChanges, eolOf } from './changes.ts';
@@ -610,7 +611,7 @@ function moveRows(
   // A comment that runs from one row into another (a row with no pipe at its start can't start with
   // a marker, and the comment's opener stands at the end of the row above) can't be kept with a
   // move that can be rejected: refused now, naming its author, and not when the move is decided.
-  const across = ctx ? commentAcrossRows(table, parsed) : null;
+  const across = ctx ? commentAcrossRows(table, parsed, true) : null;
   if (across) {
     throw new EditError(
       `${across.name}'s comment runs from one row of this table into the next. Delete or resolve it first, or turn off Track Changes.`,
@@ -780,7 +781,9 @@ function wordsNextTo(
   table: TableRead,
 ): string | null {
   const next = neighboursOf(text, parsed, table);
-  if (error.code === 'unclosed-end' && next.fenceAfter) return NEXT_TO_WORDS.codeAfter;
+  if (error.code === 'unclosed-end' && next.fenceAfter) {
+    return next.fenceUnclosed ? NEXT_TO_WORDS.codeAfterUnclosed : NEXT_TO_WORDS.codeAfter;
+  }
   if (
     next.endsText &&
     ((error.code === 'inside-code' && next.indentedAbove) ||
@@ -893,51 +896,55 @@ function deleteTable(
  */
 /** The operation at the grain it was made, refused where its rules say so (`tableEdit` widens). */
 export function fineTableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
-  const parsed = parse(text);
-  // A table in the new text of a pending replacement takes no mark of its own there (a decision of
-  // the replacement would hide it): the operation is written into the replacement's new text, as a
-  // replacement of the table does (`tableEdit` widens what is refused here).
-  if (op.kind !== 'deleteTable' && inReplacementText(text, op)) {
-    throw new EditError(IN_REPLACEMENT, 'no-legal-placement');
-  }
-  const table = tableOf(text, parsed, op);
-  if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, ctx);
-  if (op.kind === 'fillCells') return fillCells(text, parsed, table, op, ctx);
-  if (op.kind === 'deleteRows') return deleteRows(text, parsed, table, rowsOf(table, op.rows), ctx);
-  if (op.kind === 'moveRows') {
-    return moveRows(text, parsed, table, rowsOf(table, op.rows), op.to, ctx);
-  }
-  if (op.kind === 'insertCols') return insertCols(text, parsed, table, op, ctx);
-  if (op.kind === 'deleteCols') return deleteCols(text, parsed, table, colsOf(table, op.cols), ctx);
-  if (op.kind === 'moveCols') {
-    return moveCols(text, parsed, table, colsOf(table, op.cols), op.to, ctx);
-  }
-  if (op.kind === 'align') return aligned(text, parsed, table, op, ctx);
-  const refusal = ruleTwo(op.kind, pendingOf(table, parsed), true);
-  if (refusal) throw new EditError(refusal, 'no-legal-placement');
-  headerCheck(op, table, parsed);
-  const eol = eolOf(text, parsed.ledgerRange);
+  return withDialect(ctx.dialect, () => {
+    const parsed = parse(text);
+    // A table in the new text of a pending replacement takes no mark of its own there (a decision of
+    // the replacement would hide it): the operation is written into the replacement's new text, as a
+    // replacement of the table does (`tableEdit` widens what is refused here).
+    if (op.kind !== 'deleteTable' && inReplacementText(text, op)) {
+      throw new EditError(IN_REPLACEMENT, 'no-legal-placement');
+    }
+    const table = tableOf(text, parsed, op);
+    if (op.kind === 'deleteTable') return deleteTable(text, parsed, table, ctx);
+    if (op.kind === 'fillCells') return fillCells(text, parsed, table, op, ctx);
+    if (op.kind === 'deleteRows')
+      return deleteRows(text, parsed, table, rowsOf(table, op.rows), ctx);
+    if (op.kind === 'moveRows') {
+      return moveRows(text, parsed, table, rowsOf(table, op.rows), op.to, ctx);
+    }
+    if (op.kind === 'insertCols') return insertCols(text, parsed, table, op, ctx);
+    if (op.kind === 'deleteCols')
+      return deleteCols(text, parsed, table, colsOf(table, op.cols), ctx);
+    if (op.kind === 'moveCols') {
+      return moveCols(text, parsed, table, colsOf(table, op.cols), op.to, ctx);
+    }
+    if (op.kind === 'align') return aligned(text, parsed, table, op, ctx);
+    const refusal = ruleTwo(op.kind, pendingOf(table, parsed), true);
+    if (refusal) throw new EditError(refusal, 'no-legal-placement');
+    headerCheck(op, table, parsed);
+    const eol = eolOf(text, parsed.ledgerRange);
 
-  const taken = idsIn(text);
-  const ledger = workingLedger(parsed.ledger);
-  addPerson(ledger, ctx.author);
-  const group = ctx.group ?? (op.count > 1 ? newId(taken, ctx.random) : undefined);
-  if (group !== undefined) taken.add(group);
-  const ids: string[] = [];
-  const lines: string[] = [];
-  for (let i = 0; i < op.count; i++) {
-    const id = newId(taken, ctx.random);
-    taken.add(id);
-    ids.push(id);
-    const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };
-    if (group !== undefined) entry.group = group;
-    if (ctx.note !== undefined) entry.note = ctx.note;
-    ledger.marks[id] = entry;
-    lines.push(rowText(table, text, `<!--ins ${id} row-->`, op.texts?.[i]));
-  }
-  const body = insertBody(text, table, op, eol, lines);
-  const changes = commitEdit(text, body, ledger, { parsed, created: ids });
-  return { changes, caret: caretOf(applyChanges(text, changes), table, op) };
+    const taken = idsIn(text);
+    const ledger = workingLedger(parsed.ledger);
+    addPerson(ledger, ctx.author);
+    const group = ctx.group ?? (op.count > 1 ? newId(taken, ctx.random) : undefined);
+    if (group !== undefined) taken.add(group);
+    const ids: string[] = [];
+    const lines: string[] = [];
+    for (let i = 0; i < op.count; i++) {
+      const id = newId(taken, ctx.random);
+      taken.add(id);
+      ids.push(id);
+      const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };
+      if (group !== undefined) entry.group = group;
+      if (ctx.note !== undefined) entry.note = ctx.note;
+      ledger.marks[id] = entry;
+      lines.push(rowText(table, text, `<!--ins ${id} row-->`, op.texts?.[i]));
+    }
+    const body = insertBody(text, table, op, eol, lines);
+    const changes = commitEdit(text, body, ledger, { parsed, created: ids });
+    return { changes, caret: caretOf(applyChanges(text, changes), table, op) };
+  });
 }
 
 /** Aligning columns (format §3.7, rule 5). `ctx` is null for plain. */
@@ -1604,9 +1611,17 @@ export function decideRows(
     changes.push(...commentsOf(parsed, table, leaving));
     for (const mark of parsed.marks) {
       if (mark.kind !== 'cmt' && mark.kind !== 'hl') continue;
-      const at = mark.segments[0]?.open.from ?? -1;
-      const row = table.rows.findIndex((r) => r.from <= at && at <= r.to);
-      if (row !== -1 && leaving.has(row)) anchored.add(mark.id);
+      // An end in a row that leaves is written again as a point (`commentsOf`), the closer too when the
+      // comment's opener stands in another row (#376): the old marker goes with the row.
+      const ends = mark.segments.flatMap((segment) => [
+        segment.open.from,
+        segment.close?.from ?? -1,
+      ]);
+      const inLeaving = ends.some((at) => {
+        const row = table.rows.findIndex((r) => r.from <= at && at <= r.to);
+        return row !== -1 && leaving.has(row);
+      });
+      if (inLeaving) anchored.add(mark.id);
     }
     // A comment or a highlight in a row that is taken out and written again is written with it
     // (format §3.7, "Moving rows"): a decision of the text would leave its markers at the place the row
@@ -1644,28 +1659,30 @@ const IN_REPLACEMENT = 'A mark of its own cannot stand in the new text of a pend
  * @throws EditError when the operation is refused.
  */
 export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdit {
-  try {
-    // A table in the new text of a pending replacement takes no mark of its own there (a decision of
-    // the replacement would hide it): the operation is written into the replacement's new text.
-    if (inReplacementText(text, op)) return widenedTableEdit(text, op, ctx);
-  } catch (first) {
-    if (!(first instanceof EditError) && !(first instanceof Untrackable)) throw first;
-  }
-  try {
-    return fineTableEdit(text, op, ctx);
-  } catch (error) {
-    if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
-    // A request with no meaning (the last column, rows already there, columns already aligned that
-    // way) is no refusal of the rules: it is answered in its own words, not written as a replacement.
-    if (NO_MEANING.test(error.message)) throw error;
+  return withDialect(ctx.dialect, () => {
     try {
-      return widenedTableEdit(text, op, ctx);
-    } catch (second) {
-      // The operation has no meaning, or no unit holds it: the refusal is the first one's.
-      if (second instanceof EditError || second instanceof Untrackable) throw error;
-      throw second;
+      // A table in the new text of a pending replacement takes no mark of its own there (a decision of
+      // the replacement would hide it): the operation is written into the replacement's new text.
+      if (inReplacementText(text, op)) return widenedTableEdit(text, op, ctx);
+    } catch (first) {
+      if (!(first instanceof EditError) && !(first instanceof Untrackable)) throw first;
     }
-  }
+    try {
+      return fineTableEdit(text, op, ctx);
+    } catch (error) {
+      if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
+      // A request with no meaning (the last column, rows already there, columns already aligned that
+      // way) is no refusal of the rules: it is answered in its own words, not written as a replacement.
+      if (NO_MEANING.test(error.message)) throw error;
+      try {
+        return widenedTableEdit(text, op, ctx);
+      } catch (second) {
+        // The operation has no meaning, or no unit holds it: the refusal is the first one's.
+        if (second instanceof EditError || second instanceof Untrackable) throw error;
+        throw second;
+      }
+    }
+  });
 }
 
 /** Whether the table that `op` is on stands in the new text of a pending replacement. */
@@ -1696,21 +1713,23 @@ export function askedTableEdit(
   op: TableOp,
   ctx: EditContext,
 ): TableEdit & { untracked?: true } {
-  try {
-    return tableEdit(text, op, ctx);
-  } catch (error) {
-    if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
-    if (NO_MEANING.test(error.message)) throw error;
+  return withDialect(ctx.dialect, () => {
     try {
-      return {
-        ...untrackedTableEdit(text, op, { author: ctx.author, random: ctx.random }),
-        untracked: true,
-      };
-    } catch (second) {
-      if (second instanceof EditError) throw error;
-      throw second;
+      return tableEdit(text, op, ctx);
+    } catch (error) {
+      if (!(error instanceof EditError) || !WIDENABLE.includes(error.code ?? 'markup')) throw error;
+      if (NO_MEANING.test(error.message)) throw error;
+      try {
+        return {
+          ...untrackedTableEdit(text, op, { author: ctx.author, random: ctx.random }),
+          untracked: true,
+        };
+      } catch (second) {
+        if (second instanceof EditError) throw error;
+        throw second;
+      }
     }
-  }
+  });
 }
 
 const NO_MEANING =

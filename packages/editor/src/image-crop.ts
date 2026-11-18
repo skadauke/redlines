@@ -34,18 +34,23 @@ const WHOLE = 0.995;
 type Side = 'n' | 's' | 'e' | 'w';
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 const HANDLE_NAMES: Record<(typeof HANDLES)[number], string> = {
-  nw: 'top left corner',
-  n: 'top edge',
-  ne: 'top right corner',
-  e: 'right edge',
-  se: 'bottom right corner',
-  s: 'bottom edge',
-  sw: 'bottom left corner',
-  w: 'left edge',
+  nw: 'Top left corner',
+  n: 'Top edge',
+  ne: 'Top right corner',
+  e: 'Right edge',
+  se: 'Bottom right corner',
+  s: 'Bottom edge',
+  sw: 'Bottom left corner',
+  w: 'Left edge',
 };
+/** The pause after the last arrow key press before the box's size and place are spoken, in ms. */
+const ANNOUNCE_MS = 400;
 
+/** The box's name, and its hint, which describes it (`aria-describedby`) and is not its label. */
+export const CROP_LABEL = 'Crop box';
 export const CROP_HINT =
-  'Crop box. Arrow keys move it, Shift with the arrows resizes it. Return crops, Escape cancels.';
+  'Arrow keys move the box. Tab to a handle and the arrow keys resize it from that side or corner, ' +
+  'Shift with the arrows takes larger steps. Return crops, Escape cancels.';
 export const CROP_NO_IMAGE = 'Select an image to crop it.';
 export const CROP_REMOTE = 'Only a picture kept in a file can be cropped.';
 export const CROP_RAW = 'Crop works on the picture as it reads. Show Clean or Redlines first.';
@@ -60,6 +65,8 @@ const STYLE = `
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 0 100vmax rgba(0, 0, 0, 0.5);
   background-image: linear-gradient(to right, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.55) calc(33.33% - 0.5px), rgba(255, 255, 255, 0.55) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgba(255, 255, 255, 0.55) calc(66.66% - 0.5px), rgba(255, 255, 255, 0.55) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)),
     linear-gradient(to bottom, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.55) calc(33.33% - 0.5px), rgba(255, 255, 255, 0.55) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgba(255, 255, 255, 0.55) calc(66.66% - 0.5px), rgba(255, 255, 255, 0.55) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)); }
+.rl-crop-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.rl-crop-handle:focus-visible { outline: 2px solid var(--rl-ink); outline-offset: 2px; }
 .rl-crop-box:focus-visible { outline: 2px solid var(--rl-ink); outline-offset: 2px; }
 .rl-crop-handle { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; box-sizing: border-box;
   background: #fff; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.35); }
@@ -151,13 +158,25 @@ export function startCrop(
   box.className = 'rl-crop-box';
   box.tabIndex = 0;
   box.setAttribute('role', 'group');
-  box.setAttribute('aria-label', CROP_HINT);
-  root.append(box);
+  box.setAttribute('aria-label', CROP_LABEL);
+  const hint = doc.createElement('span');
+  hint.className = 'rl-crop-sr';
+  hint.id = `rl-crop-hint-${Math.random().toString(36).slice(2, 8)}`;
+  hint.textContent = CROP_HINT;
+  box.setAttribute('aria-describedby', hint.id);
+  // One polite voice, written once a run of key presses has ended, not at every step.
+  const status = doc.createElement('span');
+  status.className = 'rl-crop-sr';
+  status.setAttribute('role', 'status');
+  root.append(box, hint, status);
   for (const side of HANDLES) {
     const handle = doc.createElement('span');
     handle.className = 'rl-crop-handle';
     handle.dataset['side'] = side;
-    handle.title = `Drag the ${HANDLE_NAMES[side]}`;
+    handle.tabIndex = 0;
+    handle.setAttribute('role', 'button');
+    handle.setAttribute('aria-label', `${HANDLE_NAMES[side]}, crop handle`);
+    handle.title = `Drag the ${HANDLE_NAMES[side].toLowerCase()}`;
     handle.style.left = side.includes('w') ? '0%' : side.includes('e') ? '100%' : '50%';
     handle.style.top = side.includes('n') ? '0%' : side.includes('s') ? '100%' : '50%';
     box.append(handle);
@@ -168,7 +187,7 @@ export function startCrop(
   bar.setAttribute('aria-label', 'Crop');
   const size = doc.createElement('span');
   size.className = 'rl-crop-size';
-  size.setAttribute('aria-live', 'polite');
+  size.setAttribute('aria-hidden', 'true');
   const button = (label: string, primary: boolean, run: () => void) => {
     const made = doc.createElement('button');
     made.type = 'button';
@@ -190,6 +209,17 @@ export function startCrop(
   let f: CropRect = { x: 0.1, y: 0.1, width: 0.8, height: 0.8 };
   let busy = false;
   let gone = false;
+  let announce: ReturnType<typeof setTimeout> | undefined;
+  /** Whether a key press moved the box since it was last spoken of: other arrow keys are not its. */
+  let moved = false;
+
+  const say = () => {
+    moved = false;
+    const percent = (n: number) => Math.round(n * 100);
+    status.textContent =
+      `${Math.round(f.width * img.naturalWidth)} by ${Math.round(f.height * img.naturalHeight)} pixels, ` +
+      `${percent(f.x)} percent from the left, ${percent(f.y)} percent from the top`;
+  };
 
   const place = () => {
     if (gone) return;
@@ -274,7 +304,8 @@ export function startCrop(
   box.addEventListener('pointerdown', (event) => {
     if (event.target === box) drag(event, null);
   });
-  for (const handle of box.querySelectorAll<HTMLElement>('.rl-crop-handle')) {
+  const handleEls = [...box.querySelectorAll<HTMLElement>('.rl-crop-handle')];
+  for (const handle of handleEls) {
     const sides = [...(handle.dataset['side'] ?? '')] as Side[];
     handle.addEventListener('pointerdown', (event) => drag(event, sides));
   }
@@ -282,7 +313,9 @@ export function startCrop(
   function close(refocus = false): void {
     if (gone) return;
     gone = true;
+    clearTimeout(announce);
     doc.removeEventListener('keydown', onKey, true);
+    doc.removeEventListener('keyup', onKeyUp, true);
     doc.removeEventListener('pointerdown', onPress, true);
     win.removeEventListener('resize', place);
     observer?.disconnect();
@@ -299,6 +332,7 @@ export function startCrop(
     done.setAttribute('aria-disabled', 'true');
     cancel.setAttribute('aria-disabled', 'true');
     size.textContent = 'Cropping…';
+    status.textContent = 'Cropping…';
     const doc0 = view.state.doc;
     try {
       const copy = await crop(path, { ...f });
@@ -319,6 +353,9 @@ export function startCrop(
     }
   }
 
+  /** The side or corner of the handle that `target` is, or null where it is not a handle. */
+  const handleOf = (target: EventTarget | null): string | null =>
+    handleEls.find((handle) => handle === target)?.dataset['side'] ?? null;
   const onKey = (event: KeyboardEvent) => {
     if (event.isComposing || event.defaultPrevented) return;
     if (event.key === 'Escape') {
@@ -341,15 +378,36 @@ export function startCrop(
       ArrowDown: [0, 1],
     };
     const arrow = arrows[event.key];
-    if (!arrow || busy || (event.target !== box && event.target !== doc.body)) return;
+    const handleSide = handleOf(event.target);
+    const onHandle = handleSide !== null;
+    if (!arrow || busy || (event.target !== box && event.target !== doc.body && !onHandle)) return;
     event.preventDefault();
     event.stopPropagation();
     const rect = img.getBoundingClientRect();
+    if (onHandle) {
+      // A handle moves its own sides: the arrow toward the outside grows the box, away from it shrinks it.
+      const sides = [...(handleSide ?? '')] as Side[];
+      const step = event.shiftKey || event.altKey ? 10 : 1;
+      const before = f;
+      set(resize(f, sides, (arrow[0] * step) / rect.width, (arrow[1] * step) / rect.height));
+      moved ||=
+        f.x !== before.x ||
+        f.y !== before.y ||
+        f.width !== before.width ||
+        f.height !== before.height;
+      return;
+    }
     const step = event.altKey ? 10 : 1;
     const dx = (arrow[0] * step) / rect.width;
     const dy = (arrow[1] * step) / rect.height;
     if (event.shiftKey) set({ ...f, width: f.width + dx, height: f.height + dy });
     else set({ ...f, x: f.x + dx, y: f.y + dy });
+    moved = true;
+  };
+  const onKeyUp = (event: KeyboardEvent) => {
+    if (!moved || !event.key.startsWith('Arrow')) return;
+    clearTimeout(announce);
+    announce = setTimeout(say, ANNOUNCE_MS);
   };
   const onPress = (event: PointerEvent) => {
     const target = event.target;
@@ -357,6 +415,7 @@ export function startCrop(
     close();
   };
   doc.addEventListener('keydown', onKey, true);
+  doc.addEventListener('keyup', onKeyUp, true);
   doc.addEventListener('pointerdown', onPress, true);
   win.addEventListener('resize', place);
   const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place());

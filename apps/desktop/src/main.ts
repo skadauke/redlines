@@ -19,7 +19,7 @@ import {
   defaultFirst,
   renderCommentText,
 } from '@redlines/agents';
-import { codeFileHighlight, codeLanguages } from '@redlines/code';
+import { codeFileHighlight, codeLanguagesFor } from '@redlines/code';
 import {
   createEditor,
   editorDocumentHtml,
@@ -53,6 +53,10 @@ import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
+import { joinSession, type Session } from './session.ts';
+import type { SyncState } from '@redlines/sync';
+import { tauriSessionPorts } from './session-tauri.ts';
+import { browserSessionPorts, tabsCanShare } from './session-browser.ts';
 import { documentKind } from './file-names.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { addImages, type ImageAdding } from './image-add.ts';
@@ -102,6 +106,7 @@ import { createNotice } from './ui/notice.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
 import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
+import { tooBroadNotice } from './project-notice.ts';
 import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
 import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
@@ -212,6 +217,74 @@ function askAboutThisWindow(): Promise<boolean> {
   });
 }
 
+/** This document's session, when it is in several windows (src/session.ts). */
+let session: Session | null = null;
+let sessionState: SyncState = 'synced';
+let sessionPeers = 0;
+
+/** Where the document stands among its windows, for the title bar; nothing for a document alone. */
+function sessionStatus(): string | undefined {
+  if (!session) return undefined;
+  if (sessionState === 'offline') return 'Offline: your edits are kept';
+  if (sessionState === 'ended') return 'No longer in the session';
+  return sessionPeers > 0 ? `In ${sessionPeers + 1} windows` : undefined;
+}
+
+/** Joins the session of the document at `path`, as its leader when there is none yet. */
+async function beginSession(path: string, follow = false): Promise<void> {
+  session = await joinSession(isTauri ? tauriSessionPorts() : browserSessionPorts(path), editor, {
+    path,
+    follow,
+    person: { handle: author.handle, name: author.name },
+    // The leader writes the file, for every window of the document.
+    diskText: () => controller.diskText,
+    save: async () => ((await controller.save()) ? controller.diskText : null),
+    onSaved: (text) => controller.savedBySession(text),
+    onLoaded: () => controller.sessionLoaded(),
+    onLead: () => {
+      controller.becameLeader();
+      if (import.meta.env.DEV) document.documentElement.dataset['session'] = 'leading';
+    },
+    onState: (state) => {
+      sessionState = state;
+      render();
+    },
+    onPeers: (peers) => {
+      sessionPeers = peers.length;
+      render();
+    },
+    notice: (message) => notice.flash(message),
+  });
+  controller.enterSession(session);
+  // Debug only (two-windows.html): what the journeys wait for.
+  if (import.meta.env.DEV) {
+    document.documentElement.dataset['session'] = session.leading ? 'leading' : 'following';
+  }
+}
+
+/** Takes this window out of its session, as when it opens another document. */
+async function endSession(): Promise<void> {
+  const ended = session;
+  session = null;
+  sessionPeers = 0;
+  sessionState = 'synced';
+  controller.leaveSession();
+  await ended?.stop();
+}
+
+/** Another window with this document's text, kept in step with this one's: a session. */
+async function openAnotherWindow(): Promise<void> {
+  const path = controller.state.path;
+  if ((!isTauri && !tabsCanShare) || path === null) return;
+  try {
+    if (!session) await beginSession(path);
+    await host.openWindow(path, undefined, undefined, true);
+  } catch (error) {
+    console.error('Could not open another window on this document', error);
+    notice.flash('Couldn’t open another window on this document.');
+  }
+}
+
 const openInNewWindow = (path?: string, line?: number) =>
   host.openWindow(path, line).catch((error: unknown) => {
     console.error('Could not open a new window', error);
@@ -225,6 +298,13 @@ const openInNewWindow = (path?: string, line?: number) =>
 let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
+
+/** The file that an include names, as the open document writes it: null where it is none. */
+function includedFile(path: string): string | null {
+  const document = imageDocument;
+  const project = imageFolder ?? (isTauri ? null : '');
+  return document && project !== null ? localImagePath(path, document, project) : null;
+}
 
 /** The size of each local image file, read from its header once and kept until it is saved again. */
 const imageSizes = createImageSizes((paths) => host.imageSizes(paths));
@@ -361,7 +441,14 @@ const editor = createEditor(element('#editor'), {
     settings = { ...settings, people: meetPeopleInSettings(handles, settings.people) };
     editor.setPeople(settings.people);
   },
-  codeLanguages,
+  // A chunk's `{r}` in a .qmd or .Rmd file is read for its language.
+  codeLanguages: codeLanguagesFor(() => {
+    try {
+      return controller.state.path;
+    } catch {
+      return null; // the controller is made after the editor
+    }
+  }),
   // ⌘-click on a link opens its address (http, https or mailto: the editor lets no other through)
   // in the default browser or mail app, which only the app can run; a browser tab opens it itself.
   openLink: (address) => {
@@ -391,6 +478,24 @@ const editor = createEditor(element('#editor'), {
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
     return file === null ? null : imageSizes.of(file);
   },
+  // An include of a Quarto document (`{{< include _part.qmd >}}`) is read and opened as a file of
+  // its own, as a local image is found: relative to the document, and only inside its project (a
+  // browser tab's one folder in memory has no path of its own).
+  includes: {
+    read: async (path) => {
+      const file = includedFile(path);
+      if (file === null) return null;
+      try {
+        return await host.read(file);
+      } catch {
+        return null;
+      }
+    },
+    open: (path) => {
+      const file = includedFile(path);
+      if (file !== null) void controller.open(file);
+    },
+  },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).
   openImage: isTauri || import.meta.env.DEV ? (src) => openImageInPreview(src) : undefined,
@@ -419,6 +524,30 @@ const editor = createEditor(element('#editor'), {
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
     void addImages(imageAdding, spot, { kind: 'files', files, pasted }),
+  // The pictures of a paste from Google Docs are at Google's addresses, which the page can't fetch:
+  // the app does (`fetch_remote_image`, Google's image hosts only), and the bytes are saved like any
+  // pasted picture. A plain browser has none, and the pictures stay linked.
+  onFetchImage: isTauri
+    ? async (url) => {
+        try {
+          const read = await invoke<{ mimeType: string; data: string }>('fetch_remote_image', {
+            url,
+          });
+          const extension = {
+            'image/jpeg': 'jpg',
+            'image/png': 'png',
+            'image/gif': 'gif',
+            'image/webp': 'webp',
+            'image/bmp': 'bmp',
+          }[read.mimeType];
+          if (!extension) return null;
+          const bytes = Uint8Array.from(atob(read.data), (char) => char.charCodeAt(0));
+          return { bytes, type: read.mimeType, extension };
+        } catch {
+          return null;
+        }
+      }
+    : undefined,
   // An image dragged from the sidebar is the project's own file: linked by its path, not copied.
   projectImageLink: (dragged) => relativeImagePath(controller.state.path, dragged),
   // An Undo or Redo with nothing to take: the Mac's beep.
@@ -478,13 +607,14 @@ const agents =
           ...(isTauri
             ? {
                 more: async () =>
-                  (await listedAcpAgents()).map(({ id, name, program, args, bridge }) =>
+                  (await listedAcpAgents()).map(({ id, name, program, args, bridge, gateway }) =>
                     createAcpProvider(processes, {
                       id,
                       name,
                       command: program,
                       args,
                       ...(bridge === undefined ? {} : { bridge }),
+                      ...(gateway === true ? { gateway: true as const } : {}),
                     }),
                   ),
               }
@@ -516,7 +646,7 @@ const documentData = createDocumentData(
 );
 
 /** The @ picker for a box that asks an agent: a comment's, and the question of an Ask. */
-const attachAgentPicker = (field: HTMLTextAreaElement) => {
+const attachAgentPicker = (field: HTMLTextAreaElement, agentsOnly = false) => {
   void lookForAgents();
   return attachPicker(field, {
     getParsed: () => editor.getParsed(),
@@ -524,6 +654,7 @@ const attachAgentPicker = (field: HTMLTextAreaElement) => {
     me: author.handle,
     // The default agent comes first in the list (#528).
     agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
+    agentsOnly,
   });
 };
 
@@ -602,8 +733,8 @@ const review = createReview(editor, {
         documentPath: () => controller.state.path,
         projectFolder: async (path) => {
           const root = await projectOf(path);
-          // As for images: a repository too broad to read all of is not the place to look.
-          return root.tooBroad ? dirname(path) : root.folder;
+          // As for images: a folder too broad to be a project is no place to look (#451).
+          return root.tooBroad ? null : root.folder;
         },
         realPath: (path) => invoke<string>('real_path', { path }),
         // A document opens in a window, and an image or a PDF in its default app; any other
@@ -738,6 +869,8 @@ function showDocument(state: DocumentState): void {
     runs.documentReplaced();
     wordCount.refresh();
   }
+  // Another document took this window: it leaves the document's session.
+  if (session && state.path !== session.path) void endSession();
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
@@ -813,6 +946,8 @@ async function showImages(path: string | null): Promise<void> {
     const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
     // Another file may have opened meanwhile.
     if (!allowed || doc?.path !== path) return;
+    // The home folder and what is above it is no project: only the document's own folder loads
+    // its images, which paste and crop write there (#451).
     imageFolder = root.tooBroad ? dirname(path) : root.folder;
     editor.refreshImages();
     imageWatch.settle();
@@ -830,7 +965,11 @@ async function showInSidebar(path: string | null): Promise<void> {
     return { folder: dirname(path), isRepo: false, tooBroad: false };
   });
   // Another file may have opened meanwhile.
-  if (doc?.path === path) sidebar.setDocument({ path, root });
+  if (doc?.path !== path) return;
+  sidebar.setDocument({ path, root });
+  // The home folder, or a folder above it, is no project (#451): say why there is no folder.
+  const notice = tooBroadNotice(root);
+  if (notice) notifications.show(notice);
 }
 
 /** Opens the document at `path` in the editor, in place of the one it shows. */
@@ -864,7 +1003,7 @@ const runs = createRuns({
     read: () => editor.getDoc(),
     parsed: () => editor.getParsed(),
     save: () => controller.save(),
-    applyAgentEdit: (next, step) => controller.applyAgentEdit(next, step),
+    applyAgentEdit: (next, step, base) => controller.applyAgentEdit(next, step, base),
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
@@ -954,7 +1093,8 @@ const ask = createAsk(editor, {
   // The model the bubble's list starts at: Preferences' choice for the agent (#530, #507).
   chosenModel: (agent) => loadSettings().agentModels[agent],
   notice: (message) => notice.flash(message),
-  attachToField: attachAgentPicker,
+  // Only agents: an @ of a person means nothing in a question to an agent.
+  attachToField: (field) => attachAgentPicker(field, true),
   showThread: (thread) => review.showThread(thread),
   // Where the rail shows its notes, it lays the bubble out among them, level with the selection,
   // and the notes make room for it; elsewhere (narrow window, Clean, no comments) Ask hangs the
@@ -985,6 +1125,36 @@ createAltText(editor, {
     readImage: readImageForAgent,
   }),
 });
+
+/**
+ * The bytes of the local picture `src` for Export to Word: only one inside the document's project
+ * folder (the one its sidebar shows) (`localImagePath`), read by the app under the rules that hold what the page may load
+ * (`image_for_crop`). Undefined for any other address or a file the app won't give.
+ */
+async function readImageForWord(src: string): Promise<Uint8Array | undefined> {
+  const document = imageDocument;
+  const root = imageFolder ?? (isTauri ? null : '');
+  if (/^[a-z][a-z0-9+.-]*:/i.test(src) || document === null || root === null) return undefined;
+  let relative: string;
+  try {
+    relative = decodeURIComponent(src.replace(/[?#].*$/s, ''));
+  } catch {
+    return undefined;
+  }
+  const path = localImagePath(relative, document, root);
+  if (path === null) return undefined;
+  try {
+    if (isTauri) {
+      const read = await invoke<{ mimeType: string; data: string }>('image_for_crop', { path });
+      return Uint8Array.from(atob(read.data), (char) => char.charCodeAt(0));
+    }
+    const url = host.imageUrl(path);
+    const response = url === null ? null : await fetch(url);
+    return response?.ok ? new Uint8Array(await response.arrayBuffer()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** The most bytes of a picture an agent is shown, as the app's own command holds it to. */
 const AGENT_IMAGE_BYTES = 3_670_016;
@@ -1075,6 +1245,8 @@ const toggleTracking = () => {
 
 /** Review ▸ Accept All Changes and Stop Tracking: the selection's changes, or all, then Track Changes off. */
 const acceptAllAndStopTracking = () => {
+  // The count is the changes at the click: what the notification says it accepted.
+  const count = editor.getUiState().acceptAllCount;
   try {
     if (!editor.acceptAllAndStopTracking()) return;
   } catch (error) {
@@ -1082,7 +1254,22 @@ const acceptAllAndStopTracking = () => {
     return notice.flash(error.message);
   }
   controller.dismissNotice(TRACKING_FOR_EVERYONE);
-  notice.flash('Changes accepted. Track Changes is off');
+  const accepted = editor.getDoc();
+  // Said with the count, and with the way back: one Undo gives the changes and Track Changes back.
+  notifications.show({
+    key: 'accept-all',
+    text: `${count === 1 ? '1 change' : `${count} changes`} accepted. Track Changes is off.`,
+    action: {
+      label: 'Undo',
+      run: (shown) => {
+        // Only while nothing was written since: a later edit is Edit ▸ Undo's to take back.
+        if (editor.getDoc() === accepted) editor.undo();
+        else notice.flash('The document changed since. Use Edit ▸ Undo.');
+        shown.close();
+      },
+    },
+    timeout: 8000,
+  });
 };
 
 /**
@@ -1366,6 +1553,7 @@ const commands: MenuCommands = {
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
   rename: renameDocument,
+  openAnotherWindow: () => void openAnotherWindow(),
   revealInFinder: () => {
     if (doc?.path) {
       void host.reveal(doc.path).catch((error: unknown) => {
@@ -1424,6 +1612,7 @@ const commands: MenuCommands = {
       text: editor.getDoc(),
       name: doc?.name ?? 'Untitled',
       path: doc?.path ?? null,
+      images: readImageForWord,
       show: (options) => void notifications.show(options),
       canReveal: isTauri,
     }).catch((error: unknown) => {
@@ -1566,6 +1755,7 @@ function render(): void {
   titleBar.update({
     name: doc.name,
     dirty: doc.dirty,
+    ...(sessionStatus() ? { sync: sessionStatus()! } : {}),
     fileDraggable: doc.path !== null && canDragFile,
     plainOnly: ui.kind === 'plain-only',
     view: ui.view,
@@ -1616,6 +1806,8 @@ if (isTauri) {
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else {
+      // The others go on: the next window leads the session, and none is left with a stale caret.
+      await endSession();
       // Closed without saving, or with nothing unsaved: no copy is kept of it.
       recovery?.discard();
       runs.stopAll();
@@ -1626,9 +1818,17 @@ if (isTauri) {
   // to show what it was opened for.
   const start = await host.windowStart().catch((error: unknown) => {
     console.error('Could not ask what this window was opened for', error);
-    return { path: null, line: null, text: null };
+    return { path: null, line: null, text: null, session: false };
   });
-  if (start.path === null) {
+  if (start.session && start.path !== null) {
+    // Another window on a document: its text is the session's, which the window's leader gives.
+    controller.followSession(start.path);
+    await beginSession(start.path, true).catch(async (error: unknown) => {
+      // The window that showed it closed first: this one holds the file on its own.
+      console.error('Could not join the session', error);
+      await controller.open(start.path!);
+    });
+  } else if (start.path === null) {
     // A window opened for text starts with an Untitled document that holds it, unsaved.
     await (start.text ? controller.createWith(start.text) : controller.create());
   } else {
@@ -1721,7 +1921,24 @@ if (isTauri) {
   updates?.setAutomatic(settings.checkForUpdates);
 } else {
   installShortcuts(menuModel, shortcutBook);
-  await controller.open('sample.md');
+  const query = new URLSearchParams(location.search);
+  const joining = query.get('join');
+  if (joining !== null && tabsCanShare) {
+    // Another tab on a document: its text is the session's, which the tab that leads gives.
+    controller.followSession(joining);
+    await beginSession(joining, true).catch(async (error: unknown) => {
+      console.error('Could not join the session', error);
+      await controller.open('sample.md');
+    });
+  } else {
+    await controller.open('sample.md');
+    // Debug only (the two-windows page, src/two-windows.ts): this tab starts the session.
+    if (import.meta.env.DEV && query.get('session') === 'host' && tabsCanShare) {
+      await beginSession('sample.md').catch((error: unknown) => {
+        console.error('Could not start the session', error);
+      });
+    }
+  }
   // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
@@ -1797,6 +2014,14 @@ if (import.meta.env.DEV && import.meta.env['VITE_PALETTE_CHECK']) {
   void import('./palette-check.ts').then(({ runPaletteCheck }) =>
     runPaletteCheck(editor, { ask: !isTauri }),
   );
+}
+
+// Debug only (sync-check.ts): one document in two windows, side by side, in WebKit.
+if (
+  import.meta.env.DEV &&
+  (import.meta.env['VITE_SYNC_CHECK'] || new URLSearchParams(location.search).has('sync-check'))
+) {
+  void import('./sync-check.ts').then(({ runSyncCheck }) => runSyncCheck());
 }
 
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.

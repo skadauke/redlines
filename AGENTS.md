@@ -15,12 +15,14 @@ and [docs/format.md](docs/format.md) (the file format).
 | Path                    | What it is                                                                |
 | ----------------------- | ------------------------------------------------------------------------- |
 | `packages/format`       | `@redlines/format`: types, ids and payload handling for the file format   |
+| `packages/collab`       | `@redlines/collab`: the session authority for multiuser editing, its hub, window client and transports (live between windows of the app) |
 | `packages/editor`       | `@redlines/editor`: the editor core                                       |
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
 | `packages/agent-process` | `@redlines/agent-process`: what the agent providers share               |
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
 | `packages/word`         | `@redlines/word`: Word (.docx) export, import and Google Docs' export normalizer; not in the editor bundle |
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
+| `packages/collab-sim`   | `@redlines/collab-sim`: the session simulation harness: seeded live sessions over the real format library, with an oracle (research tooling, not shipped; `REDLINES_FUZZ=<n>` for the larger run, `pnpm --filter @redlines/collab-sim matrix` for the matrix) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `apps/desktop/quicklook` | `@redlines/quicklook`: the Quick Look preview in the app: the renderer (TypeScript, run in JavaScriptCore) and the Swift extension (`swift/`) |
@@ -39,6 +41,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
 | `plugins/tables`        | `@redlines/tables`: the Table menu and its commands, the grips and the +  |
 | `plugins/emoji`         | `@redlines/emoji`: emoji shortcodes drawn as emoji, and the list after a colon |
+| `plugins/sync`          | `@redlines/sync`: binds the editor to a session (pending edits, intents derived again, remote edits) |
 | `plugins/toolbar`       | `@redlines/toolbar`: the toolbar, from the title bar's wrench, on right-click and from the keyboard |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the agent skills are written, see its README     |
@@ -58,7 +61,7 @@ repo root.
 - `pnpm install` (CI uses `pnpm install --frozen-lockfile`)
 - `pnpm typecheck`: `tsc` at the root, then `pnpm -r typecheck`
 - `pnpm lint`: ESLint (`eslint.config.js`)
-- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`, the keystroke in a file without indented code in `packages/format/src/indented-code.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it on pushes to main; pull requests skip them until #432), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
+- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`, the keystroke in a file without indented code in `packages/format/src/indented-code.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it in full runs: pushes to main, the schedule, a dispatch and the one Epic-to-main pull request; other pull requests and pushes to an Epic branch skip them until #432), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
   `plugins/*`, next to the code they test, run in Node. A test that needs a DOM starts with a
   `@vitest-environment happy-dom` comment.
 - `pnpm format` / `pnpm format:check`: Prettier
@@ -68,7 +71,8 @@ repo root.
   Every `cargo` in `src-tauri` needs the program for its target, which isn't in git, and stops
   without it (`bundle.externalBin`). `pnpm build`, `pnpm tauri dev` and `pnpm tauri build` run the
   script for themselves. It bundles `packages/cli` (`pnpm --filter redlines bundle`, to
-  `apps/desktop/redlines/bundle/redlines.js`), compiles the crate and copies the program to
+  `apps/desktop/redlines/bundle/redlines.js`, and `@redlines/word` apart as `word.js`, which the
+  program evaluates only for `import-docx` and `export-docx`), compiles the crate and copies the program to
   `src-tauri/binaries/redlines-<triple>` (Python 3; a triple as its argument, or
   `TAURI_ENV_TARGET_TRIPLE`, picks the target, and `universal-apple-darwin` makes three files)
 - Desktop app, in `apps/desktop`: `pnpm dev` serves the frontend on port 1420 for a plain browser
@@ -103,7 +107,7 @@ repo root.
   ([look-review.md](apps/desktop/journeys/look-review.md): the checklist, and how a lane uses it);
   `apps/desktop/scripts/app-windows` screenshots a built `Redlines.app`'s own windows (it needs
   Screen Recording for the terminal, once). Baselines are drawn by WebKit on macOS, as the app is;
-  a journey is a `tests/*.spec.ts` file in the package (not a vitest test)
+  a journey is a `tests/*.spec.ts` file in the package (not a vitest test). `apps/desktop/two-windows.html` (dev only) is the page twice, side by side, as two tabs of one session: `journeys/tests/tabs.spec.ts` drives it.
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
@@ -112,7 +116,9 @@ repo root.
   page's scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its
   results to the console and ends with a `... done <n> passed, <n> failed` line
   (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`).
-  `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
+  `VITE_SYNC_CHECK=1` (one document in two windows side by side, joined to one authority, typed
+  into through the browser's own input path, `src/sync-check.ts`; `/?sync-check` on a dev page does
+  the same, and `journeys/tests/sync.spec.ts` runs it) is the same too. `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
   the same, and `VITE_ZOOM_CHECK=1` (the column and the rail at every text size, and the window
   zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
   (`src/print-check.ts`) shows that the printed page holds the document and no mark (and, in `pnpm tauri dev` with `REDLINES_EXPORT_PDF=<path>`, writes the PDF there with no panel). They read nothing in a
@@ -129,6 +135,10 @@ repo root.
   (`~/Library/Application Support/md.redlines.editor/recovery/`), never next to the file; saving or
   closing without saving deletes it, and so does a quit that asked about every document. A window
   that opens the document after a crash puts the edits back and says so in a notification
+- The Quarto check, in `apps/desktop`: `node scripts/quarto-check.ts` (Node 24; Quarto on the PATH)
+  renders a marked-up `.qmd` to HTML, Word and Typst and checks that the newest text comes out
+  ([docs/research/quarto-check.md](docs/research/quarto-check.md)). CI runs it in an optional
+  workflow (`quarto.yml`: the open Epic's schedule, and pull requests that touch Quarto code)
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
@@ -237,6 +247,14 @@ repo root.
 - The `quicklook` job of `ci.yml` runs on macOS, when its flag is set (on a pull request, only for
   a change to the Quick Look code; on main, also for `packages/format`): it builds the Quick Look
   extension and checks it (`scripts/build-quicklook --check`), since no other job compiles Swift.
+- `deep.yml`: the depth run (#586): every test file that reads `REDLINES_FUZZ` (or calls
+  `fuzzCount`) at a deeper draw count, one job per file on GitHub's runners, since a shared Mac
+  can't hold it. Only by hand: `gh workflow run deep.yml --ref <branch>`, with `-f fuzz=300` (the
+  default) and `-f suites='path1 path2'`. It needs the file on the default branch, and nothing runs
+  it on a push or a pull request.
+- `quarto.yml`: the optional Quarto check (`apps/desktop/scripts/quarto-check.ts`, with a pinned
+  Quarto, the markdown engine only): on a schedule, of the open Epic branch (main when none is
+  open, as `ci.yml`'s schedule does), on pull requests that touch Quarto code, and by hand.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
   `website/**`, `apps/website-embed/**`, the icon masters, `docs/design.md`, the lockfile or the
@@ -310,7 +328,7 @@ repo root.
 - Keep PRs small and focused on one change.
 - When you change format behavior, update `docs/format.md` (and `docs/design.md` if it describes
   the behavior) in the same PR. Before you change how an edit is written, read
-  [docs/hardening.md](docs/hardening.md): the four properties the format is built to hold, what
+  [docs/hardening.md](docs/hardening.md): the five properties the format is built to hold, what
   holds them, what is known not to hold, and how to add a rule without loosening one.
 - Add or update vitest tests for new or changed behavior, next to the code.
 - Run `pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm format:check` before finishing. Run

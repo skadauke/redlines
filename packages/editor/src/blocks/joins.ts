@@ -27,7 +27,7 @@ import {
 } from '@redlines/format';
 import { onlyHidden } from '../tracked/decorations.ts';
 import { authorFacet, parsedField } from '../tracked/field.ts';
-import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
+import { blockFormat, trackingField } from '../tracked/typing.ts';
 import {
   blankOf,
   continuation,
@@ -118,9 +118,9 @@ function formatted(
   stands?: string,
 ): KeyEdit | null {
   try {
-    const changes = blockFormatChanges(state, { from: at, to: at }, op);
+    const { changes, intent } = blockFormat(state, { from: at, to: at }, op);
     if (!changes.length) return null;
-    return { changes, selection: state.selection, userEvent, final: true };
+    return { changes, selection: state.selection, userEvent, final: true, intent };
   } catch (error) {
     if (error instanceof EditError) {
       if (stands !== undefined && error.message === stands) {
@@ -155,6 +155,33 @@ const DEEP_AT_START =
 const readsAsText = (row: string) =>
   /^[ \t>]*(?:(?:\d{1,9}[.)]|[-+*])[ \t]*|=+[ \t]*|-{2,}[ \t]*)$/.test(row) ||
   (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1';
+
+/**
+ * The last line of an item's own paragraph, as CommonMark reads the file: the editor's parse keeps a
+ * list marker line that doesn't continue the item (a number other than 1 or an empty marker, less
+ * indented than the item's text) as a lazy line of its paragraph, where it is a list item of its
+ * own (#446). Lines from that one on are cut off.
+ */
+function ownLines(state: EditorState, block: Block, item: SyntaxNode): Line {
+  const { doc } = state;
+  const last = doc.lineAt(block.lines.to);
+  const first = doc.lineAt(block.lines.from);
+  const offset = textOffset(state, item);
+  for (let n = first.number + 1; n <= last.number; n++) {
+    const row = doc.line(n).text;
+    const quoted = QUOTE_PREFIX.exec(row)![0].length;
+    const at = columnAt(row, quoted + /^[ \t]*/.exec(row.slice(quoted))![0].length);
+    const base = columnAt(row, quoted);
+    if (at - base >= offset) continue;
+    if (
+      /^[ \t>]*(?:\d{1,9}[.)]|[-+*])[ \t]*$/.test(row) ||
+      (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1'
+    ) {
+      return doc.line(n - 1);
+    }
+  }
+  return last;
+}
 
 /**
  * Why an item can't move (up a level, or out of its list, or into the paragraph above it) while a
@@ -960,15 +987,16 @@ function outOfList(
 ): KeyEdit {
   const userEvent = 'delete.backward.block';
   const { doc } = state;
+  const ownEnd = ownLines(state, block, item);
   // A line below that a pending change empties would follow the text as an underline (#292).
-  if (readsOtherwiseBelow(state, doc.lineAt(item.to))) {
+  if (readsOtherwiseBelow(state, ownEnd)) {
     return { ...nothing(state), refusal: BELOW_CHANGES };
   }
   const list = item.parent;
   // A one-item list is the format's block change, which writes nothing for the line below: a number
   // other than 1 there is text of the paragraph once the item is one (the key writes the blank line
   // that keeps it apart), so it takes the way of a longer list.
-  const underItem = doc.lineAt(item.to);
+  const underItem = ownEnd;
   const below = underItem.number < doc.lines ? doc.line(underItem.number + 1).text : '';
   const alone =
     (list?.getChildren('ListItem').length ?? 0) <= 1 &&
@@ -980,7 +1008,7 @@ function outOfList(
   const line = doc.lineAt(block.lines.from);
   const own = block.containers.at(-1)!;
   // What stood in the item moves out of it with the paragraph, by the item's own offset.
-  const under = leaving(state, item, doc.lineAt(block.lines.to).number);
+  const under = leaving(state, item, ownEnd.number);
   // The first line of the file, Track Changes on: the format takes the marker out as a change of
   // its own, and the lines below it, up to a blank line, must not turn into text of this one or
   // make a heading of it (an item that can't interrupt a paragraph: numbered other than 1, or
@@ -1008,10 +1036,12 @@ function outOfList(
     if (prev) before = state.sliceDoc(prev.lines.to, own.prefix.from);
   }
   // The next item, numbered other than 1, right under it would be read into the paragraph.
-  const last = doc.lineAt(block.lines.to);
+  const last = ownEnd;
   if (last.number < doc.lines) {
     const next = doc.line(last.number + 1);
-    const number = /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text);
+    const number =
+      /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text) ??
+      /^([ \t>]*)(?:[-+*]|(\d{1,9})[.)])[ \t]*$/.exec(next.text);
     if (number && number[2] !== '1') {
       // The first line of the file, Track Changes on: the format takes the marker out as a change
       // of its own, and has no place for the blank line that this item's number needs after it
@@ -1189,6 +1219,35 @@ function fencedContent(state: EditorState, block: Block): { first: Line; last: L
 const contentStart = (line: Line) => line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
 
 /**
+ * Whether Backspace or Delete would take a character out of a fence's marker run, or the line break
+ * that sets the closing fence on its own line (#1109). The line stops being a fence: the code is no
+ * longer closed (or opened), and every fence after it pairs up differently, so that a list below
+ * becomes code. A closing fence longer than the opening one may lose characters down to it; for the
+ * rest the key does nothing, as at the ends of the code.
+ */
+function breaksFence(state: EditorState, block: Block, head: number, forward: boolean): boolean {
+  const { doc } = state;
+  const open = doc.lineAt(block.lines.from);
+  const openRun = /^[ \t>]*(?:[-*+] |\d{1,9}[.)] )?[ \t]*(`{3,}|~{3,})/.exec(open.text);
+  if (!openRun) return false;
+  const end = doc.lineAt(block.lines.to);
+  const closeRun = end.number > open.number ? /^[ \t>]*(`{3,}|~{3,})[ \t]*$/.exec(end.text) : null;
+  if (closeRun && !forward && head === end.from) return true;
+  // The character that goes, by its start.
+  const at = forward ? head : head - 1;
+  if (at < open.from || at > end.to) return false;
+  const marks = (line: Line, run: RegExpExecArray) => {
+    const to = line.from + run[0].trimEnd().length;
+    return at >= to - run[1]!.length && at < to;
+  };
+  if (doc.lineAt(at).number === open.number) return marks(open, openRun);
+  if (closeRun && doc.lineAt(at).number === end.number) {
+    return marks(end, closeRun) && closeRun[1]!.length - 1 < openRun[1]!.length;
+  }
+  return false;
+}
+
+/**
  * Backspace or Delete in a block that takes no text: nothing at the start of code's first line or
  * the end of its last (as at the ends of a file in a code editor); an empty code block goes whole;
  * at the start of the block itself, Backspace moves the caret to the block above and joins
@@ -1214,6 +1273,7 @@ function inNoText(
     if (!forward && head <= contentStart(state.doc.lineAt(block.text.from))) return nothing(state);
     if (forward && head >= block.text.to) return nothing(state);
   }
+  if (content && breaksFence(state, block, head, forward)) return nothing(state);
   if (!forward && head <= block.text.from) {
     // In front of the block: nothing joins into the block above, which the caret goes to.
     const { prev } = neighbours(state, block);

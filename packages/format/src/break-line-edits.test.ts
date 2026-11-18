@@ -23,7 +23,7 @@ import {
   squash,
   thread,
 } from './test-helpers.ts';
-import { SELF_CHECK, fineEdits as trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits } from './track.ts';
 import type { Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -227,13 +227,52 @@ describe('what the rule leaves as it was', () => {
     }
   });
 
-  it("does not take the break of the author's own pending split (#419)", () => {
-    // A change inside it cancels the split, which the last check refuses where letters differ.
-    const text = file('> One<!--split k3x9-->\n>\n> Two', { k3x9: 'ada' });
-    const at = newestView(text).text.indexOf('>\n> Two');
-    for (const insert of ['x', '> ']) {
-      expect(() => edited(text, at, at + 1, insert), insert).toThrow(SELF_CHECK);
+  it("writes a replacement inside the break of the author's own split as new splits (#419)", () => {
+    // The break stays, line by line: the split is cancelled and the break is typed again with what
+    // is typed, its line breaks as splits of their own, with words and with digits.
+    for (const [one, two] of [
+      ['One', 'Two'],
+      ['41', '42'],
+    ] as const) {
+      const text = file(`> ${one}<!--split k3x9-->\n>\n> ${two}`, { k3x9: 'ada' });
+      const at = newestView(text).text.indexOf('>\n> ' + two);
+      for (const insert of ['\n', '\n\n', 'x', '> ', '1']) {
+        const done = edited(text, at, at + 1, insert, ada, counting());
+        expect(newestView(done.after).text, `${one} ${JSON.stringify(insert)}`).toBe(done.typed);
+        expect(parse(done.after).warnings).toEqual([]);
+        expectEveryOrderAlike(`#419 ${one} ${JSON.stringify(insert)}`, done.after);
+      }
     }
+  });
+
+  it('writes a deletion inside a blank line of a break as a substitution that keeps the break (#447)', () => {
+    // The indentation in front of the `>` of a quote in a list item, and the quote that starts with
+    // the blank line under a list item (#418), with digits (where the last check was blind) and words.
+    for (const [one, two] of [
+      ['One', 'Two'],
+      ['41', '42'],
+    ] as const) {
+      const indented = file(`- > ${one}\n  >\n  > ${two}`);
+      const space = newestView(indented).text.indexOf('\n  >\n') + 1;
+      const a = edited(indented, space, space + 1, '', ada, counting());
+      expect(newestView(a.after).text, `indent ${one}`).toBe(a.typed);
+      expect(parse(a.after).warnings).toEqual([]);
+      expectEveryOrderAlike(`#447 indent ${one}`, a.after);
+      expect(bodyText(applyChanges(a.after, reject(a.after, a.fresh[0] ?? '')))).toBe(
+        `- > ${one}\n  >\n  > ${two}`,
+      );
+      const under = file(`1.  7 ${one}\n>\n> ${two}`);
+      const mark = newestView(under).text.indexOf('>\n> ' + two);
+      const b = edited(under, mark, mark + 1, '', bo, counting());
+      expect(newestView(b.after).text, `opening ${one}`).toBe(b.typed);
+      expectEveryOrderAlike(`#418 opening ${one}`, b.after);
+    }
+  });
+
+  it("is told where the break is another person's split (#447)", () => {
+    const text = file('> 41<!--split k3x9-->\n>\n> 42', { k3x9: 'bo' });
+    const at = newestView(text).text.indexOf('>\n> 42');
+    expect(() => edited(text, at, at + 1, '', ada, counting())).toThrow(/Decide Bo/);
   });
 });
 

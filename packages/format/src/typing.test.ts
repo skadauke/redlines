@@ -24,7 +24,11 @@ import {
   thread,
 } from './test-helpers.ts';
 import type { Person, TextChange } from './types.ts';
-import { fineEdit as trackedEdit, fineEdits as trackedEdits } from './track.ts';
+import {
+  fineEdit as trackedEdit,
+  fineEdits as trackedEdits,
+  trackedEdits as widenedTrackedEdits,
+} from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -3420,6 +3424,8 @@ describe("text typed after the list marker of your own pending split's break (#1
 
 const UNDERLINED =
   'The line breaks typed after this bullet make it read as the underline of the text above it, so what is typed under it would be indented code, where its markers would not be read. Reject those line breaks first, or turn Track Changes off.';
+const UNDERLINING_SPLIT =
+  "A line break at the start of this bullet would read differently in the file than in the document: the empty bullet would turn the text above it into a heading. Type the text first and then the line break, or decide the other person's change first.";
 const IN_CODE_WORDS = "A tracked change can't go inside code or an HTML comment";
 
 describe('text typed on a blank line of your own pending line breaks, under a bullet (#143)', () => {
@@ -3542,6 +3548,7 @@ describe('text typed on a blank line of your own pending line breaks, under a bu
       return (n: number) => Uint8Array.from({ length: n }, () => Math.floor(random() * 256));
     };
     let typedWords = 0;
+    let skipped = 0;
     for (const [head, indent] of [
       ['- one\n  - ', '    '],
       ['text\n- ', '  '],
@@ -3558,17 +3565,34 @@ describe('text typed on a blank line of your own pending line breaks, under a bu
           let text = file(`${head}café 42`);
           const first = head.length;
           let caret = first;
+          let unwritten = false;
           for (const [i, breaks] of plan.entries()) {
             const insert = Array.from(
               { length: breaks },
               (_, k) => `\n${k < breaks - 1 ? indent.trimEnd() : indent}`,
             ).join('');
             const at = newestView(text).map.toSource(caret, sides[i] ?? -1);
-            text = applyChanges(
-              text,
-              trackedEdit(text, { from: at, to: at, insert }, context(bo, [], { random: draw() })),
-            );
+            try {
+              text = applyChanges(
+                text,
+                trackedEdit(
+                  text,
+                  { from: at, to: at, insert },
+                  context(bo, [], { random: draw() }),
+                ),
+              );
+            } catch (error) {
+              // A raw break at the start of the text of a bullet under text is not written beside a
+              // marker (#443): the words say why, and the person types the text first.
+              if (!(error instanceof EditError) || error.message !== UNDERLINING_SPLIT) throw error;
+              unwritten = true;
+              break;
+            }
             caret += insert.length;
+          }
+          if (unwritten) {
+            skipped++;
+            continue;
           }
           // The start and the end of every line from the bullet's to the one with the item's text.
           const now = newestView(text).text;
@@ -3600,8 +3624,10 @@ describe('text typed on a blank line of your own pending line breaks, under a bu
         }
       }
     }
-    // Every place was tried: none was left out by a refusal, which would have thrown.
-    expect(typedWords).toBeGreaterThan(300);
+    // Every place was tried: none was left out by a refusal, which would have thrown. The breaks that
+    // could not be written (#443) are the ones left out, and the bullets with no text above are not.
+    expect(skipped).toBeGreaterThan(0);
+    expect(typedWords).toBeGreaterThan(50);
   }, 60_000);
 
   it('keeps the words of a refusal in code for code that is typed, and for a bullet no view reads as an underline', () => {
@@ -4096,8 +4122,8 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
       // A pending deletion empties the item below: the file reads it as an item with text, the view
       // as an empty one, which can't interrupt a paragraph (#248 review C1).
       ['- one\n- <!--del k3x9 two-->', 2],
-      ['1. one\n1. <!--del k3x9 two-->', 3],
       ['- one\n- <!--del k3x9 two-->\n- three', 2],
+      ['1. one\n1. <!--del k3x9 two-->', 3],
       ['- one\n- <!--ins k3x9-->two<!--/k3x9-->\n- ', 2],
       // An underline below would make a heading of the text.
       ['- one\n---', 2],
@@ -4109,6 +4135,106 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
         () => trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd'])),
         body,
       ).toThrow(EditError);
+    }
+  });
+});
+
+describe('a raw line break at the start of a bullet item under text (#443)', () => {
+  // `- one⏎  - café 42` with `\n    ` typed in front of `café`, and `text⏎- café 42` with `\n  `:
+  // a split's marker on the bullet's line makes the file read an item where the newest view reads the
+  // bullet as the underline of the text above it. It is never written so: where a replacement of the
+  // list reads alike in the file and the view it is that, and otherwise the words say what to do.
+  const typeBreak = (body: string, insert: string) => {
+    const before = file(body);
+    const at = before.indexOf('café');
+    return {
+      before,
+      run: () =>
+        widenedTrackedEdits(before, [{ from: at, to: at, insert }], context(ada, ['m2bd', 'n8fx'])),
+      fine: () =>
+        trackedEdits(before, [{ from: at, to: at, insert }], context(ada, ['m2bd', 'n8fx'])),
+    };
+  };
+
+  it('is written as a replacement that reads alike, where a unit holds it', () => {
+    const { before, run, fine } = typeBreak('- one\n  - café 42', '\n    ');
+    // No fine form (a split's marker on the bullet) reads alike: the editor's write is the unit.
+    expect(fine).toThrow(UNDERLINING_SPLIT);
+    const after = applyChanges(before, run().changes);
+    expect(bodyText(after)).not.toContain('<!--split');
+    expect(newestView(after).text).toBe('- one\n  - \n    café 42\n');
+    expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+    expectEveryOrderAlike('replacement', after, exactly);
+    expect(bodyOf(applyChanges(after, rejectAll(after))).trim()).toBe(bodyOf(before).trim());
+  });
+
+  it('is an alert, in words that say why and what to do, where no write reads alike', () => {
+    for (const [body, insert] of [
+      ['text\n- café 42', '\n  '],
+      ['- one\n  - café 42\n  - more', '\n    '],
+    ] as const) {
+      const { run } = typeBreak(body, insert);
+      let error: unknown;
+      try {
+        run();
+      } catch (e) {
+        error = e;
+      }
+      expect(error, body).toBeInstanceOf(EditError);
+      expect((error as EditError).message, body).toBe(UNDERLINING_SPLIT);
+      expect((error as EditError).message, body).toMatch(/Type the text first/);
+      expect((error as EditError).message, body).toMatch(/decide the other person's change first/);
+    }
+  });
+
+  it('is no alert where the bullet has no text above it, or the text goes first', () => {
+    for (const [body, insert] of [
+      ['- café 42', '\n  '],
+      ['text\n\n- café 42', '\n  '],
+      ['- one\n  - café 42', 'x\n    '],
+    ] as const) {
+      const { before, run } = typeBreak(body, insert);
+      const after = applyChanges(before, run().changes);
+      expect(readsAsNewest(after), body).toBe(true);
+    }
+  });
+});
+
+describe("an edit of the prefix of an empty item inside another person's substitution (#430)", () => {
+  it('is not written with the line break after the prefix lost', () => {
+    // Ada's substitution holds `⏎2. ⏎> beta`; cutting it after the prefix would start its next
+    // segment with a line break, which a reader takes for the opener's carrier: in no view.
+    const body =
+      '> beta <!--del mb2x beta--> <!--del mb3x 7--><!--sub dnwg \\n>\\n> beta-->\n2. \n> beta<!--/dnwg--> <!--ins mb4x-->café<!--/mb4x--> <!--ins mb5x--><!--del mb6x 7--><!--/mb5x-->\n>\n> 42 <!--del mc2x x--> 42';
+    const before = file(body, {
+      mb2x: 'bo',
+      mb3x: 'ada',
+      mb4x: 'ada',
+      mb5x: 'bo',
+      mb6x: 'ada',
+      mc2x: 'bo',
+      dnwg: 'ada',
+    });
+    const view = newestView(before);
+    const from = view.text.indexOf('2. ');
+    for (const insert of ['2. ', '3. ']) {
+      const edit = {
+        from: view.map.toSource(from, 1),
+        to: view.map.toSource(from + 3, -1),
+        insert,
+      };
+      let after: string | undefined;
+      try {
+        after = applyChanges(
+          before,
+          trackedEdits(before, [edit], context(bo, ['fpxh', 'scmv', 'q2zr'])).changes,
+        );
+      } catch (error) {
+        // Refused in words (the unit's range holds another person's marks, #808).
+        expect(error).toBeInstanceOf(EditError);
+      }
+      // Written only where the newest view is what was typed.
+      if (after) expect(newestView(after).text).toBe(view.text.replace('2. ', insert));
     }
   });
 });

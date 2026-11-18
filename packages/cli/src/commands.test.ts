@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parse } from '@redlines/format';
+import { acceptAll, applyChanges, parse } from '@redlines/format';
 import { redlines } from './test-helpers.ts';
 
 const PLAIN = '# Plan\n\nWe will ship the importer in March.\n';
@@ -58,5 +58,15 @@ describe('str-replace', () => {
       first.files,
     );
     expect(parse(second.files['plan.md'] ?? '').marks[0]?.entry.note).toBe('First');
+  });
+
+  it('takes the delimiters of a bold whose text is all deleted, so that accepting leaves no `****`', async () => {
+    const run = await redlines(
+      ['str-replace', 'plan.md', ...['--old', 'now', '--new', ''], ...AS_CLAUDE],
+      { 'plan.md': '# Plan\n\nShip **now** please.\n' },
+    );
+    expect(run.code).toBe(0);
+    const written = run.files['plan.md'] ?? '';
+    expect(applyChanges(written, acceptAll(written))).not.toContain('*');
   });
 });
