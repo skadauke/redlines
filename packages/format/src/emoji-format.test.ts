@@ -14,7 +14,7 @@ import { fineEdit as trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import type { Range, TextChange } from './types.ts';
 
-const STUCK = /between a letter and an emoji shortcode/;
+const STUCK = /between a letter, a digit or punctuation and an emoji shortcode/;
 const IDS = ['k3x9', 'p7qd'];
 const bold: FormatOp = { kind: 'inline', format: 'bold', on: true };
 
@@ -203,7 +203,7 @@ describe('an emoji shortcode, in a tracked change (#312)', () => {
   });
 });
 
-describe('no marker goes between a letter or a digit and a shortcode (#312)', () => {
+describe('no marker goes between a letter, a digit or punctuation and a shortcode (#312, #388)', () => {
   const text = 'Say abc:tent: here.\n';
   const at = text.indexOf(':');
 
@@ -284,8 +284,22 @@ describe('no marker goes between a letter or a digit and a shortcode (#312)', ()
     );
   });
 
-  it('refuses nothing where a space, punctuation or the start of a text is in front of it', () => {
-    for (const file of ['Say :tent: here.\n', 'Say (:tent:) here.\n', 'Say — :tent: x\n']) {
+  it('refuses a marker after punctuation too, where GitHub shows the shortcode as written', () => {
+    for (const file of ['Say (:tent:) here.\n', 'Say .:tent: x\n', 'Say -:tent: x\n']) {
+      const colon = file.indexOf(':');
+      expect(
+        refusal(() => trackedFormat(file, rangeOf(file, ':tent:'), bold, context(ada))),
+        file,
+      ).toMatch(STUCK);
+      // Typed in front of it, the change takes the shortcode in: it reads alike everywhere.
+      const typed = edit(file, { from: colon, to: colon, insert: 'big' });
+      expect(body(typed), file).toContain(`<!--sub k3x9 :`);
+      expect(rejected(typed), file).toBe(file);
+    }
+  });
+
+  it('refuses nothing where a space or the start of a text is in front of it', () => {
+    for (const file of ['Say :tent: here.\n', 'Say  :tent: here.\n', 'Say — :tent: x\n']) {
       const colon = file.indexOf(':');
       expect(
         refusal(() => edit(file, { from: colon, to: colon, insert: 'big ' })),
@@ -311,7 +325,7 @@ describe('no edit puts a marker between a letter and a shortcode, in any of its 
   // A letter or a digit, markers, and a shortcode: what a reader of the file sees as the shortcode at
   // the start of a text, which GitHub shows as the emoji.
   const STUCK_IN_FILE =
-    /[\p{L}\p{N}](?:<!--(?:(?!-->)[^])*-->)+:(?:[abmovx]|\+1|-1|100|1234|[a-z0-9]+(?:[_-][a-z0-9]+)*):/u;
+    /[^\s>](?:<!--(?:(?!-->)[^])*-->)+:(?:[abmovx]|\+1|-1|100|1234|[a-z0-9]+(?:[_-][a-z0-9]+)*):/u;
 
   it('is held by every tracked edit of a few lines, which also read alike in both views', () => {
     let made = 0;
