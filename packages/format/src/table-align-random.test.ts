@@ -479,7 +479,7 @@ describe('a point alignment change with changes beside it, random', () => {
       // The first check that fails says what went wrong first, and the later ones follow from it.
       if (found.failed[0] === found.checks[0]) {
         // The file without the mark fails the same one: older than the mark, and left out if its shape is known.
-        const known = OLDER.find(({ shape }) => shape(found));
+        const known = process.env["NOEXC"] ? undefined : OLDER.find(({ shape }) => shape(found));
         if (known) older[known.issue] = (older[known.issue] ?? 0) + 1;
         else unmapped.push(`${found.checks.join(', ')}\n${steps.join(' / ')}\n${body}`);
         continue;
