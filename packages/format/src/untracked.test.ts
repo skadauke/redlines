@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { accept } from './decide.ts';
+import { expectSound } from './oracle.ts';
 import { breakEnd, openerRange, splitEnd } from './blocks.ts';
 import { markerRanges } from './edit-support.ts';
 import { applyChanges } from './changes.ts';
@@ -1035,4 +1037,88 @@ describe('on random documents (format §3.10)', { timeout: 600_000 }, () => {
       'x in the middle of',
     ]);
   });
+});
+
+describe("a delimiter taken out beside another person's pending format, Track Changes off (#265)", () => {
+  /** The accept plan of the editor (design §3.4): Bo's change decided, and the edit made on what is left. */
+  function afterAccepting(text: string, id: string, needle: string, offset: number) {
+    const accepted = applyChanges(text, accept(text, id));
+    const at = bodyOf(accepted).indexOf(needle) + offset;
+    return applyChanges(accepted, untrackedEdit(accepted, remove(at, at + 1)));
+  }
+
+  it('throws in a paragraph, and the accepted plan reads alike in every order', () => {
+    const body = '1<!--fmt k3x9 +bold-->**1**<!--/k3x9-->';
+    const text = file(body, { k3x9: 'bo' });
+    for (const [offset, edited] of [
+      [1, '1*1**'],
+      [0, '1*1**'],
+      [3, '1**1*'],
+    ] as const) {
+      const at = body.indexOf('**1') + offset;
+      const label = `delete at ${offset}`;
+      // The fine write is held back, with the code the editor asks about...
+      expect(refusal(text, remove(at, at + 1)), label).toBe('no-legal-placement');
+      // ...and what the editor makes instead reads as the plain edit of the text, in every order.
+      const after = afterAccepting(text, 'k3x9', '**1', offset);
+      expect(newest(after), label).toBe(edited);
+      expectSound(label, after);
+    }
+  });
+
+  it('throws in a cell of a table, and the accepted plan reads alike', () => {
+    const body = '| a |\n| --- |\n| 1<!--fmt k3x9 +bold-->**1**<!--/k3x9--> |';
+    const text = file(body, { k3x9: 'bo' });
+    const at = body.indexOf('**1') + 1;
+    expect(refusal(text, remove(at, at + 1))).toBe('no-legal-placement');
+    const after = afterAccepting(text, 'k3x9', '**1', 1);
+    expect(newest(after)).toBe('| a |\n| --- |\n| 1*1** |');
+    expectSound('cell', after);
+  });
+
+  it('keeps the fine write where it reads alike, and away from other changes', () => {
+    const body = 'A <!--fmt k3x9 +bold-->**word**<!--/k3x9--> b.';
+    const text = file(body, { k3x9: 'bo' });
+    // A letter typed far from the delimiters, and a delimiter in a paragraph without marks.
+    const at = body.indexOf(' b.');
+    expect(refusal(text, type(at, 'x'))).toBeUndefined();
+    const plain = file('A *b* c.\n\nD <!--ins k3x9-->e<!--/k3x9-->', { k3x9: 'bo' });
+    expect(refusal(plain, remove(2, 3))).toBeUndefined();
+  });
+});
+
+describe('a delimiter beside a comment or a highlight only is written, not asked about (#265)', () => {
+  it('writes where no change is there to accept', () => {
+    const hl = 'foo*<!--hl k3x9-->bar<!--/k3x9-->';
+    const highlighted = file(hl, { k3x9: 'bo' });
+    expect(refusal(highlighted, type(hl.length, '*'))).toBeUndefined();
+    const cmt = '2*<!--cmt c8d2-->3<!--/c8d2--> and 4^5';
+    const commented = file(cmt, {}, thread('c8d2'));
+    expect(refusal(commented, type(cmt.indexOf('^'), '*'))).toBeUndefined();
+    const lone = 'xx*<!--cmt c8d2-->x<!--/c8d2-->';
+    expect(refusal(file(lone, {}, thread('c8d2')), type(lone.length, '*'))).toBeUndefined();
+  });
+});
+
+describe("a plain edit beside another person's pending deletion of a delimiter run (#265)", () => {
+  // `*xy ` and Bo's deleted `**` under a comment: replacing `xy ` by `ab` leaves `*ab`, and rejecting the
+  // deletion puts the comment's end between `ab` and its `**`, which reads otherwise than the newest
+  // view. The deletion's delimiters are in no visible text, so the edit doesn't show one.
+  const del = '<!--cmt c8d2--><!--del k3x9 **--><!--/c8d2-->';
+  for (const [what, wrap] of [
+    ['a paragraph', (line: string) => line],
+    ['a cell', (line: string) => `| a | b |\n| --- | --- |\n| c | ${line}`],
+  ] as const) {
+    it(`asks first in ${what}, and the accepted plan reads alike`, () => {
+      const body = wrap(`*xy ${del}`);
+      const text = file(body, { k3x9: 'bo' }, thread('c8d2'));
+      const at = body.indexOf('xy ');
+      expect(refusal(text, replace(at, at + 3, 'ab'))).toBe('no-legal-placement');
+      const accepted = applyChanges(text, accept(text, 'k3x9'));
+      const x = bodyOf(accepted).indexOf('xy ');
+      const after = applyChanges(accepted, untrackedEdit(accepted, replace(x, x + 3, 'ab')));
+      expect(newest(after)).toBe(wrap('*ab'));
+      expectSound(what, after);
+    });
+  }
 });

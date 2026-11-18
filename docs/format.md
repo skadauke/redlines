@@ -3293,7 +3293,14 @@ backslash typed, or left by a deletion, right in front of a marker, which would 
 refused with Track Changes off, as it is with it on (§3.1, rule 4), in words that name the change
 ("A backslash can't stand right in front of the marker of Bo Chen's insertion while Track Changes
 is off: other Markdown readers would show the marker as text. Decide Bo Chen's insertion first, or
-turn on Track Changes."). In Plain, with Track Changes off, the editor edits the source as written,
+turn on Track Changes."). An emphasis delimiter (`*`, `_` or `~`) taken out or typed in a paragraph
+that holds marks is held to the same reading: where the fine write would make a file that micromark
+reads otherwise than its newest view (a marker between a `*` and the text it flanks, as in Bo's
+pending `**1**` after a `1` when one `*` is deleted, #265), it is refused with `no-legal-placement`,
+and the editor answers with the question of §3.13 (accepting the pending changes in the unit, then
+making the edit). That holds only where the smallest unit that holds the edit has a change to accept:
+beside a comment or a highlight alone there is nothing to ask about, and the edit is written as it
+is. In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
@@ -3594,7 +3601,8 @@ pending changes around it, is asked about in the same way, with its own title, "
 made without accepting Bo Chen's 2 pending changes in this paragraph. Make the edit?", Cancel and
 Make Edit, and no "Don't ask again". The pending changes in the smallest unit that holds the edit
 (§3.12), the person's own and other people's, are accepted, and the edit is made on the text that
-results, as one step, so that one Undo gives back the file as it was. Rejecting is never chosen for
+results, as one step, so that one Undo gives back the file as it was. It is asked only where that unit holds a change to accept: comments and highlights are not changes,
+and an edit beside them alone is written without a question. Rejecting is never chosen for
 the person. It is asked every time, since no answer to it stands for the next edit: the changes are
 gone after the first. Where accepting them doesn't let the edit be made either, the refusal stands as
 before. The same words are used for an input method's composition, asked about when it ends.
