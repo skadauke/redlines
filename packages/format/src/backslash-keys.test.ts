@@ -677,7 +677,7 @@ function prefixOf(view: string, caret: number): string {
 /** The words of the refusals that are meant: no place for the closer of a change that takes in the
  * text after a backslash. */
 const MEANT =
-  /can't end a block|closing #s|between a hard break and the line end|would start a line|take no change|only Markdown syntax|every order of decisions reads alike|inside code|can't stand right in front|replaces ends in a backslash|hide other changes|inside a code block|take the start of the block|altering other text|marker at the start|inserted yet|line's indentation|ends the line here|Decide/i;
+  /can't end a block|closing #s|between a hard break and the line end|would start a line|take no change|only Markdown syntax|line that opens or closes code|every order of decisions reads alike|inside code|can't stand right in front|replaces ends in a backslash|hide other changes|inside a code block|take the start of the block|altering other text|marker at the start|inserted yet|line's indentation|ends the line here|Decide/i;
 
 describe('random keys next to backslashes read as micromark reads them (#223, #235)', () => {
   it(
