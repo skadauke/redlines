@@ -1073,38 +1073,46 @@ function readHtml(source: string): string {
     .trim();
 }
 
-const MOST_NEAR_MARKS = 6;
-const MOST_STATES = 600;
+/** The most marks in a paragraph that are decided in every order, and the most states read; over
+ * either the unit is replaced, which is safe (#265). */
+const MOST_NEAR_MARKS = 4;
+const MOST_STATES = 100;
 
 /**
- * Whether `file`, a write, reads otherwise than its newest view (micromark) in some order of
- * deciding the marks within 400 characters of `first` to `last`, or has more than six of them: a
- * file that the person's change made, which another person's decisions read other than it shows
- * (#265). A decision that is refused ends its order.
+ * Whether `file`, a write that took in text of another person's format change, reads otherwise than
+ * its newest view (micromark) in some order of deciding the marks of the paragraph or paragraphs
+ * from `first` to `last`, or has more than four of them, or more states than are read, or a mark
+ * that runs out of them (#265). Only that stretch is read in each state, with the ledger after it,
+ * so that the cost does not grow with the file. A decision that is refused ends its order.
  */
 export function ordersReadOtherwiseNear(file: string, first: number, last: number): boolean {
   const parsed = parse(file);
-  const ids = new Set(
-    parsed.marks
-      .filter(
-        (mark) =>
-          mark.kind !== 'cmt' &&
-          mark.kind !== 'hl' &&
-          mark.segments.some((s) => s.open.to >= first - 400 && s.open.from <= last + 400),
-      )
-      .map((mark) => mark.id),
-  );
+  const end = parsed.ledgerRange?.from ?? file.length;
+  const before = file.lastIndexOf('\n\n', Math.max(0, first - 1));
+  const from = before < 0 ? 0 : before + 2;
+  const after = file.indexOf('\n\n', Math.min(last, end));
+  const to = after < 0 || after > end ? end : after;
+  const ids = new Set<string>();
+  for (const mark of parsed.marks) {
+    if (mark.kind === 'cmt' || mark.kind === 'hl') continue;
+    for (const segment of mark.segments) {
+      const inside = segment.open.from >= from && (segment.close?.to ?? segment.open.to) <= to;
+      const touches = segment.open.to > from && segment.open.from < to;
+      if (touches && !inside) return true;
+      if (inside) ids.add(mark.id);
+    }
+  }
   if (ids.size > MOST_NEAR_MARKS) return true;
+  // The ledger only: the body after the stretch holds no mark that a decision here could reach.
+  const tail = file.slice(end);
   const seen = new Set<string>();
-  const walk = (current: string): boolean => {
-    if (seen.has(current)) return true;
-    seen.add(current);
+  const walk = (stretch: string): boolean => {
+    if (seen.has(stretch)) return true;
+    seen.add(stretch);
     if (seen.size > MOST_STATES) return false;
-    const now = parse(current);
-    const end = now.ledgerRange?.from ?? current.length;
-    const body = current.slice(0, end);
-    if (readHtml(body) !== readHtml(newestView(body).text)) return false;
-    for (const mark of now.marks) {
+    if (readHtml(stretch) !== readHtml(newestView(stretch).text)) return false;
+    const current = stretch + tail;
+    for (const mark of parse(current).marks) {
       if (!ids.has(mark.id)) continue;
       for (const decide of [accept, reject]) {
         let next: string;
@@ -1114,12 +1122,13 @@ export function ordersReadOtherwiseNear(file: string, first: number, last: numbe
           if (!(error instanceof EditError)) throw error;
           continue;
         }
-        if (!walk(next)) return false;
+        // The ledger changes with a decision; the stretch is what comes before it.
+        if (!walk(next.slice(0, parse(next).ledgerRange?.from ?? next.length))) return false;
       }
     }
     return true;
   };
-  return !walk(file);
+  return !walk(file.slice(from, to));
 }
 
 /**
