@@ -107,11 +107,12 @@ REDLINES_SEED=<n> pnpm exec vitest run packages/format/src/table-cols-random.tes
 ```
 
 A shared Mac can't hold a deep draw. `gh workflow run deep.yml --ref <branch>` (`-f fuzz=300`, and
-`-f suites='<files>'` for some) runs every suite that reads `REDLINES_FUZZ` at that count, one job per
-suite, on GitHub's runners (#586); nothing else runs it.
+`-f suites='<files>'` for some) runs every suite that reads `REDLINES_FUZZ` (or calls `fuzzCount`) at
+that count, one job per suite, on GitHub's runners (#586); nothing else runs it. In the `collab-sim`
+suites `REDLINES_FUZZ` is the number of sessions in all, spread over the cells (#1130).
 
-`REDLINES_SEED` starts `table-cols-random`, `table-format-random`, `table-rows-random` and
-`format-apart` at one seed.
+`REDLINES_SEED` starts the seeded suites (`table-*-random`, `format-apart`, `wrapped-line`, `track`
+and others that read it) at one seed.
 
 The tables have a **pair model** besides: every pair of operations on rows and columns by two
 people is decided in every order (`table-pairs.test.ts`, [format.md](format.md) §3.7). A tracked
@@ -259,10 +260,12 @@ its case; each is a bug. The list is what has been found, not a count of what is
   digits or markers is seen (#418). A deletion inside a blank line of a break, and a replacement
   inside the blank line of the break of the author's own pending split, are written as a
   substitution that keeps the break, so that every order of decisions reads as typed (#447, #419).
-- A highlight that runs from the text above a table into its header row can make another person's
-  pending column change impossible to decide (#396).
-- The backslash and emphasis fixes leave five cases in one shape wrong, as on main, and refuse
-  keys next to chains of another person's marks that main wrote (#276).
+- Delimiters beside another person's marks still read otherwise in some order of decisions in three
+  shapes, which the random suites leave out: a run pasted next to a tag or across a letter (#1135),
+  one typed at the seam of a paragraph made of their insertion (#1136), and, with Track Changes off,
+  one beside a comment or highlight marker (#1140); the rest of #265 is open with them.
+- A comment over a backtick can make another person's table change undecidable (#376; left out of
+  `table-align-random.test.ts`).
 - Return at the start of a nested first item, tracked, fails in four more shapes, and the walks over
   lists side by side fail at 13 more seeds past 200 (#395).
 - The walks of Stage 1's keys skip no seed by name now, and some shapes of them are still not drawn
@@ -289,8 +292,7 @@ insertion of its own, would read `## xbeta` in one order and `xbeta` in another 
 refusal applies, the block beside the unit is tried, which holds the split in the old text of one
 substitution (across a quote's blank `>` line too, and as the whole quote in an item), and that is
 what typing and a block change after a split write. What is left is a cost, not a hole: the edit is
-not written, so nothing is silently wrong. In the probe of random edits that the fine writer
-refuses (`agent-probe.test.ts`), about 146 of 285 were held by the first guard and 58 are by this one. The tests that pin it say `(#107)` in
+not written, so nothing is silently wrong. The tests that pin it say `(#107)` in
 their comments (`issues.test.ts`, `code-substitution.test.ts`). Also not held:
 
 - A unit of more than eight top-level blocks (`WIDEN_MOST_BLOCKS`) is not written; the edit is asked

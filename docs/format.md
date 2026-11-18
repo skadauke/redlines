@@ -3307,9 +3307,8 @@ that holds marks is held to the same reading: where the fine write would make a 
 reads otherwise than its newest view (a marker between a `*` and the text it flanks, as in Bo's
 pending `**1**` after a `1` when one `*` is deleted, #265), it is refused with `no-legal-placement`,
 and the editor answers with the question of §3.13 (accepting the pending changes in the unit, then
-making the edit). That holds only where the smallest unit that holds the edit has a change to accept:
-beside a comment or a highlight alone there is nothing to ask about, and the edit is written as it
-is. In Plain, with Track Changes off, the editor edits the source as written,
+making the edit). That holds only where the smallest unit that holds the edit has a change to accept (§3.13);
+beside a comment or a highlight alone the edit is written as it is. In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
@@ -3436,7 +3435,7 @@ end, next to another person's insertion), is written with the closer before that
 ends the unit's last line, where one on a line of its own would read as a block of the container.
 The break follows the closer as a plain line break, or is the blank line that follows the unit
 already, so that no blank line is added to the file. A text that ends in two or more line breaks, a
-delimiter, a risky line or an atomic block, or that is only line breaks, keeps the closer rule above
+delimiter, a risky line or an atomic block, or that is only line breaks, keeps the closer rule below
 (`widen.ts`, `tryRung`).
 
 The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
@@ -3459,11 +3458,9 @@ comment that is never closed, new text that holds Redlines markup, an unknown id
 that matches nothing or several places, and, under the guard below, an edit whose unit holds another
 person's pending mark.
 
-**A hard break next to a deleted break.** A line break typed after a backslash, in a block that holds a
-pending deletion of a block break or of a backslash, is written as a replacement of the unit where some
-order of decisions reads otherwise (the reading and its caps are in §3.4, "A hard break typed behind a
-pending deletion"). The editor writes it so, and so does an agent's edit (`suggestReplace`), which
-retries the unit when the fine form says no way of writing reads alike. No refusal is added (#265).
+**A hard break next to a deleted break** (§3.4) is written as a replacement of the unit where some
+order of decisions reads otherwise, by the editor and by an agent's edit (`suggestReplace`), which
+retries the unit when the fine form says no way of writing reads alike (#265).
 
 **Block syntax.** A fine write at a block's syntax (a tag's `>`, a heading's space, right behind a
 bare marker) or in indented code above a list line is read with micromark first. If the file would
@@ -3528,8 +3525,9 @@ person's pending marks, in a table's cells and elsewhere: they stay in the paylo
 order of accepting and rejecting the replacement and the marks in it reads alike (#808). The one
 refusal that stays is for a mark of theirs that ends at the unit's edge without being in it, as a
 split's break right in front of the unit or an insertion right after it (`touchingOthers` of
-`widen`): it is decided with the block next to it, the replacement would not read as the original
-in some order (#107), and the edit is not written. A change that holds the unit in its new text is
+`widen`), where the block beside the unit (see Delimiters) does not hold it either: it is decided
+with the block next to it, the replacement would not read as the original in some order (#107),
+and the edit is not written. A change that holds the unit in its new text is
 no neighbour: the unit is written inside it. The rest of this paragraph is what is written. Marks in a payload are written in the payload's
 encoding (§2.5): `<!--ins k3x9-->` is `<!-\-ins k3x9-\->`. A decoded payload's marker is a mark
 when its id has a ledger entry (a thread, for a comment) and stands nowhere else in the file, its
@@ -3619,8 +3617,9 @@ pending changes around it, is asked about in the same way, with its own title, "
 made without accepting Bo Chen's 2 pending changes in this paragraph. Make the edit?", Cancel and
 Make Edit, and no "Don't ask again". The pending changes in the smallest unit that holds the edit
 (§3.12), the person's own and other people's, are accepted, and the edit is made on the text that
-results, as one step, so that one Undo gives back the file as it was. It is asked only where that unit holds a change to accept: comments and highlights are not changes,
-and an edit beside them alone is written without a question. Rejecting is never chosen for
+results, as one step, so that one Undo gives back the file as it was. It is asked only where that
+unit holds a change to accept: comments and highlights are not changes, and an edit beside them
+alone is written without a question. Rejecting is never chosen for
 the person. It is asked every time, since no answer to it stands for the next edit: the changes are
 gone after the first. Where accepting them doesn't let the edit be made either, the refusal stands as
 before. The same words are used for an input method's composition, asked about when it ends.
