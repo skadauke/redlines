@@ -2,17 +2,16 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
-import { rejectAll } from './decide.ts';
+import { acceptAll, reject, rejectAll } from './decide.ts';
 import { applyLedgerOp, ledgerMapOf } from './ledger-map.ts';
 import { mergeLedgers } from './ledger-merge.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { ada, context, file } from './test-helpers.ts';
+import { ada, bo, context, file } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 const ids = (...more: string[]) => context(ada, ['k3x9', 'w8nn', 'c8d2', ...more]);
-const bodyOf = (text: string) => text.slice(0, text.indexOf('<!-- redlines'));
 
 /** `text` with every pending change rejected. */
 const rejected = (text: string) => applyChanges(text, rejectAll(text));
@@ -175,7 +174,7 @@ describe('#17: line breaks, blocks and rejecting all', () => {
     expect(rejected(written)).toBe(body);
   });
 
-  it('gives back the text of a break and its own fusing, both tracked', () => {
+  it('cancels your own split when you fuse it again: no change is left, and no new id', () => {
     const body = 'Hello world\n';
     const at = body.indexOf(' world');
     const split = applyChanges(body, trackedEdit(body, { from: at, to: at, insert: '\n' }, ids()));
@@ -185,8 +184,43 @@ describe('#17: line breaks, blocks and rejecting all', () => {
       split,
       trackedEdit(split, { from, to: from + 1, insert: '' }, ids()),
     );
+    expect(fused).toBe(body);
+  });
+
+  it("tracks another person's fusing of a split as a deletion under their own id", () => {
+    const body = 'Hello world\n';
+    const at = body.indexOf(' world');
+    const split = applyChanges(body, trackedEdit(body, { from: at, to: at, insert: '\n' }, ids()));
+    const view = newestView(split);
+    const from = view.map.toSource(view.text.indexOf('\n'));
+    const fused = applyChanges(
+      split,
+      trackedEdit(split, { from, to: from + 1, insert: '' }, context(bo, ['m3xb', 'p3xb'])),
+    );
+    expect(
+      parse(fused)
+        .marks.map((mark) => mark.id)
+        .sort(),
+    ).toEqual(['k3x9', 'm3xb']);
     expect(originalView(fused).text).toBe(body);
     expect(rejected(fused)).toBe(body);
-    expect(bodyOf(fused).length).toBeGreaterThan(0);
+    expect(newestView(fused).text).toBe('Hello world\n');
+  });
+
+  it.each([
+    ['a replacement from inside an HTML block into the text after it', 'raw', 'Outro', 'New'],
+    ['a replacement that starts above it', 'Intro', 'raw', 'New\n\nthing'],
+    ['a replacement of the block alone', '<div>', '</div>', 'X'],
+    ['a replacement of everything', 'Intro', 'Outro', 'Z'],
+  ])('keeps every line break when %s is rejected or accepted', (_, first, last, insert) => {
+    const html = 'Intro\n\n<div>\nraw\n</div>\n\nOutro\n';
+    const from = html.indexOf(first);
+    const to = html.indexOf(last) + last.length;
+    const written = applyChanges(html, trackedEdit(html, { from, to, insert }, ids()));
+    expect(rejected(written)).toBe(html);
+    expect(rejected(written)).toBe(originalView(written).text);
+    expect(applyChanges(written, acceptAll(written))).toBe(newestView(written).text);
+    const [mark] = parse(written).marks;
+    expect(applyChanges(written, reject(written, mark?.id ?? ''))).toBe(html);
   });
 });
