@@ -131,6 +131,7 @@ import {
 } from './code-edit.ts';
 import { widenedAtOnce, widenedEdits } from './edits-widen.ts';
 import {
+  afterBareDeletion,
   atBlockBoundary,
   atDelimiter,
   delimiterBesideBreak,
@@ -5585,6 +5586,9 @@ export function readsOtherAtBoundary(
   edits: readonly TextChange[],
   changes: readonly TextChange[],
 ): boolean {
+  // A write right after a deletion that rejecting would leave a bare marker before reads alike as it
+  // stands and otherwise once the deletion is rejected: the unit is replaced (#1104).
+  if (edits.some((edit) => afterBareDeletion(text, edit.from))) return true;
   return (
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||

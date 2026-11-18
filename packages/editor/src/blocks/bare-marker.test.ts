@@ -173,6 +173,35 @@ scriptRows(
   60_000,
 );
 
+// Marks that stand right behind a bare marker in one order of decisions, and a tab that starts code
+// above a quote's bare item (#1104): the write is the unit's, so every order reads as the view.
+scriptRows(
+  [
+    {
+      name: 'Backspace takes the break and the bare marker, Return splits behind the deletion',
+      doc: '* alpha⏎*‸⏎',
+      keys: ['Backspace', 'Enter', { decide: 'reject' }],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'Backspace takes the letter behind a bare marker of another list, after accepting it',
+      doc: '* text⏎+‸⏎',
+      keys: [{ type: 'a' }, { decide: 'accept' }, 'Backspace'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'a tab in the open item starts code above a quote that starts with a bare item',
+      doc: '> - one⏎> 2.⏎* plan⏎*‸⏎> 1. note⏎> 2. text⏎> 3.⏎',
+      keys: ['Enter', { type: '\ta' }],
+      tc: true,
+      expect: {},
+    },
+  ] as Script[],
+  60_000,
+);
+
 // The walks: documents with bare markers, the caret at the end of one, then typing, Undo, Redo and
 // decisions, with a tab and pastes of inline markup (no bold toggle: with a collapsed caret it fails on main, #584), and Return and
 // Backspace, at the bare marker too (#581).

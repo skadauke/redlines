@@ -126,7 +126,8 @@ export interface Locate {
 }
 
 const BLANK_LINE = /^[ \t>]*$/;
-const trimmed = (text: string) => text.trim();
+// (without the markers on the line: a substitution's closer stands behind its last line)
+const trimmed = (text: string) => text.replace(/<!--(?:(?!-->)[^])*-->/g, '').trim();
 
 /** What surrounds a blank line: the lines of text above and below its run of blank lines. */
 export function locateOf(doc: Text, line: Line): Locate | null {

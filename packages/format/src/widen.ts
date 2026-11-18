@@ -33,7 +33,7 @@ import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { intact, ledgerFor, payloadFile, payloadIdsOf, payloadOfFile } from './payload-marks.ts';
-import { encodePayload } from './payload.ts';
+import { decodePayload, encodePayload } from './payload.ts';
 import { shapeOf, unitsOf } from './widen-units.ts';
 import type { Unit, UnitKind } from './widen-units.ts';
 import type { EditContext, MarkEntry, MarkRange, Parsed, Range, TextChange } from './types.ts';
@@ -155,6 +155,16 @@ function widenIn(
   ) {
     sourceFrom = Math.min(sourceFrom, view.map.toSource(spanFrom, -1));
   }
+  // The end of the body right after a deletion that rejecting would leave a bare marker behind: the
+  // point is before the deletion, as it is for an item with no text (#1104).
+  if (
+    spanFrom === spanTo &&
+    parsed.ledgerRange &&
+    sourceFrom > parsed.ledgerRange.from &&
+    afterBareDeletion(text, parsed.ledgerRange.from)
+  ) {
+    sourceFrom = Math.min(sourceFrom, view.map.toSource(spanFrom, -1));
+  }
   const sourceTo = Math.max(sourceFrom, view.map.toSource(spanTo, -1));
   if (
     sourceFrom < bodyStart(text) ||
@@ -170,10 +180,38 @@ function widenIn(
   let rung = rungOf(units, sourceFrom, sourceTo);
   // Where no unit of its own holds the edit, the unit and the block after it are replaced together.
   let fromSpare = false;
-  let spare =
-    rung && atBlockBoundary(text, edits) && !(rung.parent && rung.kind === 'code')
-      ? withNext(units, rung)
-      : undefined;
+  const boundary =
+    rung !== undefined &&
+    (atBlockBoundary(text, edits) ||
+      // Indented code started in an empty line (the edits are in the newest view's places, and the
+      // file's are those of the block's start).
+      (sorted.some((edit) => /^(?: {4}|\t)/.test(edit.insert)) &&
+        atBlockBoundary(
+          text,
+          sorted.map((edit) => ({
+            ...edit,
+            from: view.map.toSource(edit.from, 1),
+            to: Math.max(view.map.toSource(edit.from, 1), view.map.toSource(edit.to, -1)),
+          })),
+        ))) &&
+    !(rung.parent && rung.kind === 'code');
+  const spares: Rung[] = [];
+  if (rung && boundary) {
+    const spare = withNext(units, rung);
+    if (spare) spares.push(spare);
+  }
+  // The opener of a replacement that starts right under a bare marker's line is read as that item's
+  // text by the shape check (a mark stands right behind a bare marker): the block before goes with it.
+  if (rung && boundary && endsInBare(lineBefore(text, rung.lineFrom))) {
+    const [only] = rung.units;
+    const siblings = rung.parent ? rung.parent.children : units;
+    const at = only ? siblings.indexOf(only) : -1;
+    const before = siblings[at - 1];
+    const after = siblings[at + 1];
+    if (only && rung.units.length === 1 && before && at > 0) {
+      spares.push(rungOfUnits(after ? [before, only, after] : [before, only], rung.parent));
+    }
+  }
   // A unit that closure brought back to one already tried would go up and down for ever.
   const tried = new Set<string>();
   // The first write that another person's mark touches at the edge, kept if no wider unit holds it.
@@ -182,7 +220,7 @@ function widenIn(
   let besideTried = false;
   for (let index = 0; rung; index++) {
     const closed = closure(parsed, units, rung, sourceFrom, sourceTo, region);
-    const key = `${closed.lineFrom}:${closed.to}`;
+    const key = `${closed.lineFrom}:${closed.to}${ofOneParagraph(closed) ? ':list' : ''}`;
     if (tried.has(key)) {
       rung = widerThan(rung);
       continue;
@@ -255,9 +293,10 @@ function widenIn(
       continue;
     }
     const wider = widerThan(closed);
-    fromSpare = !wider && spare !== undefined;
+    const spare = wider ? undefined : spares.shift();
+    if (wider) spares.length = 0;
+    fromSpare = spare !== undefined;
     rung = wider ?? spare;
-    spare = undefined;
   }
   if (touching) return touching;
   trace?.('ladder-end');
@@ -489,7 +528,7 @@ function tryRung(
   const range = { from: rung.lineFrom, to: rung.to };
   // The new text is one unit of the kind the old one was: an edit that makes an item two, or takes
   // a block of it out of its container, is a change of the unit around it.
-  if (!sameFrame(rung.kind, rung.prefix, now)) return giveUp('frame');
+  if (!sameFrame(rung.kind, rung.prefix, now, ofOneParagraph(rung))) return giveUp('frame');
   // Your own pending changes in the unit fold into the replacement: they are rejected in its old
   // text, as they would be by rejecting them, and their text is in the new text.
   const own = parsed.marks.filter(
@@ -627,7 +666,7 @@ function tryRung(
 /** Whether the new text of a unit makes one unit of its kind after the prefix of the old: an item
  * stays one item, a list stays a list, a block of text stays one block. An edit that makes an item
  * two, or takes its text out of the list, belongs to the unit around it. */
-function sameFrame(kind: UnitKind, prefix: string, now: string): boolean {
+function sameFrame(kind: UnitKind, prefix: string, now: string, single = false): boolean {
   // Code in a container that an edit makes text of is no code: its closer, on a line of its own,
   // would end a paragraph that the closer is no part of, so the unit around it takes it.
   if (kind === 'code' && /^ +$/.test(prefix)) {
@@ -644,8 +683,34 @@ function sameFrame(kind: UnitKind, prefix: string, now: string): boolean {
   let top: readonly Unit[] = units;
   while (top.length === 1 && top[0]?.kind === 'quote') top = top[0].children;
   const [only] = top;
+  // A list at the top of the document may turn into several blocks: nothing around it holds them.
+  if (single && top.length > 1 && top.every((unit) => unit.kind === 'list')) return true;
   if (top.length !== 1 || only?.kind !== 'list') return false;
   return kind === 'list' || only.children.length === 1;
+}
+
+/** Whether a rung is a list at the top of the document with one item that holds one paragraph: the
+ * same range as the paragraph's and the item's, which may turn into several lists (#1104). */
+function ofOneParagraph(rung: Rung): boolean {
+  const [list] = rung.units;
+  const [item] = list?.children ?? [];
+  const [text] = item?.children ?? [];
+  return (
+    rung.kind === 'list' &&
+    rung.prefix === '' &&
+    rung.units.length === 1 &&
+    list?.children.length === 1 &&
+    item?.children.length === 1 &&
+    text?.children.length === 0
+  );
+}
+
+/** The line before the one that starts at `at`, without the markers of changes in it. */
+function lineBefore(text: string, at: number): string {
+  if (at <= 0) return '';
+  const from = lineStart(text, at - 1);
+  const end = text[at - 2] === '\r' ? at - 2 : at - 1;
+  return text.slice(from, end).replace(/<!--[^]*?-->/g, '');
 }
 
 /** Whether the last line of a text closes a fenced block: a closer written after it would be read
@@ -820,9 +885,16 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     ) {
       return true;
     }
+    // Indented code started on an empty line (a tab or four spaces first) with a list line close
+    // below it: micromark reads that line as text after the code, and as an item once a comment
+    // line stands between (#1104).
+    const startsCode =
+      /^(?: {4}|\t)/.test(edit.insert) &&
+      prefix === '' &&
+      /^[ \t]*(?:<!--[^]*?-->[ \t]*)*(?:\r?\n|$)/.test(text.slice(edit.to));
     // Text typed in indented code or an item's text never changes the blocks: only a line break can.
-    if (!edit.insert.includes('\n') && edit.from === edit.to) return false;
-    if (!/^(?: {4}|\t)/.test(text.slice(start))) return false;
+    if (!startsCode && !edit.insert.includes('\n') && edit.from === edit.to) return false;
+    if (!startsCode && !/^(?: {4}|\t)/.test(text.slice(start))) return false;
     let at = lineEnd(text, edit.to);
     for (let i = 0; i < 4 && at < text.length; i++) {
       const next = lineEnd(text, at + 1);
@@ -831,6 +903,21 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     }
     return false;
   });
+}
+
+/**
+ * Whether the text before `at` ends in pending deletions that, put back, leave its line a bare list
+ * marker (`alpha<!--del k3x9 ⏎*-->`): rejecting them would put whatever is written there behind it.
+ */
+export function afterBareDeletion(text: string, at: number): boolean {
+  const line = text.slice(lineStart(text, at), at);
+  const tail = /(?:<!--del [a-z][a-z0-9]* (?:(?!-->)[^])*-->)+$/.exec(line);
+  if (!tail) return false;
+  let put = line.slice(0, tail.index).replace(/<!--[^]*?-->/g, '');
+  for (const found of tail[0].matchAll(/<!--del [a-z][a-z0-9]* ((?:(?!-->)[^])*)-->/g)) {
+    put += decodePayload(found[1] ?? '');
+  }
+  return /(?:^|\n)[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]*)*(?:[-*+]|\d{1,9}[.)])$/.test(put);
 }
 
 /**

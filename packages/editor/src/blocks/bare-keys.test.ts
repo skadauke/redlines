@@ -168,7 +168,8 @@ const both = (rows: [string, string, 'Enter' | 'Backspace'][]): Script[] =>
       doc,
       keys: [key],
       tc,
-      expect: tc && name.includes('next line') ? { refusal: NOT_IN_INDENTATION } : {},
+      // (Return with its content on the next line was refused; the unit is written now, #1104)
+      expect: {},
     })),
   );
 
