@@ -3661,7 +3661,9 @@ disabled, and its hint says why.
 A comment thread is anchored in the body and stored in the ledger under the same id.
 
 - **Anchors:** `<!--cmt ID-->text<!--/ID-->` for a range, `<!--cmt ID-->` alone for a point. A
-  range may span blocks, as one segment per block with the same id. It may contain any marks and
+  range that spans blocks is written as one segment, its opener in the first block and its closer
+  in the last, so that moves, deletions and decisions keep it whole. A reader also takes one segment
+  per block with the same id, which other tools may write. It may contain any marks and
   overlap other comments and highlights. A range of whole blocks, from the first column of a
   paragraph, item, quote or heading to the first column of the next block, starts at the text
   after the prefix (`- `, `> `, `## `) and ends where the last block's text ends. A range that
