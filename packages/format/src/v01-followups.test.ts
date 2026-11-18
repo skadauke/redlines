@@ -7,8 +7,8 @@ import { applyLedgerOp, ledgerMapOf } from './ledger-map.ts';
 import { mergeLedgers } from './ledger-merge.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { ada, bo, context, file } from './test-helpers.ts';
-import { blockRunAt, moveBlockEdits, neighbourGap } from './block-move.ts';
+import { ada, bo, context, file, thread } from './test-helpers.ts';
+import { blockRunAt, moveBlockEdits, neighbourGap, trackedBlockMove } from './block-move.ts';
 import { trackedEdit } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -204,6 +204,55 @@ describe('#17: line breaks, blocks and rejecting all', () => {
     expect(newestView(after).text).toBe(
       up ? 'Three four.\n\nOne two.\n\nFive six.\n' : 'One two.\n\nFive six.\n\nThree four.\n',
     );
+  });
+
+  it.each([
+    ['up', true],
+    ['down', false],
+  ])('keeps the comment whole when the middle block is moved %s, tracked', (_, up) => {
+    const text = file(
+      'One <!--cmt kjxn-->two.\n\nThree four.\n\nFive<!--/kjxn--> six.\n',
+      {},
+      thread('kjxn'),
+    );
+    const view = newestView(text);
+    const from = view.map.toSource(view.text.indexOf('Three four.'), 1);
+    const run = blockRunAt(text, { from, to: from });
+    const gap = run && neighbourGap(run, up);
+    expect(run && gap).toBeTruthy();
+    let state = 7;
+    const random = (n: number) => {
+      const bytes = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        state = (state * 1103515245 + 12345) & 0x7fffffff;
+        bytes[i] = state >> 16;
+      }
+      return bytes;
+    };
+    const moved = trackedBlockMove(text, run!, gap!, { ...context(bo), random });
+    const after = applyChanges(text, moved!.changes);
+    expect(parse(after).warnings).toEqual([]);
+    const spans = (written: string) => {
+      const comment = parse(written).marks.find((mark) => mark.id === 'kjxn');
+      const segment = comment?.segments[0];
+      expect(comment?.segments.length).toBe(1);
+      expect(segment?.close).toBeDefined();
+      return [comment?.segments.length, segment?.close !== undefined] as const;
+    };
+    spans(after);
+    expect(parse(after).marks.find((mark) => mark.kind === 'sub')).toBeUndefined();
+    for (const decide of [acceptAll, rejectAll]) {
+      const decided = applyChanges(after, decide(after));
+      spans(decided);
+      const comment = parse(decided).marks.find((mark) => mark.id === 'kjxn');
+      const covered = decided.slice(
+        comment?.segments[0]?.content.from,
+        comment?.segments[0]?.close?.from,
+      );
+      expect(covered.startsWith('two.')).toBe(true);
+      expect(covered.endsWith('Five')).toBe(true);
+    }
+    expect(newestView(rejected(after)).text).toBe(view.text);
   });
 
   it('removes the one segment when the thread is deleted, and keeps the text', () => {
