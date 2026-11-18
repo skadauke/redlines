@@ -4810,9 +4810,9 @@ function underliningSplits(text: string): number {
   const view = newestView(text);
   const shown = view.text;
   let count = 0;
-  // Every line after the first, with the line before it.
+  // Every line after the first of the body (front matter is no text above it), with the line before it.
   for (
-    let start = shown.indexOf('\n') + 1;
+    let start = shown.indexOf('\n', bodyStart(shown)) + 1;
     start > 0 && start <= shown.length;
     start = shown.indexOf('\n', start) + 1 || shown.length + 1
   ) {
