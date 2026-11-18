@@ -519,7 +519,7 @@ function tryRung(
   const viewFrom = view.map.fromSource(rung.from);
   const viewTo = view.map.fromSource(rung.to);
   if (edits.some((edit) => edit.from < viewFrom || edit.to > viewTo)) return giveUp('span');
-  const now = applyChanges(
+  let now = applyChanges(
     view.text.slice(viewFrom, viewTo),
     edits.map((edit) => ({ ...edit, from: edit.from - viewFrom, to: edit.to - viewFrom })),
   );
@@ -579,7 +579,15 @@ function tryRung(
   // the top level, the closer stands in it and the payload ends with the block's line break.
   // A closer on a line of its own inside an item reads as a block of the item, which no marker may be:
   // a text that needs one there (it ends in a delimiter) goes to a unit that is not in a container.
-  if (
+  // A new text that ends in a line break only (an Enter typed at the end of the unit) keeps the
+  // break after the closer, as a plain line break: the closer then ends the line before it.
+  const trail =
+    rung.prefix !== '' && !rung.atomic && !endsInDelimiter(now) && !riskyEnd(now, rung.prefix)
+      ? (/(?:\r?\n)+$/.exec(now)?.[0] ?? '')
+      : '';
+  if (trail !== '' && now.slice(0, now.length - trail.length).trim() !== '') {
+    now = now.slice(0, now.length - trail.length);
+  } else if (
     rung.prefix !== '' &&
     !rung.atomic &&
     (endsInDelimiter(now) || riskyEnd(now, rung.prefix) || /\n[ \t>]*$/.test(now))
@@ -623,6 +631,7 @@ function tryRung(
   const tight = rung.kind === 'list' && rung.parent ? rung.parent.tight : rung.tight;
   const lead = scaffold(rung.prefix, eol, tight);
   const body = now.replaceAll('\r\n', '\n').replaceAll('\n', eol);
+  const trailBreak = trail.replaceAll('\r\n', '\n').replaceAll('\n', eol);
   let written: string;
   let end = to;
   if (atomic) {
@@ -630,7 +639,7 @@ function tryRung(
     written = `${opener}${lead}${body}${html || (bare && rung.prefix === '') ? eol : ''}${eol}${line}`;
     if (blankAfter) end = to + eol.length;
   } else {
-    written = `${opener}${lead}${body}${closer}`;
+    written = `${opener}${lead}${body}${closer}${trailBreak}`;
   }
   const result = applyChanges(before, [{ from, to: end, insert: written }]);
   const done = withLedger(result, ledger);
