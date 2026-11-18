@@ -709,7 +709,8 @@ function ofOneParagraph(rung: Rung): boolean {
 function lineBefore(text: string, at: number): string {
   if (at <= 0) return '';
   const from = lineStart(text, at - 1);
-  return text.slice(from, at - 1).replace(/<!--[^]*?-->/g, '');
+  const end = text[at - 2] === '\r' ? at - 2 : at - 1;
+  return text.slice(from, end).replace(/<!--[^]*?-->/g, '');
 }
 
 /** Whether the last line of a text closes a fenced block: a closer written after it would be read
@@ -887,7 +888,10 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     // Indented code started on an empty line (a tab or four spaces first) with a list line close
     // below it: micromark reads that line as text after the code, and as an item once a comment
     // line stands between (#1104).
-    const startsCode = /^(?: {4}|\t)/.test(edit.insert) && prefix === '';
+    const startsCode =
+      /^(?: {4}|\t)/.test(edit.insert) &&
+      prefix === '' &&
+      /^[ \t]*(?:<!--[^]*?-->[ \t]*)*(?:\r?\n|$)/.test(text.slice(edit.to));
     // Text typed in indented code or an item's text never changes the blocks: only a line break can.
     if (!startsCode && !edit.insert.includes('\n') && edit.from === edit.to) return false;
     if (!startsCode && !/^(?: {4}|\t)/.test(text.slice(start))) return false;
