@@ -103,7 +103,12 @@ import {
   blankBetween,
 } from './list-run.ts';
 import { sameEmphasis, sameReading } from './format-reader.ts';
-import { emphasisReadsAlike, neighbours, unreadDelimiters } from './emphasis-orders.ts';
+import {
+  emphasisReadsAlike,
+  hardBreakBesideDeletionReadsOtherwise,
+  neighbours,
+  unreadDelimiters,
+} from './emphasis-orders.ts';
 import {
   codeSpanAt,
   inspectPlace,
@@ -5536,6 +5541,12 @@ function editsWidening(
       }
       try {
         const written = editsOnce(text, edits, mode === 0 ? first : again(), mode);
+        // A hard break typed near another person's pending deletion of a block break or a backslash,
+        // which reads otherwise in some order of decisions: the fine write is no write (#265), and
+        // the unit is replaced.
+        if (!widening && hardBreakBesideDeletionReadsOtherwise(text, edits, written.changes)) {
+          throw new ReadsOtherwise();
+        }
         if (widening && readsOtherAtBoundary(text, edits, written.changes)) {
           // A write the format accepts that a reader of the file reads otherwise than the newest
           // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
@@ -5589,6 +5600,7 @@ export function readsOtherAtBoundary(
   // A write right after a deletion that rejecting would leave a bare marker before reads alike as it
   // stands and otherwise once the deletion is rejected: the unit is replaced (#1104).
   if (edits.some((edit) => afterBareDeletion(text, edit.from))) return true;
+  if (hardBreakBesideDeletionReadsOtherwise(text, edits, changes)) return true;
   return (
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||
