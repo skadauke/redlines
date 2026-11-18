@@ -218,8 +218,14 @@ function widenIn(
     const fenced =
       /^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to)) &&
       sorted.some((edit) => /^[ \t>]*$/.test(text.slice(lineStart(text, edit.from), edit.from)));
+    // A line break typed in a unit that holds code is read too: the text after it may stand less deep
+    // than the container, and the blocks after the unit read otherwise beside the closer (#586).
+    const broken =
+      sorted.some(
+        (edit) => edit.insert.includes('\n') || text.slice(edit.from, edit.to).includes('\n'),
+      ) && /^(?: {4,}|\t)\S|^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to));
     const kept =
-      done && !((fromSpare || fenced) && readsOtherMicromark(text, done.changes))
+      done && !((fromSpare || fenced || broken) && readsOtherMicromark(text, done.changes))
         ? done
         : undefined;
     if (kept && (!beside || kept.touchingOthers.length === 0)) return kept;
