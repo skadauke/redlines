@@ -315,6 +315,7 @@ function nameOf(parsed: Parsed, handle: string): string {
 export function commentAcrossRows(
   table: TableRead,
   parsed: Parsed,
+  parkedOnly = false,
 ): { mark: MarkRange; name: string } | null {
   const rowOf = (at: number) => table.rows.findIndex((row) => row.from <= at && at <= row.to);
   for (const mark of parsed.marks) {
@@ -323,7 +324,14 @@ export function commentAcrossRows(
       if (!close) continue;
       const a = rowOf(open.from);
       const b = rowOf(close.from);
-      if (a !== -1 && b !== -1 && a !== b) return { mark, name: nameOf(parsed, mark.entry.by) };
+      if (a === -1 || b === -1 || a === b) continue;
+      // Only the opener of a comment that starts the next row, parked at the end of the row it is
+      // in, has no form that a move of rows carries (`parkedOnly`, #295): any other comment
+      // travels with its rows, as a highlight across rows does.
+      const rest = parsed.text.slice(open.to, table.rows[a]?.to ?? open.to);
+      // (Other markers parked beside it are no text.)
+      if (parkedOnly && rest.replace(/<!--[^]*?-->/g, '').trim() !== '') continue;
+      return { mark, name: nameOf(parsed, mark.entry.by) };
     }
   }
   return null;

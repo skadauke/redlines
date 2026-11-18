@@ -611,7 +611,7 @@ function moveRows(
   // A comment that runs from one row into another (a row with no pipe at its start can't start with
   // a marker, and the comment's opener stands at the end of the row above) can't be kept with a
   // move that can be rejected: refused now, naming its author, and not when the move is decided.
-  const across = ctx ? commentAcrossRows(table, parsed) : null;
+  const across = ctx ? commentAcrossRows(table, parsed, true) : null;
   if (across) {
     throw new EditError(
       `${across.name}'s comment runs from one row of this table into the next. Delete or resolve it first, or turn off Track Changes.`,
