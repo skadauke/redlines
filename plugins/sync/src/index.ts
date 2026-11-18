@@ -33,7 +33,14 @@ import {
 import type { Editor, Intent, Rederived } from '@redlines/editor';
 import type { TextChange } from '@redlines/format';
 import { EditorView } from '@codemirror/view';
-import { fileChanges, fileDoc, fileOf, fileViewOf, intoDoc, between as diff } from './file-space.ts';
+import {
+  fileChanges,
+  fileDoc,
+  fileOf,
+  fileViewOf,
+  intoDoc,
+  between as diff,
+} from './file-space.ts';
 import { placeLedgerWrite } from './ledger.ts';
 import { placeRejection } from './rejection.ts';
 import { ensureStyle, peersShown, presenceExtension, showPeers } from './presence.ts';
