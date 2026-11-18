@@ -188,7 +188,12 @@ The window, on the desktop:
   what `.gitignore` ignores; text and code files are in the secondary ink, and Preferences › General
   can leave them out (all but the open one). The project's images are listed after the documents
   and before the folders (#681): a row is dragged into the document, never opened (§5.10). No
-  other file is listed. The sidebar's edge resizes it, down to closed (#721). Choosing a document opens it in the same window, and ⌘-click
+  other file is listed. A folder that is the home folder, a folder above it or the disk's root is
+  never taken as a project (#451): a document directly in it opens on its own, the sidebar has no
+  folder, and a notice says why. A repository at home is passed over the same way, and the
+  document's own folder is the project. A window never gets more of the disk than its sidebar
+  shows, so none of these is listed, read or opened through the project commands. The sidebar's
+  edge resizes it, down to closed (#721). Choosing a document opens it in the same window, and ⌘-click
   opens it in a new one, as does a click while an agent is working in the window. A text or code
   file is saved under its own name as it is, with no Track Changes, comments or ledger (§5.3). A document dropped on a window opens as one from Finder does, but for
   the file that the window's own document icon dragged, which opens nothing when it is dropped
@@ -510,7 +515,7 @@ Redlines covers everything in the Markdown Guide's
   Preferences › Editor › Suggest emoji after a colon turns it off; macOS's own picker (fn-E) is
   not touched. A shortcode that a file already has (`:tent:`) is kept as written and drawn as its
   emoji in every view but Plain, as an entity is drawn as its character, and shows as written while
-  the caret is on it; one that a letter or a digit is before (`a:tent:`) is text, as GitHub shows
+  the caret is on it; one that a letter, a digit or punctuation is before (`a:tent:`, `(:tent:`) is text, as GitHub shows
   it. An emoji and a shortcode are one character for a change: no marker parts either
   ([format §3.1](format.md#31-inside-a-line)).
 - **Table cells** with line breaks (Return writes `<br>`, §5.8) and lists.
@@ -1381,8 +1386,8 @@ ordinary copy writes the HTML that Word and Docs draw well); File › Print and 
   a hidden one included. An image dragged in from elsewhere is copied in, never moved, and nothing
   is ever replaced: a taken name gets `-2`, `-3` and on, and an image that is there already, byte
   for byte, is linked and not copied again. A document that is in no project keeps an `images`
-  folder beside it. A document in the home folder or at the disk's root, whose project is too broad
-  to load images from but for its own folder, takes images in that folder alone. The setting can't
+  folder beside it. A document in the home folder or at the disk's root has no project (#451): the
+  preview loads the images in its own folder alone, where an image added to it is copied. The setting can't
   name another place on the disk. Only image files go in, by their
   names and by their first bytes, and no larger than the preview shows (50 MB). None goes in code,
   or in Plain while Track Changes is on, and the editor says why before anything is saved. Images

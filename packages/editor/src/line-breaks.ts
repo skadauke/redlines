@@ -49,7 +49,17 @@ class LineBreak extends RangeValue {
  * undo gives back. Its ranges map through changes, as the history maps what it keeps.
  */
 const resetLineBreaks = StateEffect.define<RangeSet<LineBreak>>({
-  map: (breaks, mapping) => breaks.map(mapping),
+  // The history keeps this record as it was before an edit, and maps it over the changes that
+  // others make after it (a session's windows). Where the record isn't on the text the mapping
+  // starts from, the kinds are given up and the file's own stands: Undo restores a break of the
+  // file's kind, rather than the window stopping (#1057).
+  map: (breaks, mapping) => {
+    try {
+      return breaks.map(mapping);
+    } catch {
+      return RangeSet.empty as RangeSet<LineBreak>;
+    }
+  },
 });
 
 /** Makes a file the editor's: the one it was loaded with, or the one an undo gives back. */
@@ -357,6 +367,20 @@ function textOf(
   return text;
 }
 
+/**
+ * The file's text for the document in `state`, line breaks of every kind as the editor has them
+ * written (the open paragraph stays, as in `mixedFileText`), or null when the document is its own
+ * file text: an LF file with no break of another kind. This is the text a session's replicas and
+ * authority hold, whose offsets are the file's (#1057); a window's document keeps LF breaks.
+ */
+export function docFileText(state: EditorState): string | null {
+  const file = state.field(fileField, false);
+  if (!file) return null;
+  const kept = state.field(lineBreaks, false) ?? (RangeSet.empty as RangeSet<LineBreak>);
+  if (!kept.size && file.lineBreak === '\n' && file.formatBreak === '\n') return null;
+  return textOf(state, state.doc, kept, state.field(parsedField, false)?.ledgerRange ?? null);
+}
+
 /** The line break the file writes for a new one, or null when the editor has no file. */
 export function fileLineBreak(state: EditorState): string | null {
   return state.field(fileField, false)?.lineBreak ?? null;
@@ -387,7 +411,10 @@ export function mixedFileText(state: EditorState, named = false): string | null 
     }
   }
   const text = textOf(state, state.doc, kept, state.field(parsedField, false)?.ledgerRange ?? null);
-  // A CR alone is left to the old way: the format reads a body of CRs as one with a ledger it
-  // can't read (format §5.1), and its payload is not this issue's.
-  return /\r(?!\n)/.test(text) ? null : text;
+  // A ledger that the format can't read, as one that a CR alone precedes (format §5.1; the editor
+  // wrote such ledgers before), is left to the old way: it is written again on the LF text.
+  if (/\r(?!\n)/.test(text) && text.includes('<!-- redlines')) {
+    if (parse(text).warnings.some((warning) => warning.code === 'bad-ledger')) return null;
+  }
+  return text;
 }

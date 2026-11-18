@@ -53,6 +53,8 @@ mod project;
 
 // The images the preview loads: those of the project folders the sidebars show.
 mod images;
+// The pictures of a paste from Google Docs, fetched for the page from Google's image hosts.
+mod remote_image;
 
 // Images added to a document: dropped on its window, chosen in a panel or pasted, saved beside it.
 mod image_files;
@@ -455,6 +457,7 @@ pub fn run() {
             images::image_for_agent,
             images::image_for_crop,
             images::image_stamps,
+            remote_image::fetch_remote_image,
             images::image_sizes,
             project::allow_document,
             image_files::pick_images,

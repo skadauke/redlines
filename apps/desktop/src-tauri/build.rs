@@ -57,6 +57,7 @@ const COMMANDS: &[&str] = &[
     "image_for_agent",
     "image_for_crop",
     "image_stamps",
+    "fetch_remote_image",
     "install_command_line",
     "install_command_line_at_home",
     "keep_running",

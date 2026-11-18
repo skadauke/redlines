@@ -34,6 +34,9 @@ function tracked(doc: string): Editor {
 const MIXED = [
   ['an LF in a CRLF file', 'Alpha\r\nbeta\ngamma\r\ndelta\r\n'],
   ['a CRLF in an LF file', 'Alpha\nbeta\r\ngamma\ndelta\n'],
+  ['a CR alone in a CRLF file', 'Alpha\r\nbeta\rgamma\r\ndelta\r\n'],
+  ['a CR alone among CRLFs and an LF', 'Alpha\r\nbeta\rgamma\ndelta\r\n'],
+  ['an LF in a file of CRs', 'Alpha\rbeta\ngamma\rdelta\r'],
 ] as const;
 
 describe.each(MIXED)('%s (#924)', (_, file) => {
@@ -42,7 +45,7 @@ describe.each(MIXED)('%s (#924)', (_, file) => {
   const ctx = { author, time: '2026-11-05T10:00Z', random: idBytes('k3x9') };
   // What the command line writes, which reads the file's bytes.
   const written = applyChanges(file, trackedEdit(file, { from, to, insert: 'X' }, ctx));
-  const lf = file.replaceAll('\r\n', '\n');
+  const lf = file.replace(/\r\n?/g, '\n');
   const docFrom = lf.indexOf('beta') + 2;
   const docTo = lf.indexOf('gamma') + 2;
 
@@ -96,7 +99,7 @@ describe.each(MIXED)('%s (#924)', (_, file) => {
   it('writes the kind when Delete takes the break out, as the command line does', () => {
     const ctx2 = { author, time: '2026-11-05T10:00Z', random: idBytes('k3x9') };
     const breakAt = file.indexOf('beta') + 4;
-    const len = file.startsWith('Alpha\r\n') ? 1 : 2;
+    const len = file.startsWith('\r\n', breakAt) ? 2 : 1;
     const cli = applyChanges(
       file,
       trackedEdit(file, { from: breakAt, to: breakAt + len, insert: '' }, ctx2),
@@ -126,5 +129,35 @@ describe.each(MIXED)('%s (#924)', (_, file) => {
     expect(editor.getDoc()).toBe(written);
     editor.reject('k3x9');
     expect(editor.getDoc()).toBe(file);
+  });
+});
+
+describe('many deletions at once (#1057)', () => {
+  // Eight or more deletions with room between them are written together, as a column of cells is.
+  it.each([
+    ['an LF in a CRLF file', '\r\n', '\n'],
+    ['a CRLF in an LF file', '\n', '\r\n'],
+  ])('names the kind of a break that one of them takes out: %s', (_, eol, other) => {
+    const lines = Array.from({ length: 10 }, (_, i) => `line ${i} here`);
+    const file = lines.map((line, i) => line + (i === 3 ? other : eol)).join('');
+    const lf = file.replace(/\r\n?/g, '\n');
+    const ranges: [number, number][] = [];
+    for (let i = 0; i < 10; i++) {
+      const at = lf.indexOf(`line ${i} here`);
+      // Line 3's range runs from its end across the break into line 4.
+      ranges.push(i === 3 ? [at + 10, at + 15] : [at + 1, at + 4]);
+    }
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc: file, author, tracking: true });
+    open.push(editor);
+    editor.view.dispatch({
+      changes: ranges.filter((_, i) => i !== 4).map(([from, to]) => ({ from, to })),
+      userEvent: 'delete.selection',
+    });
+    const saved = editor.getDoc();
+    expect(saved).toContain('<!--del');
+    expect(parse(saved).warnings).toEqual([]);
+    expect(applyChanges(saved, rejectAll(saved))).toBe(file);
   });
 });

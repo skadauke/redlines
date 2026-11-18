@@ -29,10 +29,16 @@ function attempt<T>(run: () => T): T | undefined {
 
 describe('a refused edit in a list, written as a replacement of its item or list', () => {
   const runs = fuzzCount(120);
+  // Seeds that failed in a deeper run, kept in the default one: 121 types in the indentation of a
+  // fenced code line that stands less deep than its item, which ends the item and its code, and
+  // leaves the closer of the replacement inside a fence that nothing closes; 166 breaks a line in
+  // indented code of a deep item, so that the blocks after it read otherwise beside the closer (#586).
+  const KEPT = [121, 166];
 
   it('types, breaks and deletes: written, reads alike in every order, rejects back', () => {
     let widened = 0;
-    for (let seed = 1; seed <= runs; seed++) {
+    const seeds = new Set([...Array.from({ length: runs }, (_, i) => i + 1), ...KEPT]);
+    for (const seed of seeds) {
       const random = seeded(seed * 7 + 1);
       const text = listDocument(random);
       if (parse(text).warnings.length > 0) continue;
