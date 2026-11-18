@@ -43,3 +43,18 @@ describe('block-move-random seed 65: the last item of a list moves to the end, w
     },
   ]);
 });
+
+describe('list-widen seed 166: Return inside indented code of a nested item, before an ordered item', () => {
+  scriptRows([
+    {
+      name: 'Return in the code line, with a comment in the item, Track Changes on',
+      doc: `* one <!--cmt k6hg-->two<!--/k6hg-->⏎    - nested⏎⏎          co‸de⏎          more⏎2. next⏎   > quote${LEDGER}`,
+      keys: ['Enter'],
+      tc: true,
+      expect: {
+        refusal:
+          "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.",
+      },
+    },
+  ]);
+});

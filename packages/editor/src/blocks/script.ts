@@ -18,6 +18,7 @@ import {
   decodePayload,
   plainPayload,
   encodePayload,
+  frontMatterEnd,
   newestView,
   originalView,
   parse,
@@ -522,7 +523,9 @@ function itemLines(body: string): number {
 
 /** How many more marker lines a file has than micromark reads items in it. */
 export function unreadItems(file: string): number {
-  const body = bodyOf(file);
+  // The front matter is YAML, whose `- ` lines no Markdown reader reads as items.
+  const whole = bodyOf(file);
+  const body = whole.slice(Math.max(0, frontMatterEnd(whole)));
   const html = micromark(body, { allowDangerousHtml: true });
   return itemLines(body) - (html.match(/<li[ >]/g)?.length ?? 0);
 }
@@ -718,6 +721,22 @@ const lineStarts = (file: string) => {
 const BLANK = /^[ \t>]*$/;
 const FENCE = /^[ \t>]*(?:[-*+] |\d{1,9}[.)] )?[ \t]*(`{3,}|~{3,})/;
 
+/** A line of indented code: four spaces or a tab, then text that is no list item or quote. */
+const CODE_LINE = /^(?: {4,}|\t)(?![-*+][ \t]|\d{1,9}[.)][ \t]|>)\S/;
+
+/**
+ * Whether the blank lines before line `next` (the first line that is not blank) are in indented
+ * code, where blank lines are content, no paragraph break: the lines on both sides are code, or the
+ * line above closes a fence and the one below is code.
+ */
+function inIndentedCode(lines: string[], next: number): boolean {
+  if (!CODE_LINE.test(lines[next] ?? '')) return false;
+  let above = next - 1;
+  while (above >= 0 && BLANK.test(lines[above] ?? '')) above--;
+  if (above < 0) return false;
+  return CODE_LINE.test(lines[above] ?? '') || FENCE.test(lines[above] ?? '');
+}
+
 /**
  * The empty paragraphs of a body, outside fenced code: an empty line between blank lines (three
  * blank lines in a row), or with a blank line beside it at the start or the end; and the lines
@@ -732,8 +751,9 @@ export function emptyParagraphs(body: string): string[] {
   /** The blank lines in a row before the current line, and where they start. */
   let run = 0;
   let runStart = 0;
-  const endRun = (atEnd: boolean) => {
+  const endRun = (atEnd: boolean, next = -1) => {
     const atStart = runStart === 0;
+    if (next >= 0 && inIndentedCode(lines, next)) run = 0;
     if (run >= 3 || (run >= 2 && (atStart || atEnd))) {
       found.push(`an empty paragraph at line ${runStart + 1} (${run} blank lines)`);
     }
@@ -758,7 +778,7 @@ export function emptyParagraphs(body: string): string[] {
       run++;
       return;
     }
-    endRun(false);
+    endRun(false, i);
     if (opens) fence = opens;
   });
   if (run > 0 && !fence) endRun(true);
@@ -774,8 +794,13 @@ export function strayBlankLines(body: string): string[] {
   const found: string[] = [];
   let fence: string | null = null;
   let run = 0;
+  // Front matter's lines are its content, and a blank line in indented code is code.
+  const matter =
+    lines[0] === '---' ? lines.findIndex((l, i) => i > 0 && /^(?:---|\.\.\.)$/.test(l)) : -1;
   const end = (i: number) => {
-    if (run === 2 && i - run > 0) found.push(`a stray blank line at line ${i}`);
+    if (run === 2 && i - run > 0 && i > matter && !inIndentedCode(lines, i)) {
+      found.push(`a stray blank line at line ${i}`);
+    }
     run = 0;
   };
   lines.forEach((line, i) => {

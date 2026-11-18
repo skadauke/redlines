@@ -1597,7 +1597,10 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
  */
 function firstPrefix(plan: Plan, from: number, to: number): Cover | undefined {
   const { text } = plan;
-  if (from !== plan.bodyStart || prefixEnd(plan, from) !== to) return undefined;
+  // The first line of the body, or the first after the blank lines that follow front matter.
+  const above = text.slice(plan.bodyStart, from);
+  if (!/^(?:[ \t]*\r?\n)*$/.test(above) || prefixEnd(plan, from) !== to) return undefined;
+  if (plan.markers.some((marker) => marker.to <= from)) return undefined;
   const line = text.slice(from, lineEnd(text, from));
   const prefix = text.slice(from, to);
   if (!FIRST_PREFIX.test(prefix) || line.length === prefix.length) return undefined;
@@ -1612,11 +1615,33 @@ function firstPrefix(plan: Plan, from: number, to: number): Cover | undefined {
   // it. Where the three disagree about those lines (a pending deletion that empties an item reads
   // as text in the file and as an empty item in the view), nothing is written. Where a mark is on
   // them the item's reading is not the file's to rely on either, so only plain lines are let through.
-  const reads = [below(text), below(newestView(text).text), below(originalView(text).text)];
+  // From the first line of the body on: front matter above it is not a line of the item's block.
+  const newest = newestView(text);
+  const original = originalView(text);
+  const reads = [
+    below(text.slice(from)),
+    below(newest.text.slice(newest.map.fromSource(from))),
+    below(original.text.slice(original.map.fromSource(from))),
+  ];
   const classes = reads.map((lines) => lines.map(lineClass));
   const agree = classes.every((one) => one.join(' ') === (classes[0] ?? []).join(' '));
   const all = classes.flat();
-  if (!agree || all.includes('rule') || (all.includes('unlike') && markedBelow(plan, from))) {
+  // Where no line below is one of those in any reading, the lines that another person's pending
+  // insertion or split adds or takes in some of them change nothing about how the rest reads (#291).
+  const unlike = all.includes('unlike');
+  // A deletion or substitution there can empty a line in some orders of decisions. A split's break is read with the prefix of the line it ends: without the marker the next line
+  // has none, and rejecting the split would leave the line's indentation behind, so one in the
+  // lines of the item is not let through where the readings of the lines below differ.
+  const splits = plan.parsed.marks.some(
+    (mark) =>
+      (mark.kind === 'split' || mark.kind === 'del' || mark.kind === 'sub') &&
+      mark.segments.some((segment) => inItemLines(text, from, segment.open.from)),
+  );
+  if (
+    all.includes('rule') ||
+    (!agree && splits) ||
+    (unlike && (!agree || markedBelow(plan, from)))
+  ) {
     throw new EditError(FIRST_PREFIX_BELOW, 'no-legal-placement');
   }
   return { from, to, at: to };
@@ -1652,6 +1677,17 @@ function lineClass(line: string): 'unlike' | 'rule' | 'other' {
   // An empty item, of any number, can't interrupt a paragraph either.
   if (/^[ \t>]*(?:\d{1,9}[.)]|[-+*])[ \t]*$/.test(line)) return 'unlike';
   return item[1] !== undefined && item[1] !== '1' ? 'unlike' : 'other';
+}
+
+/** Whether `at` is on a line from the one that `from` is on, up to the next blank line. */
+function inItemLines(text: string, from: number, at: number): boolean {
+  if (at < from) return false;
+  let end = lineEnd(text, from);
+  for (let next = nextLineStart(text, end); next < text.length; next = nextLineStart(text, end)) {
+    if (/^[ \t>]*$/.test(text.slice(next, lineEnd(text, next)))) break;
+    end = lineEnd(text, next);
+  }
+  return at <= end;
 }
 
 /** Whether a marker stands on the lines after the first one, up to the next blank line. */
@@ -4543,6 +4579,12 @@ const EMPTY_ITEM_IN_CODE =
 const UNDERLINED_BULLET_IN_CODE =
   'The line breaks typed after this bullet make it read as the underline of the text above it, so what is typed under it would be indented code, where its markers would not be read. Reject those line breaks first, or turn Track Changes off.';
 
+/** Why a raw line break at the start of a bullet item's text, under text, is not written (#443): its
+ * marker would stand on the bullet's line, which the file reads as an item and the newest view as
+ * the underline of the text above it. */
+const UNDERLINING_SPLIT =
+  "A line break at the start of this bullet would read differently in the file than in the document: the empty bullet would turn the text above it into a heading. Type the text first and then the line break, or decide the other person's change first.";
+
 /** The line of an empty list item, in a view. */
 const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
 
@@ -4814,6 +4856,46 @@ function inCodeWords(text: string, edits: readonly TextChange[], views: Views): 
     return UNDERLINED_BULLET_IN_CODE;
   }
   return IN_CODE;
+}
+
+/**
+ * How many bullets there are that the newest view of `text` reads as the underline of the text above
+ * (an empty item can't interrupt a paragraph) and that a split's marker stands on, which the file
+ * reads as an item (#143, #443).
+ */
+function underliningSplits(text: string): number {
+  const view = newestView(text);
+  const shown = view.text;
+  let count = 0;
+  // Every line after the first of the body (front matter is no text above it), with the line before it.
+  for (
+    let start = shown.indexOf('\n', bodyStart(shown)) + 1;
+    start > 0 && start <= shown.length;
+    start = shown.indexOf('\n', start) + 1 || shown.length + 1
+  ) {
+    const line = shown.slice(start, lineEnd(shown, start));
+    if (!/^[ \t>]*-[ \t]*$/.test(line)) continue;
+    const over = lineStart(shown, start - 1);
+    if (!underliningBullet(shown.slice(over, start - 1).replace(/\r$/, ''), line)) continue;
+    const source = view.map.toSource(start, 1);
+    if (text.slice(lineStart(text, source), lineEnd(text, source)).includes('<!--split ')) count++;
+  }
+  return count;
+}
+
+/**
+ * `written`, the fine write of an edit, or an alert where it would put a split's marker on a bullet
+ * that the file reads as an item and the newest view as the underline of the text above it, where
+ * no write reads alike in both: the words say what to do (#443). Such a bullet that the file had
+ * already (another person's break) is not the edit's, and its own edits stay.
+ */
+function noUnderliningSplit(text: string, written: TrackedEdits): TrackedEdits {
+  if (!written.changes.some((change) => change.insert.includes('<!--split '))) return written;
+  const after = applyChanges(text, written.changes);
+  const now = underliningSplits(after);
+  if (now > 0 && now > underliningSplits(text) && readsOtherMicromark(text, written.changes))
+    throw new EditError(UNDERLINING_SPLIT, 'no-legal-placement');
+  return written;
 }
 
 /** What `trackedEdits` gives: the changes of the file, and which marks they made or changed. */
@@ -5453,10 +5535,7 @@ function editsWidening(
       }
       try {
         const written = editsOnce(text, edits, mode === 0 ? first : again(), mode);
-        if (
-          widening &&
-          (readsOtherAtBoundary(text, edits, written.changes) || delimiterBesideBreak(text, edits))
-        ) {
+        if (widening && readsOtherAtBoundary(text, edits, written.changes)) {
           // A write the format accepts that a reader of the file reads otherwise than the newest
           // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
           // can't be.
@@ -5466,9 +5545,11 @@ function editsWidening(
           } catch {
             // no unit holds it: the fine write stays
           }
-          return whole && !readsOtherMicromark(text, whole.changes) ? whole : written;
+          return whole && !readsOtherMicromark(text, whole.changes)
+            ? whole
+            : noUnderliningSplit(text, written);
         }
-        return written;
+        return noUnderliningSplit(text, written);
       } catch (error) {
         if (!(error instanceof ReadsOtherwise)) throw error;
       }
@@ -5476,14 +5557,28 @@ function editsWidening(
   } catch (error) {
     // Where no fine form reads alike in every order, it is a replacement of the unit (format §3.12).
     if (!widening) throw error;
-    return widenedEdits(text, edits, again(), error);
+    if (!(error instanceof EditError) || error.message !== UNDERLINING_SPLIT) {
+      return widenedEdits(text, edits, again(), error);
+    }
+    // A split's marker on a bullet that reads two ways (#443): the unit is replaced where that
+    // reads alike in the file and the newest view, and the person is told where it can't.
+    let whole: TrackedEdits | undefined;
+    try {
+      whole = widenedEdits(text, edits, again(), error);
+    } catch {
+      // no unit holds it
+    }
+    if (whole && !readsOtherMicromark(text, whole.changes)) return whole;
+    throw error;
   }
 }
 
 /**
  * Whether `changes`, a fine write of `edits`, are at a block's boundary (`atBlockBoundary`) and
- * make a file that micromark reads otherwise than its newest view (#597, #601, #588). The editor
- * answers it with the replacement of the unit.
+ * make a file that micromark reads otherwise than its newest view (#597, #601, #588), or whether
+ * an edit has a delimiter beside a break (`delimiterBesideBreak`, which the fine form can't hold
+ * whatever it reads as). The editor answers it with the replacement of the unit, as `trackedEdits`
+ * does (the fifth property of docs/hardening.md).
  */
 export function readsOtherAtBoundary(
   text: string,
@@ -5491,7 +5586,9 @@ export function readsOtherAtBoundary(
   changes: readonly TextChange[],
 ): boolean {
   return (
-    (atBlockBoundary(text, edits) || atDelimiter(text, edits)) && readsOtherMicromark(text, changes)
+    ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
+      readsOtherMicromark(text, changes)) ||
+    delimiterBesideBreak(text, edits)
   );
 }
 

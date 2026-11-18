@@ -163,11 +163,11 @@ describe('inside a line (format §3.1)', () => {
 
   it('keeps a position between a letter and a shortcode free of markers, and no other (#312)', () => {
     // A marker there would leave the shortcode at the start of a text, where GitHub shows it as the
-    // emoji, as it doesn't with the letter against it.
+    // emoji, as it doesn't with a letter or punctuation against it (#388).
     const refused = {
       kind: 'refuse',
       reason:
-        'A marker between a letter and an emoji shortcode would make it show as an emoji. Select the shortcode along with the word.',
+        'A marker between a letter, a digit or punctuation and an emoji shortcode would make it show as an emoji. Select the shortcode along with the text before it.',
     };
     expect(place('a‸:tent: b')).toEqual(refused);
     expect(place('é‸:tent: b')).toEqual(refused);
@@ -179,14 +179,16 @@ describe('inside a line (format §3.1)', () => {
     // A letter after it changes nothing: GitHub shows the emoji there too.
     expect(place('a :tent:‸b')).toEqual(OK);
     expect(place('a :tent:‸9')).toEqual(OK);
-    // Next to a space, punctuation or another shortcode it is as free as any text.
+    // So does punctuation, and another shortcode.
+    expect(place('(‸:tent:) b')).toEqual(refused);
+    expect(place('.‸:tent: b')).toEqual(refused);
+    expect(place('x:‸:tent: b')).toEqual(refused);
+    expect(place(':smile:‸:tent: b')).toEqual(refused);
+    // Next to a space, or after the shortcode, it is as free as any text.
     expect(place('a ‸:tent: b')).toEqual(OK);
     expect(place('a :tent:‸ b')).toEqual(OK);
-    expect(place('(‸:tent:) b')).toEqual(OK);
     expect(place('a (:tent:‸)')).toEqual(OK);
-    expect(place('x:‸:tent: b')).toEqual(OK);
     expect(place('a :tent:‸. b')).toEqual(OK);
-    expect(place(':smile:‸:tent: b')).toEqual(OK);
   });
 
   it('puts a position inside an emoji that is more than one character on the whole of it (#312)', () => {

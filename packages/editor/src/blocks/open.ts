@@ -110,6 +110,66 @@ export interface OpenRequest {
   item?: true;
   /** The line is the empty line Shift-Return opened (`OpenBlock.line`). */
   line?: true;
+  /**
+   * Where the open line stands among its neighbours in the document the key planned (`locate`), for
+   * a tracked write that replaced the text round it, which no position maps through.
+   */
+  locate?: Locate;
+}
+
+/** The text above and below the run of blank lines that holds the open line, and its place in it. */
+export interface Locate {
+  above: string | null;
+  below: string | null;
+  blanks: number;
+  index: number;
+}
+
+const BLANK_LINE = /^[ \t>]*$/;
+const trimmed = (text: string) => text.trim();
+
+/** What surrounds a blank line: the lines of text above and below its run of blank lines. */
+export function locateOf(doc: Text, line: Line): Locate | null {
+  if (!BLANK_LINE.test(line.text)) return null;
+  let first = line.number;
+  while (first > 1 && BLANK_LINE.test(doc.line(first - 1).text)) first--;
+  let last = line.number;
+  while (last < doc.lines && BLANK_LINE.test(doc.line(last + 1).text)) last++;
+  return {
+    above: first > 1 ? trimmed(doc.line(first - 1).text) : null,
+    below: last < doc.lines ? trimmed(doc.line(last + 1).text) : null,
+    blanks: last - first + 1,
+    index: line.number - first,
+  };
+}
+
+const sameLocate = (a: Locate | null, b: Locate) =>
+  a !== null &&
+  a.above === b.above &&
+  a.below === b.below &&
+  a.blanks === b.blanks &&
+  a.index === b.index;
+
+/**
+ * The line a write put the open line at, found by its neighbours in the changed text: for a tracked
+ * write that replaced the unit round it (a substitution of a whole list), where the line the key
+ * planned maps to no line of it (walk seeds 80 and 260 of `REDLINES_FUZZ=300`).
+ */
+function locatedLine(tr: Transaction, locate: Locate, near: number): Line | null {
+  const doc = tr.newDoc;
+  let from = doc.lines + 1;
+  let to = 0;
+  tr.changes.iterChangedRanges((_a, _b, fromB, toB) => {
+    from = Math.min(from, doc.lineAt(fromB).number);
+    to = Math.max(to, doc.lineAt(toB).number);
+  });
+  let found: Line | null = null;
+  for (let n = Math.max(1, from - 1); n <= Math.min(doc.lines, to + 1); n++) {
+    if (!sameLocate(locateOf(doc, doc.line(n)), locate)) continue;
+    // The nearest to where the mapping put it, if several read alike.
+    if (!found || Math.abs(n - near) < Math.abs(found.number - near)) found = doc.line(n);
+  }
+  return found;
 }
 
 /** Marks a key's transaction that opens (or keeps) the empty block, and where. */
@@ -450,6 +510,15 @@ function removableLine(doc: Text, line: Line): boolean {
 
 /** The line of the new document a key's open request names (`OpenRequest`). */
 export function requestedLine(tr: Transaction, request: OpenRequest): Line {
+  const line = mappedLine(tr, request);
+  if (!request.locate || request.item || request.line) return line;
+  // A blank line the mapping found stays (the tracked layer's markers round it change its context).
+  if (BLANK_LINE.test(line.text) || sameLocate(locateOf(tr.newDoc, line), request.locate))
+    return line;
+  return locatedLine(tr, request.locate, line.number) ?? line;
+}
+
+function mappedLine(tr: Transaction, request: OpenRequest): Line {
   const doc = tr.newDoc;
   if (request.line) {
     // The empty line is found by its no-break space, wherever the tracked layer wrote the break
