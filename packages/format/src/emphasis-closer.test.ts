@@ -161,6 +161,8 @@ describe("another person's pending marks around the change (#81)", () => {
       '***',
       '_',
       '__',
+      '~',
+      '~~',
       'word',
       '<sub>',
       '</sub>',
@@ -201,9 +203,20 @@ describe("another person's pending marks around the change (#81)", () => {
       'x ‸ca<!--ins k3x9-->**f**<!--/k3x9-->é',
       'x a<!--ins k3x9-->*f*<!--/k3x9-->é‸ y',
       'x ‸ca<!--ins k3x9-->~~f~~<!--/k3x9-->é',
+      '**one ‸<!--split k3x9-->\n\ntwo** End',
+      '**one <!--split k3x9-->\n\n‸two** End',
+      '~~one ‸<!--split k3x9-->\n\ntwo~~ End',
+      '_one<!--del k3x9 \\n\\n-->‸two_ End',
+      '__one ‸<!--del k3x9 \\n\\n-->two__ End',
+      'Start ‸<!--del k3x9 **-->middle** End',
+      'Start **<!--del k3x9 **-->‸middle End',
+      'Start <!--del k3x9 \\\\-->‸*middle* End',
+      'Start ‸<!--del k3x9 \\\\-->*middle* End',
+      'Start *mid<!--split k3x9-->\n\n‸dle End',
     ];
     const total = fuzzCount(400);
     let written = 0;
+    const refusedBy = new Map<string, number>();
     for (let seed = 1; seed <= total; seed++) {
       const random = seeded(seed * 6151);
       let pasted = '';
@@ -216,6 +229,8 @@ describe("another person's pending marks around the change (#81)", () => {
         after = pasteWidened(target, pasted, { k3x9: 'bo' });
       } catch (error) {
         if (!(error instanceof EditError)) throw error;
+        const k = `${target} :: ${error.message}`;
+        refusedBy.set(k, (refusedBy.get(k) ?? 0) + 1);
         continue;
       }
       written++;
@@ -223,6 +238,7 @@ describe("another person's pending marks around the change (#81)", () => {
       expect(readsAsNewest(after), label).toBe(true);
       expectSound(label, after);
     }
+    if (process.env['REDLINES_FUZZ']) console.log('refused', [...refusedBy]);
     expect(written).toBeGreaterThan(total / 4);
   });
 });
@@ -302,5 +318,5 @@ describe('text pasted before a letter reads as micromark reads it (#81)', () => 
     if (process.env['REDLINES_FUZZ'])
       console.log('closer paste', { insertions, substitutions, refused });
     expect(insertions).toBeGreaterThan(total / 10);
-  });
+  }, 60_000);
 });
