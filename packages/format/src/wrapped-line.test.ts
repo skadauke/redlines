@@ -759,6 +759,32 @@ function trickyDocument(random: () => number): string {
   return `${lines.join('\n')}\n`;
 }
 
+describe('all the body of an alert, deleted with Track Changes off (#1112, deep seeds 206, 254)', () => {
+  it('leaves an empty quote line, which the random walk below does not count as a bare line', () => {
+    const text = '> [!note]\n> x 42\\\\ \n';
+    const from = text.indexOf('x 42');
+    const to = from + 'x 42\\\\'.length;
+    expect(plain(text, from, to)).toBe('> [!note]\n>  \n');
+    expect(aloneInAlert(text, from, to)).toBe(true);
+    const folded = '> [!NOTE]- Folded\n> gamma\n>\n> beta\n';
+    expect(aloneInAlert(folded, 20, 25)).toBe(true);
+    const longer = '> [!note]\n> one\n> two\n';
+    expect(aloneInAlert(longer, longer.indexOf('two'), longer.indexOf('two') + 3)).toBe(false);
+  });
+});
+
+/** Whether the line `from` to `to` of a text is all the body of an alert: the line above it is the
+ * alert's `[!TYPE]` line, and nothing under it goes on the paragraph. */
+function aloneInAlert(text: string, from: number, to: number): boolean {
+  const above =
+    text
+      .slice(0, text.lastIndexOf('\n', from - 1))
+      .split('\n')
+      .pop() ?? '';
+  const below = text.slice(to + 1).split('\n')[0] ?? '';
+  return /^(?:> ?)+\[![A-Za-z]+\]/.test(above) && (below === '' || !/^(?:> ?)+[^> ]/.test(below));
+}
+
 describe('deleting the text of each wrapped line of random documents', () => {
   it('takes the break with a line of a paragraph, tracked and plain, and reads the same', () => {
     // `taken`: the text of a line that was taken with its break, the paragraph is not parted;
@@ -778,7 +804,10 @@ describe('deleting the text of each wrapped line of random documents', () => {
       realPlainTaken: 0,
     };
     const reasons = new Map<string, number>();
+    // `REDLINES_SEED=206` runs that one seed alone, the repro of a deep run's failure.
+    const only = Number(process.env.REDLINES_SEED) || undefined;
     for (let seed = 1; seed <= fuzzCount(150); seed++) {
+      if (only !== undefined && seed !== only) continue;
       // Documents of paragraphs, quotes, items and alerts (`realistic`: every wrapped line is a
       // line of a paragraph), with code in them, and of every shape of indentation.
       const kind = seed % 4;
@@ -884,7 +913,13 @@ describe('deleting the text of each wrapped line of random documents', () => {
             }
           } else {
             counts.plainBare++;
-            expect(realistic, `${label}: plain, left as ${JSON.stringify(now)}`).toBe(false);
+            // The one exception (format §3.10, #1112): all of an alert's body, deleted from the
+            // start of its text, leaves an empty quote line, where the break would take the body
+            // line from the callout.
+            expect(
+              realistic && !aloneInAlert(view.text, line.from, line.to),
+              `${label}: plain, left as ${JSON.stringify(now)}`,
+            ).toBe(false);
             expect(now, `${label}: plain`).toBe(bare);
           }
         } catch (error) {
@@ -894,6 +929,7 @@ describe('deleting the text of each wrapped line of random documents', () => {
         }
       }
     }
+    if (only !== undefined) return;
     expect(counts.taken, 'lines taken with their breaks').toBeGreaterThan(50);
     expect(counts.taken).toBeGreaterThan(counts.refused);
   }, 120_000);
