@@ -3,7 +3,10 @@
 // and reads the file again for the new selection, and each read is the size of the file. Measured in
 // a document of 2,000 blocks with 200 pending changes, against a plain key typed in the same
 // document, which is what an edit costs there. The timing tests run with REDLINES_COST=check, as
-// the other cost tests do, since a busy machine can't time them: the bounds are ratios.
+// the other cost tests do, since a busy machine can't time them: the bounds are ratios. A move is
+// the format's own work (the widened write checks its replacement by reading and deciding it), which
+// a CI runner does 2.5 times slower than this machine, where a key is 1.6 times slower: the same move
+// stood at 10 to 13 keys here and 21.6 there (a push run of main, #1114), so the bound is 24.
 import { forceParsing } from '@codemirror/language';
 import { parseStats } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -78,7 +81,7 @@ describe('a block move in 2,000 blocks with 200 pending changes', () => {
   });
 
   timed(
-    'costs at most 14 times a plain key typed in the same document (it was 13, and is 10)',
+    'costs at most 24 times a plain key typed in the same document (about 10 where it is measured, 21 on CI)',
     () => {
       const editor = editorFor(doc, caret);
       const { view } = editor;
@@ -94,9 +97,17 @@ describe('a block move in 2,000 blocks with 200 pending changes', () => {
         moveBlocks(view, down);
         down = !down;
       };
-      const plain = best(key, 9);
-      const moved = best(move, 9);
-      expect(moved).toBeLessThan(plain * 14 + 5);
+      // The move and its yardstick take turns (#432): the median of five turns, each the best of a
+      // few runs of both, so that a runner slowed for a few seconds slows both and not the ratio.
+      const plain: number[] = [];
+      const moved: number[] = [];
+      for (let turn = 0; turn < 5; turn++) {
+        plain.push(best(key, 5));
+        moved.push(best(move, 5));
+      }
+      const middle = (xs: number[]) => [...xs].sort((x, y) => x - y)[xs.length >> 1]!;
+      console.log(`MOVE plain ${middle(plain).toFixed(2)} moved ${middle(moved).toFixed(2)}`);
+      expect(middle(moved)).toBeLessThan(middle(plain) * 24 + 5);
     },
   );
 });

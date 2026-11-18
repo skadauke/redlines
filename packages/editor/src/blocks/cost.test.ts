@@ -964,11 +964,12 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of the first key in cod
       const inParagraph = (text: string) => text.indexOf('quick brown', 100) + 'quick '.length;
       pair(editor, doc, inCode);
       pair(editor, doc, inParagraph);
-      // The paragraph key is timed beside the code key, so that a slow moment slows both.
+      // The paragraph key is timed beside the code key, so that a slow moment slows both; the median
+      // of 11 turns, since 2000 lines stood 2% over its bound with 7 on a push run of main (#1114).
       const attempt = (): Held => {
         const code: number[] = [];
         const paragraph: number[] = [];
-        for (let i = 0; i < 7; i++) {
+        for (let i = 0; i < 11; i++) {
           code.push(pair(editor, doc, inCode));
           paragraph.push(pair(editor, doc, inParagraph));
         }
