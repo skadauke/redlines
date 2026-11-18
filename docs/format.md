@@ -3554,6 +3554,13 @@ blocks of the document's own flow, §3.7.)
   the widened replacement at once: the fine write would put the deletions among the markers of
   another person's insertion, a mark on each line, and those read otherwise when some are decided
   and others not (#1052). Where no unit holds the replacement, the fine write is tried after it.
+- **What the move must not break.** A move writes a blank line above a list where it makes an item that
+  can't start a list under a line of text the first of its siblings (an empty item, or a number other
+  than 1), and between an HTML block and the block it is put beside (an HTML block takes the next line
+  as its own); the blank line is the only text a move writes outside its marks. A plain move of text
+  with pending changes carries them with it, as it does comments (the file's own text is taken out
+  and put in). A code block whose fence nothing closes has no place to go, since it holds the blocks
+  after it wherever it stands: the command is disabled and says why (#1103).
 - **Track Changes off.** The same two edits are made plain, and the moved text is the file's own,
   markers included, where the blocks hold a comment or a highlight: its markers go with it, so a
   comment stays on the words it was on, and no marker is left alone on a line where it would split
