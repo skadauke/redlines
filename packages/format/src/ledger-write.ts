@@ -228,7 +228,10 @@ function threadLines(thread: Thread): string[] {
  * holds them, which should be the order of the document.
  */
 export function serializeLedger(ledger: Ledger): string {
-  const lines = ['<!-- redlines', NOTE, 'version: 1'];
+  // A later version's number is kept in `extra` as it was read, and written back where it was (§5.2).
+  const kept = ledger.extra?.['version'];
+  const later = typeof kept === 'string' && /^[0-9]+$/.test(kept) && Number(kept) > 1;
+  const lines = ['<!-- redlines', NOTE, `version: ${later ? kept : 1}`];
   if (ledger.tracking) lines.push(`tracking: ${ledger.tracking}`);
   if (ledger.view) lines.push(`view: ${ledger.view}`);
   if (ledger.history === 'full') lines.push('history: full');
@@ -243,7 +246,7 @@ export function serializeLedger(ledger: Ledger): string {
   if (marks.length > 0) lines.push('marks:', ...marks.map(([id, entry]) => entryLine(id, entry)));
   if (ledger.comments.length > 0) lines.push('comments:', ...ledger.comments.flatMap(threadLines));
   for (const [name, value] of Object.entries(ledger.extra ?? {}))
-    lines.push(...valueLines('', key(name), value));
+    if (name !== 'version') lines.push(...valueLines('', key(name), value));
   lines.push('-->');
   return lines.join('\n');
 }
