@@ -699,3 +699,124 @@ describe('walk seed 586 of the lists side by side (#602): an agent’s edit whil
     },
   ]);
 });
+
+describe('walk seed 201 (#1117): Undo of an agent’s edit that took the open empty paragraph back', () => {
+  // An agent's edit that comes down on the open empty paragraph takes it back in its own step, which
+  // Undo gives back whole: the empty paragraph is open again, the caret in the block Return was
+  // pressed in. It came back as two blank lines in the file, with nothing open, and the caret at the
+  // start of the document (where the agent's text changed).
+  const agent = { agent: 'The agent wrote this.' };
+  scriptRows([
+    {
+      name: 'Return at the start of a paragraph, the agent’s edit, Undo',
+      doc: 'alpha⏎⏎‸beta',
+      keys: ['Enter', agent, 'Mod-z'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'the same, Track Changes off',
+      doc: 'alpha⏎⏎‸beta',
+      keys: ['Enter', agent, 'Mod-z'],
+      tc: false,
+      expect: {},
+    },
+    {
+      name: 'the same, Undo and Redo',
+      doc: 'alpha⏎⏎‸beta',
+      keys: ['Enter', agent, 'Mod-z', 'Mod-Shift-z'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'in the second paragraph of an item, whose text starts with a space (the seed)',
+      doc: '+ ship note delta alpha⏎⏎   ‸gamma code note',
+      keys: ['Enter', { decide: 'reject' }, agent, 'Mod-Shift-z', 'Shift-ArrowLeft'],
+      tc: true,
+      expect: {},
+    },
+  ]);
+});
+
+describe('walk seed 294 (#1117): a decision that ends beside the open empty paragraph’s blank lines', () => {
+  // The rejected insertion ends on the line above the blank lines the open paragraph stands among,
+  // which it doesn't touch: what it left of them and the open line's own made three blank lines in
+  // the file, once the paragraph was taken back. The decision takes the paragraph back too.
+  scriptRows([
+    {
+      name: 'Shift-Return, Return, the insertion rejected (the seed, without its last two keys)',
+      doc: '## ship text ship‸⏎⏎',
+      keys: ['Shift-Enter', 'Enter', { decide: 'reject' }],
+      tc: true,
+      expect: { file: '## ship text ship⏎⏎' },
+    },
+    {
+      name: 'then Return and a letter (the seed)',
+      doc: '## ship text ship‸⏎⏎',
+      keys: ['Shift-Enter', 'Enter', { decide: 'reject' }, 'Enter', { type: 'x' }],
+      tc: true,
+      expect: {},
+    },
+  ]);
+});
+
+describe('a decision on the line above the open empty paragraph keeps it open (#1117)', () => {
+  // A decision that ends at the end of the line above the blank lines, and leaves as many of them
+  // as there were, takes nothing back: the paragraph stays open, the caret in it.
+  const rows = (
+    [
+      ['in a paragraph', 'alpha‸⏎⏎beta', 'alphax⏎⏎‸⏎⏎beta', 'alpha⏎⏎‸⏎⏎beta'],
+      ['in a quote', '> q‸⏎>⏎> r', '> qx⏎>⏎> ‸⏎>⏎> r', '> q⏎>⏎> ‸⏎>⏎> r'],
+      ['after a heading', '## head‸⏎⏎beta', '## headx⏎⏎‸⏎⏎beta', '## head⏎⏎‸⏎⏎beta'],
+    ] as const
+  ).flatMap(([name, doc, accepted, rejected]) => [
+    {
+      name: `${name}, accepted`,
+      doc,
+      keys: [{ type: 'x' }, 'Enter', { decide: 'accept' }] as Step[],
+      tc: true,
+      expect: { caret: accepted },
+    },
+    {
+      name: `${name}, rejected`,
+      doc,
+      keys: [{ type: 'x' }, 'Enter', { decide: 'reject' }] as Step[],
+      tc: true,
+      expect: { caret: rejected },
+    },
+  ]);
+  scriptRows(rows);
+});
+
+describe('walk seed 207 (#1117): ⌥↓ in the new text of a substitution that holds the whole quote', () => {
+  // The substitution's opener stands before the paragraph in the file, and went with it, out of the
+  // quote's text: the list that stayed was left outside the substitution, and the quote ended at the
+  // opener, so that micromark read two quotes where the newest view has one.
+  scriptRows([
+    {
+      name: 'Tab, Return, Tab, →, ⌥↓ (the seed)',
+      doc: '> ship plan text⏎>⏎> - ‸ship gamma⏎>   - delta review',
+      keys: ['Tab', 'Enter', 'Tab', 'ArrowRight', 'Alt-ArrowDown'],
+      tc: true,
+      // The first Tab is the first item of its list, which nothing can go under.
+      expect: {
+        refusal: "The first item of a list can't be indented: there is no item to put it under.",
+      },
+    },
+  ]);
+});
+
+describe('walk seed 222 (#1117): Backspace at the first item of a nested list in a quote, in a change of its own', () => {
+  // The item's line starts with the quote's marker: the plain edit that takes it up a level put the
+  // parent's indentation, `> `, at the start of the line, in front of that marker, which made a
+  // quote inside the quote and the item a line of it.
+  scriptRows([
+    {
+      name: 'Tab, Return, ⌥↑, Backspace (the seed)',
+      doc: '> 2. delta alpha⏎> 2. gamma gamma⏎>    ‸alpha gamma⏎>    + plan code',
+      keys: ['Tab', 'Enter', 'Alt-ArrowUp', 'Backspace', 'Tab'],
+      tc: true,
+      expect: {},
+    },
+  ]);
+});
