@@ -3476,6 +3476,18 @@ line after another person's split (`## x`, `- x`, `> x`, `1. x`, a letter or a s
 change of that line (heading, bullet, quote, number), are written this way: the substitution holds
 the split in its old text, and every order of decisions reads alike (#107, #276).
 
+A change that, to keep its markers clear of a delimiter run, takes in the letters beside it never goes
+in through the marker of another person's pending format change into its text, which would write
+their bold or italic again outside their mark. Where it would, the write that takes the text in is
+read in every order of decisions of the marks of its paragraph (`ordersReadOtherwiseNear` in
+`widen.ts`; only that paragraph is read in each state, with the ledger, so the cost does not grow with
+the file): if any order reads otherwise than its newest view, the unit is replaced whole instead;
+where all read alike, the fine write stays (#265). The reading has caps, and over any of them the unit
+is replaced, which is always sound: more than four marks in the paragraphs, more than 100 states, or a
+mark that runs out of them past three rounds of taking the paragraphs it spans in. An edit across a
+line break is no letter beside a run and is not read this way, and a table's cell is read by the rule
+that follows.
+
 In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that stands
 against a delimiter, in a table that holds changes, is read in the file as it stands and after each
 accept and reject of the table's changes (`readsOtherInDecisions`, `table-delimiter.ts`); where one of
