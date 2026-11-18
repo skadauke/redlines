@@ -3293,7 +3293,12 @@ backslash typed, or left by a deletion, right in front of a marker, which would 
 refused with Track Changes off, as it is with it on (§3.1, rule 4), in words that name the change
 ("A backslash can't stand right in front of the marker of Bo Chen's insertion while Track Changes
 is off: other Markdown readers would show the marker as text. Decide Bo Chen's insertion first, or
-turn on Track Changes."). In Plain, with Track Changes off, the editor edits the source as written,
+turn on Track Changes."). An emphasis delimiter (`*`, `_` or `~`) taken out or typed in a paragraph
+that holds marks is held to the same reading: where the fine write would make a file that micromark
+reads otherwise than its newest view (a marker between a `*` and the text it flanks, as in Bo's
+pending `**1**` after a `1` when one `*` is deleted, #265), it is refused with `no-legal-placement`,
+and the editor answers with the question of §3.13 (accepting the pending changes in the unit, then
+making the edit). In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
