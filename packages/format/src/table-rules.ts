@@ -401,6 +401,23 @@ export function pastRowMark(table: TableRead, text: string, at: number): number 
   return at;
 }
 
+/**
+ * `at`, or the place before the closing pipe of the header row that it is after: a marker after the pipe
+ * is a cell more than the delimiter row has, and the header and the table are no longer read (#955,
+ * #396). Past the pipe, the marker goes in front of it, at the end of the last cell's text.
+ */
+export function beforeHeaderPipe(table: TableRead, text: string, at: number): number {
+  const header = table.rows[0];
+  if (!header || at <= header.from || at > header.to) return at;
+  const line = text.slice(header.from, header.to);
+  const pipe = /\|\s*$/.exec(line);
+  if (!pipe) return at;
+  const slashes = /\\*$/.exec(line.slice(0, pipe.index))?.[0].length ?? 0;
+  if (slashes % 2 === 1) return at;
+  const pipeAt = header.from + pipe.index;
+  return at > pipeAt ? pipeAt : at;
+}
+
 /** The marks, other than comments and highlights, that have a marker inside `row`. */
 function changesIn(parsed: Parsed, row: TableRowRead): MarkRange[] {
   return parsed.marks.filter(
@@ -1080,24 +1097,26 @@ export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed)
   if (edit.to > end) return [];
   const line = readLine(text, start, end);
   if (line.lone) return [];
-  // A row of one cell keeps it with a pipe at one end, and needs none besides, but for the mark of an alignment change
-  // that ends the cell of a header. With the text gone the mark alone holds the cell: with no leading pipe it would start
-  // the line, where no marker may stand (format §3.3), and would be put on a line of its own above the table, outside
-  // it; with no closing pipe the header is a lone pipe once the change is accepted, and no table.
+  // A row of one cell keeps it with a pipe at one end, and needs the other once the text is gone: with
+  // none left, a lone pipe is no cell, the header is one cell less than the delimiter row, and the table is
+  // none. (The mark of an alignment change that ends the cell of a header is no text either.)
   const only = line.cells.length === 1 ? line.cells[0] : undefined;
-  if (line.cells.length < 2) {
-    if (!only || alignPointIn(text, only.contentFrom, only.contentTo) === null) return [];
-  }
-  // The cell's text is all in the edit, and none of it is a mark. The mark of an alignment change that
-  // ends the cell stays, and is not text.
+  if (line.cells.length < 2 && !only) return [];
+  // The cell's text is all in the edit. What stays is no text: the mark of an alignment change that ends the
+  // cell, and the markers of other changes, a comment's among them, and the text that another person's
+  // pending deletion holds, which the newest view does not read.
   const emptied = (index: number): boolean => {
     const cell = line.cells[index];
     if (!cell) return false;
     const to = alignPointIn(text, cell.contentFrom, cell.contentTo)?.from ?? cell.contentTo;
     const content = text.slice(cell.contentFrom, to);
-    if (content.trim() === '' || content.includes('<!--')) return false;
-    const first = cell.contentFrom + (content.length - content.trimStart().length);
-    const last = to - (content.length - content.trimEnd().length);
+    // The text of the cell as the newest view has it, each character in its place, the rest blanked.
+    const seen = content
+      .replace(/<!--del (\w{4})\b[^>]*-->[\s\S]*?<!--\/\1-->/g, (m) => ' '.repeat(m.length))
+      .replace(/<!--[\s\S]*?-->/g, (m) => ' '.repeat(m.length));
+    if (seen.trim() === '') return false;
+    const first = cell.contentFrom + (seen.length - seen.trimStart().length);
+    const last = cell.contentFrom + seen.trimEnd().length;
     return edit.from <= first && last <= edit.to;
   };
   const writes: PipeWrite[] = [];
@@ -1109,6 +1128,9 @@ export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed)
   // Only a row of a table has cells.
   const table = tablesIn(text, parsed).find((t) => t.from <= start && end <= t.to);
   const row = table?.rows.find((r) => r.from === start);
+  // A body row of one cell that is a pipe alone stands for the empty cell (and takes a column back);
+  // only a header has to keep its cells.
+  if (line.cells.length === 1 && !row?.header) return [];
   return row ? writes : [];
 }
 

@@ -1583,14 +1583,18 @@ the deletion would join, or the opener would start a line that has text after it
 and the first line's indentation alone are not a prefix of this kind, and are refused as before.
 A task item's box is part of the prefix (`- [ ] `). The lines below the first, up to the next blank
 line, are read three ways, in the file, in the newest view and in the original view (a CRLF file as
-the same file in LF), and the rule is written only where all three read alike and nothing there
+the same file in LF), and the rule is written only where nothing there
 turns into text of the first line or into its heading: an underline (`===`, `--`), and, because an
 empty item (a bullet, or a number of any value) or an item numbered other than 1 can't interrupt a
 paragraph, such an item once the first item's marker is gone (`1. one\n2. two` leaves `one\n2. two`,
 one paragraph). Such an item is let through only where no marker is on the lines below, so that the
 file, the newest and the original view read it alike. A pending deletion that empties an item reads as
 an item with text in the file and as an empty item in the view, and is refused, as is any mark on
-those lines in front of such an item. A refusal says that the changes below are to be decided first,
+those lines in front of such an item. Another person's pending insertion on those lines, which adds lines
+to the newest view and none to the original, is no reason to refuse where none of the lines is one
+of those; a split of theirs is, where the three readings differ, because rejecting it would leave the
+indentation of the line after it behind (#291). The first item may follow front matter and the blank
+lines after it. A refusal says that the changes below are to be decided first,
 or that the marker can be taken out with Track Changes off. The editor keeps the first item of a
 list in its list while a line below it would read as text of it, and says so. The editor's Backspace
 at a first item does not rely on that rule alone. Wherever the item is in the file, with Track Changes
@@ -2730,6 +2734,21 @@ it, one per line:
   cell if it has no leading pipe, ` |` after the mark if it has no closing pipe (an indented header
   gets one leading pipe, not two). So the mark never starts a line, and the header is a header once
   the change is accepted.
+  The other markers that stay in a cell are no text either: a comment's marker, and another person's
+  pending insertion or deletion (the text of a pending deletion is not in the newest view). A deletion
+  that takes all the other text of the last cell of a header with no closing pipe writes that pipe
+  beside them, and so does one in the only cell of a header (any header of one cell, not only one that
+  holds an alignment change's mark); a body row that is a lone pipe stands for its empty cell and takes
+  no pipe (#428).
+- **A comment's or a highlight's markers in a table with a change pending** stand where no decision
+  of that change becomes impossible (#376, #396). A marker after the closing pipe of a header is a
+  cell too many, so the end goes in front of the pipe (and in front of a delimiter run that the
+  marker would split). When the range as asked would leave a decision of a pending row or column
+  change refused (a marker in a stretch that the decision takes out, in front of a column's mark, or
+  by a deletion's line below the table), the nearest range whose ends stand elsewhere is written; when
+  none does, the range as asked. A comment whose closer stands in a row that a decision takes out,
+  while its opener stands in another row, takes its closer to the point where the row was, as its
+  opener does.
 - **A cell is one line.** Text in a row never holds an unescaped `|` or a line break: a pipe in
   a cell is written `\|`, a line break `<br>`. An edit that changes a table's lines or the
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
@@ -3563,6 +3582,13 @@ blocks of the document's own flow, §3.7.)
   the widened replacement at once: the fine write would put the deletions among the markers of
   another person's insertion, a mark on each line, and those read otherwise when some are decided
   and others not (#1052). Where no unit holds the replacement, the fine write is tried after it.
+- **What the move must not break.** A move writes a blank line above a list where it makes an item that
+  can't start a list under a line of text the first of its siblings (an empty item, or a number other
+  than 1), and between an HTML block and the block it is put beside (an HTML block takes the next line
+  as its own); the blank line is the only text a move writes outside its marks. A plain move of text
+  with pending changes carries them with it, as it does comments (the file's own text is taken out
+  and put in). A code block whose fence nothing closes has no place to go, since it holds the blocks
+  after it wherever it stands: the command is disabled and says why (#1103).
 - **Track Changes off.** The same two edits are made plain, and the moved text is the file's own,
   markers included, where the blocks hold a comment or a highlight: its markers go with it, so a
   comment stays on the words it was on, and no marker is left alone on a line where it would split

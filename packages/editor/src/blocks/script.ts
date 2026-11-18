@@ -18,6 +18,7 @@ import {
   decodePayload,
   plainPayload,
   encodePayload,
+  frontMatterEnd,
   newestView,
   originalView,
   parse,
@@ -522,7 +523,9 @@ function itemLines(body: string): number {
 
 /** How many more marker lines a file has than micromark reads items in it. */
 export function unreadItems(file: string): number {
-  const body = bodyOf(file);
+  // The front matter is YAML, whose `- ` lines no Markdown reader reads as items.
+  const whole = bodyOf(file);
+  const body = whole.slice(Math.max(0, frontMatterEnd(whole)));
   const html = micromark(body, { allowDangerousHtml: true });
   return itemLines(body) - (html.match(/<li[ >]/g)?.length ?? 0);
 }
