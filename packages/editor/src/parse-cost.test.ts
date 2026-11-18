@@ -91,9 +91,10 @@ describe.each<ViewMode>(['redlines', 'clean', 'raw'])(
         console.log(
           `parse cost (${view}): ${small.length} -> ${a.toFixed(0)} ms, ${large.length} -> ${b.toFixed(0)} ms`,
         );
-        // Four times the text: linear is 4x; quadratic is 16x.
-        // Before the restyling was incremental it was 12 to 16.
-        expect(ratio).toBeLessThan(8.5);
+        // Four times the text: linear is 4x; quadratic is 16x. Before the restyling was incremental
+        // it was 12 to 16. A machine here measures about 6, CI's shared runners about 9 (a larger
+        // text is slower per byte there), so the bound sits between those and the old cost.
+        expect(ratio).toBeLessThan(11);
       },
       240_000,
     );
