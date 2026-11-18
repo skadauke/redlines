@@ -949,7 +949,8 @@ function outdent(state: EditorState, block: Block): KeyEdit {
   if (!own || !parent) return nothing(state);
   const line = own.line;
   const from = line.from;
-  const markerAt = line.from + line.text.length - line.text.trimStart().length;
+  // Past what stands before its marker: a quote's markers too, not only the white space.
+  const markerAt = line.from + own.indent.length;
   // What is nested in the item moves up with it, as the format writes it: its text column moves
   // left by as many columns as the marker does, and a line left where it was would stand that much
   // further in, four columns or more, as text or code.

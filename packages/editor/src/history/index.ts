@@ -42,4 +42,5 @@ export {
   undoKeys,
   undoSayingWhy,
 } from './guard.ts';
+export { agentCaretFacet } from './caret-facet.ts';
 export { labelOf, redoName, type StepLabel, undoName } from './names.ts';

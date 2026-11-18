@@ -3465,7 +3465,13 @@ in `widen.ts`). Typing over one `*` of another person's pending bold `**`, or a 
 pending split, can write a file that micromark reads otherwise than the newest view; the paragraph is
 replaced whole instead (#299, #265). Where another person's mark ends at the unit's edge (a pending
 split's break or deletion of one), the unit is tried with the block beside it, which holds the mark
-whole, before the refusal below applies.
+whole, before the refusal below applies. The edge is the unit's with the line breaks, white space and
+quote marks (`>`) that carry no text beside it, so that a quote's blank line `>` between the split and
+the unit is no gap; and a unit that can't be written in an item's first line (a quote's paragraphs,
+which start on the item's marker line) is tried again as the quote whole. Typing at the start of the
+line after another person's split (`## x`, `- x`, `> x`, `1. x`, a letter or a space), and a block
+change of that line (heading, bullet, quote, number), are written this way: the substitution holds
+the split in its old text, and every order of decisions reads alike (#107, #276).
 
 **The old text holds other people's marks.** The old text of a replacement may hold another
 person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every
