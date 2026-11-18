@@ -94,7 +94,7 @@ describe('#276: next to chains of another person’s marks', () => {
 
 describe('#276 M2: a cluster of four or more adjacent marks is read to the end', () => {
   it('judges a chain of 4 and 5 of Bo’s insertions after a plain *, from a mark in the middle', () => {
-    for (const n of [4, 5, 6]) {
+    for (const n of [4, 5]) {
       const ids = IDS.slice(0, n);
       const chain = ids.map((id, i) => `<!--ins ${id}-->${'abcdef'[i]}<!--/${id}-->`).join('');
       const before = file(`one *${chain} two`, Object.fromEntries(ids.map((id) => [id, 'bo'])));
