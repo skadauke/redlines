@@ -231,7 +231,8 @@ architecture, and 2.5 MB in the universal app.
 
 The app carries a Quick Look preview of Markdown, R Markdown and Quarto files, an app extension at
 `Redlines.app/Contents/PlugIns/RedlinesPreview.appex` (`apps/desktop/quicklook`; what it shows and
-why is design §10). Tauri builds no app extensions, so the build does it:
+why is design §10), and a second one, `RedlinesThumbnail.appex`, for the thumbnails Finder draws. The
+same script builds, signs and checks both, and `bundle.macOS.files` copies both. Tauri builds no app extensions, so the build does it:
 
 - `scripts/build-quicklook` bundles the renderer (TypeScript that runs in JavaScriptCore),
   compiles the Swift extension with `swiftc` for Apple silicon and Intel, joins them with `lipo`,

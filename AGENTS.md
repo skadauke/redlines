@@ -61,7 +61,7 @@ repo root.
 - `pnpm install` (CI uses `pnpm install --frozen-lockfile`)
 - `pnpm typecheck`: `tsc` at the root, then `pnpm -r typecheck`
 - `pnpm lint`: ESLint (`eslint.config.js`)
-- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`, the keystroke in a file without indented code in `packages/format/src/indented-code.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it on pushes to main; pull requests skip them until #432), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
+- `pnpm test`: `vitest run`. The timing tests (the block keys' cost in `packages/editor/src/blocks/cost.test.ts`, the hidden lines' linearity in `hidden.test.ts`, the keystroke in a file without indented code in `packages/format/src/indented-code.test.ts`) run only with `REDLINES_COST=check` (CI's check job sets it in full runs: pushes to main, the schedule, a dispatch and the one Epic-to-main pull request; other pull requests and pushes to an Epic branch skip them until #432), since a busy machine can't time them. Tests are `src/**/*.test.ts` files under `apps/*`, `packages/*` and
   `plugins/*`, next to the code they test, run in Node. A test that needs a DOM starts with a
   `@vitest-environment happy-dom` comment.
 - `pnpm format` / `pnpm format:check`: Prettier
@@ -107,7 +107,7 @@ repo root.
   ([look-review.md](apps/desktop/journeys/look-review.md): the checklist, and how a lane uses it);
   `apps/desktop/scripts/app-windows` screenshots a built `Redlines.app`'s own windows (it needs
   Screen Recording for the terminal, once). Baselines are drawn by WebKit on macOS, as the app is;
-  a journey is a `tests/*.spec.ts` file in the package (not a vitest test). `apps/desktop/two-windows.html` (dev only) is the page twice, side by side, as two tabs of one session: `tests/tabs.spec.ts`
+  a journey is a `tests/*.spec.ts` file in the package (not a vitest test). `apps/desktop/two-windows.html` (dev only) is the page twice, side by side, as two tabs of one session: `journeys/tests/tabs.spec.ts` drives it.
 - Checks in WebKit, which happy-dom can't make: in `apps/desktop`, `VITE_BLOCK_CHECK=1 pnpm dev`
   (block editing), `VITE_TABLE_CHECK=1 pnpm dev` (tables: layout, presses, keys, typing, the
   cost of a keystroke), `VITE_STRUCK_CHECK=1 pnpm dev` (deleted and replaced blocks, the caret
@@ -116,7 +116,9 @@ repo root.
   page's scripted agent) serve the page, and `pnpm tauri dev` runs it in WKWebView; each writes its
   results to the console and ends with a `... done <n> passed, <n> failed` line
   (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`).
-  `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
+  `VITE_SYNC_CHECK=1` (one document in two windows side by side, joined to one authority, typed
+  into through the browser's own input path, `src/sync-check.ts`; `/?sync-check` on a dev page does
+  the same, and `journeys/tests/sync.spec.ts` runs it) is the same too. `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
   the same, and `VITE_ZOOM_CHECK=1` (the column and the rail at every text size, and the window
   zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
   (`src/print-check.ts`) shows that the printed page holds the document and no mark (and, in `pnpm tauri dev` with `REDLINES_EXPORT_PDF=<path>`, writes the PDF there with no panel). They read nothing in a
@@ -245,6 +247,14 @@ repo root.
 - The `quicklook` job of `ci.yml` runs on macOS, when its flag is set (on a pull request, only for
   a change to the Quick Look code; on main, also for `packages/format`): it builds the Quick Look
   extension and checks it (`scripts/build-quicklook --check`), since no other job compiles Swift.
+- `deep.yml`: the depth run (#586): every test file that reads `REDLINES_FUZZ` (or calls
+  `fuzzCount`) at a deeper draw count, one job per file on GitHub's runners, since a shared Mac
+  can't hold it. Only by hand: `gh workflow run deep.yml --ref <branch>`, with `-f fuzz=300` (the
+  default) and `-f suites='path1 path2'`. It needs the file on the default branch, and nothing runs
+  it on a push or a pull request.
+- `quarto.yml`: the optional Quarto check (`apps/desktop/scripts/quarto-check.ts`, with a pinned
+  Quarto, the markdown engine only): on a schedule, of the open Epic branch (main when none is
+  open, as `ci.yml`'s schedule does), on pull requests that touch Quarto code, and by hand.
 - `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
   builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
   `website/**`, `apps/website-embed/**`, the icon masters, `docs/design.md`, the lockfile or the
