@@ -34,6 +34,14 @@ describe("#11: the ledger's YAML (format §5.5)", () => {
     expect(read.ledger.marks['k3x9']?.note).toBe('Why:');
   });
 
+  it.each(['\\', 'a\n\\\nb', '\\\n\n\\'])(
+    'reads a comment whose text has a line of only a backslash back as it was: %j',
+    (text) => {
+      const written = commented(text);
+      expect(parse(written).ledger.comments[0]?.text).toBe(text);
+    },
+  );
+
   it('keeps a key with a line break in it on one line, and reads it back', () => {
     const text = file('Hello').replace('version: 1', 'version: 1\n"a\\nb": 1');
     const written = serializeLedger(parse(text).ledger);
