@@ -6,7 +6,7 @@
 // the other cost tests do, since a busy machine can't time them: the bounds are ratios. A move is
 // the format's own work (the widened write checks its replacement by reading and deciding it), which
 // a CI runner does 2.5 times slower than this machine, where a key is 1.6 times slower: the same move
-// stood at 10 to 13 keys here and 21.6 there (a push run of main, #1114), so the bound is 24.
+// stood at 13 keys here and 21.6 there (a push run of main, #1114), so the bound is 24.
 import { forceParsing } from '@codemirror/language';
 import { parseStats } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -81,13 +81,14 @@ describe('a block move in 2,000 blocks with 200 pending changes', () => {
   });
 
   timed(
-    'costs at most 24 times a plain key typed in the same document (about 10 where it is measured, 21 on CI)',
+    'costs at most 24 times a plain key typed in the same document (13 where it is measured, 21 on CI)',
     () => {
       const editor = editorFor(doc, caret);
       const { view } = editor;
-      let at = caret;
       const key = () => {
-        view.dispatch({ changes: { from: at, insert: 'x' }, selection: { anchor: ++at } });
+        // At the caret, which a move keeps in its block, since the turns alternate with moves.
+        const at = view.state.selection.main.head;
+        view.dispatch({ changes: { from: at, insert: 'x' }, selection: { anchor: at + 1 } });
       };
       let down = true;
       // A letter at the top before each move, so that each is made on a text no memo has seen (the
