@@ -235,7 +235,6 @@ const TAG_IN_OLD_TEXT = /<!--(?:del|sub) \w{4} (?:(?!-->).)*<[a-z/]/i;
 const LINK_IN_OLD_TEXT =
   /<!--(?:del|sub) \w{4} (?:(?!-->).)*\]-->(?:<!--(?!cmt)[^>]*-->)*<!--cmt \w{4}-->\(/;
 
-
 /**
  * Where a state that fails without the mark comes from. The mark never makes a sound file unsound, and a
  * file that is not sound without it is older than the mark, and is left out of the check: but only a shape
