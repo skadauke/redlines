@@ -886,12 +886,7 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'widen',
     'inventory #59',
   ],
-  [
-    'packages/format/src/track.ts',
-    'NO_FINE_FORM',
-    'widen',
-    'inventory #76',
-  ],
+  ['packages/format/src/track.ts', 'NO_FINE_FORM', 'widen', 'inventory #76'],
   [
     'packages/format/src/track.ts',
     'This edit would leave ${words.pair}, and decidin',
