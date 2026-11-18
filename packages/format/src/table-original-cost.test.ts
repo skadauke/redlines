@@ -26,11 +26,19 @@ describe('the original text of the rows of a table in which every row holds a pe
         run();
         return performance.now() - start;
       };
-      const parseCost = Math.min(...Array.from({ length: 3 }, () => time(() => parse(text))));
+      // A text of its own each time, for the parse and for the rows: `parse` keeps the parses of
+      // the latest long texts, and a text it has kept costs nothing to read again.
+      let salt = 0;
+      const parseCost = Math.min(
+        ...Array.from({ length: 3 }, () => {
+          const own = `${text}\n${' '.repeat(++salt)}`;
+          return time(() => parse(own));
+        }),
+      );
       const cost = Math.min(
         ...Array.from({ length: 3 }, () => {
           // A text of its own each time: the view built for the last one is not reused.
-          const fresh = `${text}\n`;
+          const fresh = `${text}\n${' '.repeat(++salt)}`;
           return time(() => {
             const read = parse(fresh);
             for (const row of readTables(fresh, read)[0]!.rows) originalRowText(fresh, read, row);
