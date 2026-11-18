@@ -1629,12 +1629,12 @@ function firstPrefix(plan: Plan, from: number, to: number): Cover | undefined {
   // Where no line below is one of those in any reading, the lines that another person's pending
   // insertion or split adds or takes in some of them change nothing about how the rest reads (#291).
   const unlike = all.includes('unlike');
-  // A split's break is read with the prefix of the line it ends: without the marker the next line
+  // A deletion or substitution there can empty a line in some orders of decisions. A split's break is read with the prefix of the line it ends: without the marker the next line
   // has none, and rejecting the split would leave the line's indentation behind, so one in the
   // lines of the item is not let through where the readings of the lines below differ.
   const splits = plan.parsed.marks.some(
     (mark) =>
-      mark.kind === 'split' &&
+      (mark.kind === 'split' || mark.kind === 'del' || mark.kind === 'sub') &&
       mark.segments.some((segment) => inItemLines(text, from, segment.open.from)),
   );
   if (

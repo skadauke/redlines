@@ -4096,8 +4096,8 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
       // A pending deletion empties the item below: the file reads it as an item with text, the view
       // as an empty one, which can't interrupt a paragraph (#248 review C1).
       ['- one\n- <!--del k3x9 two-->', 2],
-      ['1. one\n1. <!--del k3x9 two-->', 3],
       ['- one\n- <!--del k3x9 two-->\n- three', 2],
+      ['1. one\n1. <!--del k3x9 two-->', 3],
       ['- one\n- <!--ins k3x9-->two<!--/k3x9-->\n- ', 2],
       // An underline below would make a heading of the text.
       ['- one\n---', 2],
