@@ -2734,6 +2734,21 @@ it, one per line:
   cell if it has no leading pipe, ` |` after the mark if it has no closing pipe (an indented header
   gets one leading pipe, not two). So the mark never starts a line, and the header is a header once
   the change is accepted.
+  The other markers that stay in a cell are no text either: a comment's marker, and another person's
+  pending insertion or deletion (the text of a pending deletion is not in the newest view). A deletion
+  that takes all the other text of the last cell of a header with no closing pipe writes that pipe
+  beside them, and so does one in the only cell of a header (any header of one cell, not only one that
+  holds an alignment change's mark); a body row that is a lone pipe stands for its empty cell and takes
+  no pipe (#428).
+- **A comment's or a highlight's markers in a table with a change pending** stand where no decision
+  of that change becomes impossible (#376, #396). A marker after the closing pipe of a header is a
+  cell too many, so the end goes in front of the pipe (and in front of a delimiter run that the
+  marker would split). When the range as asked would leave a decision of a pending row or column
+  change refused (a marker in a stretch that the decision takes out, in front of a column's mark, or
+  by a deletion's line below the table), the nearest range whose ends stand elsewhere is written; when
+  none does, the range as asked. A comment whose closer stands in a row that a decision takes out,
+  while its opener stands in another row, takes its closer to the point where the row was, as its
+  opener does.
 - **A cell is one line.** Text in a row never holds an unescaped `|` or a line break: a pipe in
   a cell is written `\|`, a line break `<br>`. An edit that changes a table's lines or the
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
