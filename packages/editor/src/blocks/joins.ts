@@ -1219,6 +1219,35 @@ function fencedContent(state: EditorState, block: Block): { first: Line; last: L
 const contentStart = (line: Line) => line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
 
 /**
+ * Whether Backspace or Delete would take a character out of a fence's marker run, or the line break
+ * that sets the closing fence on its own line (#1109). The line stops being a fence: the code is no
+ * longer closed (or opened), and every fence after it pairs up differently, so that a list below
+ * becomes code. A closing fence longer than the opening one may lose characters down to it; for the
+ * rest the key does nothing, as at the ends of the code.
+ */
+function breaksFence(state: EditorState, block: Block, head: number, forward: boolean): boolean {
+  const { doc } = state;
+  const open = doc.lineAt(block.lines.from);
+  const openRun = /^[ \t>]*(?:[-*+] |\d{1,9}[.)] )?[ \t]*(`{3,}|~{3,})/.exec(open.text);
+  if (!openRun) return false;
+  const end = doc.lineAt(block.lines.to);
+  const closeRun = end.number > open.number ? /^[ \t>]*(`{3,}|~{3,})[ \t]*$/.exec(end.text) : null;
+  if (closeRun && !forward && head === end.from) return true;
+  // The character that goes, by its start.
+  const at = forward ? head : head - 1;
+  if (at < open.from || at > end.to) return false;
+  const marks = (line: Line, run: RegExpExecArray) => {
+    const to = line.from + run[0].length;
+    return at >= to - run[1]!.length && at < to;
+  };
+  if (doc.lineAt(at).number === open.number) return marks(open, openRun);
+  if (closeRun && doc.lineAt(at).number === end.number) {
+    return marks(end, closeRun) && closeRun[1]!.length - 1 < openRun[1]!.length;
+  }
+  return false;
+}
+
+/**
  * Backspace or Delete in a block that takes no text: nothing at the start of code's first line or
  * the end of its last (as at the ends of a file in a code editor); an empty code block goes whole;
  * at the start of the block itself, Backspace moves the caret to the block above and joins
@@ -1244,6 +1273,7 @@ function inNoText(
     if (!forward && head <= contentStart(state.doc.lineAt(block.text.from))) return nothing(state);
     if (forward && head >= block.text.to) return nothing(state);
   }
+  if (content && breaksFence(state, block, head, forward)) return nothing(state);
   if (!forward && head <= block.text.from) {
     // In front of the block: nothing joins into the block above, which the caret goes to.
     const { prev } = neighbours(state, block);
