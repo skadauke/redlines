@@ -263,11 +263,10 @@ its case; each is a bug. The list is what has been found, not a count of what is
 - Delimiters beside another person's marks still read otherwise in some order of decisions in three
   shapes, which the random suites leave out: a run pasted next to a tag or across a letter (#1135),
   one typed at the seam of a paragraph made of their insertion (#1136), and, with Track Changes off,
-  one beside a comment or highlight marker (#1140); the rest of #265 is open with them.
+  one beside a comment or highlight marker (#1140), all three found while closing #265.
 - A comment over a backtick can make another person's table change undecidable (#376; left out of
   `table-align-random.test.ts`).
-- Return at the start of a nested first item, tracked, fails in four more shapes, and the walks over
-  lists side by side fail at 13 more seeds past 200 (#395).
+- Return at the start of a nested first item, tracked, fails in four more shapes (#395).
 - The walks of Stage 1's keys skip no seed by name now, and some shapes of them are still not drawn
   by the walks as they are (#258).
 - `pre` and `title` inside a quote or a list item are not read as raw text, so markers can go in them
