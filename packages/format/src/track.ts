@@ -141,6 +141,8 @@ import {
 } from './widen.ts';
 import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
+import { readsOtherInDecisions } from './table-delimiter.ts';
+import { scopeOf } from './widen-scope.ts';
 import { atWrappedLine, wrappedLineStart } from './wrapped-line.ts';
 import type {
   DocView,
@@ -5571,6 +5573,14 @@ function editsWidening(
           let whole: ReturnType<typeof widenedAtOnce>;
           try {
             whole = widenedAtOnce(text, edits, again(), false, true);
+            // A typed edit in a table's cell is held by the table's own unit, which the cells' rungs
+            // of the ladder write (#490): where its fine write reads otherwise in some order of
+            // decisions, the table that holds the cell is replaced.
+            whole ??=
+              edits.every((edit) => scopeOf(text, edit.from, edit.to) === 'cell') &&
+              readsOtherInDecisions(text, edits, written.changes)
+                ? widenedAtOnce(text, edits, again(), true, true)
+                : undefined;
           } catch {
             // no unit holds it: the fine write stays
           }
@@ -5620,7 +5630,8 @@ export function readsOtherAtBoundary(
   return (
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||
-    delimiterBesideBreak(text, edits)
+    delimiterBesideBreak(text, edits) ||
+    readsOtherInDecisions(text, edits, changes)
   );
 }
 

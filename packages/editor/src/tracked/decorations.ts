@@ -323,6 +323,19 @@ function replacedCode(
 }
 
 /**
+ * The table a substitution replaced whole (format §3.7): a payload that is one table and nothing
+ * else, drawn as the ghost table of a table deleted. The new table follows its marker, so the old
+ * is read as blocks alone, with no break at either end. Null for any other payload.
+ */
+function replacedTable(
+  segment: Segment,
+): { kind: DeletedBlockKind; pieces: { text: string; at: number }[] } | null {
+  const blocks = deletedBlocks(segment, { atEnd: true, alone: true, tableRows: GHOST_ROWS });
+  const [block] = blocks ?? [];
+  return blocks?.length === 1 && block?.kind.kind === 'table' ? block : null;
+}
+
+/**
  * The whole-block deletions to draw as blocks (design: Part 3), by their marks, and the marks of
  * other people that they hold, whose deleted text is part of the blocks. A deletion is whole when
  * `deletedBlocks` reads its payload as whole blocks, and the file is in the form that goes with
@@ -363,7 +376,8 @@ function struckBlocks(
     // A deletion of whole blocks, or a substitution of one block of code (format §3.5).
     const replaced =
       mark.kind === 'sub' && mark.segments.length === 1 && !!mark.segments[0]?.carrier
-        ? replacedCode(plainPayload(mark.segments[0].payload ?? ''))
+        ? (replacedCode(plainPayload(mark.segments[0].payload ?? '')) ??
+          replacedTable(mark.segments[0]))
         : null;
     if (
       (mark.kind !== 'del' && !replaced) ||
@@ -390,6 +404,7 @@ function struckBlocks(
     // the break after the marker is the opener's carrier, so the marker is the first line's, and
     // the text below is paragraphs of their own.
     const lone =
+      !replaced &&
       !!first.carrier &&
       mark.segments.length === 1 &&
       line.number === 1 &&

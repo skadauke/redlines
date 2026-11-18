@@ -3415,6 +3415,14 @@ substitution of this kind is written in the forms of §3.3 (a paragraph, a headi
 paragraph, a list item, a list) and of §3.5 (a code block, display math, raw-text HTML) and §3.7 (a
 table), and nothing about its markers differs from theirs.
 
+A new text that ends in one line break, in a unit inside a quote or an item (an Enter typed at its
+end, next to another person's insertion), is written with the closer before that break: the closer
+ends the unit's last line, where one on a line of its own would read as a block of the container.
+The break follows the closer as a plain line break, or is the blank line that follows the unit
+already, so that no blank line is added to the file. A text that ends in two or more line breaks, a
+delimiter, a risky line or an atomic block, or that is only line breaks, keeps the closer rule above
+(`widen.ts`, `tryRung`).
+
 The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
 and the views read the replacements it writes, and the writers that refuse today call it one unit at
 a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format change in a cell),
@@ -3478,6 +3486,16 @@ where all read alike, the fine write stays (#265). The reading has caps, and ove
 is replaced, which is always sound: more than four marks in the paragraph, more than 100 states, or a
 mark that runs out of the paragraph. A table cell, which has no replacement of its own for this, is
 written as before.
+
+In a table's cell the same holds for every order of decisions (#490). A typed or pasted edit that stands
+against a delimiter, in a table that holds changes, is read in the file as it stands and after each
+accept and reject of the table's changes (`readsOtherInDecisions`, `table-delimiter.ts`); where one of
+them reads otherwise than the newest view and the file before the edit had none, the table that holds the
+cell is replaced.
+A comment or a highlight whose end stands against a delimiter is placed the same way as beside a pending
+row change: at the nearest range whose ends cut no delimiter run in any decision (`besideDelimiter` in
+`table-settle.ts`), and as asked when none does. An untracked edit that cuts a delimiter of a pending
+bold is not widened: it is no tracked write.
 
 **The old text holds other people's marks.** The old text of a replacement may hold another
 person's pending marks, in a table's cells and elsewhere: they stay in the payload, and every
