@@ -3298,7 +3298,9 @@ that holds marks is held to the same reading: where the fine write would make a 
 reads otherwise than its newest view (a marker between a `*` and the text it flanks, as in Bo's
 pending `**1**` after a `1` when one `*` is deleted, #265), it is refused with `no-legal-placement`,
 and the editor answers with the question of §3.13 (accepting the pending changes in the unit, then
-making the edit). In Plain, with Track Changes off, the editor edits the source as written,
+making the edit). That holds only where the smallest unit that holds the edit has a change to accept:
+beside a comment or a highlight alone there is nothing to ask about, and the edit is written as it
+is. In Plain, with Track Changes off, the editor edits the source as written,
 markers included.
 
 **Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and

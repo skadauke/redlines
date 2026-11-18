@@ -18,7 +18,7 @@ import type { MarkdownDialect } from './dialect.ts';
 import { assertWholeCharacters } from './characters.ts';
 import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
-import { accept, reject } from './decide.ts';
+import { accept, changesIn, reject } from './decide.ts';
 import { encodePayload } from './payload.ts';
 import { readLine } from './table.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
@@ -57,6 +57,7 @@ import {
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
 import { atDelimiter, readsOtherMicromark } from './widen.ts';
+import { unitsOf } from './widen-units.ts';
 import { wrappedLineStart } from './wrapped-line.ts';
 
 /**
@@ -584,6 +585,23 @@ function inOldRows(text: string, parsed: Parsed, edit: TextChange): TextChange[]
   return null;
 }
 
+/** The smallest unit that holds the edit, as the editor's accept plan finds it. */
+function unitRange(text: string, edit: TextChange): Range {
+  let units = unitsOf(text, parse(text)).filter(
+    (unit) => unit.lineFrom <= edit.to && edit.from <= unit.to,
+  );
+  while (units.length === 1) {
+    const inside = units[0]!.children.filter(
+      (unit) => unit.lineFrom <= edit.to && edit.from <= unit.to,
+    );
+    if (inside.length === 0) break;
+    units = inside;
+  }
+  const first = units[0];
+  const last = units.at(-1);
+  return first && last ? { from: first.lineFrom, to: last.to } : { from: edit.from, to: edit.to };
+}
+
 function edited(
   text: string,
   edit: TextChange,
@@ -601,7 +619,10 @@ function edited(
       !half &&
       changes.length > 0 &&
       atDelimiter(text, changes) &&
-      readsOtherMicromark(text, changes)
+      readsOtherMicromark(text, changes) &&
+      // Only where the editor has something to accept (`acceptPlan`): a paragraph with only comments
+      // and highlights has no change to decide, and the edit is written as it was.
+      changesIn(parse(text), unitRange(text, edit)).length > 0
     ) {
       throw new EditError(ACCEPT_FIRST, 'no-legal-placement');
     }

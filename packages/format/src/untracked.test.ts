@@ -1086,3 +1086,16 @@ describe("a delimiter taken out beside another person's pending format, Track Ch
     expect(refusal(plain, remove(2, 3))).toBeUndefined();
   });
 });
+
+describe('a delimiter beside a comment or a highlight only is written, not asked about (#265)', () => {
+  it('writes where no change is there to accept', () => {
+    const hl = 'foo*<!--hl k3x9-->bar<!--/k3x9-->';
+    const highlighted = file(hl, { k3x9: 'bo' });
+    expect(refusal(highlighted, type(hl.length, '*'))).toBeUndefined();
+    const cmt = '2*<!--cmt c8d2-->3<!--/c8d2--> and 4^5';
+    const commented = file(cmt, {}, thread('c8d2'));
+    expect(refusal(commented, type(cmt.indexOf('^'), '*'))).toBeUndefined();
+    const lone = 'xx*<!--cmt c8d2-->x<!--/c8d2-->';
+    expect(refusal(file(lone, {}, thread('c8d2')), type(lone.length, '*'))).toBeUndefined();
+  });
+});
