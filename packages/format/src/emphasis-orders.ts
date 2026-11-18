@@ -2,6 +2,14 @@
 // that touches another mark, where the markers of both read as punctuation to the delimiters between
 // them, and deciding either mark changes which delimiters stand next to which (format §3.1, rule 5).
 
+import { micromark } from 'micromark';
+import {
+  gfmAutolinkLiteral,
+  gfmAutolinkLiteralHtml,
+} from 'micromark-extension-gfm-autolink-literal';
+import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
+import { gfmTable, gfmTableHtml } from 'micromark-extension-gfm-table';
+import { gfmTaskListItem, gfmTaskListItemHtml } from 'micromark-extension-gfm-task-list-item';
 import { lineEnd, lineStart, nextLineStart } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
@@ -13,6 +21,7 @@ import { hitsIn } from './inline.ts';
 import { markerRanges } from './markers.ts';
 import { parse } from './parse.ts';
 import type { MarkRange, Parsed, Range } from './types.ts';
+import { newestView } from './views.ts';
 
 /**
  * The text with the delimiters that are no emphasis left out, in the same places: an escaped
@@ -169,4 +178,112 @@ export function neighbours(after: string, seeds: ReadonlySet<string>): MarkRange
   const parsed = parse(after);
   const cluster = clusterOf(parsed, seeds);
   return parsed.marks.filter((mark) => cluster.has(mark.id));
+}
+
+/** What micromark, with GFM, reads `source` as, with comments and white space folded. */
+function readHtml(source: string): string {
+  return micromark(source, {
+    allowDangerousHtml: true,
+    extensions: [gfmAutolinkLiteral(), gfmStrikethrough(), gfmTable(), gfmTaskListItem()],
+    htmlExtensions: [
+      gfmAutolinkLiteralHtml(),
+      gfmStrikethroughHtml(),
+      gfmTableHtml(),
+      gfmTaskListItemHtml(),
+    ],
+  })
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
+}
+
+/** Whether micromark reads the body of `text` as its newest view. */
+function readsLikeView(text: string): boolean {
+  const ledger = parse(text).ledgerRange;
+  const body = ledger ? text.slice(0, ledger.from) : text;
+  return readHtml(body) === readHtml(newestView(body).text);
+}
+
+/** The most marks near a break that are decided in every order, and the most states read. */
+const MOST_NEAR = 6;
+const MOST_ORDER_STATES = 600;
+
+/**
+ * Whether a line break typed after a backslash (a hard break) stands near another mark's pending
+ * deletion of a block break or of a backslash, and, once `changes` are written, deciding the marks
+ * around it gives a different text in some order for the same decisions (#265: rule 11 takes in
+ * text that holds the deletion, and rejecting the break takes a list item's indent in one order and
+ * not in another). The marks within 400 characters of the change are decided; more than six are
+ * read as not alike. Only that shape is read, so that a keystroke elsewhere costs what it did.
+ */
+export function hardBreakBesideDeletionReadsOtherwise(
+  text: string,
+  edits: readonly { from: number; to: number; insert: string }[],
+  changes: readonly { from: number; to: number; insert: string }[],
+): boolean {
+  const typed = edits.some(
+    (edit) =>
+      /\\\r?\n/.test(edit.insert) || (/^\r?\n/.test(edit.insert) && text[edit.from - 1] === '\\'),
+  );
+  if (!typed || changes.length === 0) return false;
+  const after = applyChanges(text, changes);
+  const parsed = parse(after);
+  const first = Math.min(...changes.map((change) => change.from));
+  const last = Math.max(...changes.map((change) => change.from + change.insert.length));
+  const near = parsed.marks.filter(
+    (mark) =>
+      mark.kind !== 'cmt' &&
+      mark.kind !== 'hl' &&
+      mark.segments.some(
+        (segment) => segment.open.to >= first - 400 && segment.open.from <= last + 400,
+      ),
+  );
+  // Any author's: a deletion of one's own can be decided apart from the edit as well.
+  const theirs = near.some(
+    (mark) =>
+      mark.kind === 'del' &&
+      mark.segments.some(
+        (segment) =>
+          (segment.payload ?? '').includes('\n\n') || (segment.payload ?? '').includes('\\'),
+      ),
+  );
+  if (!theirs) return false;
+  const ids = new Set(near.map((mark) => mark.id));
+  if (ids.size > MOST_NEAR) return true;
+  const outcomes = new Map<string, Set<string>>();
+  const seen = new Set<string>();
+  let states = 0;
+  const walk = (current: string, decided: string[]): boolean => {
+    const key = `${current}|${decided.toSorted().join(' ')}`;
+    if (seen.has(key)) return true;
+    seen.add(key);
+    if (++states > MOST_ORDER_STATES) return false;
+    if (!readsLikeView(current)) return false;
+    const left = parse(current).marks.filter((mark) => ids.has(mark.id));
+    if (left.length === 0) {
+      const set = decided.toSorted().join(' ');
+      const results = outcomes.get(set) ?? new Set<string>();
+      results.add(current);
+      outcomes.set(set, results);
+      return results.size === 1;
+    }
+    for (const mark of left) {
+      for (const [how, decide] of [
+        ['a', accept],
+        ['r', reject],
+      ] as const) {
+        let next: string;
+        try {
+          next = applyChanges(current, decide(current, mark.id));
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          continue;
+        }
+        if (!walk(next, [...decided, `${how}${mark.id}`])) return false;
+      }
+    }
+    return true;
+  };
+  return !walk(after, []);
 }

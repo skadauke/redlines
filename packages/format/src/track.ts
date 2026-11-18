@@ -104,7 +104,12 @@ import {
   blankBetween,
 } from './list-run.ts';
 import { sameEmphasis, sameReading } from './format-reader.ts';
-import { emphasisReadsAlike, neighbours, unreadDelimiters } from './emphasis-orders.ts';
+import {
+  emphasisReadsAlike,
+  hardBreakBesideDeletionReadsOtherwise,
+  neighbours,
+  unreadDelimiters,
+} from './emphasis-orders.ts';
 import {
   codeSpanAt,
   inspectPlace,
@@ -5559,13 +5564,16 @@ function editsWidening(
       // Each way of writing the change is tried once; a change that reads otherwise in all of them
       // is refused, never tried again.
       if (mode > MOST_MODES) {
-        throw new EditError(
-          'This change could not be written so that every order of decisions reads alike. Make smaller changes.',
-          'no-legal-placement',
-        );
+        throw new EditError(NO_FINE_FORM, 'no-legal-placement');
       }
       try {
         const written = editsOnce(text, edits, mode === 0 ? first : again(), mode);
+        // A hard break typed near another person's pending deletion of a block break or a backslash,
+        // which reads otherwise in some order of decisions: the fine write is no write (#265), and
+        // the unit is replaced.
+        if (!widening && hardBreakBesideDeletionReadsOtherwise(text, edits, written.changes)) {
+          throw new ReadsOtherwise();
+        }
         if (widening && readsOtherAtBoundary(text, edits, written.changes)) {
           // A write the format accepts that a reader of the file reads otherwise than the newest
           // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
@@ -5627,6 +5635,7 @@ export function readsOtherAtBoundary(
   // A write right after a deletion that rejecting would leave a bare marker before reads alike as it
   // stands and otherwise once the deletion is rejected: the unit is replaced (#1104).
   if (edits.some((edit) => afterBareDeletion(text, edit.from))) return true;
+  if (hardBreakBesideDeletionReadsOtherwise(text, edits, changes)) return true;
   return (
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||
@@ -5789,6 +5798,11 @@ function codeEdits(
   );
   return { changes, markIds: [id], extendedIds: [] };
 }
+
+/** The words of the fine form's refusal where no way of writing a change reads alike in every order of
+ * decisions: the editor and an agent's edit then write the unit as a replacement (format §3.12). */
+export const NO_FINE_FORM =
+  'This change could not be written so that every order of decisions reads alike. Make smaller changes.';
 
 /** How many ways of writing a change next to a mark are tried (as typed, then by a character). */
 const MOST_MODES = 8;

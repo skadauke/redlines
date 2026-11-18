@@ -13,7 +13,7 @@ import { escapedMarker, expectSound, readsAsNewest } from './oracle.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { ada, bo, bodyOf, context, dropEmptyBlocks, file, squash } from './test-helpers.ts';
-import { fineEdits as trackedEdits } from './track.ts';
+import { fineEdits as trackedEdits, trackedEdits as widenedEdits } from './track.ts';
 import type { Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -677,7 +677,7 @@ function prefixOf(view: string, caret: number): string {
 /** The words of the refusals that are meant: no place for the closer of a change that takes in the
  * text after a backslash. */
 const MEANT =
-  /can't end a block|closing #s|between a hard break and the line end|would start a line|take no change|only Markdown syntax|inside code|can't stand right in front|replaces ends in a backslash|hide other changes|inside a code block|take the start of the block|altering other text|marker at the start|inserted yet|line's indentation|ends the line here|Decide/i;
+  /can't end a block|closing #s|between a hard break and the line end|would start a line|take no change|only Markdown syntax|line that opens or closes code|every order of decisions reads alike|inside code|can't stand right in front|replaces ends in a backslash|hide other changes|inside a code block|take the start of the block|altering other text|marker at the start|inserted yet|line's indentation|ends the line here|Decide/i;
 
 describe('random keys next to backslashes read as micromark reads them (#223, #235)', () => {
   it(
@@ -788,5 +788,55 @@ describe('random keys next to backslashes read as micromark reads them (#223, #2
       expect(unmeant.slice(0, 5)).toEqual([]);
       expect(made).toBeGreaterThan(refused);
     },
+  );
+});
+
+describe("a hard break typed next to another person's pending deletion of a block break (#265)", () => {
+  // Seeds of the walk: Ada's own changes hold the caret, Bo's `b2zz` deletes a block break, and
+  // Return follows Ada's backslash. Rejecting the typed break took a list item's indent in one order
+  // of decisions and not in another (4706), or read the quote after it otherwise than the view (5456).
+  const cases: {
+    seed: number;
+    body: string;
+    marks: Record<string, string>;
+    caret: number;
+    key: string;
+  }[] = [
+    {
+      seed: 4706,
+      body: '- two\n  x<!--del hz9w \\\\\\--><!--del b2zz \\n\\n--><!--del hz9w \\x2d--><!--ins gz9w-->\\\\\\-<!--/gz9w--> a\n  bold a One\\\n  a C:\\Users two',
+      marks: { hz9w: 'ada', gz9w: 'ada', b2zz: 'bo' },
+      caret: 11,
+      key: '\\\n  ',
+    },
+    {
+      seed: 5456,
+      body: 'path\\ One<!--ins f4z2-->\\\\<!--/f4z2-->\ntwo<!--del b2zz \\n\\n-->> bold a bold path\\\n',
+      marks: { f4z2: 'ada', b2zz: 'bo' },
+      caret: 5,
+      key: '\n',
+    },
+  ];
+
+  it.each(cases)(
+    'seed $seed is no fine write, and is written as a replacement',
+    (c) => {
+      const text = file(c.body, c.marks);
+      const view = newestView(text);
+      const edit = {
+        from: view.map.toSource(c.caret, 1),
+        to: view.map.toSource(c.caret, -1),
+        insert: c.key,
+      };
+      expect(readsAsNewest(text)).toBe(true);
+      const ids = ['m2bd', 'n8fx', 'n4z2', 'p7qd'];
+      expect(() => trackedEdits(text, [edit], context(ada, ids))).toThrow(
+        /every order of decisions reads alike/,
+      );
+      const after = applyChanges(text, widenedEdits(text, [edit], context(ada, ids)).changes);
+      expect(readsAsNewest(after)).toBe(true);
+      expectSound(`seed ${c.seed}`, after);
+    },
+    60_000,
   );
 });

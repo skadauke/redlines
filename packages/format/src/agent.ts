@@ -14,7 +14,7 @@ import { hunksOf, joinedHunks, runsOf } from './join.ts';
 import { tableSuggestion } from './table-diff.ts';
 import type { Hunk, JoinGuards } from './join.ts';
 import { parse } from './parse.ts';
-import { fineEdits, trackedEdits as widenedEdits } from './track.ts';
+import { NO_FINE_FORM, fineEdits, trackedEdits as widenedEdits } from './track.ts';
 import { recordIds } from './edits-widen.ts';
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Parsed, Range, TextChange } from './types.ts';
@@ -134,9 +134,15 @@ function fineThenWidened(
   try {
     return fineEdits(text, edits, recorded.ctx);
   } catch (error) {
-    // Only the refusals of a pending line break next to the edit: the agent's other refusals (a
-    // join that reads otherwise, code, a prefix) are answers of their own.
-    if (!(error instanceof EditError) || !BREAK_NEXT.test(error.message)) throw error;
+    // Only the refusals of a pending line break next to the edit, and the fine form that no way of
+    // writing reads alike (a hard break beside another person's deleted break, #265): the agent's
+    // other refusals (a join that reads otherwise, code, a prefix) are answers of their own.
+    if (
+      !(error instanceof EditError) ||
+      !(BREAK_NEXT.test(error.message) || error.message === NO_FINE_FORM)
+    ) {
+      throw error;
+    }
     try {
       return widenedEdits(text, edits, recorded.replay());
     } catch {
