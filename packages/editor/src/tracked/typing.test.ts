@@ -2368,3 +2368,29 @@ describe('composition', () => {
     expect(notices).toHaveLength(1);
   });
 });
+
+describe("text typed after another person's pending line break (#107, #276)", () => {
+  // Another person's split, then text or a block's opener at the start of the line after its break:
+  // written, as the replacement of the block that holds the split, and never refused.
+  it.each([
+    ['a paragraph', 'alpha<!--split b2b2-->\nbeta'],
+    ['a list item', '- alpha<!--split b2b2-->\n  beta'],
+    ['a paragraph after a blank line', 'alpha<!--split b2b2-->\n\nbeta'],
+    ['a quote', '> alpha<!--split b2b2-->\n>\n> beta'],
+    ['a quote in a list item', '- > alpha<!--split b2b2-->\n  >\n  > beta'],
+  ])('is written in %s', (name, text) => {
+    for (const typed of ['x', ' ', '## x', '- x', '> x', '1. x']) {
+      const file = withLedger(text, { b2b2: 'bo' });
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 't7wz'] });
+      const before = newestView(file).text;
+      const place = before.indexOf('beta');
+      caret(editor, file.indexOf('beta'));
+      type(editor, typed);
+      expect(newestView(docText(editor)).text, `${name}: ${typed}`).toBe(
+        `${before.slice(0, place)}${typed}${before.slice(place)}`,
+      );
+      // The split is still pending, whoever's change holds it now.
+      expect(docText(editor), `${name}: ${typed}`).toContain('b2b2: {by: bo');
+    }
+  });
+});
