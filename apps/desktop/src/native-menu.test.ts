@@ -135,6 +135,7 @@ function commands() {
     setView: vi.fn(),
     switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
+    showChat: vi.fn(),
     toggleTracking: vi.fn(),
     acceptAllAndStopTracking: vi.fn(),
     openReview: vi.fn(),

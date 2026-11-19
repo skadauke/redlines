@@ -70,10 +70,13 @@ ARCHS = ["arm64", "x86_64"]
 
 # The types of the files that the extensions handle. Markdown has two on macOS 27: the one macOS
 # exports, which `.md` files have and Redlines imports for a macOS that doesn't know it, and the one
-# that other apps declare (document-types.plist claims both). R Markdown and Quarto have none: macOS
-# gives their files a dynamic type, made from the extension.
+# that other apps declare (document-types.plist claims both). Quarto has one of Redlines' own: the
+# app exports it for `.qmd` (document-types.plist, UTExportedTypeDeclarations), so that a `.qmd` file
+# is previewed here and opened by Redlines. R Markdown has none: macOS gives its files a dynamic type,
+# made from the extension.
 MARKDOWN_TYPES = ["net.daringfireball.markdown", "public.markdown"]
-EXTENSIONS_WITH_NO_TYPE = ["qmd", "rmd"]
+QUARTO_TYPE = "md.redlines.quarto"
+EXTENSIONS_WITH_NO_TYPE = ["rmd"]
 
 # The theme's fonts that the thumbnails are drawn in (Carlito for the text, Cousine for code, design
 # §6.6), as the files of @fontsource that the preview inlines in its page.
@@ -158,7 +161,7 @@ EXTENSIONS = [PREVIEW, THUMBNAIL]
 
 def quick_look_types() -> List[str]:
     """The types that both extensions list: what macOS asks each extension for."""
-    return MARKDOWN_TYPES + [dynamic_type(extension) for extension in EXTENSIONS_WITH_NO_TYPE]
+    return MARKDOWN_TYPES + [QUARTO_TYPE] + [dynamic_type(extension) for extension in EXTENSIONS_WITH_NO_TYPE]
 
 
 def fail(message: str) -> NoReturn:

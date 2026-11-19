@@ -8,6 +8,7 @@ export {
   agentPrompt,
   altTextPrompt,
   askPrompt,
+  chatPrompt,
   nodeToolsPrompt,
   quoteBlock,
   replyOnlyPrompt,

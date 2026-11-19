@@ -15,6 +15,7 @@ import { type Script, runScript, scriptRows } from './blocks/script.ts';
 import { undo } from './history/index.ts';
 import { IMAGE_IN_HEADING, imageInSelection, imageText, lookEdit } from './image-size.ts';
 import { createEditor, type Editor } from './index.ts';
+import { isWidenedNotice } from './tracked/intent.ts';
 
 const open: Editor[] = [];
 afterEach(() => {
@@ -29,7 +30,9 @@ function load(doc: string, at = 0, notices: string[] = []) {
   const editor = createEditor(parent, {
     doc,
     author: { handle: 'ada', name: 'Ada Lovelace' },
-    onNotice: (message) => notices.push(message),
+    onNotice: (message) => {
+      if (!isWidenedNotice(message)) notices.push(message);
+    },
     // A host with an Image menu, which is what has the commands.
     openImage: () => {},
   });

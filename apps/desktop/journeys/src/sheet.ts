@@ -129,6 +129,8 @@ const eyeWithKeys = async (j: Journey) => {
   await j.page.getByRole('button', { name: 'View', exact: true }).focus();
   await j.page.keyboard.press('ArrowDown');
   await j.page.locator('.rl-menu-item').filter({ visible: true }).first().waitFor();
+  // One that isn't the current view (that one is the menu's "selected" row, which is drawn apart).
+  await j.page.locator('.rl-menu-item').filter({ visible: true }).nth(2).focus();
 };
 
 /** The palette, from a right-click on the paragraph, with its Format menu open. */
@@ -492,13 +494,16 @@ export const SPECIMENS: readonly Specimen[] = [
     family: 'rows',
     frame: '.rl-grip-menu',
     selector: '.rl-grip-item',
-    selectorFor: { hover: '.rl-grip-item:hover' },
-    // No `keys`: the grip's menu has no way to be chosen from with the keys (listed in the PR).
+    selectorFor: { hover: '.rl-grip-item:hover', keys: '.rl-grip-item:focus-visible' },
     reach: {
       rest: openGripMenu,
       hover: async (j) => {
         await openGripMenu(j);
         await hoverItem('.rl-grip-item')(j);
+      },
+      keys: async (j) => {
+        await openGripMenu(j);
+        await chooseWithKeys('.rl-grip-item')(j);
       },
     },
   },
@@ -515,12 +520,12 @@ export const SPECIMENS: readonly Specimen[] = [
       rest,
       hover: async (j) => {
         await rest(j);
-        await pointAt(j, j.page.locator('.rl-titlebar-end .rl-icon-button').nth(1));
+        await pointAt(j, j.page.locator('.rl-titlebar-end .rl-icon-button').nth(0));
       },
       keys: async (j) => {
         await rest(j);
         await j.page.keyboard.press('Shift');
-        await j.page.locator('.rl-titlebar-end .rl-icon-button').nth(1).focus();
+        await j.page.locator('.rl-titlebar-end .rl-icon-button').nth(0).focus();
       },
     },
   },
@@ -724,34 +729,10 @@ export interface KnownDisagreement {
  */
 export const KNOWN: readonly KnownDisagreement[] = [
   {
-    issue: 1199,
-    family: 'handles',
-    props: ['borderTopLeftRadius', 'backgroundColor', 'boxShadow'],
-    why: 'the picture’s handles are white pills with an outline; the table’s grips are gray pills with a border and a bigger radius',
-  },
-  {
-    issue: 1247,
-    family: 'hover',
-    props: ['backgroundColor'],
-    why: 'rows take 55% of the pressed gray, buttons the full gray, the action the rule gray, and the title bar’s buttons none',
-  },
-  {
-    issue: 1247,
-    family: 'keys-like-hover',
-    props: ['backgroundColor', 'outlineStyle'],
-    why: 'buttons show a ring when chosen with the keys and no fill, unlike their hover; the eye’s menu rows a heavier fill (the palette’s were fixed by #1191)',
-  },
-  {
     issue: 1172,
     family: 'chips',
     props: ['color'],
     why: 'a reference chip is in the full ink, a citation chip in the gray one (both are heavy chips; #1172 makes them text with a dotted underline)',
-  },
-  {
-    issue: 1247,
-    family: 'focus-ring',
-    props: ['outlineStyle', 'outlineWidth', 'outlineColor'],
-    why: 'rows show a fill and no ring when chosen with the keys, buttons a 2 px ring',
   },
 ];
 

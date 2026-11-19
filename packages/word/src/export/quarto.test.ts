@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { partText, readParts } from '../shared/zip.ts';
 import { exportDocx } from './build.ts';
+import { parseBibtex } from '@redlines/citations';
 import { codeSpan, isQuarto, quartoToMarkdown } from './quarto.ts';
 
 const DOC = `---
@@ -109,6 +110,59 @@ describe('a Quarto document for the Word export (#1215)', () => {
     expect(xml).toContain('<w:vertAlign w:val="superscript"/>');
     expect(report.map((r) => r.kind)).toContain('quarto');
     expect(Object.keys(parts)).not.toContain('customXml/redlines-source.xml');
+  });
+});
+
+describe('citations in the Word export (#1171)', () => {
+  const BIB = [
+    '@book{knuth1984, author = {Donald E. Knuth}, title = {The TeXbook}, year = {1984}}',
+    '@article{lamport1994, author = {Lamport, Leslie}, title = {LaTeX}, year = {1994}}',
+  ].join('\n');
+  const DOC = [
+    '---',
+    'title: T',
+    'bibliography: refs.bib',
+    '---',
+    '',
+    'As @knuth1984 shows [@lamport1994, p. 4; @knuth1984], and [-@knuth1984] and [@nobody]. `[@knuth1984]`',
+    '',
+  ].join('\n');
+  const files =
+    (known: Record<string, string>) =>
+    (path: string): Uint8Array | undefined =>
+      known[path] === undefined ? undefined : new TextEncoder().encode(known[path]);
+
+  it('writes the bibliography’s print of a citation, as the editor draws it', () => {
+    const out = quartoToMarkdown(DOC, {
+      bib: parseBibtex(BIB),
+      style: 'chicago-author-date',
+    });
+    expect(out).toContain(
+      'As Knuth (1984) shows (Lamport 1994, 4; Knuth 1984), and (1984) and [@nobody]. `[@knuth1984]`',
+    );
+  });
+
+  it('reads the bibliography and the style beside the document, through the picture reader', async () => {
+    const apa = '<style><id>http://www.zotero.org/styles/apa</id><title>APA</title></style>';
+    const report: { kind: string; message: string }[] = [];
+    const parts = readParts(
+      await exportDocx(DOC.replace('refs.bib', 'refs.bib\ncsl: apa.csl'), {
+        report,
+        images: files({ 'refs.bib': BIB, 'apa.csl': apa }),
+      }),
+    );
+    const xml = partText(parts, 'word/document.xml') ?? '';
+    const text = [...xml.matchAll(/<w:t\b[^>]*>([^<]*)</g)].map((m) => m[1]).join('');
+    expect(text).toContain('Knuth (1984) shows (Lamport, 1994, p. 4; Knuth, 1984)');
+    expect(report.map((r) => r.kind)).not.toContain('bibliography');
+  });
+
+  it('writes the citations as typed, and says so, where the bibliography can’t be read', async () => {
+    const report: { kind: string; message: string }[] = [];
+    const parts = readParts(await exportDocx(DOC, { report, images: files({}) }));
+    const xml = partText(parts, 'word/document.xml') ?? '';
+    expect(xml).toContain('@knuth1984');
+    expect(report.find((r) => r.kind === 'bibliography')?.message).toContain('refs.bib');
   });
 });
 

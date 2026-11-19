@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { AUTOCORRECTION } from './corrections.ts';
 import { editSourceFacet } from './typing.ts';
+import { isWidenedNotice } from './intent.ts';
 
 // WebKit makes a correction (macOS's autocorrection, a text replacement, a smart quote or dash, a
 // spelling suggestion picked from the context menu) as a command of its own,
@@ -618,7 +619,11 @@ describe('a correction next to hidden markers', () => {
   it('leaves out a correction of a word with deleted text in it, and says nothing', async () => {
     const doc = withLedger('Hello te<!--del c3c3 x-->h', { c3c3: 'bo' });
     const notices: string[] = [];
-    const editor = load(doc, { onNotice: (message) => notices.push(message) });
+    const editor = load(doc, {
+      onNotice: (message) => {
+        if (!isWidenedNotice(message)) notices.push(message);
+      },
+    });
     spaceAtEnd(editor);
     const typed = editor.getDoc();
     // The page shows the deleted "x" in the word.
@@ -660,7 +665,9 @@ describe('where nothing is corrected', () => {
     const notices: string[] = [];
     const editor = load('```\nteh x\n```\n', {
       tracking: true,
-      onNotice: (message) => notices.push(message),
+      onNotice: (message) => {
+        if (!isWidenedNotice(message)) notices.push(message);
+      },
     });
     editor.view.dispatch({ selection: { anchor: 8 } });
     // A key WebKit corrects the word on.
@@ -675,7 +682,9 @@ describe('where nothing is corrected', () => {
     const notices: string[] = [];
     const editor = load('Say `teh` x\n', {
       tracking: true,
-      onNotice: (message) => notices.push(message),
+      onNotice: (message) => {
+        if (!isWidenedNotice(message)) notices.push(message);
+      },
     });
     editor.view.dispatch({ selection: { anchor: 5, head: 8 } });
     correct(editor, 5, 8, 'the');
@@ -698,7 +707,9 @@ describe('where nothing is corrected', () => {
     const notices: string[] = [];
     const editor = load('Say `teh` x\n', {
       tracking: true,
-      onNotice: (message) => notices.push(message),
+      onNotice: (message) => {
+        if (!isWidenedNotice(message)) notices.push(message);
+      },
     });
     editor.view.dispatch({ changes: { from: 6, to: 8, insert: 'he' }, userEvent: AUTOCORRECTION });
     expect(editor.getDoc()).toContain('Say `the` x<!--/');

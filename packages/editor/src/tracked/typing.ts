@@ -84,15 +84,7 @@ import {
   type UntrackedWords,
 } from './ask.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
-import {
-  intentAnnotation,
-  newIntentId,
-  recordedAs,
-  recording,
-  replaying,
-  type TypingIntent,
-  type Unnamed,
-} from './intent.ts';
+import { recordedAs, recording, replaying, type TypingIntent, type Unnamed } from './intent.ts';
 import { type FormatIntent, writeFormat } from './format-intent.ts';
 import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
@@ -992,10 +984,7 @@ function rewritten(
     changes,
     selection: caret === null ? tr.newSelection.map(mapping) : EditorSelection.cursor(caret),
     effects: [...StateEffect.mapEffects(tr.effects, mapping), ...effects],
-    annotations: [
-      ...annotationsOf(tr),
-      ...(intent ? [intentAnnotation.of({ ...intent, id: newIntentId() })] : []),
-    ],
+    annotations: [...annotationsOf(tr), ...(intent ? [recordedAs(intent)] : [])],
     scrollIntoView: tr.scrollIntoView,
   };
 }
@@ -1296,7 +1285,7 @@ function untrackedSpec(
       {
         annotations: [
           trackedEditAnnotation.of(true),
-          ...(result.intent ? [intentAnnotation.of({ ...result.intent, id: newIntentId() })] : []),
+          ...(result.intent ? [recordedAs(result.intent)] : []),
         ],
         sequential: true,
       },

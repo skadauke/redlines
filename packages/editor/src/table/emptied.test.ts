@@ -13,6 +13,7 @@ import { type Script, scriptRows, type Step } from '../blocks/script.ts';
 import { createEditor, type Editor, redo, undo } from '../index.ts';
 import { emptyStats, rectOf, whole } from './cells.ts';
 import { tablesOf } from './model.ts';
+import { isWidenedNotice } from '../tracked/intent.ts';
 
 interface Row {
   name: string;
@@ -457,7 +458,9 @@ describe('in an editor', () => {
       doc,
       author: { handle: 'ada', name: 'Ada Lovelace' },
       tracking,
-      onNotice: (message) => notices.push(message),
+      onNotice: (message) => {
+        if (!isWidenedNotice(message)) notices.push(message);
+      },
     });
     open.push(editor);
     forceParsing(editor.view, editor.view.state.doc.length, 10_000);

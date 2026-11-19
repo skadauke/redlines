@@ -16,6 +16,28 @@
 // none of Quarto's syntax is returned as it is. The text that comes out is no longer the file's, so
 // the export leaves the carriers of a round trip out of it and says so.
 
+import {
+  bibliographyRefs,
+  formatBracket,
+  formatNarrative,
+  makeContext,
+  parseBibliography,
+  parseBracket,
+  styleOfCsl,
+} from '@redlines/citations';
+import type { Bibliography, StyleName } from '@redlines/citations';
+
+/** The bibliography of a document and the style its citations are printed in. */
+export interface Citations {
+  bib: Bibliography;
+  style: StyleName;
+}
+
+const XREF = /^(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-/;
+/** A citation in brackets, or one that is part of the sentence (`@smith2020`). */
+const CITATION =
+  /\[(?=[^\][\n]*-?@)[^\][\n]*\]|(?<![\w@\]])@([\w][\w:.#$%&+?<>~/-]*)(?<![:.#$%&+?<>~/-])/g;
+
 const LEDGER = /\n<!-- redlines\n[\s\S]*$/;
 const FENCE = /^( {0,3})(`{3,}|~{3,})/;
 const OPEN_DIV = /^(:{3,})\s*(\{[^}]*\}|[\w-]+)\s*$/;
@@ -51,7 +73,9 @@ export function isQuarto(text: string): boolean {
   return (
     /^:{3,}\s*\{[^}]*\.callout-/m.test(text) ||
     /\{[^{}]*#(?:sec|fig|tbl|eq|lst)-[\w:.-]+[^{}]*\}/.test(text) ||
-    /^ {0,3}(?:`{3,}|~{3,})\{[a-z]+/m.test(text)
+    /^ {0,3}(?:`{3,}|~{3,})\{[a-z]+/m.test(text) ||
+    // Citations that a bibliography prints.
+    (bibliographyRefs(text) !== undefined && /\[[^\]\n]*@\w/.test(text))
   );
 }
 
@@ -85,7 +109,7 @@ function outsideSpans(text: string, change: (plain: string) => string): string {
 const HEADING = /^#{1,6}\s+(.*?)\s*#*\s*$/;
 
 /** The text of a Quarto document as the Markdown the Word export reads. */
-export function quartoToMarkdown(text: string): string {
+export function quartoToMarkdown(text: string, citations?: Citations): string {
   const ledger = LEDGER.exec(text)?.[0] ?? '';
   const body = ledger ? text.slice(0, text.length - ledger.length) : text;
   const lines = body.split('\n');
@@ -116,12 +140,41 @@ export function quartoToMarkdown(text: string): string {
     }
   });
 
+  // The works cited, in order, so that years can be told apart and works numbered.
+  const cited: string[] = [];
+  if (citations) {
+    lines.forEach((line, i) => {
+      if (i < first || code[i]) return;
+      outsideSpans(line, (plain) => {
+        for (const found of plain.matchAll(CITATION)) {
+          const keys = found[1]
+            ? [found[1]]
+            : (parseBracket(found[0])?.map((item) => item.key) ?? []);
+          if (!keys.some((key) => XREF.test(key))) cited.push(...keys);
+        }
+        return plain;
+      });
+    });
+  }
+  const context = citations ? makeContext(citations.bib, citations.style, cited) : undefined;
+  const cite = (plain: string) =>
+    context
+      ? plain.replace(CITATION, (found: string, key: string | undefined, at: number) => {
+          if (key !== undefined) {
+            return XREF.test(key) ? found : (formatNarrative(key, context) ?? found);
+          }
+          // A bracket that a `(`, `{` or `[` follows is a link or a span.
+          if (/^[({[]/.test(plain.slice(at + found.length, at + found.length + 1))) return found;
+          const items = parseBracket(found);
+          if (!items || items.some((item) => XREF.test(item.key))) return found;
+          return formatBracket(items, context) ?? found;
+        })
+      : plain;
   const label = (id: string) => numbers.get(id) ?? `${NAMES[id.slice(0, id.indexOf('-'))]} ?`;
   /** The prose of a line: references, superscripts and subscripts, outside code spans. */
   const prose = (line: string) =>
     outsideSpans(line, (plain) =>
-      plain
-        .replace(INLINE_MATH, (_all, tex: string) => codeSpan(tex))
+      cite(plain.replace(INLINE_MATH, (_all, tex: string) => codeSpan(tex)))
         .replace(REFERENCE, (_all, id: string) => label(id))
         .replace(/(?<![\\^])\^([^\s^]+)\^/g, '<sup>$1</sup>')
         .replace(/(?<![\\~])~([^\s~]+)~(?!~)/g, '<sub>$1</sub>'),
@@ -218,4 +271,38 @@ export function quartoToMarkdown(text: string): string {
 function previousLine(lines: string[], from: number): string {
   for (let i = from - 1; i >= 0; i--) if (lines[i]!.trim() !== '') return lines[i]!;
   return '';
+}
+
+/**
+ * The bibliography and the style a document's front matter names, read through the same reader as
+ * its pictures (the files beside the document). The paths that couldn't be read are `unread`.
+ */
+export async function readBibliography(
+  text: string,
+  options: { images?: (path: string) => Uint8Array | undefined | Promise<Uint8Array | undefined> },
+): Promise<{ citations?: Citations; unread: string[] }> {
+  const refs = bibliographyRefs(text);
+  if (!refs) return { unread: [] };
+  const unread: string[] = [];
+  const read = async (path: string): Promise<string | undefined> => {
+    try {
+      const bytes = await options.images?.(path);
+      if (bytes) return new TextDecoder().decode(bytes);
+    } catch {
+      // Told below.
+    }
+    unread.push(path);
+    return undefined;
+  };
+  const bib: Bibliography = new Map();
+  for (const path of refs.files) {
+    const file = await read(path);
+    if (file) for (const [key, entry] of parseBibliography(path, file)) bib.set(key, entry);
+  }
+  const csl = refs.csl ? await read(refs.csl) : undefined;
+  if (bib.size === 0) return { unread };
+  return {
+    citations: { bib, style: (csl ? styleOfCsl(csl) : undefined) ?? 'chicago-author-date' },
+    unread,
+  };
 }
