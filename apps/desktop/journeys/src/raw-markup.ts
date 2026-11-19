@@ -123,14 +123,6 @@ export interface KnownCase {
  */
 export const KNOWN: readonly KnownCase[] = [
   {
-    issue: 1169,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'marker',
-    text: /<!--/,
-    why: 'a callout whose title holds an insertion shows its marker',
-  },
-  {
     issue: 1170,
     doc: 'Build 21.qmd',
     surfaces: ['redlines', 'clean', 'simple'],
