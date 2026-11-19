@@ -2498,8 +2498,11 @@ differences:
   and not a link (OpenClaw refuses one), be the person's own (a file of the system's, or of
   another user, is refused), have no second name (a hard link) and be reached by a path with no
   link in it, and hold from one byte to 16 KiB, which is looked at without reading it. A program
-  of another name that is `acp --url …` (a wrapper) is never held to the whole shape, but a
-  `--token` or `--password` on its line is refused all the same. The question says where the document and the thread go, warns of a `ws://`
+  of another name with `acp` among its arguments (a wrapper) is never held to the whole shape, but
+  a `--token` or `--password` on its line is refused all the same. The file is looked at again
+  before each run, in the same words (a swap between that look and OpenClaw's own open of the file
+  can't be closed from the host); the case of its letters and the system's own links (`/tmp`,
+  `/var`, `/etc` are in `/private`) are no reason to refuse it. The question says where the document and the thread go, warns of a `ws://`
   address, which isn't encrypted, unless it is on this Mac (`localhost`, `127.0.0.1`, `[::1]`: what
   goes there stays on it, or goes through a tunnel its owner made), and of a token file that other
   people on the Mac can read.

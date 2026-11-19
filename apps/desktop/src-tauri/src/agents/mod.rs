@@ -395,6 +395,12 @@ pub fn acp_start(
         );
     }
     let launch = acp_runs::spec_for(&app.state::<AcpAgents>(), &agent, &cwd, log)?;
+    // The token file is looked at again: it may have been swapped since the agent was added.
+    if launch.bridge.is_some()
+        && let Some(problem) = acp::bridge_token_problem(&launch.spec.args)
+    {
+        return Err(problem);
+    }
     let environment = for_bridge(
         programs.environment_for(Path::new(&launch.spec.program)),
         launch.bridge.is_some(),
