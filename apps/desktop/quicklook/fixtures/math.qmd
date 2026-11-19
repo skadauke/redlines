@@ -1,0 +1,15 @@
+---
+title: "Energy"
+---
+
+# Energy {#sec-energy}
+
+Einstein found that $E = mc^2$, and that a mass $m_1 + m_2$ at rest holds it. It costs $5 and $6 here, and `$x$` is code.
+
+$$ E = mc^2 $$ {#eq-mass}
+
+$$
+\int_0^1 x\,dx = \frac{1}{2}
+$$ {#eq-int}
+
+See @eq-mass and @eq-int.

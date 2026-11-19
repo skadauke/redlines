@@ -6,7 +6,8 @@
 import { frontMatterEnd, newestView } from '@redlines/format';
 import { markdownImages, markdownToHtml, type LoadedImages } from './markdown.ts';
 import { page } from './page.ts';
-import { quartoHtml } from './quarto.ts';
+import { putMath, takeMath } from './math.ts';
+import { quartoHtml, targetsOf } from './quarto.ts';
 import { noticeOf } from './summary.ts';
 
 /** The most of a document that a preview draws, in characters, after its changes are accepted. A
@@ -87,13 +88,19 @@ export function renderPreview(
 ): string {
   const { notice, frontMatter, shown, more } = prepare(source, cut);
   const pandoc = /\.(?:qmd|rmd)$/i.test(name);
-  const drawn = markdownToHtml(shown, images, pandoc);
+  // Formulas are taken out before the text is read, which would read their TeX as emphasis, and put
+  // back typeset (math.ts).
+  const math = pandoc ? takeMath(shown) : null;
+  const drawn = markdownToHtml(math ? math.text : shown, images, pandoc);
+  const whole = `${frontMatter ?? ''}${shown}`;
   return page({
     title: name,
     notice,
     frontMatter,
     // A Quarto or R Markdown file has what Quarto draws (quarto.ts); Markdown has no such syntax.
-    body: pandoc ? quartoHtml(drawn, `${frontMatter ?? ''}${shown}`) : drawn,
+    body: pandoc
+      ? putMath(quartoHtml(drawn, whole), math?.formulas ?? [], targetsOf(whole))
+      : drawn,
     after: more ? CUT_SHORT : null,
   });
 }

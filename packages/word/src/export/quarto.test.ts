@@ -78,7 +78,7 @@ describe('a Quarto document for the Word export (#1215)', () => {
   });
 
   it('writes a display formula as its TeX with its number', () => {
-    expect(out).toContain('E = mc^2    (1)');
+    expect(out).toContain('`E = mc^2`    (1)');
     expect(out).not.toContain('$$');
   });
 
@@ -124,7 +124,7 @@ describe('math in the Word export (#1173)', () => {
     const out = quartoToMarkdown(
       '# T {#sec-t}\n\n$$\n\\int_0^1 x\\,dx\n$$ {#eq-int}\n\nSee @eq-int.\n',
     );
-    expect(out).toContain('\\int_0^1 x\\,dx    (1)');
+    expect(out).toContain('`\\int_0^1 x\\,dx`    (1)');
     expect(out).toContain('See Equation 1.');
   });
 });

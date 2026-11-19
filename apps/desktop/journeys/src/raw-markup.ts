@@ -146,14 +146,6 @@ export const KNOWN: readonly KnownCase[] = [
     text: /\{\.column/,
     why: 'the fences of a div that isn’t a callout are drawn as source',
   },
-  ...([['math', /\$\$/, 'the display formula']] as const).map(([rule, text, what]): KnownCase => ({
-    issue: 1216,
-    doc: ['Build 21.qmd', 'frontmatter.qmd'],
-    surfaces: ['quicklook'],
-    rule,
-    text,
-    why: `the Quick Look page shows ${what} as source`,
-  })),
 ];
 
 export interface Found {

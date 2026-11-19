@@ -184,7 +184,9 @@ export function quartoToMarkdown(text: string): string {
       }
       const id = ID.exec(attributes)?.[1];
       const number = id ? numbers.get(id)?.replace(/^\D+/, '') : undefined;
-      put(`${tex.trim()}${number ? `    (${number})` : ''}`);
+      // The TeX is code, so that Markdown reads none of it (`\,` an escape, `_` and `*` emphasis).
+      const fence = tex.includes('`') ? '``' : '`';
+      put(`${fence}${tex.trim()}${fence}${number ? `    (${number})` : ''}`);
       continue;
     }
     // A table's caption, after its rows.
