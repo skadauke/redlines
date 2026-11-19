@@ -525,7 +525,7 @@ Gateway can't take at all (no model signed in) fails the request itself with
 |---|---|---|
 | `client.id`, `mode` | `node-host`, `node` | `gateway-client`, `backend` |
 | `role`, `scopes` | `node`, none | `operator`, `operator.read` and `operator.write` (never `operator.admin`) |
-| protocol | 3 (4 is also taken) | **4**: a live Gateway refuses an operator that offers 3 |
+| protocol | 4 first, then 3 when the Gateway says it expects 3 (`protocol mismatch`, `expectedProtocol`), as OpenClaw's node host does | **4**: a live Gateway refuses an operator that offers 3 |
 | signed text | `v2\|id\|node-host\|node\|node\|\|at\|credential\|nonce` | `v2\|id\|gateway-client\|backend\|operator\|operator.read,operator.write\|at\|credential\|nonce` |
 | used for | the agent's tool calls | `chat.send`, the run's events, `chat.abort` |
 

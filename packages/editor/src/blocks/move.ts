@@ -78,7 +78,7 @@ export function moveBlocksReason(state: EditorState, up: boolean): string | unde
   const run = runOfSelection(read.file);
   if (!run) return 'Put the caret in a paragraph, a list item or a block.';
   if (neighbourGap(run, up)) return undefined;
-  if (run.unclosed) return UNCLOSED_FENCE;
+  if (run.unclosed) return closingFence(read.file, run, up) ? undefined : UNCLOSED_FENCE;
   const many = run.count > 1;
   return `${many ? 'These blocks are' : 'This block is'} at the ${up ? 'top' : 'bottom'} already.`;
 }
@@ -97,22 +97,103 @@ export function moveBlocks(view: EditorView, up: boolean): boolean {
   const gap = neighbourGap(run, up);
   // Nothing above the first or below the last: the command is disabled (`moveBlocksReason` says why),
   // and the key does nothing, with no notice.
-  if (!gap) return true;
+  if (!gap) {
+    // Code that nothing closes holds the rest of its container, so it has nowhere to go: the
+    // closing fence is written first and the block moves, in one step (#1203). With Track Changes
+    // on the fence is tracked with the move; where the move can't be tracked, the whole step is
+    // made untracked, fence included, after the person is asked.
+    const closing = !read.back && run.unclosed ? closingFence(read.file, run, up) : null;
+    if (!closing) return true;
+    const base = read.file;
+    const closed = (changes: ChangeSet): FileRead => ({
+      file: base.update({
+        changes,
+        selection: EditorSelection.single(changes.mapPos(base.selection.main.head, -1)),
+        filter: false,
+      }).state,
+      back: changes,
+    });
+    const text = base.doc.toString();
+    const edits = [closing];
+    let tracked: ChangeSet;
+    let plainChanges: ChangeSet;
+    try {
+      plainChanges = untrackedWrite(base, text, base.field(parsedField), edits).changes;
+      tracked = base.field(trackingField)
+        ? authoredWrite(base, text, base.field(parsedField), edits).changes
+        : plainChanges;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      // The fence can't be written here: the block stays, and the reason is the old one.
+      view.dispatch({ effects: refusedEditEffect.of(UNCLOSED_FENCE) });
+      return true;
+    }
+    const first = closed(tracked);
+    const second = closed(plainChanges);
+    const next = runOfSelection(first.file);
+    const to = next && neighbourGap(next, up);
+    if (!next || !to) return true;
+    const other = runOfSelection(second.file);
+    const otherGap = other && neighbourGap(other, up);
+    return moveRunTo(
+      view,
+      next,
+      to,
+      first,
+      other && otherGap ? { read: second, run: other, gap: otherGap } : undefined,
+    );
+  }
   return moveRunTo(view, run, gap, read);
+}
+
+/**
+ * The change that writes the closing fence of the one code block `run` is, when closing it lets the
+ * block move in the direction asked: on the last line when that is empty, and on a new line under
+ * it otherwise, in the opening fence's own container syntax, as ↓ at the end of such a block does.
+ */
+function closingFence(
+  state: EditorState,
+  run: BlockRun,
+  up: boolean,
+): { from: number; to: number; insert: string } | null {
+  if (run.kind !== 'code' || run.count !== 1) return null;
+  const { doc } = state;
+  const first = doc.lineAt(run.from);
+  const last = doc.lineAt(Math.min(run.to, doc.length));
+  const fence = /^[ \t>]*(?:`{3,}|~{3,})/.exec(first.text)?.[0];
+  if (!fence) return null;
+  const empty = /^[ \t>]*$/.test(last.text) && last.number > first.number;
+  const change = {
+    from: empty ? last.from : last.to,
+    to: last.to,
+    insert: (empty ? '' : '\n') + fence,
+  };
+  const closed = state.update({ changes: change, filter: false }).state;
+  const after = runOfSelection(
+    closed.update({
+      selection: EditorSelection.single(
+        state.changes(change).mapPos(state.selection.main.head, -1),
+      ),
+    }).state,
+  );
+  return after && !after.unclosed && neighbourGap(after, up) ? change : null;
 }
 
 /** Moves `run` to `gap` and keeps it selected, as it was (a caret stays at its place in the text). */
 export function moveRunTo(
   view: EditorView,
-  run: BlockRun,
-  gap: BlockGap,
+  run0: BlockRun,
+  gap0: BlockGap,
   read?: FileRead,
+  fallback?: { read: FileRead; run: BlockRun; gap: BlockGap },
 ): boolean {
   // The state the run is read in: the file's, with an empty paragraph taken back (`asFile`), and
   // the changes that did it, which the step makes first.
-  const state = read?.file ?? view.state;
-  const back = read?.back ?? null;
-  const text = state.doc.toString();
+  let run = run0;
+  let gap = gap0;
+  let state = read?.file ?? view.state;
+  let back = read?.back ?? null;
+  let text = state.doc.toString();
   const tracking = state.field(trackingField);
   let changes: ChangeSet;
   let moved: Range;
@@ -142,6 +223,14 @@ export function moveRunTo(
         // (design: widen, alert or disable, §3.1), never refused.
         untracked = true;
         if (error.reason !== 'too-large') asking = NOT_MARKABLE;
+        if (fallback) {
+          // The closing fence the move began with was written tracked, which an untracked move
+          // can't sit beside: the whole step is made untracked, the fence plain as well.
+          ({ run, gap } = fallback);
+          state = fallback.read.file;
+          back = fallback.read.back;
+          text = state.doc.toString();
+        }
         const plain = plainMove(state, text, run, gap, true);
         if (!plain) return false;
         ({ changes, moved, intent } = plain);

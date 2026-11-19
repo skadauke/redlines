@@ -48,6 +48,24 @@ test.describe('moving blocks @blocks', () => {
   }
 
   for (const scheme of ['light', 'dark'] as const) {
+    test(`a tracked move is drawn as one Moved block with a double underline, ${scheme} (#1201)`, async ({
+      start,
+    }) => {
+      const j = await start({ doc: DOC, tracking: true, view: 'redlines', scheme });
+      await j.caretAfter('the one that');
+      await j.press('Alt+ArrowDown');
+      await j.settle();
+      const moved = j.page.locator('.rl-ins.rl-moved').first();
+      await expect(moved, 'the new place is drawn as a move').toContainText('Second paragraph');
+      expect(
+        await moved.evaluate((el) => getComputedStyle(el).textDecorationStyle),
+        'a double underline, as a moved row has',
+      ).toBe('double');
+      await j.shot(`moved-block-${scheme}`);
+    });
+  }
+
+  for (const scheme of ['light', 'dark'] as const) {
     test(`a drag of a selected paragraph shows the drop line and moves it, ${scheme}`, async ({
       start,
     }) => {

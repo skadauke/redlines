@@ -62,6 +62,7 @@ import {
   describeChanges,
   element,
   errorLine,
+  blockMoved,
   rowsDone,
   openerEnd,
   readable,
@@ -1723,6 +1724,8 @@ function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
 function changesShown(parsed: Parsed, changes: readonly MarkRange[]): ChangeShown[] {
   const rows = changes.length > 1 ? rowsDone(changes) : null;
   if (rows !== null) return [{ old: '', added: rows }];
+  const moved = blockMoved(changes);
+  if (moved !== null) return [{ old: '', added: moved }];
   return changes.map((change) => changeShown(parsed, change));
 }
 
