@@ -21,6 +21,7 @@ import { isAlignMark, plainPayload, rejectReason } from '@redlines/format';
 import type { MarkRange, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
+import { highlightAt, highlightBubble, installBubbleStyle } from './bubble.ts';
 import { startsNewComment } from './rail.ts';
 import {
   attempt,
@@ -182,6 +183,65 @@ function changeOf(view: EditorView, changes: readonly MarkRange[], el: Element):
   );
 }
 
+/**
+ * The change at `pos` of the text, or under `el`, the element the pointer is over (deleted text
+ * is drawn as a widget, which has no position of its own).
+ */
+function pointedAtPlace(
+  view: EditorView,
+  changes: readonly MarkRange[],
+  pos: number,
+  side: -1 | 1,
+  el: Element | null,
+): Found | null {
+  const struck = el?.closest('.rl-del, .rl-struck, .rl-ghost');
+  if (struck && view.contentDOM.contains(struck)) return changeOf(view, changes, struck);
+  // A line break's mark, drawn where the break shows, also when its marker is on a hidden line
+  // beside another break's (#198).
+  const mark = el?.closest<HTMLElement>('.rl-split[data-rl-change]');
+  if (mark && view.contentDOM.contains(mark)) {
+    const split = changes.find((change) => change.id === mark.dataset['rlChange']);
+    const segment = split?.segments[0];
+    if (split && segment) {
+      return { change: split, span: segmentSpan(segment), start: visibleStart(segment) };
+    }
+  }
+  return (
+    changeAt(changes, pos, side) ??
+    rowAt(view.state, changes, pos) ??
+    alignAt(view.state, changes, pos)
+  );
+}
+
+/**
+ * The highlight at `pos` as a card's subject (its mark stands where a change does), unless a
+ * comment is anchored there too: that one's note is what a click opens.
+ */
+function highlightFound(view: EditorView, pos: number): Found | null {
+  const mark = highlightAt(view, pos);
+  if (!mark) return null;
+  if (
+    view.state.field(parsedField).marks.some((other) => other.kind === 'cmt' && inMark(other, pos))
+  ) {
+    return null;
+  }
+  const segment = mark.segments.find((s) => segmentSpan(s).from <= pos && pos <= segmentSpan(s).to);
+  const first = segment ?? mark.segments[0];
+  // The highlighted text itself: the card stands against it, and not against hidden markers.
+  return first
+    ? {
+        change: mark,
+        span: { from: first.content.from, to: first.content.to },
+        start: first.content.from,
+      }
+    : null;
+}
+
+const inMark = (mark: MarkRange, pos: number) =>
+  mark.segments.some(
+    (segment) => segmentSpan(segment).from <= pos && pos <= segmentSpan(segment).to,
+  );
+
 /** Where a card goes when its change isn't on screen: nowhere to be seen. */
 const OFF_SCREEN: Rect = { left: -1e4, right: -1e4, top: -1e4, bottom: -1e4 };
 
@@ -206,6 +266,16 @@ class Card implements TooltipView {
     const { change } = found;
     const parsed = view.state.field(parsedField);
     const { author } = ctx;
+    // A highlight has a card too: the one the toolbar stacks (bubble.ts), on its own here.
+    if (change.kind === 'hl') {
+      installBubbleStyle(view.dom.ownerDocument);
+      this.by = change.entry.by;
+      this.color = colorClass(view.state, this.by);
+      this.dom = element('div', 'rl-bubble-card');
+      this.dom.setAttribute('role', 'dialog');
+      this.dom.append(highlightBubble(view, ctx, change));
+      return;
+    }
     // A suggestion of several marks is decided as one, from the card of any of them.
     const marks = suggestionIn(ctx, change.id);
     this.by = change.entry.by;
@@ -300,6 +370,10 @@ export function cards(ctx: ReviewContext): {
   close(view: EditorView): void;
   /** Pins the card of change `id` over its first segment, as a click on it would. */
   pinChange(view: EditorView, id: string): void;
+  /** While held, hovering shows no card (the toolbar has it in its own); a click still pins one. */
+  hold(held: boolean): void;
+  /** The change at `pos`, or under `el`: the one a right-click there is on. */
+  changeAtPlace(view: EditorView, pos: number, el: Element | null): MarkRange | null;
 } {
   /** The element under the pointer at its last move. */
   let hovered: Element | null = null;
@@ -313,28 +387,11 @@ export function cards(ctx: ReviewContext): {
     return mode === 'redlines' || mode === 'simple';
   };
   /** The change under the pointer: the deleted text it is over, else the text at `pos`. */
-  const pointedAt = (view: EditorView, pos: number, side: -1 | 1): Found | null => {
-    const changes = changesOf(ctx);
-    const struck = hovered?.closest('.rl-del, .rl-struck, .rl-ghost');
-    if (struck && view.contentDOM.contains(struck)) return changeOf(view, changes, struck);
-    // A line break's mark, drawn where the break shows, also when its marker is on a hidden line
-    // beside another break's (#198).
-    const mark = hovered?.closest<HTMLElement>('.rl-split[data-rl-change]');
-    if (mark && view.contentDOM.contains(mark)) {
-      const split = changes.find((change) => change.id === mark.dataset['rlChange']);
-      const segment = split?.segments[0];
-      if (split && segment) {
-        return { change: split, span: segmentSpan(segment), start: visibleStart(segment) };
-      }
-    }
-    return (
-      changeAt(changes, pos, side) ??
-      rowAt(view.state, changes, pos) ??
-      alignAt(view.state, changes, pos)
-    );
-  };
+  const pointedAt = (view: EditorView, pos: number, side: -1 | 1): Found | null =>
+    pointedAtPlace(view, changesOf(ctx), pos, side, hovered);
+  let held = false;
   const cardAt = (view: EditorView, pos: number, side: -1 | 1): Tooltip | null => {
-    const found = pinning ?? (redlines(view) ? pointedAt(view, pos, side) : null);
+    const found = pinning ?? (redlines(view) && !held ? pointedAt(view, pos, side) : null);
     if (!found) return null;
     const { from, to } = found.span;
     // CodeMirror puts away a tooltip whose anchor is above the top of the editor's own box, less the
@@ -402,11 +459,27 @@ export function cards(ctx: ReviewContext): {
         const drawn = target?.closest(
           '.rl-ins, .rl-ins-plain, .rl-ins-row-plain, .rl-ins-col-plain, .rl-del, .rl-fmt, .rl-ins-row, .rl-ins-col, .rl-struck, .rl-ghost',
         );
-        if (event.button !== 0 || !drawn || !clickable(view)) return;
-        const found = changeOf(view, changesOf(ctx), drawn);
-        if (!found) return;
+        if (event.button !== 0 || !clickable(view)) return;
         const { doc } = view.state;
         const win = view.dom.ownerDocument.defaultView ?? window;
+        if (!drawn) {
+          // A click on a highlight, where no change or comment is: its card opens alone.
+          const releaseOnHighlight = (up: MouseEvent) => {
+            const moved = Math.hypot(up.clientX - event.clientX, up.clientY - event.clientY);
+            if (moved > CLICK_SLOP) return;
+            setTimeout(() => {
+              if (!view.dom.isConnected || view.state.doc !== doc || !clickable(view)) return;
+              const { head, empty } = view.state.selection.main;
+              if (!empty) return;
+              const found = highlightFound(view, head);
+              if (found) pin(view, found);
+            });
+          };
+          win.addEventListener('mouseup', releaseOnHighlight, { once: true });
+          return;
+        }
+        const found = changeOf(view, changesOf(ctx), drawn);
+        if (!found) return;
         const release = (up: MouseEvent) => {
           const moved = Math.hypot(up.clientX - event.clientX, up.clientY - event.clientY);
           if (moved > CLICK_SLOP) return;
@@ -426,6 +499,13 @@ export function cards(ctx: ReviewContext): {
       if (!change || !segment) return;
       pin(view, { change, span: segmentSpan(segment), start: visibleStart(segment) });
     },
+    hold: (on) => {
+      held = on;
+    },
+    changeAtPlace: (view, pos, el) =>
+      pointedAtPlace(view, changesOf(ctx), pos, 1, el)?.change ??
+      pointedAtPlace(view, changesOf(ctx), pos, -1, null)?.change ??
+      null,
     close(view) {
       if (view.state.field(hover.active).length) {
         view.dispatch({ effects: closeHoverTooltip(hover) });

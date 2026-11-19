@@ -37,7 +37,8 @@ export type MarkdownDialect = 'gfm' | 'pandoc';
 
 /**
  * The views a View menu lists (design §5.3): Clean, Redlines and Plain. Redlines is the view in
- * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
+ * either of its looks (`menuViewOf`), and `Editor.showView` shows it: from Clean or Plain in the look
+ * shown last, and from the simple look as the full markup.
  */
 export type MenuView = 'clean' | 'redlines' | 'raw';
 
@@ -537,9 +538,10 @@ export interface Editor {
   /**
    * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Plain. Redlines is
    * shown in the look that was shown last: the one a click on a change bar or `switchLook` chose
-   * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
-   * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
-   * on a change bar, or `switchLook`, chooses a look.
+   * (`EditorUiState.markupView`), unless the review bar has shown the full markup since; from Clean
+   * or Plain it chooses no look. Chosen while the simple look shows, it is the way back to the full
+   * markup, as a click on a change bar is (#1156), and chooses it. When the full markup shows
+   * already, it does nothing.
    */
   showView(view: MenuView): void;
   /**

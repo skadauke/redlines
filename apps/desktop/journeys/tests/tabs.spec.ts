@@ -1,7 +1,7 @@
 // One document in two tabs of a browser, side by side (apps/desktop/two-windows.html: the page of the
 // app twice, as two frames). The tabs find each other and agree on who leads through Web Locks and a
 // BroadcastChannel (src/session-tabs.ts, session-browser.ts); each is typed into with the real
-// keyboard. Both converge, each one's Undo is its own, the title says there are two windows, and
+// keyboard. Both converge, each one's Undo is its own, the title says which window each is, and
 // when the leader's page hangs, the other tab takes the lead and goes on.
 
 import type { Frame, Page } from '@playwright/test';
@@ -76,9 +76,15 @@ test('two tabs show one document, each with its own Undo, and the other goes on 
     })
     .toBe(true);
   // The title of each says the document is in two windows.
-  for (const frame of [left, right]) {
-    await expect(frame.locator('.rl-title')).toContainText('In 2 windows');
-  }
+  await expect(left.locator('.rl-title')).toContainText('Window 1');
+  await expect(right.locator('.rl-title')).toContainText('Window 2');
+  // The name stands alone: what the window is and that it was edited is set apart from it.
+  await expect(left.locator('.rl-titlebar')).toHaveScreenshot(
+    `title-bar-window-1-${test.info().project.name}.png`,
+  );
+  await expect(right.locator('.rl-titlebar')).toHaveScreenshot(
+    `title-bar-window-2-${test.info().project.name}.png`,
+  );
 
   // Undo in the first takes back its own edit and leaves the other tab's.
   await caretAfter(left, 'Redlines shows every change');

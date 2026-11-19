@@ -908,7 +908,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         'p',
         'rl-oc-sub',
         pairing?.again
-          ? 'This Mac was connected before, and its details changed. Approving it replaces the sign-in Redlines kept, so afterwards you will need a new setup code.'
+          ? 'This Mac was connected before, and its details changed. Approving it replaces the sign-in Redlines kept, so afterwards you will need a new setup code (a token you typed keeps working without one).'
           : pairing
             ? 'Your agent sees a request from “Redlines on ' +
               mac +
