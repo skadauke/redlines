@@ -1658,6 +1658,54 @@ mod tests {
         );
     }
 
+    /// The retry at protocol 3 carries the credential the first attempt used: a device token, and
+    /// a shared token, as well as a setup code.
+    #[test]
+    fn the_protocol_3_retry_carries_the_same_stored_credential() {
+        let mismatch = |socket: &mut Ws, frames: &Frames, auth: Value| {
+            greet(socket, "a");
+            let params = take_connect_at(socket, frames, "a", 4);
+            assert_eq!(params["auth"], auth);
+            text(
+                socket,
+                json!({"type": "res", "id": "1", "ok": false, "error": {
+                    "code": "INVALID_REQUEST", "message": "protocol mismatch",
+                    "details": {"code": "PROTOCOL_MISMATCH", "expectedProtocol": 3}}}),
+            );
+        };
+        let accepted = |socket: &mut Ws, frames: &Frames, auth: Value| {
+            greet(socket, "b");
+            let params = take_connect_at(socket, frames, "b", 3);
+            assert_eq!(params["auth"], auth);
+            hello(socket, None);
+            read_frame(socket, frames);
+            drain(socket, frames);
+        };
+        // A device token the Gateway gave.
+        let gateway = fake(vec![
+            Box::new(move |s, f| mismatch(s, f, json!({"deviceToken": TOKEN}))),
+            Box::new(move |s, f| accepted(s, f, json!({"deviceToken": TOKEN}))),
+        ]);
+        let mut run = Run::start(&gateway, Credential::Token(secret(TOKEN)), Some(TOKEN));
+        run.wait("connected", |event| {
+            matches!(event, Event::Status(Status::Connected { .. }))
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+
+        // A shared token the person typed, with no device token kept.
+        let gateway = fake(vec![
+            Box::new(move |s, f| mismatch(s, f, json!({"token": "typed-1"}))),
+            Box::new(move |s, f| accepted(s, f, json!({"token": "typed-1"}))),
+        ]);
+        let mut run = Run::start_shared(&gateway, Credential::Token(secret("x")), None, "typed-1");
+        run.wait("connected", |event| {
+            matches!(event, Event::Status(Status::Connected { .. }))
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+    }
+
     /// A Gateway that wants neither 3 nor 4 is newer, after each was offered once.
     #[test]
     fn a_gateway_that_wants_a_protocol_beyond_both_is_newer_without_a_loop() {
