@@ -2557,7 +2557,7 @@ line.
   A reviewer's chat can only suggest (§8.2, Limits).
 
 **The chat panel.** The sidebar has two views, **Files** and **Chat**, switched by a small segmented
-control at its head (⌃⌘S still shows and hides the sidebar; ⌥⌘C opens it at Chat). It is the
+control at its head (⌃⌘S still shows and hides the sidebar; ⌃⌘C opens it at Chat). It is the
 sidebar's column, in the sidebar's width, so it never covers the page; in a narrow window it covers
 the page, as the file list does.
 
@@ -2628,7 +2628,7 @@ bubble does ("Claude", the capitalized handle, §8.6), with the model beside it 
   but the Luna models also ultra). Redlines should ask `codex debug models` for the list instead of
   holding one, and offer the newest of each family (Sol, Astra, Terra, Luna) with the efforts as a
   submenu, through `-m <id>` and `-c model_reasoning_effort=<effort>`; `AgentModel` gains an
-  optional list of `efforts`. This waits on question 3 below.
+  optional list of `efforts`. 
 - **Ask's bubble uses the same menu,** replacing its model list: one picker, one place to learn.
 
 **The sidebar's foot.** A bar at the bottom of the sidebar, in both views, in the sidebar's own
@@ -2660,22 +2660,18 @@ list's search finds a question again by its words.
 4. Later: edits at the document's level, chats with none, the chat list, Start Over, folding old
    turns, answers that cite with links to ranges, Codex's efforts.
 
-**Questions only Stephan can answer.**
+**Decided 2026-11-19** (Stephan's direction on #1194):
 
-1. **Where does chat live: the left sidebar, as written here, or the right of the page, by the
-   comment rail?** The sidebar fits the history of asks and the foot as he described them. The
-   right puts the conversation beside the margin notes, and costs the page's width.
-2. **May a chat edit the document in its first version,** as a comment's run does at the document's
-   level, or is it read-only like Ask until it has proved itself? This design says read-only.
-3. **Which Codex models and efforts does the menu offer:** the newest of each family that
-   `codex debug models` lists, with efforts, or a fixed short list under the names he suggested
-   (Astra, Sol, Terra, Luna)?
-4. **Does a chat follow a document that another program moves,** by a guess (same name and
-   contents), or never, as this design says? A wrong guess shows someone another document's chat.
-5. **Is one chat per document right,** or may a document have several named chats? This design has
-   one, with Start Over keeping the old.
-6. **Should an Ask's answer go from the bubble by itself, and after how long,** or stay until Esc, as
-   it does today?
+- **Where:** the left sidebar, Files and Chat, with the history and the foot in it.
+- **Edits:** read-only in the first version. Make Comment posts an answer as a thread; suggestions
+  come later.
+- **Codex:** the newest of each family (Sol, Astra, Terra, Luna), each with its efforts as a
+  submenu, read from `codex debug models`.
+- **A document moved by another program:** its chat is not followed, as written above.
+- **One continuous chat per document,** with Start Over keeping the earlier sessions.
+- **Ask's bubble goes by itself** once the answer is complete, after a time that follows the
+  answer's length (a base plus about 200 words a minute, the rule of #1185), never while the
+  pointer is on it or it holds a follow-up.
 
 ## 9. Integrations
 
