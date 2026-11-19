@@ -2777,12 +2777,12 @@ it, one per line:
   beside them, and so does one in the only cell of a header (any header of one cell, not only one that
   holds an alignment change's mark); a body row that is a lone pipe stands for its empty cell and takes
   no pipe (#428).
-  A decision does the same: rejecting the author's own insertion that is all the text of the last cell
-  of a header with no closing pipe (or accepting the deletion of it, or rejecting another's
-  insertion) leaves the header a cell short of the delimiter row, and writes the pipe the cell needs,
-  plain, in the same decision (` |`, or `|` after a space that the line ends with). It is not written where
-  the decision changes the delimiter row too, as the decision of a column does, or where the header was no
-  table's (#428).
+  A decision never writes a closing pipe: it restores or accepts exactly (docs/hardening.md: all
+  rejected gives the original byte for byte), so a hand-made header with no closing pipe that is one
+  cell short of its delimiter row once the author's insertion that is all the text of its last cell
+  is rejected reads as no table again, as the file did before the insertion. The editor never writes
+  that file: a key that empties the cell writes the pipe (above), so the header it leaves is not
+  one cell short in either version (#428).
 - **A comment's or a highlight's markers in a table with a change pending** stand where no decision
   of that change becomes impossible (#376, #396). A marker after the closing pipe of a header is a
   cell too many, so the end goes in front of the pipe (and in front of a delimiter run that the

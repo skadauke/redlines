@@ -1,11 +1,13 @@
-// A decision that empties the last cell of a header with no pipe at its end writes the pipe the cell
-// needs (#428): rejecting the author's own insertion that is all the text of the last cell, for one.
-// Without it the header is a cell less than the delimiter row, and micromark reads no table.
+// The closing pipe of a bare header's last cell (#428). A key that empties the cell writes the pipe it
+// needs (#1055: `outerPipeWrites`), so a table that the editor writes never has the header one cell
+// short. A decision never writes a pipe: it restores or accepts exactly (docs/hardening.md, all
+// rejected gives the original byte for byte), so a hand-made header one cell short, which was no
+// table, reads as no table again once its insertion is rejected.
 
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
-import { expectEveryOrderRead, expectSound } from './oracle.ts';
+import { expectEveryOrderRead } from './oracle.ts';
 import { ada, bo, bodyOf, context, file } from './test-helpers.ts';
 import { trackedEdits } from './track.ts';
 import { newestView } from './views.ts';
@@ -15,19 +17,18 @@ const decided = (text: string, id: string, action: 'accept' | 'reject') =>
 
 const ROWS = '\n| --- | --- |\n| 1 | 2 |\n';
 
-describe('a header whose last cell a decision empties', () => {
+describe('a decision on a header whose last cell an insertion holds, in a hand-made file', () => {
   const headers: [string, string, string][] = [
-    ['with a leading pipe', '| a | <!--ins k3x9-->é<!--/k3x9-->', '| a | |'],
-    ['with no leading pipe', 'a | <!--ins k3x9-->é<!--/k3x9-->', 'a | |'],
-    ['with the cell’s text in two parts', '| a | <!--ins k3x9-->é é<!--/k3x9-->', '| a | |'],
+    ['with a leading pipe', '| a | <!--ins k3x9-->é<!--/k3x9-->', '| a | '],
+    ['with no leading pipe', 'a | <!--ins k3x9-->é<!--/k3x9-->', 'a | '],
+    ['with the cell’s text in two parts', '| a | <!--ins k3x9-->é é<!--/k3x9-->', '| a | '],
   ];
-  for (const [name, header, closed] of headers) {
-    it(`rejecting the insertion of its text writes the pipe, ${name}`, () => {
-      const start = file(header + ROWS.replace('--- | ---', '--- | ---'), { k3x9: '' });
-      expectEveryOrderRead(name, start);
+  for (const [name, header, original] of headers) {
+    it(`rejecting it restores the original exactly, with no pipe written, ${name}`, () => {
+      const start = file(header + ROWS, { k3x9: '' });
       const after = decided(start, 'k3x9', 'reject');
-      expect(bodyOf(after).split('\n')[0]).toBe(closed);
-      expectSound(name, start);
+      expect(bodyOf(after).split('\n')[0]).toBe(original);
+      expect(bodyOf(after)).toBe(`${original}${ROWS}`.replace(/\n$/, '\n\n'));
     });
     it(`accepting it leaves the header as it was, ${name}`, () => {
       const start = file(header + ROWS, { k3x9: '' });
@@ -35,17 +36,6 @@ describe('a header whose last cell a decision empties', () => {
       expect(bodyOf(after).split('\n')[0]).toBe(header.replace(/<!--[^]*?-->/g, ''));
     });
   }
-
-  it('is left alone where the header keeps its cells', () => {
-    const start = file('| a | b <!--ins k3x9-->é<!--/k3x9-->' + ROWS, { k3x9: '' });
-    expect(bodyOf(decided(start, 'k3x9', 'reject')).split('\n')[0]).toBe('| a | b ');
-  });
-
-  it('is left alone where the header was no table’s', () => {
-    // A line over a delimiter row with more cells than it has: a paragraph before and after.
-    const start = file('x <!--ins k3x9-->é<!--/k3x9-->' + ROWS, { k3x9: '' });
-    expect(bodyOf(decided(start, 'k3x9', 'reject')).split('\n')[0]).toBe('x ');
-  });
 });
 
 describe('a key that empties the last cell of a bare header (the half of #428 that #1055 fixed)', () => {

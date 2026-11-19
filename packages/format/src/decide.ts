@@ -47,7 +47,6 @@ import { tablesOfText } from './table.ts';
 import { colMarkIds, decideCols } from './table-cols.ts';
 import { isAlignMark, isAlignPoint } from './table-align.ts';
 import { wholeTableDeleted } from './table-bare.ts';
-import { closeBareHeaders } from './table-header-close.ts';
 import { decideRows, originalRowText, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, PayloadMarks, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalView, syntaxOnly } from './views.ts';
@@ -425,11 +424,7 @@ function decide(
   action: Action,
 ): TextChange[] {
   try {
-    // A header that a decision leaves a cell short (its last cell emptied) gets the pipe it needs (#428).
-    return closeBareHeaders(
-      text,
-      widenForKeys(text, parsed, marks, action, decideOnce(text, parsed, marks, action)),
-    );
+    return widenForKeys(text, parsed, marks, action, decideOnce(text, parsed, marks, action));
   } catch (error) {
     // A replacement that gives its old text back with other people's marks in it, where those marks
     // can't stand at the top level as they are (a deletion line with typed text after it): the
