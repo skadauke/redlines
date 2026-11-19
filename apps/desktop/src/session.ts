@@ -21,7 +21,7 @@ import {
   type WalRecord,
 } from '@redlines/collab';
 import type { Editor } from '@redlines/editor';
-import { PALETTE, syncEditor, syncText, type SyncBinding, type SyncState } from '@redlines/sync';
+import { syncEditor, syncText, type SyncBinding, type SyncState } from '@redlines/sync';
 
 /** What the app answers a window that joins a document's session. */
 export interface Joined {
@@ -260,7 +260,7 @@ export class PortLog implements DurableLog {
 /**
  * The number a window is known by in a session: the main window is the first, `doc-<n>` the one
  * after it. It comes from the label, so that the window that leads next gives every window the
- * same name and color as the one before it.
+ * same name as the one before it.
  */
 export function ordinalOf(label: string): number {
   const found = /(\d+)$/.exec(label);
@@ -269,7 +269,8 @@ export function ordinalOf(label: string): number {
 
 /**
  * Anyone in a session of this app's windows may be in it: they are the person's own. Each window is
- * named for its number, and has a color of its own that every window shows it in.
+ * named for its number. Its color is not chosen here: the others draw a window in its person's author
+ * color of the document, the same in every window of theirs (#1168).
  */
 function authenticateFor(person: { handle: string; name: string }) {
   return (credential: unknown): AuthResult => {
@@ -281,7 +282,6 @@ function authenticateFor(person: { handle: string; name: string }) {
       handle: person.handle,
       name: `${person.name} (window ${n})`,
       role: 'owner',
-      color: PALETTE[(n - 1) % PALETTE.length]!,
     };
   };
 }

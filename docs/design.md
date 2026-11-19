@@ -1937,11 +1937,13 @@ one session on one Mac, with no network, no account and no invitation.
 - **Save is once, after a pause.** The leader saves when the log has been quiet for a second and
   its own edits are confirmed. Save in another window asks the leader. A window closes without a
   question when the authority has everything it made; the leader that closes writes the file first.
-- **Each window is a person to the others.** It has a name ("Ada (window 2)") and a color of its own,
-  chosen by the authority and the same in every window, which follow the window through a
-  handover. The others show its caret with its name on a flag that fades after five seconds, and
-  its selection tinted, in that color. A caret is sent as a position in the confirmed text at a
-  version, and every window places it again among its own text, so it stays among the same words
+- **Each window is a person to the others.** It has a name ("Ada (window 2)"); its color is its
+  person's author color in the document (§5.5), the color their changes are drawn in, the same in
+  every window of that person and never one that another person has in that document (a person
+  the document doesn't know yet is gray). The others show its caret with its name on a flag that
+  fades after five seconds, and its selection tinted, in that color; while a selection lasts, its
+  caret and flag stay (#1168), so that it is clear who marked what. A caret is sent as a
+  position in the confirmed text at a version, and every window places it again among its own text, so it stays among the same words
   while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
   windows", or that edits are kept while the session can't be reached.
 - **Undo is each window's own.** A step knows whose it is, and a change that came from another window
