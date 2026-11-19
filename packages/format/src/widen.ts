@@ -934,8 +934,10 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
     if (!startsCode && !/^(?: {4}|\t)/.test(text.slice(start))) return false;
     let at = lineEnd(text, edit.to);
     for (let i = 0; i < 4 && at < text.length; i++) {
-      const next = lineEnd(text, at + 1);
-      if (LIST_LINE.test(text.slice(at + 1, next))) return true;
+      // (A line's end is at its CR in a file with CRLF line breaks: the next line starts after both.)
+      const from = at + (text[at] === '\r' ? 2 : 1);
+      const next = lineEnd(text, from);
+      if (LIST_LINE.test(text.slice(from, next))) return true;
       at = next;
     }
     return false;

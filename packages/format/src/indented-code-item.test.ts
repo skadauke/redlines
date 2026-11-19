@@ -7,14 +7,18 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { expectEveryOrderRead, expectSound } from './oracle.ts';
-import { ada, bodyOf, context, file } from './test-helpers.ts';
+import { acceptAll, rejectAll } from './decide.ts';
+import { ada, bodyOf, context, file, thread } from './test-helpers.ts';
 import { trackedEdits } from './track.ts';
 import { newestView } from './views.ts';
 
 const IDS = ['k3x9', 'w8nn', 'p5qm', 'q6rs'];
 
 function typed(body: string, find: string, offset: number, insert: string, length = 0): string {
-  const start = file(body);
+  // A file with CRLF line breaks has them in its ledger too.
+  const start = body.includes('\r\n')
+    ? file(body.replace(/\r\n/g, '\n')).replace(/\n/g, '\r\n')
+    : file(body);
   const at = newestView(start).text.indexOf(find) + offset;
   const changes = trackedEdits(
     start,
@@ -28,6 +32,8 @@ describe('indented code above an item that starts at a number other than 1', () 
   const cases: [string, string, string, number, string, number][] = [
     ['typing in the code, above 2.', '     a a\n2. review a', 'a a', 1, 'x', 0],
     ['deleting in the code, above 2.', '     a a\n2. review a', 'a a', 1, '', 1],
+    ['typing in the code, above 2., CRLF', '     a a\r\n2. review a', 'a a', 1, 'x', 0],
+    ['deleting in the code, above 2., CRLF', '     a a\r\n2. review a', 'a a', 1, '', 1],
     ['typing in the code, above 10.', '     a a\n10. review a', 'a a', 1, 'x', 0],
     [
       'typing in the code, above 3) and a text',
@@ -45,7 +51,7 @@ describe('indented code above an item that starts at a number other than 1', () 
         const after = typed(body, find, offset, insert, length);
         const text = bodyOf(after);
         // The item is in the substitution, not alone under its closer.
-        expect(text, after).not.toMatch(/-->\n\d{1,9}[.)] /);
+        expect(text, after).not.toMatch(/-->\r?\n\d{1,9}[.)] /);
         // micromark reads the file as it reads the newest view, in every order of decisions.
         expectEveryOrderRead(name, after);
         expectSound(name, after);
@@ -56,7 +62,27 @@ describe('indented code above an item that starts at a number other than 1', () 
 
   it('an item that starts at 1 stays out of the replacement', () => {
     const after = typed('     a a\n1. review a', 'a a', 1, 'x');
-    expect(bodyOf(after)).toMatch(/-->\n1\. review a/);
+    expect(bodyOf(after)).toMatch(/-->\r?\n1\. review a/);
     expectSound('1.', after);
+  });
+
+  it('takes a comment in the item with it, as every replacement does (§3.12)', () => {
+    // The comment is in the replacement's old text: rejecting gives it back whole, and accepting
+    // leaves a point comment at the start of the new text, with its thread.
+    const start = file('     a a\n2. review <!--cmt c8d2-->a<!--/c8d2--> a', {}, thread('c8d2'));
+    const at = newestView(start).text.indexOf('a a') + 1;
+    const changes = trackedEdits(
+      start,
+      [{ from: at, to: at, insert: 'x' }],
+      context(ada, IDS),
+    ).changes;
+    const after = applyChanges(start, changes);
+    expectEveryOrderRead('comment', after);
+    expect(bodyOf(applyChanges(after, rejectAll(after))).trimEnd()).toBe(
+      '     a a\n2. review <!--cmt c8d2-->a<!--/c8d2--> a',
+    );
+    const accepted = bodyOf(applyChanges(after, acceptAll(after)));
+    expect(accepted).toMatch(/^<!--cmt c8d2-->\n/);
+    expect(applyChanges(after, acceptAll(after))).toContain('c8d2:');
   });
 });
