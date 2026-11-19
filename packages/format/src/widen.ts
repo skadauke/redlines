@@ -265,8 +265,17 @@ function widenIn(
       sorted.some(
         (edit) => edit.insert.includes('\n') || text.slice(edit.from, edit.to).includes('\n'),
       ) && /^(?: {4,}|\t)\S|^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to));
+    // Indented code with a list line close below it: the code's replacement puts its closer's line
+    // between them, and micromark reads an item that doesn't start at 1 as one after it, and as text
+    // after the code without it (#601). The item is outside the paragraph that the change is in, so
+    // the whole file is read.
+    const codeAboveItem = boundary && closed.kind === 'code';
     const kept =
-      done && !((fromSpare || fenced || broken) && readsOtherMicromark(text, done.changes))
+      done &&
+      !(
+        (fromSpare || fenced || broken || codeAboveItem) &&
+        readsOtherMicromark(text, done.changes, codeAboveItem)
+      )
         ? done
         : undefined;
     if (kept && (!beside || kept.touchingOthers.length === 0)) return kept;
@@ -920,8 +929,8 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
       /^(?: {4}|\t)/.test(edit.insert) &&
       prefix === '' &&
       /^[ \t]*(?:<!--[^]*?-->[ \t]*)*(?:\r?\n|$)/.test(text.slice(edit.to));
-    // Text typed in indented code or an item's text never changes the blocks: only a line break can.
-    if (!startsCode && !edit.insert.includes('\n') && edit.from === edit.to) return false;
+    // (Text typed in indented code is written as the whole code block, whose closer's line then
+    // stands between the code and a list line below it: that is read too, #601.)
     if (!startsCode && !/^(?: {4}|\t)/.test(text.slice(start))) return false;
     let at = lineEnd(text, edit.to);
     for (let i = 0; i < 4 && at < text.length; i++) {
