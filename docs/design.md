@@ -1223,9 +1223,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   letting go moves it there as one step (tracked as a move with Track Changes on), and Escape lets it
   go. The press must go 24 px before the table can drop anywhere, so that a shaking hand moves
   nothing. A Quarto or Pandoc caption (a `:` paragraph after the table) moves with it. With Track
-  Changes on a table moves only past the block above or below it, as ⌥↑ and ⌥↓ take it, since a
-  tracked move to a gap further away is not yet written so that it reads as a table in every order of
-  decisions; the hint says so. It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
+  Changes on it goes to any gap too: a tracked move of a table is written with its rows unsplit
+  (format §3.14, #1279). It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
   A grip's menu is used from the keyboard: Down, Up and Tab choose an item, which looks as one under
   the pointer, Return runs it and Escape closes the menu.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:

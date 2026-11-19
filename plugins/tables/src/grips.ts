@@ -38,7 +38,6 @@ import {
   rowTitles,
   selectedCells,
   tablesOf,
-  trackingField,
   touchedCols,
   touchedRows,
   type Table,
@@ -663,12 +662,7 @@ class Grips {
       if (which === 'selectAll') {
         el.className = 'rl-table-select';
         el.append(moveIcon());
-        this.hint(
-          el,
-          this.view.state.field(trackingField, false)
-            ? 'Select the table, or drag it past the block above or below'
-            : 'Select the table, or drag it',
-        );
+        this.hint(el, 'Select the table, or drag it');
       } else {
         el.className = `rl-edge-add ${which === 'addCol' ? 'rl-edge-col' : 'rl-edge-row'}`;
         el.textContent = '+';
