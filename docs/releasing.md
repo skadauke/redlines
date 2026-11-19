@@ -265,7 +265,7 @@ same script builds, signs and checks both, and `bundle.macOS.files` copies both.
   compiler the renderer is several times slower (5 to 8 times measured: 100 KB takes 1.3 seconds
   instead of 0.2, and a 1.6 MB file 4 seconds instead of 0.5, more when the Mac is busy), which a
   long document turns from a moment into a wait.
-- **Checks.** `scripts/build-quicklook --check` (CI's `quicklook` job on a Mac) builds it, runs the
+- **Checks.** `scripts/build-quicklook --check` (run on the dev Mac, or by CI's `quicklook` job when `ci.yml` is dispatched with `-f mac=true`) builds it, runs the
   renderer in the system's JavaScriptCore on the fixtures of `apps/desktop/quicklook/fixtures`
   (a plain file, one with tracked changes and comments, front matter, tables, R Markdown and Quarto
   chunks, a large file), loads the images of a project made for the purpose (those it may load, and
