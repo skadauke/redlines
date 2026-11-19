@@ -23,4 +23,4 @@ export function versionLine(about: About): string {
 }
 
 /** The copyright line, which is the license's own (LICENSE). */
-export const COPYRIGHT = 'Copyright © 2026 skadauke';
+export const COPYRIGHT = 'Copyright © 2026 Stephan Kadauke';

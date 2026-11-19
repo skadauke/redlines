@@ -115,8 +115,9 @@ from this table.
 
 The Mac app is built; Windows and Linux are planned (§10). Live collaboration with people is built between windows of one Mac and planned across networks (§7). The editor is not yet published as a
 package others can embed: the packages are private, and the website's embed is a demo. R Markdown
-and Quarto files are edited with their divs, callouts, citations, cross-references and includes
-drawn; running their code cells is not what Redlines does. Several windows of one document on one
+and Quarto files are edited with their divs, callouts, citations, cross-references, includes and
+math (`$x^2$`, `$$ … $$`, in Markdown files too, drawn as MathML by Temml, which the app loads when a
+document has a formula, #1173) drawn; running their code cells is not what Redlines does. Several windows of one document on one
 Mac work, but live collaboration with people means people on different computers.
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
@@ -226,6 +227,11 @@ The window, on the desktop:
   written to a crash log in the app's log folder, and a gray notification offers Report…, a
   filled-in GitHub issue for the person to read and send (the build, the system, the trace and the
   document's shape, never its text), and Reveal Log; Help has both (Report a Problem…, Reveal Log).
+  A build that isn't a release also keeps a dev log (`dev.log`, beside the crash log): a rolling line
+  for each refusal, alert, error, agent run and keystroke that took over 100 ms, never a document's
+  text or a secret, and Help › Write to Log… adds the person's note with a snapshot (the document's
+  hash, the selection, the last keys by name, never the letters). A release build has no dev log and
+  no such rows (`redlines_release`, as for the updater).
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits. A
@@ -317,16 +323,29 @@ The window, on the desktop:
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
-- **A toolbar, shown only when summoned** (#504). It is summoned three ways. The wrench in the
-  title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
-  puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
-  in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
-  at the pointer, where it takes the place of the system's context menu. A docked toolbar stays
+- **The outline button** (#1193). The first of the three icons at the right of the title bar, left
+  of the eye, opens the outline as a window under the button, over the page, and puts it away
+  (pressed while it shows). It lists every heading, goes to one on a click and then goes away, and
+  goes away on Esc or a press elsewhere. It reaches the outline at every text size: the outline in
+  the left margin has no room at the largest sizes, and the window does not depend on the margin.
+  (It took the place of the wrench, which showed the toolbar docked: the toolbar is summoned as
+  below, and Preferences keeps it docked.)
+- **A toolbar, shown only when summoned** (#504). It is summoned two ways, and Preferences can keep
+  it docked. ⇧⌘P (Show Toolbar, in the View menu) shows it at the caret and puts it away, with the
+  keyboard in it. A right-click shows it
+  at the pointer, where it takes the place of the system's context menu. Both open the same bar: on
+  a change, a comment or a highlight, that place's review card (who, what, and Accept and Reject,
+  Resolve and Reply, or Remove) is stacked above the bar in the same card, under the spelling rows;
+  a click on a highlight opens its card alone, and ⇧⌘P at the caret or selection opens what a
+  right-click there opens. The card is the place's at the caret, which is the selection's head
+  (a right-click's is the point clicked), and the selection keeps its highlight while the bar is
+  open. With the keys, the card's first button is where the keyboard enters, and ← and → move
+  along its row. A docked toolbar stays
   while you write, scroll, resize the window or click in the text (Esc, with the keyboard in
   it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
   elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›
   Editor › Show the toolbar at the bottom keeps it docked from the start, for those who want it
-  always shown; the wrench still puts it away for that window. Nothing else is drawn at the bottom
+  always shown. Nothing else is drawn at the bottom
   of the window to summon it (the handle that was there is gone, decided on 2026-11-15). It is a
   small card in one row: **Ask | Insert · Review · [List] · [Table] · [Image] · Format · Edit**, a vertical line after
   Ask. Each name opens a menu on a click (hovering from one open menu to another switches menus),
@@ -505,6 +524,8 @@ Redlines covers everything in the Markdown Guide's
   which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
+- **Heading attributes:** in `.qmd` and `.Rmd`, the `{#sec-intro}` after a heading's text is a small gray chip
+  (the interface's small size, never the heading's), with its source shown while the caret is in it.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
 - **Emoji:** the character itself in every file type, because shortcodes don't render in pandoc,
   Quarto or VS Code. Typing `:` and two letters lists the emoji whose names (gemoji's, GitHub's
@@ -646,9 +667,11 @@ no ledger, and no view or tracking recorded. An agent reads and writes the file 
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
   with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
-  text. In the simple look, a click on a change, on its colored text or on its bar, opens that
+  text. In the simple look, a click on a change's colored text opens that
   change's card with Accept and Reject (the card says what a hidden deletion was: #664); a click on
-  a bar in the full markup, and the switch, switch from the one look to the other, with the line where it was (a
+  a bar, in either look, and the switch, switch from the one look to the other, so that Simple is
+  never a place with no way back (#1156): the Redlines row of the title bar's View menu and ⌥⌘2 go
+  back from it too, each with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
@@ -1124,7 +1147,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   menu (Insert Above and Below, Delete, Delete Table, Move Up and Down, Clear Contents), Esc closes
   it and keeps the selection; a drag moves the rows, and the others selected with it, to any
   boundary, the last included: nothing is highlighted while it lasts, the rows dim, a copy follows
-  the pointer, a 3 px gray line (the theme's `--rl-ink-2`) marks the drop and shows only where the
+  the pointer, a 3 px faint blue line (the theme's `--rl-drop`, the one drop marker of the blocks, the table, the rows and the pictures) marks the drop and shows only where the
   rows would go, never at their own place, the page scrolls near its edges, Esc cancels. A + shows
   within 8 px of a row boundary in the strip beside the table, with a thin line across it, and a
   press inserts a row there.
@@ -1280,7 +1303,7 @@ key the person chose beats a binding of the editor's or a plugin's own.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
-| Show the toolbar               | ⇧⌘P (at the caret; the title bar's wrench docks it)                                           | Ctrl+Shift+P              |
+| Show the toolbar               | ⇧⌘P (at the caret; Preferences can dock it)                                           | Ctrl+Shift+P              |
 | Show the outline               | ⌃⌘O (View › Show Outline: opens the list and puts the focus on the heading you are reading)  | —                         |
 | Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
@@ -1328,7 +1351,10 @@ reads a `.docx` with its revisions and comments (#840) and maps the result to Ma
 marks and ledger (#866), and has Google Docs' differences (#838). File › Export to Word… calls
 the writer (#841) and File › Open .docx… the reader (#881; pictures are carried into the images folder after a save panel, #885); the full Word
 round trip is still to be wired in, and Copy for Word as a command of its own is not built (an
-ordinary copy writes the HTML that Word and Docs draw well); File › Print and Export as PDF are built.
+ordinary copy writes the HTML that Word and Docs draw well: Arial like the export, a task item as a
+paragraph of its own and not an item of the bullet list above it, a table 6.5 in wide, a code block
+shaded gray, and a quote's paragraphs in `class=MsoQuote`, which Word reads as its "Quote" style,
+#1181); File › Print and Export as PDF are built.
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
@@ -1468,7 +1494,7 @@ a new email under the same name becomes an alias in the ledger
 **Should (v1 if time allows):**
 
 - a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the toolbar (§5.1), which
-  opens from the title bar's wrench, on ⇧⌘P and on right-click rather than floating over a
+  opens on ⇧⌘P and on right-click rather than floating over a
   selection by itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in
   it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
@@ -1725,7 +1751,7 @@ app's File › Print and Export as PDF are its own).
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
-| `toolbar`    | The toolbar: the title bar's wrench, right-click and ⇧⌘P (§5.1) | —               |
+| `toolbar`    | The toolbar: right-click and ⇧⌘P (§5.1) | —               |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 
@@ -1945,8 +1971,10 @@ one session on one Mac, with no network, no account and no invitation.
   fades after five seconds, and its selection tinted, in that color; while a selection lasts, its
   caret and flag stay (#1168), so that it is clear who marked what. A caret is sent as a
   position in the confirmed text at a version, and every window places it again among its own text, so it stays among the same words
-  while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
-  windows", or that edits are kept while the session can't be reached.
+  while text moves; nothing of it is stored. Beside the document's name, set apart from it in
+  regular italic where the name is bold, the title bar says which window this is, "Window 2", as
+  Word numbers the windows of one document (a tab with no number of its own says "In 2 windows"),
+  or that edits are kept while the session can't be reached.
 - **Track Changes is the document's.** Turning it on or off in one window turns it on or off in
   every window of the document, with the toggle and the "Track Changes on" notice in each. A window
   that joins takes the leader's setting. The window says it to the others as an event between
@@ -2288,10 +2316,20 @@ copy only, never the plugin, and the Claude Code row says to keep one. Publishin
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks
-a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a sheet
+a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a window of
+its own, larger than Preferences and resizable, which Preferences › Agents and the @ picker (its
+last row, while no OpenClaw agent is connected) open
 ([research note](research/openclaw-connection.md), screens 1 to 7, and a gray card for every
 failure): whether this Mac has Tailscale installed, is signed in and sees other computers
-(`tailscale status --json`, read only: Redlines never starts, stops or changes Tailscale); which
+(`tailscale status --json`, read only), and, where something is missing, does most of the setting up itself,
+only from that window and only when the person presses the button: it downloads Tailscale's
+package from pkgs.tailscale.com, checks that Tailscale signed it (Apple team W5364U7YZB) and Apple
+notarized it, refuses in plain words if either fails, and installs it with macOS's own
+administrator prompt (never a password field of Redlines'; the App Store page for a person who is
+not an administrator); opens the app and waits for its network extension, saying where in System
+Settings to allow it; starts the sign-in and opens its page; and restarts Tailscale's app once
+after a fresh install, and when the sign-in hangs (the app started before its extension and never
+connected to it). Which
 computer, found by opening its WebSocket and reading its greeting (nothing is sent); a prompt to
 send the person's agent, which holds no secret and asks for the private road only (Tailscale
 Serve, auth on, one command, the tools for one agent); a secure field for the setup code the agent
@@ -2743,7 +2781,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
   line over its code. HTML is drawn from the same allowed list as Clean (§5.2), never live: no script,
   no style, and nothing the document can make load. Quarto divs are drawn too (a `.callout-*` div is a
-  quiet labelled box, any other div its text). An image that is a file in the
+  quiet labelled box, any other div its text). In a `.qmd` or `.Rmd` file the preview draws what the editor
+  draws of Quarto's syntax (`quarto.ts`): the attributes of a heading, a figure or a formula as a small
+  gray chip, a table's caption with its label ("Table 1:"), a cross-reference as its target's label
+  ("Figure 1") with a fine dotted underline, and `H~2~O` and `x^2^` as a subscript and a superscript. An image that is a file in the
   document's project is drawn, an `<img>` tag at its `width` and `height` when these are digits; any other is its alt text, and one from a server is never loaded.
   - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
     `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.

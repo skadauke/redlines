@@ -17,8 +17,9 @@ export default defineConfig({
   build: {
     rollupOptions: {
       // The app's window, the window that asks to install the app from its disk image, Preferences
-      // and About Redlines.
+      // About Redlines and the OpenClaw setup.
       input: {
+        'openclaw-setup': resolve(import.meta.dirname, 'openclaw-setup.html'),
         main: resolve(import.meta.dirname, 'index.html'),
         install: resolve(import.meta.dirname, 'install.html'),
         preferences: resolve(import.meta.dirname, 'preferences.html'),
