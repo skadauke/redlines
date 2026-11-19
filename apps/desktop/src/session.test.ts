@@ -147,6 +147,7 @@ async function windowOn(app: FakeApp, label: string, doc: string): Promise<Windo
       heardTracking.push(on);
       editor.setTracking(on, { inFile: false });
     },
+    tracking: () => editor.getUiState().tracking,
     saveDelayMs: 20,
   });
   return { label, editor, session, saved, told, notices, heardTracking };
@@ -233,6 +234,18 @@ describe('a document in two windows', () => {
     expect(tracking()).toEqual([false, false]);
     expect(two.heardTracking).toEqual([true]);
     expect(one.heardTracking).toEqual([false]);
+  });
+
+  it('gives a window that joins the leader’s Track Changes setting (#1166)', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    one.editor.setTracking(true, { inFile: false });
+    const two = await windowOn(app, 'doc-2', '');
+    await settle(one, two);
+    for (const w of [one, two]) w.editor.view.dispatch({ selection: { anchor: 2 } });
+    await wait(400);
+    expect(two.editor.getUiState().tracking).toBe(true);
+    expect(two.heardTracking).toEqual([true]);
   });
 
   it('keeps a file with CRLF line breaks as it is, in both windows, with no edit taken back (#1057)', async () => {

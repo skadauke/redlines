@@ -250,12 +250,10 @@ async function beginSession(path: string, follow = false): Promise<void> {
       render();
     },
     onPeers: (peers) => {
-      const joined = peers.length > sessionPeers;
       sessionPeers = peers.length;
       render();
-      // A window that joined takes the document's choice: the leader says it to all.
-      if (joined && session?.leading) void session.shareTracking(editor.getUiState().tracking);
     },
+    tracking: () => editor.getUiState().tracking,
     onTracking: (on) => {
       if (editor.getUiState().kind === 'plain-only' || on === editor.getUiState().tracking) return;
       setTrackingHere(on);

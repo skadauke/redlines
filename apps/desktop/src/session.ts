@@ -87,6 +87,8 @@ export interface SessionOptions {
   onPeers?(peers: readonly Peer[]): void;
   /** Another window of the document turned Track Changes on or off: it is the document's. */
   onTracking?(on: boolean): void;
+  /** Whether Track Changes is on in this window now: the leader tells it to a window that joins. */
+  tracking?(): boolean;
   notice?(message: string): void;
   /**
    * The window has no text of its own and joins a session that is there: if there is none, it
@@ -493,6 +495,7 @@ export async function joinSession(
     if (text !== null) options.onSaved?.(text);
   });
 
+  let knownPeers = 0;
   const binding = syncEditor(editor, {
     transport,
     clientID,
@@ -501,7 +504,14 @@ export async function joinSession(
     ...(leading && hub ? { version: hub.authority.version } : {}),
     notice: (message) => options.notice?.(message),
     onState: (state) => options.onState?.(state),
-    onPeers: (peers) => options.onPeers?.(peers),
+    onPeers: (peers) => {
+      // A window joined: the leader tells it, and the others, whether Track Changes is on.
+      if (leading && peers.length > knownPeers && options.tracking) {
+        void session.shareTracking(options.tracking());
+      }
+      knownPeers = peers.length;
+      options.onPeers?.(peers);
+    },
     onLoaded: () => options.onLoaded?.(),
     retryMs: 500,
   });
