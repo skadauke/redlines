@@ -672,8 +672,79 @@ function edited(
     ) {
       throw new EditError(ACCEPT_FIRST, 'no-legal-placement');
     }
+    // Where it is a comment's or a highlight's marker that stands between the delimiter and its
+    // neighbor (nothing to accept: those are no changes), the marker is moved across the run, so
+    // that the delimiter stands against its neighbor in the file as in the view; the range of the
+    // comment or highlight then takes the run in or leaves it out (#1140).
+    if (
+      !half &&
+      changes.length > 0 &&
+      atDelimiter(text, changes) &&
+      readsOtherMicromark(text, changes)
+    ) {
+      return shiftedMarkers(text, changes) ?? changes;
+    }
     return changes;
   });
+}
+
+/**
+ * `changes` with a comment's or a highlight's marker moved across the delimiter run that it parts
+ * from its neighbor, where that makes micromark read the file as its newest view; null where no
+ * move does. One marker is tried at a time, the nearest first.
+ */
+function shiftedMarkers(text: string, changes: readonly TextChange[]): TextChange[] | null {
+  const file = applyChanges(text, changes);
+  const parsed = parse(file);
+  const spans: Range[] = [];
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'hl' && mark.kind !== 'cmt') continue;
+    for (const segment of mark.segments) {
+      spans.push({ from: segment.open.from, to: segment.open.to });
+      if (segment.close) spans.push({ from: segment.close.from, to: segment.close.to });
+    }
+  }
+  const run = /[*_~]+/;
+  for (const span of spans) {
+    const marker = file.slice(span.from, span.to);
+    const before = run.exec(
+      file.slice(Math.max(0, span.from - 8), span.from).match(/[*_~]+$/)?.[0] ?? '',
+    )?.[0];
+    const after = file.slice(span.to).match(/^[*_~]+/)?.[0];
+    const candidates: string[] = [];
+    if (before) {
+      candidates.push(
+        file.slice(0, span.from - before.length) + marker + before + file.slice(span.to),
+      );
+    }
+    if (after) {
+      candidates.push(
+        file.slice(0, span.from) + after + marker + file.slice(span.to + after.length),
+      );
+    }
+    for (const candidate of candidates) {
+      let start = 0;
+      while (start < text.length && start < candidate.length && text[start] === candidate[start])
+        start++;
+      let end = 0;
+      while (
+        end < text.length - start &&
+        end < candidate.length - start &&
+        text[text.length - 1 - end] === candidate[candidate.length - 1 - end]
+      ) {
+        end++;
+      }
+      const moved = [
+        {
+          from: start,
+          to: text.length - end,
+          insert: candidate.slice(start, candidate.length - end),
+        },
+      ];
+      if (!readsOtherMicromark(text, moved)) return moved;
+    }
+  }
+  return null;
 }
 
 /** A key as pandoc reads it, `@fig-x` or `@smith2020` (the same as inline.ts's). */

@@ -1091,6 +1091,64 @@ const MOST_NEAR_MARKS = 4;
 const MOST_STATES = 100;
 
 /**
+ * Whether the marks of the paragraphs from `first` to `last` of `file` (four at most) give another
+ * text in one order of deciding them than in another, each decision the same: a change that is
+ * written with its block breaks as syntax (a deletion of a paragraph, an insertion of one) leaves a
+ * blank line behind in some orders and not in others (#1136). Each state is read exactly, not by
+ * micromark; the file is cut to the stretch with the ledger after it.
+ */
+export function ordersDifferNear(file: string, first: number, last: number): boolean {
+  const parsed = parse(file);
+  const end = parsed.ledgerRange?.from ?? file.length;
+  const from = Math.max(0, file.lastIndexOf('\n\n', Math.max(0, first - 1)) + 2);
+  const after = file.indexOf('\n\n', Math.min(last, end));
+  const to = after < 0 || after > end ? end : after;
+  const ids = [
+    ...new Set(
+      parsed.marks
+        .filter(
+          (mark) =>
+            mark.kind !== 'cmt' &&
+            mark.kind !== 'hl' &&
+            mark.segments.some((g) => g.open.from >= from && (g.close?.to ?? g.open.to) <= to),
+        )
+        .map((mark) => mark.id),
+    ),
+  ];
+  if (ids.length === 0 || ids.length > 4) return false;
+  const orders = (list: string[]): string[][] =>
+    list.length <= 1
+      ? [list]
+      : list.flatMap((id, i) =>
+          orders([...list.slice(0, i), ...list.slice(i + 1)]).map((rest) => [id, ...rest]),
+        );
+  const every = orders(ids);
+  for (let mask = 0; mask < 1 << ids.length; mask++) {
+    const results = new Set<string>();
+    for (const order of every) {
+      let current = file;
+      let refused = false;
+      for (const id of order) {
+        if (!parse(current).marks.some((mark) => mark.id === id)) continue;
+        try {
+          current = applyChanges(
+            current,
+            ((mask >> ids.indexOf(id)) & 1 ? accept : reject)(current, id),
+          );
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          refused = true;
+          break;
+        }
+      }
+      if (!refused) results.add(current);
+    }
+    if (results.size > 1) return true;
+  }
+  return false;
+}
+
+/**
  * Whether `file`, a write that took in text of another person's format change, reads otherwise than
  * its newest view (micromark) in some order of deciding the marks of the paragraph or paragraphs
  * from `first` to `last`, or has more than four of them, or more states than are read, or a mark

@@ -141,6 +141,7 @@ import {
   atBlockBoundary,
   atDelimiter,
   delimiterBesideBreak,
+  ordersDifferNear,
   ordersReadOtherwiseNear,
   readsOtherMicromark,
 } from './widen.ts';
@@ -5601,7 +5602,11 @@ function editsWidening(
         if (!widening && hardBreakBesideDeletionReadsOtherwise(text, edits, written.changes)) {
           throw new ReadsOtherwise();
         }
-        if (widening && readsOtherAtBoundary(text, edits, written.changes)) {
+        if (
+          widening &&
+          (readsOtherAtBoundary(text, edits, written.changes) ||
+            delimiterOrdersDiffer(text, edits, written.changes))
+        ) {
           // A write the format accepts that a reader of the file reads otherwise than the newest
           // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
           // can't be.
@@ -5645,6 +5650,25 @@ function editsWidening(
     if (whole && !readsOtherMicromark(text, whole.changes)) return whole;
     throw error;
   }
+}
+
+/**
+ * Whether a delimiter typed or taken out beside another person's mark is written so that the marks
+ * give another text in one order of decisions than in another (#1136): the unit is replaced.
+ */
+function delimiterOrdersDiffer(
+  text: string,
+  edits: readonly TextChange[],
+  changes: readonly TextChange[],
+): boolean {
+  if (!atDelimiter(text, edits)) return false;
+  // A write that micromark reads otherwise than the newest view as it stands, or in some order of
+  // deciding its marks, or whose orders leave other texts (#1135, #1136).
+  if (readsOtherMicromark(text, changes)) return true;
+  const after = applyChanges(text, changes);
+  const first = Math.min(...changes.map((change) => change.from));
+  const last = Math.max(...changes.map((change) => change.from + change.insert.length));
+  return ordersReadOtherwiseNear(after, first, last) || ordersDifferNear(after, first, last);
 }
 
 /**
