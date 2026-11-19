@@ -22,7 +22,7 @@ test.describe('inserting blocks @blocks', () => {
     start,
   }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
-    await j.page.locator('.rl-wrench-button').click();
+    await j.dockToolbar();
 
     // Below: the caret in the middle of a sentence leaves the sentence whole.
     await j.caretAfter('Second paragraph');
@@ -48,7 +48,7 @@ test.describe('inserting blocks @blocks', () => {
 
   test('wraps two selected paragraphs in a quote, and Undo takes it back', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
-    await j.page.locator('.rl-wrench-button').click();
+    await j.dockToolbar();
     await j.selectText('paragraph of text.\n\nSecond paragraph');
     await j.shot('selected');
     await insert(j, 'insert.quote');

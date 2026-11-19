@@ -1,12 +1,16 @@
-// What the OpenClaw setup sheet and the agent's card show in a plain page in development
-// (`pnpm dev`, preferences.html), where there is no app to ask: every answer is scripted from the
+// What the OpenClaw setup window and the agent's card show in a plain page in development
+// (`pnpm dev`, openclaw-setup.html and preferences.html), where there is no app to ask: every answer is scripted from the
 // address, so that each screen and each failure can be looked at, in light and dark, and the
 // journeys can be walked. Never in a release build, and never in the app.
 //
-//   preferences.html?oc=<screen>&ts=<tailscale>&probe=<gateway>&node=<connection>&dark
+//   openclaw-setup.html?oc=<screen>&ts=<tailscale>&probe=<gateway>&node=<connection>&dark
 //
-//   oc     start | mac | computer | prompt | approve | test | card (the agent's card, no sheet)
-//   ts     missing | off | signed-out | no-peers | blocked | ready (the default)
+//   oc     start | mac | computer | prompt | approve | test | failures (every failure card), or
+//          card, on preferences.html: the agent's card in Preferences › Agents
+//   ts     missing | off | signed-out | no-peers | blocked | no-https | ready (the default)
+//   discover=1  with no `oc`: look around first, as the app does (then `probe=` says what answers)
+//   mac    what the setup has done about Tailscale, for the waits: installing | app-store |
+//          install-failed | waiting | allow | signing-in | hung | still-hung
 //   probe  found (default) | silent | none
 //   node   connecting | pairing (default) | connected | code-used | not-approved | tools | newer
 //   test   1: the test screen can run (otherwise the app's own, which can't yet)
@@ -15,6 +19,8 @@ import {
   FAILURE_IDS,
   failure,
   type GuidedDeps,
+  type SheetDeps,
+  type MacSetup,
   type NodeStatus,
   type OpenClawConnection,
   type TailscaleStatus,
@@ -44,6 +50,8 @@ function tailscaleFor(kind: string): TailscaleStatus {
     ],
     blocked: false,
     health: [],
+    https: true,
+    allow_in: 'System Settings › General › Login Items & Extensions › Network Extensions',
   };
   switch (kind) {
     case 'missing':
@@ -68,6 +76,8 @@ function tailscaleFor(kind: string): TailscaleStatus {
       };
     case 'no-peers':
       return { ...ready, state: 'no-peers', peers: [] };
+    case 'no-https':
+      return { ...ready, https: false };
     case 'blocked':
       return {
         ...ready,
@@ -99,8 +109,49 @@ function nodeFor(kind: string): NodeStatus {
   }
 }
 
+/**
+ * What the setup has already done about Tailscale on this Mac, for a look at the screens that
+ * depend on a wait (`?mac=`): times in the past, so that the wait is over.
+ */
+export function macSetupFor(query: URLSearchParams): Partial<MacSetup> {
+  const past = Date.now() - 60_000;
+  switch (query.get('mac')) {
+    case 'installing':
+      return {
+        install: {
+          phase: 'working',
+          step: 'Downloading Tailscale 1.80.2 (about 29 MB) from pkgs.tailscale.com…',
+        },
+      };
+    case 'app-store':
+      return {
+        install: {
+          phase: 'app-store',
+          step: 'You aren’t an administrator of this Mac, so Redlines can’t install Tailscale’s package. The App Store is open on Tailscale: install it there, and Redlines notices.',
+        },
+      };
+    case 'install-failed':
+      return {
+        install: {
+          phase: 'failed',
+          step: 'The download isn’t signed by Tailscale, so it wasn’t installed.',
+        },
+      };
+    case 'waiting':
+      return { openedAt: Date.now() };
+    case 'allow':
+      return { openedAt: past };
+    case 'signing-in':
+      return { signInAt: Date.now() };
+    case 'hung':
+      return { signInAt: past, restarts: 1 };
+    default:
+      return {};
+  }
+}
+
 /** The scripted answers for `query`, as the sheet and the card ask for them. */
-export function devGuided(query: URLSearchParams): GuidedDeps {
+export function devGuided(query: URLSearchParams): GuidedDeps & SheetDeps {
   const ts = query.get('ts') ?? 'ready';
   const probe = query.get('probe') ?? 'found';
   const node = query.get('node') ?? 'pairing';
@@ -125,12 +176,23 @@ export function devGuided(query: URLSearchParams): GuidedDeps {
   const where = (handle: string) => list.find((one) => one.handle === handle);
   return {
     owner: 'ada',
+    openSetup: () => void window.open(`/openclaw-setup.html${location.search}`, '_blank'),
     taken: () => ['claude-ada', 'codex-ada', ...list.map((one) => one.handle)],
     thisMac: () => Promise.resolve('Ada’s MacBook'),
     tailscale: {
-      status: () => Promise.resolve(tailscaleFor(ts)),
+      // A sign-in that hangs is one for which Tailscale gave no page.
+      status: () =>
+        Promise.resolve({
+          ...tailscaleFor(ts),
+          ...(query.get('mac') === 'hung' ? { auth_url: null } : {}),
+        }),
       openApp: () => Promise.resolve(),
-      download: () => Promise.resolve(),
+      openHttpsSettings: () => Promise.resolve(),
+      install: () => Promise.resolve(),
+      installState: () =>
+        Promise.resolve(macSetupFor(query).install ?? { phase: 'idle', step: '' }),
+      openAppStore: () => Promise.resolve(),
+      restartApp: () => Promise.resolve(),
       signIn: () => Promise.resolve(),
     },
     probe: (address) => {
