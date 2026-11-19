@@ -21,13 +21,20 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from '@redlines/formatting';
 import { createTables } from '@redlines/tables';
 import { peersShown, syncEditor, syncText } from './index.ts';
+import { colorsOf } from '@redlines/editor';
+import { FLAG_MS, showPeers } from './presence.ts';
 import type { SyncBinding } from './index.ts';
 
 const BASE = 'First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.\n';
 
 const people: Record<string, Identity> = {
-  ada: { handle: 'ada', name: 'Ada (window 1)', role: 'owner', color: 'p1' },
-  bo: { handle: 'bo', name: 'Bo (window 2)', role: 'editor', color: 'p2' },
+  ada: { handle: 'ada', name: 'Ada (window 1)', role: 'owner' },
+  bo: { handle: 'bo', name: 'Bo (window 2)', role: 'editor' },
+  'claude-skadauke': {
+    handle: 'claude-skadauke',
+    name: 'Claude (window 3)',
+    role: 'editor',
+  },
 };
 
 /** A random source with a stream of its own. */
@@ -48,13 +55,13 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function window(hub: Hub, who: 'ada' | 'bo', doc: string, hosts: boolean) {
+function window(hub: Hub, who: string, doc: string, hosts: boolean) {
   const parent = document.createElement('div');
   document.body.append(parent);
   const said: string[] = [];
   const editor = createEditor(parent, {
     doc,
-    author: { handle: who, name: who === 'ada' ? 'Ada' : 'Bo' },
+    author: { handle: who, name: who },
     tracking: true,
     extensions: [
       EditorView.updateListener.of((update) => {
@@ -308,13 +315,75 @@ describe('the other window’s caret', () => {
     await settle(ada.binding, bo.binding);
     const peers = peersShown(bo.editor.view);
     expect(peers).toHaveLength(1);
-    expect(peers[0]).toMatchObject({ name: 'Ada (window 1)', color: 'p1' });
+    expect(peers[0]).toMatchObject({ name: 'Ada (window 1)' });
     const text = bo.editor.view.state.doc.toString();
     expect(text.slice(peers[0]!.anchor, peers[0]!.head)).toBe(doc.slice(at, at + 6));
-    // Ada sees Bo in Bo’s color.
+    // Ada sees Bo.
     bo.editor.view.dispatch({ selection: { anchor: 3 } });
     await until(() => peersShown(ada.editor.view).length === 1);
-    expect(peersShown(ada.editor.view)[0]).toMatchObject({ name: 'Bo (window 2)', color: 'p2' });
+    expect(peersShown(ada.editor.view)[0]).toMatchObject({ name: 'Bo (window 2)' });
+  });
+
+  it('draws a person in their author color of the document, never one that another person has here (#1168)', async () => {
+    const base = `${BASE}\n<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada}\n  claude-skadauke: {name: Claude}\n-->\n`;
+    const hub = new Hub(
+      new Authority({
+        base,
+        authenticate: (credential) =>
+          'key' in credential
+            ? (people[credential.key] ?? { error: 'forbidden' })
+            : { error: 'forbidden' },
+      }),
+    );
+    const ada = window(hub, 'ada', base, true);
+    const claude = window(hub, 'claude-skadauke', '', false);
+    await settle(ada.binding, claude.binding);
+    ada.editor.view.dispatch({ selection: { anchor: 4 } });
+    claude.editor.view.dispatch({ selection: { anchor: 9 } });
+    await until(
+      () => peersShown(ada.editor.view).length === 1 && peersShown(claude.editor.view).length === 1,
+    );
+    // Ada's window draws Claude in Claude’s author color there, and Claude’s window draws Ada in
+    // hers: the colors their changes are drawn in.
+    const claudeInAda = colorsOf(ada.editor.view.state).get('claude-skadauke');
+    const adaInClaude = colorsOf(claude.editor.view.state).get('ada');
+    expect(peersShown(ada.editor.view)[0]!.color).toBe(claudeInAda);
+    expect(peersShown(claude.editor.view)[0]!.color).toBe(adaInClaude);
+    // Ada is the first color in her own window, and no one else has it there.
+    expect(colorsOf(ada.editor.view.state).get('ada')).toBe(1);
+    expect(claudeInAda).not.toBe(1);
+    expect(adaInClaude).not.toBe(colorsOf(claude.editor.view.state).get('claude-skadauke'));
+    // The caret and its flag are drawn with that token.
+    expect(
+      ada.editor.view.dom
+        .querySelector<HTMLElement>('.rl-presence-caret')
+        ?.style.getPropertyValue('--rl-presence-color'),
+    ).toBe(`var(--rl-author-${claudeInAda})`);
+  });
+
+  it('keeps the caret and its name flag showing while a selection lasts, and lets a caret’s flag go (#1168)', async () => {
+    const { bo } = await session();
+    const peer = {
+      clientID: 'c1',
+      name: 'Ada (window 1)',
+      color: 1,
+      head: 8,
+      anchor: 8,
+      // It moved long ago.
+      stamp: Date.now() - FLAG_MS - 1000,
+    };
+    const flags = () => [...bo.editor.view.dom.querySelectorAll('.rl-presence-flag')];
+    showPeers(bo.editor.view, [peer]);
+    expect(bo.editor.view.dom.querySelectorAll('.rl-presence-caret')).toHaveLength(1);
+    expect(flags(), 'a caret alone has lost its flag by now').toHaveLength(0);
+    showPeers(bo.editor.view, [{ ...peer, anchor: 3 }]);
+    expect(bo.editor.view.dom.querySelectorAll('.rl-presence-selection').length).toBeGreaterThan(0);
+    expect(bo.editor.view.dom.querySelectorAll('.rl-presence-caret')).toHaveLength(1);
+    expect(flags().map((flag) => flag.textContent)).toEqual(['Ada (window 1)']);
+    expect(flags()[0]!.classList.contains('rl-presence-flag-stays')).toBe(true);
+    // The selection collapses: the flag, long past its time, goes.
+    showPeers(bo.editor.view, [{ ...peer, anchor: 8 }]);
+    expect(flags()).toHaveLength(0);
   });
 
   it('moves with the text when the person types before it', async () => {

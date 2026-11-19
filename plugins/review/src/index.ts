@@ -36,6 +36,7 @@ import { reviewTheme } from './styles.ts';
 export type { FieldAttachment, PostedComment } from './comment-box.ts';
 export { icon, type IconName } from './icons.ts';
 export type { PinnedElement, ThreadExtras } from './rail.ts';
+export { railSqueezes } from './rail.ts';
 export { RAIL_GAP } from './styles.ts';
 
 /**
