@@ -3669,6 +3669,15 @@ blocks of the document's own flow, §3.7.)
   So is a move that leaves two lists side by side (a paragraph between them moved away, or a list
   moved up to one): the newest view reads them as one list and the marker between them in the file
   reads two, so no fine write is tried, and where no unit passes either, the person is asked (#883).
+- **A table moves as a replacement (#1279).** A run that is a table, with a caption that follows it or
+  not, is written as the widened replacement at once, to every gap and not only the ones beside it. The
+  fine write ends each row it inserts with a marker (a split's), and a row with a marker after it is
+  not a delimiter row, so the file with the move pending would read the table as a paragraph. The
+  replacement's new text is the table's lines as they are, in a substitution whose old text is the
+  blocks from the old place to the new, so the file reads a table in every order of decisions (judged by
+  micromark, in `block-move-table.test.ts`: between blocks, first and last in a file, under headings,
+  next to another table, in a quote, with CRLF line ends, and several moves to the top in a row). A
+  move that reaches more blocks than a widened edit may is asked about first, as above.
 - **Pending changes in the blocks.** Where the blocks a move takes out hold a pending change (an
   insertion, deletion, replacement, split or format change, whoever made it), the move is written as
   the widened replacement at once: the fine write would put the deletions among the markers of

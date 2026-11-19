@@ -539,7 +539,11 @@ export function trackedBlockMove(
         if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
       }
     }
-    for (const next of plans.filter((other) => !other.joins)) {
+    // A table is written as a replacement of the blocks it passes. The fine write puts a marker at
+    // the end of each row it inserts, and a row with a marker after it is no delimiter row, so the
+    // file with the move pending reads the table as a paragraph (#1279).
+    const table = run.kind === 'table';
+    for (const next of table ? [] : plans.filter((other) => !other.joins)) {
       try {
         const { changes } = trackedEdits(text, next.source, { ...ctx, group });
         // A fine write whose newest view has other fences than the file's (a replacement that starts
