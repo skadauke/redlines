@@ -687,16 +687,14 @@ const pointer: Check[] = [
       const drift = below ? below.getBoundingClientRect().top - rect.top : null;
       if (drift === null || Math.abs(drift) > 1) problems['drift'] = drift;
       if (editor.view.contentDOM.querySelector('.rl-struck')) problems['stillDrawn'] = true;
-      // And the bar of the block below, in Simple, opens the deleted block's card and stays in
-      // Simple (#716): the change is found on the line above, which the page hides.
+      // And the bar of the block below, in Simple, switches back to Redlines (#1156).
       if (below) {
         const next = below.getBoundingClientRect();
         pressBar(editor, next.left - 23, next.top + 10);
         await frames();
-        if (editor.getUiState().markupView !== 'simple') {
+        if (editor.getUiState().markupView !== 'redlines') {
           problems['back'] = editor.getUiState().markupView;
         }
-        if (!editor.view.dom.querySelector('.rl-card-what')) problems['card'] = 'none opened';
       }
       return problemsOf(problems);
     },

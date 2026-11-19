@@ -186,23 +186,6 @@ const KNOWN: readonly KnownCase[] = [
     text: /\{\.column/,
     why: 'the fences of a div that isn’t a callout are drawn as source',
   },
-  // The exports read a Quarto document as Markdown with its Quarto syntax left in.
-  ...(
-    [
-      ['attributes', /\{[#.]/, 'callout fences’ and headings’ attributes'],
-      ['fence', /:::/, 'callout fences'],
-      ['reference', /@(?:sec|fig|tbl|eq)-/, 'references typed as they are'],
-      ['math', /\$\$/, 'the display formula'],
-      ['sub-sup-strike', /\^2\^/, 'the superscript'],
-    ] as const
-  ).map(([rule, text, what]): KnownCase => ({
-    issue: 1215,
-    doc: ['Build 21.qmd', 'divs.qmd', 'frontmatter.qmd'],
-    surfaces: ['word'],
-    rule,
-    text,
-    why: `the Word export carries ${what} as text`,
-  })),
   ...(
     [
       ['attributes', /\{#/, 'attributes'],
