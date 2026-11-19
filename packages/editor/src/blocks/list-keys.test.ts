@@ -263,6 +263,42 @@ describe('Return in a list item', () => {
         on: { newest: 'Fruit:⏎⏎- X⏎- apples' },
       },
       {
+        name: 'under front matter, no split is written after it (#443 review)',
+        doc: '---⏎title: x⏎---⏎- ‸apples',
+        off: { caret: '---⏎title: x⏎---⏎⏎- ⏎- ‸apples' },
+        on: { caret: '---⏎title: x⏎---⏎⏎- <split>⏎- ‸apples' },
+      },
+      {
+        name: 'under a code fence’s closing line (#443 review)',
+        doc: '```⏎x⏎```⏎- ‸apples',
+        off: { caret: '```⏎x⏎```⏎⏎- ⏎- ‸apples' },
+        on: { caret: '```⏎x⏎```⏎⏎- <split>⏎- ‸apples' },
+      },
+      {
+        name: 'under a setext heading (#443 review)',
+        doc: 'Title⏎=====⏎- ‸apples',
+        off: { caret: 'Title⏎=====⏎⏎- ⏎- ‸apples' },
+        on: { caret: 'Title⏎=====⏎⏎- <split>⏎- ‸apples' },
+      },
+      {
+        name: 'under a thematic break (#443 review)',
+        doc: '***⏎- ‸apples',
+        off: { caret: '***⏎⏎- ⏎- ‸apples' },
+        on: { caret: '***⏎⏎- <split>⏎- ‸apples' },
+      },
+      {
+        name: 'under a link reference definition (#443 review)',
+        doc: '[a]: /x⏎- ‸apples',
+        off: { caret: '[a]: /x⏎⏎- ⏎- ‸apples' },
+        on: { caret: '[a]: /x⏎⏎- <split>⏎- ‸apples' },
+      },
+      {
+        name: 'under an ATX heading (#443 review)',
+        doc: '# H⏎- ‸apples',
+        off: { caret: '# H⏎⏎- ⏎- ‸apples' },
+        on: { caret: '# H<split>⏎⏎- ⏎- ‸apples' },
+      },
+      {
         name: 'the same, in a quote (#443)',
         doc: '> Fruit:⏎> - ‸apples',
         off: { caret: '> Fruit:⏎>⏎> - ⏎> - ‸apples' },

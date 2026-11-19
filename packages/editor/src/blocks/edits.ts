@@ -630,7 +630,16 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
     // bullet `-`, whose empty item reads as the text's underline once the blank line above it is
     // rejected and the item is not (#443). A bullet of `+` or `*` and a number read as text then,
     // which the two insertions below keep.
-    const joinedBreak = items.length > 1 || item.marker === '-';
+    // Only under a line of text the format can put a split after: not under front matter, a code
+    // fence, a setext underline, a rule or a link reference definition, which keep the old form.
+    const aboveBlock = above ? blockAt(state, above.from) : null;
+    const textAbove =
+      !!above &&
+      !!aboveBlock &&
+      ['paragraph', 'heading', 'table'].includes(aboveBlock.kind) &&
+      !/^[ \t>]*(?:=+|-+|\*{3,}|_{3,})[ \t]*$/.test(above.text) &&
+      !/^[ \t>]*\[[^\]]+\]:/.test(above.text);
+    const joinedBreak = items.length > 1 || (item.marker === '-' && textAbove);
     if (under && tracking && joinedBreak && HARD_BREAK_END.test(above.text)) {
       // A hard break above: the break typed after its backslash would put a marker right behind it.
       return refuse(NEEDS_BLANK_AFTER_HARD_BREAK);
