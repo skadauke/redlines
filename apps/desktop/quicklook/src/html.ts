@@ -128,7 +128,7 @@ function image(found: Map<string, string>): string {
 
 /** A piece of the HTML to write: `tag` is markup, which micromark leaves out of an image's alt text
  * (`context.tag`), and the rest is text (`context.raw`). */
-export type Part = { tag: boolean; html: string };
+type Part = { tag: boolean; html: string };
 
 /** One document's raw HTML, piece by piece (micromark gives a line of a block, or one inline tag, at
  * a time), with what is open between them. */

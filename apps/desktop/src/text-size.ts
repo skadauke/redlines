@@ -20,7 +20,7 @@ export const TEXT_MOST = 4;
 export const LADDER: readonly number[] = [...ZOOM_LADDER, 2.5, 3, 4];
 
 /** How much a wheel tick that stands for a pinch counts: the scale is e to this times -deltaY. */
-export const WHEEL_SENSITIVITY = 0.01;
+const WHEEL_SENSITIVITY = 0.01;
 
 /** A wheel pinch ends when the wheel has been quiet this long. */
 export const WHEEL_QUIET_MS = 250;

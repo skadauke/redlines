@@ -272,12 +272,7 @@ const deletionsOf = new WeakMap<Parsed, Segment[]>();
 
 /** Where a pending change reaches in the text, its markers and what it inserted with them: a
  * split's line break and prefix, a deletion's carrier. */
-export function pendingReach(
-  text: string,
-  parsed: Parsed,
-  mark: MarkRange,
-  segment: Segment,
-): Range {
+function pendingReach(text: string, parsed: Parsed, mark: MarkRange, segment: Segment): Range {
   if (mark.kind === 'split') {
     let deletions = deletionsOf.get(parsed);
     if (!deletions) {

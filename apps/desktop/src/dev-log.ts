@@ -27,19 +27,19 @@ export function tauriDevLogLink(): DevLogLink {
 }
 
 /** A keystroke that takes longer than this to reach the screen is logged. */
-export const SLOW_KEY_MS = 100;
+const SLOW_KEY_MS = 100;
 /** How many of the last keys a snapshot holds. */
 export const KEYS_KEPT = 12;
 
 /** What the snapshot says of the state, besides the keys. */
-export interface SnapshotState {
+interface SnapshotState {
   text: string;
   selection: { from: number; to: number };
   view: string;
   tracking: boolean;
 }
 
-export interface DevLog {
+interface DevLog {
   /** Whether this build keeps the log. A release build never does. */
   readonly enabled: boolean;
   log(kind: DevLogKind, detail: string): void;

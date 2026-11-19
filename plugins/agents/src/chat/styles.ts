@@ -4,7 +4,7 @@
 
 const STYLE_ID = 'rl-chat-style';
 
-export const CHAT_STYLE = `
+const CHAT_STYLE = `
 .rl-chat { display: flex; flex: 1; flex-direction: column; position: relative; min-height: 0; width: var(--rl-sidebar-width, 240px); box-sizing: border-box; color: var(--rl-ink); font-family: var(--rl-font-ui); font-size: var(--rl-size-ui); line-height: 1.45; -webkit-user-select: text; user-select: text; }
 .rl-chat[hidden] { display: none; }
 .rl-chat-title { flex: none; padding: 6px 20px 8px; overflow: hidden; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); font-weight: 700; letter-spacing: 0.06em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; -webkit-user-select: none; user-select: none; }

@@ -17,13 +17,13 @@ export type Surface = 'redlines' | 'clean' | 'simple' | 'word' | 'quicklook';
 export const WEBKIT_SURFACES: readonly Surface[] = ['redlines', 'clean', 'simple'];
 export const EXPORT_SURFACES: readonly Surface[] = ['word', 'quicklook'];
 
-export interface Rule {
+interface Rule {
   name: string;
   /** What it looks for, in one line of drawn text. */
   pattern: RegExp;
 }
 
-export const RULES: readonly Rule[] = [
+const RULES: readonly Rule[] = [
   // Redlines' own markers: an insertion, a deletion, a substitution, a split, a comment's span, a
   // format change, and the ledger's block.
   // (A note of the author's own, `<!-- … -->`, is theirs, and not drawn by the app's marks.)
@@ -48,7 +48,7 @@ export const RULES: readonly Rule[] = [
   { name: 'fence', pattern: /^\s*:{3,}/ },
 ];
 
-export interface Hit {
+interface Hit {
   rule: string;
   /** The text that matched. */
   text: string;
@@ -121,7 +121,7 @@ export interface KnownCase {
  * longer shows": delete the entry in that PR (and nothing else). A case that comes back after that
  * is then a failure of this check, with no entry to hide behind.
  */
-export const KNOWN: readonly KnownCase[] = [];
+const KNOWN: readonly KnownCase[] = [];
 
 export interface Found {
   doc: string;

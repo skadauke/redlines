@@ -26,10 +26,10 @@ export const PROPS = [
   'outlineColor',
   'opacity',
 ] as const;
-export type Prop = (typeof PROPS)[number];
+type Prop = (typeof PROPS)[number];
 export type Style = Record<Prop, string>;
 
-export interface Specimen {
+interface Specimen {
   /** A short name, which is also its screenshot's name. */
   name: string;
   /** The family of siblings it is held to (see FAMILIES). */
@@ -594,7 +594,7 @@ export async function styleOf(
 // ----- Siblings agree -----
 
 /** A rule that siblings must follow. */
-export interface Family {
+interface Family {
   name: string;
   /** What siblings share, in a sentence. */
   rule: string;
@@ -605,7 +605,7 @@ export interface Family {
   props: readonly Prop[];
 }
 
-export const FAMILIES: readonly Family[] = [
+const FAMILIES: readonly Family[] = [
   {
     name: 'handles',
     rule: 'a handle is one pill of one fill, corner radius and outline, on a picture and on a table alike',
@@ -738,7 +738,7 @@ export interface KnownDisagreement {
  * fails on one that isn't listed (a new one, or a fixed one that came back) and on a listed one
  * that no longer differs: the PR that fixes the issue deletes its entry, and nothing else.
  */
-export const KNOWN: readonly KnownDisagreement[] = [];
+const KNOWN: readonly KnownDisagreement[] = [];
 
 /** What the check reports: disagreements nobody knows, and known ones that are gone. */
 export function judgeDisagreements(

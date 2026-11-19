@@ -4,7 +4,7 @@
 import type { Hub } from './hub.ts';
 import type { Call, Notice, Reply, Transport } from './wire.ts';
 
-export interface MemoryTransportOptions {
+interface MemoryTransportOptions {
   /** Called before each call and notice is delivered: the tests make the network slow with it. */
   delay?: () => Promise<void>;
 }

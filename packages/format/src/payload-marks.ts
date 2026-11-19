@@ -4,7 +4,6 @@
 // decision in it is made by the code that decides in a file.
 
 import { eolOf, restoredPayload } from './changes.ts';
-import type { Eol } from './changes.ts';
 import { CONTAINER_PREFIX } from './blocks.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
@@ -120,7 +119,7 @@ export function intact(proxy: string, payload: string): boolean {
 
 /** The old text of a payload as the original view shows it: its own marks rejected. Where the
  * payload takes the ledger into itself (`intact`), the old text as it is. */
-export function originalOfPayload(payload: string, ledger: string, prefix = ''): string {
+function originalOfPayload(payload: string, ledger: string, prefix = ''): string {
   const proxy = payloadFile(prefix + payload, ledger);
   if (!intact(proxy, prefix + payload)) return payload;
   return withoutPrefix(originalView(proxy).text, prefix);
@@ -142,13 +141,6 @@ export function payloadAt(
   const index = mark.segments.indexOf(segment);
   return parsed.payloads.find((site) => site.owner === mark.id && site.segment === index);
 }
-
-/** The text a segment's payload restores when the mark is rejected, in the file's line breaks:
- * the old text, with the marks it holds live again (format §3.12). */
-export function restoredText(segment: Segment, eol: Eol): string {
-  return restoredPayload(segment.payload ?? '', eol);
-}
-
 /** What the original view brings back for a segment of a deletion or a substitution: the old text
  * with the marks it holds rejected, in the file's line breaks. */
 export function originalText(

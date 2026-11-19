@@ -9,7 +9,7 @@
 import temml from 'temml';
 
 /** A formula taken out of the text. */
-export interface Formula {
+interface Formula {
   tex: string;
   display: boolean;
   /** The Quarto label after a display (`eq-mass`). */
@@ -102,7 +102,7 @@ function stretch(text: string, formulas: Formula[], mark: string): string {
 }
 
 /** What was taken out of a text: the text, the formulas, and the prefix of the words in their place. */
-export interface TakenMath {
+interface TakenMath {
   text: string;
   formulas: Formula[];
   mark: string;

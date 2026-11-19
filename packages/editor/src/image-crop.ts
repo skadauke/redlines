@@ -54,9 +54,9 @@ export const CROP_HINT =
 export const CROP_NO_IMAGE = 'Select an image to crop it.';
 export const CROP_REMOTE = 'Only a picture kept in a file can be cropped.';
 export const CROP_RAW = 'Crop works on the picture as it reads. Show Clean or Redlines first.';
-export const CROP_NOT_POINTED =
+const CROP_NOT_POINTED =
   'The image could not be pointed at the cropped copy, so it was left as it was.';
-export const CROP_MOVED = 'The image moved before it was cropped, so it was left as it was.';
+const CROP_MOVED = 'The image moved before it was cropped, so it was left as it was.';
 
 const STYLE_ID = 'rl-crop-style';
 const STYLE = `
@@ -120,7 +120,7 @@ function drawnImage(view: EditorView, from: number, to: number): HTMLImageElemen
 }
 
 /** An open crop: what the view shows now. */
-export interface CropSession {
+interface CropSession {
   isOpen(): boolean;
   close(): void;
 }

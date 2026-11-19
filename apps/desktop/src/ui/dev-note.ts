@@ -1,7 +1,7 @@
 // Help › Write to Log… (dev builds only, #1205): a sheet, as the alert's, that asks for a line to
 // say what is odd, and answers with it, or null when it is cancelled. Return writes, Escape cancels.
 
-export interface DevNoteOptions {
+interface DevNoteOptions {
   container: HTMLElement;
   /** Gives the keyboard back to the editor when the sheet closes. */
   restoreFocus: () => void;

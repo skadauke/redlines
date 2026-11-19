@@ -172,7 +172,7 @@ export function deletionLine(text: string, deletion: TableDeletionRead): Range {
 }
 
 /** The end of a table's last line of rows. */
-export function tableEnd(table: TableRead): number {
+function tableEnd(table: TableRead): number {
   return Math.max(table.rows.at(-1)?.to ?? 0, table.delimiter.to);
 }
 
@@ -213,7 +213,7 @@ export function removeDeletionLines(
 }
 
 /** A deletion line to be written, and the position it is for. */
-export interface NewDeletion {
+interface NewDeletion {
   /** Where the row sat in the table before the operation: lines are kept in this order. */
   order: number;
   /** The marker, whole. */

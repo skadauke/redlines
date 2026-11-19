@@ -238,7 +238,7 @@ export function itemsAround(state: EditorState, block: Block): Item[] {
 
 /** The marker of a new item after `item`: its bullet, or the next number (or the same, in a list
  * numbered alike throughout, as `1.` all the way down). */
-export function nextMarker(state: EditorState, item: Item): string {
+function nextMarker(state: EditorState, item: Item): string {
   const number = /^(\d+)([.)])$/.exec(item.marker);
   if (!number) return item.marker;
   const numbers = listItems(state, item.node.parent).map((other) => {

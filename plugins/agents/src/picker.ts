@@ -134,7 +134,7 @@ export interface PickerDeps {
 }
 
 /** The row that opens the OpenClaw setup. */
-export const CONNECT_OPENCLAW = 'Connect an OpenClaw agent…';
+const CONNECT_OPENCLAW = 'Connect an OpenClaw agent…';
 
 /** Whether the typed part of a mention asks for the connect row: nothing, or a start of "openclaw". */
 function asksToConnect(query: string): boolean {

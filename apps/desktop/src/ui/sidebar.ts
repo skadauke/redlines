@@ -78,15 +78,15 @@ export interface SidebarOptions {
 }
 
 /** What the sidebar lists: the project's files, or the document's chat. */
-export type SidebarView = 'files' | 'chat';
+type SidebarView = 'files' | 'chat';
 
 /** A saved document, and the project it is in. */
-export interface SidebarDocument {
+interface SidebarDocument {
   path: string;
   root: ProjectRoot;
 }
 
-export interface Sidebar {
+interface Sidebar {
   setOpen(open: boolean): void;
   /** Shows the file list or the chat (ignored without a chat panel). */
   setView(view: SidebarView): void;

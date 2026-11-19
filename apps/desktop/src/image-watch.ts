@@ -13,7 +13,7 @@
 // of an image found saved again, and the number of the document's opening: a document opened again
 // loads its images from URLs of its own, however the files changed while it was closed (#677).
 /** The stamp of each file, in order, or null for a file the page may not see or that isn't there. */
-export type Stamps = (paths: string[]) => Promise<(string | null)[]>;
+type Stamps = (paths: string[]) => Promise<(string | null)[]>;
 
 export interface ImageWatch {
   /**

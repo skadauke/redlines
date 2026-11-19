@@ -29,7 +29,7 @@ export interface ChatView {
   defaultAgent?: string | undefined;
 }
 
-export interface ChatHandlers {
+interface ChatHandlers {
   send(text: string): void;
   stop(): void;
   /** An agent was picked, with a model it lists (undefined: its default). */

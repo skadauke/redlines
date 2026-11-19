@@ -51,7 +51,7 @@ function touchesLines(state: EditorState, from: number, to: number): boolean {
 }
 
 /** The decorations of the divs of `state` that are not callouts. */
-export function divDecorations(state: EditorState): DecorationSet {
+function divDecorations(state: EditorState): DecorationSet {
   if (state.facet(dialectFacet) !== 'pandoc') return Decoration.none;
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const { doc } = state;

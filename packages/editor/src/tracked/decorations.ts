@@ -1242,7 +1242,7 @@ const COMMENT = Decoration.mark({ class: 'rl-comment' });
 /**
  * A stretch the caret steps over: hidden text, or hidden lines with the line breaks around them.
  */
-export class Atom extends RangeValue {
+class Atom extends RangeValue {
   /**
    * Whether it draws something, deleted text or a move to another line, so that the caret looks
    * different at its two ends. Markers draw nothing.
@@ -1804,7 +1804,7 @@ const trackedField = StateField.define<Display>({
 });
 
 /** A run of whole lines hidden from view: blank lines, lines of markers alone, the ledger. */
-export class HiddenRun extends RangeValue {
+class HiddenRun extends RangeValue {
   /** How many lines it holds. */
   readonly lines: number;
 
@@ -1835,7 +1835,7 @@ export function hiddenLines(state: EditorState): RangeSet<HiddenRun> {
 }
 
 /** A stretch of text as the tracked layer draws it. */
-export interface TrackedPiece {
+interface TrackedPiece {
   /** Where the text is in the document. Deleted text isn't: it is drawn at this position. */
   from: number;
   text: string;
@@ -1845,7 +1845,7 @@ export interface TrackedPiece {
 }
 
 /** The tracked layer's view of part of a document, for widgets that draw its text themselves. */
-export interface TrackedText {
+interface TrackedText {
   /** The visible pieces of `from`–`to`, deleted text included, in order. */
   pieces(from: number, to: number): TrackedPiece[];
   /** The classes of the change bar for `from`–`to`, or '' when nothing there changed. */

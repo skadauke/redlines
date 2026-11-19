@@ -182,18 +182,6 @@ export function squash(text: string): string {
     .replace(/^ /, '')
     .replace(/\n+$/, '');
 }
-
-/** Whether the text has an empty block: a paragraph with nothing in it, or a bullet, quote or
- * heading with no text. A deletion of all the text of a block takes a break with it, so that none
- * is left (format §3.4). */
-export function hasEmptyBlock(text: string): boolean {
-  return (
-    /^[ \t]*\n/.test(text) ||
-    /\n[ \t>]*\n[ \t>]*\n/.test(text) ||
-    /^(?:[-*+>]|\d+\.|#{1,6})[ \t]*$/m.test(text)
-  );
-}
-
 /** A line with a prefix and nothing after it: a bullet, a number, a quote marker or `#`s. */
 const EMPTY_LINE = String.raw`(?:(?:[ \t]*(?:[-*+>]|\d+[.)]))+[ \t]*|[ \t]*#{1,6}[ \t]*)`;
 

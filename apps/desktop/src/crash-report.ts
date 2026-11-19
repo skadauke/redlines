@@ -13,7 +13,7 @@ export interface Shape {
   tables: number;
 }
 
-export type ProblemKind = 'page-error' | 'web-process' | 'panic' | 'app-crash' | 'hang';
+type ProblemKind = 'page-error' | 'web-process' | 'panic' | 'app-crash' | 'hang';
 
 /** One failure, as the app logged it (src-tauri/src/crash.rs `Problem`). */
 export interface Problem {
@@ -93,7 +93,7 @@ const KINDS: Record<ProblemKind, string> = {
 };
 
 /** The line about the shape of the document. */
-export function shapeLine(shape: Shape): string {
+function shapeLine(shape: Shape): string {
   const n = (value: number) => value.toLocaleString('en-US');
   return (
     `${n(shape.bytes)} bytes, ${n(shape.lines)} lines, longest line ${n(shape.longestLine)}, ` +
@@ -107,7 +107,7 @@ export interface Environment {
   macos: string;
 }
 
-export interface Report {
+interface Report {
   title: string;
   body: string;
   /** A new issue, filled in, for the person to review and submit. */

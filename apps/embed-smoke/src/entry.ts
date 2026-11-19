@@ -11,7 +11,7 @@ import { createReview } from '@redlines/review';
 const STUB_HOST: Host = {};
 
 /** The plugins this embed activates, in order. */
-export const EMBED_PLUGINS: readonly Plugin[] = [formatting];
+const EMBED_PLUGINS: readonly Plugin[] = [formatting];
 
 const AUTHOR: Author = { handle: 'me', name: 'Me' };
 

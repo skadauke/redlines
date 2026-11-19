@@ -13,7 +13,7 @@ import { parsedField } from '../tracked/field.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
-export type BlockKind =
+type BlockKind =
   | 'paragraph'
   | 'heading'
   | 'code'
@@ -30,7 +30,7 @@ export interface Span {
 }
 
 /** A list item or a quote that holds a block. */
-export interface Container {
+interface Container {
   kind: 'item' | 'quote';
   /**
    * Its syntax on the block's first line: an item's marker with the spaces after it (and its box),
@@ -73,7 +73,7 @@ export interface Block {
  * What lies between two blocks: the line break that ends the first, the lines between them, and
  * the second's prefix.
  */
-export interface Break {
+interface Break {
   /** The end of the first block's last line. */
   from: number;
   /** The start of the second block's text. */
@@ -580,7 +580,7 @@ export function breakAfter(state: EditorState, block: Block): Break | null {
 }
 
 /** An inline construct that a position is inside of. */
-export interface OpenConstruct {
+interface OpenConstruct {
   kind: 'emphasis' | 'strong' | 'strike' | 'code' | 'sub' | 'sup' | 'html' | 'link' | 'atom';
   /** The construct, its delimiters included. */
   from: number;

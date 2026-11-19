@@ -42,7 +42,7 @@ const UNNUMBERED = /\{[^}]*(?:\.unnumbered|\s-)[^}]*\}[ \t]*$/;
 /** A target: its label's text, "Figure 2", and where it is in the document: `pos` where it starts, and
  * `end` where the whole of it ends (a figure's line, a table with its caption, an equation, a chunk,
  * a section down to the next heading of its level or above), so that it can be shown whole. */
-export interface Target {
+interface Target {
   text: string;
   pos: number;
   end: number;
@@ -249,10 +249,7 @@ export function targetsOf(doc: Text): Map<string, Target> {
  * Takes the caret to `target` and scrolls the whole of it into view: a figure, a table with its
  * caption, an equation or a chunk as far as the window holds it, and a section from its heading down.
  */
-export function goToTarget(
-  view: EditorView,
-  target: Pick<Target, 'pos' | 'end' | 'section'>,
-): void {
+function goToTarget(view: EditorView, target: Pick<Target, 'pos' | 'end' | 'section'>): void {
   const end = Math.min(Math.max(target.end, target.pos), view.state.doc.length);
   view.dispatch({
     selection: { anchor: target.pos },

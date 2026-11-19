@@ -32,7 +32,7 @@ import { space, textPx } from './theme.ts';
 import { includeFacet } from './quarto-include.ts';
 
 /** One executed chunk: its code, as the file has it, and its output as Markdown. */
-export interface Cell {
+interface Cell {
   /** The chunk's label, from `#| label:` or the cell's id, or null. */
   label: string | null;
   /** The code the cell shows, with no `#|` lines; null where the chunk was not echoed. */
@@ -42,7 +42,7 @@ export interface Cell {
 }
 
 /** The outputs found for a document. */
-export interface Outputs {
+interface Outputs {
   /** Which file they came from: `freeze`, `keep-md` or `keep-ipynb`. */
   source: 'freeze' | 'keep-md' | 'keep-ipynb';
   /** The MD5 of the file that was run (freeze files only), kept as a note: it is not compared. */
@@ -51,7 +51,7 @@ export interface Outputs {
 }
 
 /** A chunk of the document: where its closing fence ends, its label and its code. */
-export interface Chunk {
+interface Chunk {
   /** The position at the end of the closing fence's line. */
   end: number;
   label: string | null;
@@ -232,7 +232,7 @@ export function cellsOfNotebook(json: string): Cell[] | null {
 }
 
 /** A chunk's cell, and whether the chunk's code is no longer the code that cell ran. */
-export interface Match {
+interface Match {
   cell: Cell;
   stale: boolean;
 }
@@ -387,7 +387,7 @@ class OutputWidget extends WidgetType {
 }
 
 /** The blocks of outputs under the chunks of `state`; none outside a pandoc file or in Plain. */
-export function outputDecorations(state: EditorState): DecorationSet {
+function outputDecorations(state: EditorState): DecorationSet {
   if (state.facet(dialectFacet) !== 'pandoc') return Decoration.none;
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const found = state.field(loaded);

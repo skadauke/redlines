@@ -12,7 +12,7 @@ import { unzipSync } from 'fflate';
 export const MAX_PACKAGE_BYTES = 50 * 1024 * 1024;
 
 /** A picture taken from a package, with its own format. */
-export interface OriginalPicture {
+interface OriginalPicture {
   bytes: Uint8Array;
   type: string;
   extension: string;

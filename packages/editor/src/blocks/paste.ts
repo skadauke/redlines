@@ -32,7 +32,7 @@ import { blockAt, listItems } from './structure.ts';
 const markdown = parser.configure(GFM);
 
 /** A pasted list item: its marker as pasted (nested items keep it), its checkbox, its text, its items. */
-export interface PastedItem {
+interface PastedItem {
   marker: string;
   /** `[ ]` or `[x]`, or null. */
   box: string | null;

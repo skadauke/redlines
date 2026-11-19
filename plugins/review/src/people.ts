@@ -17,7 +17,7 @@ export function colorClass(state: EditorState, handle: Handle): string {
 }
 
 /** How a person is named: by their name, and an agent also by whom it acts for. */
-export interface Byline {
+interface Byline {
   name: string;
   /** The first name of the person an agent acts for, as in "Claude for Ada". */
   for?: string;

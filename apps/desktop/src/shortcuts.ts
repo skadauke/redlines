@@ -91,7 +91,7 @@ export function ariaKey(key: string): string {
 }
 
 /** Whether a key has ⌘, ⌃ or ⌥: a key with only ⇧, or none, would be typing. */
-export function hasCommandModifier(key: string): boolean {
+function hasCommandModifier(key: string): boolean {
   return /^(?:(?:Ctrl|Alt|Shift|Mod)-)*(?:Ctrl|Alt|Mod)-/.test(key);
 }
 
@@ -137,20 +137,6 @@ export function keyOf(
   if (id in overrides) return overrides[id] ? normalizeKey(overrides[id]) : null;
   return entries.find((entry) => entry.id === id)?.default ?? null;
 }
-
-/** Every command's key by id, those with none left out. */
-export function keysOf(
-  entries: readonly ShortcutEntry[],
-  overrides: ShortcutOverrides,
-): Map<string, string> {
-  const keys = new Map<string, string>();
-  for (const { id } of entries) {
-    const key = keyOf(entries, overrides, id);
-    if (key) keys.set(id, key);
-  }
-  return keys;
-}
-
 /** What giving `id` the key `key` would come to. */
 export function assess(
   entries: readonly ShortcutEntry[],
@@ -263,7 +249,7 @@ const CODE_KEYS: Readonly<Record<string, string>> = {
 };
 
 /** What a key press says to a recorder. */
-export type Recorded =
+type Recorded =
   | { kind: 'key'; key: string }
   | { kind: 'cancel' }
   | { kind: 'clear' }

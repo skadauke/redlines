@@ -31,7 +31,7 @@ import { parsedField, viewModeField } from '../tracked/field.ts';
 import { blanked, targetsOf } from './quarto-refs.ts';
 
 /** What the host gives to draw math: TeX in, MathML out. */
-export interface MathEngine {
+interface MathEngine {
   renderToString(tex: string, options?: { displayMode?: boolean; throwOnError?: boolean }): string;
 }
 
@@ -42,7 +42,7 @@ export const mathFacet = Facet.define<
 >({ combine: (values) => values[0] ?? null });
 
 /** A formula in the text. */
-export interface MathRange {
+interface MathRange {
   from: number;
   to: number;
   tex: string;
@@ -250,7 +250,7 @@ class MathWidget extends WidgetType {
 }
 
 /** The drawn formulas of `state`: none in Plain, with no engine, or in a file with no math. */
-export function mathDecorations(state: EditorState): DecorationSet {
+function mathDecorations(state: EditorState): DecorationSet {
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const engine = state.field(engineField, false);
   if (!engine) return Decoration.none;

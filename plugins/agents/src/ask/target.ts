@@ -7,7 +7,7 @@
 import { type EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
 
-export interface TargetRange {
+interface TargetRange {
   from: number;
   to: number;
 }

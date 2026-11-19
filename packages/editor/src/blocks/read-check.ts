@@ -34,7 +34,7 @@ function body(file: string): string {
  * marks accepted against the newest view, all rejected against the original, and the structural
  * warnings of the parse.
  */
-export function readProblems(file: string): Map<string, string> {
+function readProblems(file: string): Map<string, string> {
   const found = new Map<string, string>();
   const newest = newestView(file).text;
   if (read(body(file)) !== read(newest)) found.set('render', read(body(file)));

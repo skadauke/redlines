@@ -68,7 +68,7 @@ export const EVENTS = {
   tracking: 'session-tracking',
 } as const;
 
-export interface SessionOptions {
+interface SessionOptions {
   path: string;
   /** Who this window's person is, as the ledger names them. */
   person: { handle: string; name: string };

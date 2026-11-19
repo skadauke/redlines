@@ -11,7 +11,7 @@
 // A paragraph is one line: the box that shows the prompt, and the chat it is pasted into, wrap it.
 
 /** What the prompt names. */
-export interface PromptInput {
+interface PromptInput {
   /** This Mac as its owner calls it: "Ada’s MacBook". */
   mac: string;
   /** This Mac's name on the Tailscale network: `ada-mbp.yak-bebop.ts.net`, when it is known. */

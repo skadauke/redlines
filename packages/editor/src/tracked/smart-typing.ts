@@ -100,7 +100,7 @@ function textAfter(state: EditorState, pos: number): { text: string; skipped: nu
 }
 
 /** What typing does instead of the character: a transaction, and how far back the caret goes. */
-export interface TypedAs {
+interface TypedAs {
   spec: TransactionSpec;
   /** Characters the caret steps back from the end of what was written, to sit inside a pair. */
   caretBack: number;
@@ -115,7 +115,7 @@ function write(change: { from: number; to: number; insert: string }, caretBack =
 }
 
 /** What typing `typed` at `from`–`to` does, or null when it is typed as it is. */
-export function typedAs(
+function typedAs(
   state: EditorState,
   typing: Pick<EditorTyping, 'smartPunctuation' | 'closePairs'>,
   from: number,

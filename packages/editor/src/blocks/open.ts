@@ -49,7 +49,7 @@ import { BLANK } from './hidden.ts';
 import { blockAt, isGapLine, loose, type Span } from './structure.ts';
 
 /** The empty paragraph, or the empty line, that Return opened, while it is open. */
-export interface OpenBlock {
+interface OpenBlock {
   /** Its line, from start to end: empty, or a container's syntax alone (`> `, an item's indent). */
   empty: Span;
   /** The lines of the block Return was pressed in, where the caret may be while it stays open. */
@@ -68,7 +68,7 @@ export interface OpenBlock {
 }
 
 /** What one Return did, kept so that it can be taken back exactly. */
-export interface Taken {
+interface Taken {
   /** The changes that undo it, from the document after it to the one before. */
   changes: ChangeSet;
   /** The view it switched from, as a split switches Clean to Redlines; null when it didn't. */
@@ -500,7 +500,7 @@ const emptiedRefusal = EditorState.transactionFilter.of((tr) => {
 });
 
 /** A line of a no-break space alone, after a container's syntax: the empty line of Shift-Return. */
-export const EMPTY_LINE = /^[ \t>]*\u00a0$/;
+const EMPTY_LINE = /^[ \t>]*\u00a0$/;
 
 /**
  * The empty line Shift-Return opened, when ⌘Z or ⇧⌘Z has brought back a document that the person's
@@ -587,7 +587,7 @@ function requested(tr: Transaction, request: OpenRequest): OpenBlock | null {
 }
 
 /** The empty paragraph or line that is open, if any. */
-export const openBlockField = StateField.define<OpenBlock | null>({
+const openBlockField = StateField.define<OpenBlock | null>({
   create: () => null,
   update(open, tr) {
     const set = tr.effects.findLast((effect) => effect.is(setOpenEffect));
@@ -1169,7 +1169,7 @@ export function openBlocks(): Extension {
 }
 
 /** What a new version of the file does to the document, with the open block kept where it can be. */
-export interface ThroughOpen {
+interface ThroughOpen {
   changes: ChangeSet;
   /** Where the caret goes, when the open block decides it; else null. */
   selection: EditorSelection | null;

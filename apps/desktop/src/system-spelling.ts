@@ -4,7 +4,7 @@
 import type { ToolbarSpelling } from '@redlines/toolbar';
 import { invoke } from '@tauri-apps/api/core';
 
-export interface SystemSpellingOptions {
+interface SystemSpellingOptions {
   /** Whether Preferences have spell check on: when they don't, nothing is underlined or offered. */
   enabled(): boolean;
   /**

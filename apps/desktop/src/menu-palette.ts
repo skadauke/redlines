@@ -9,7 +9,7 @@ import type { AppCommand } from '@redlines/toolbar';
 import type { MenuModel, MenuRow, MenuState } from './menu-model.ts';
 
 /** A row of a menu, by its path: `View/Simple Look`, `File/Open Recent/Clear Menu`. */
-export interface PlacedRow {
+interface PlacedRow {
   key: string;
   row: Exclude<MenuRow, { item: unknown } | { rows: unknown }>;
   menu: string;

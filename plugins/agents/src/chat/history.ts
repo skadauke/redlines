@@ -27,7 +27,7 @@ export interface ChatRecord {
   turns: AskTurn[];
 }
 
-export const EMPTY_RECORD: ChatRecord = { version: 1, turns: [] };
+const EMPTY_RECORD: ChatRecord = { version: 1, turns: [] };
 
 const isRecordOf = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

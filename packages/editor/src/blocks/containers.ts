@@ -243,12 +243,6 @@ export function isOpen(state: EditorState, container: Container, folds?: Folds):
   const { over, peek } = folds ?? state.field(foldField, false) ?? NONE;
   return peek.has(container.from) || (over.get(container.from) ?? container.fileOpen);
 }
-
-/** Whether a section's content is folded away: closed, and a whole container that has content. */
-export function isFolded(state: EditorState, container: Container): boolean {
-  return !isOpen(state, container);
-}
-
 /** The ranges of whole lines that are hidden: tag lines, and the content of closed sections. */
 export function hiddenContainerLines(state: EditorState): { from: number; to: number }[] {
   const spans: { from: number; to: number }[] = [];

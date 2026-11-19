@@ -2,15 +2,15 @@
 // `src-tauri/src/images.rs`) and kept: the preview holds an image's room before the file loads, so
 // that the page doesn't move when it arrives. Questions asked in the same moment go in one call.
 
-export interface Size {
+interface Size {
   width: number;
   height: number;
 }
 
 /** The size of each file, in order, or null where it isn't known. */
-export type Sizes = (paths: string[]) => Promise<(Size | null)[]>;
+type Sizes = (paths: string[]) => Promise<(Size | null)[]>;
 
-export interface ImageSizes {
+interface ImageSizes {
   /** The size of the image file at `path`: at once if known, else when the app has answered. */
   of(path: string): Size | null | Promise<Size | null>;
   /** The files were saved again (or, with none named, another folder is shown): sizes are asked for again. */

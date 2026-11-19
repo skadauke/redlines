@@ -46,7 +46,7 @@ export interface DocumentHtmlOptions {
 }
 
 /** The fonts of the page the HTML goes in, by its CSS variables. */
-export const PAGE_FONTS: FontStacks = {
+const PAGE_FONTS: FontStacks = {
   body: 'var(--rl-font-body)',
   heading: 'var(--rl-font-heading)',
   mono: 'var(--rl-font-mono)',

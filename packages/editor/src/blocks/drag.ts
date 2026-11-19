@@ -16,13 +16,13 @@ import type { BlockGap, BlockRun } from '@redlines/format';
 import { asFile, type FileRead, moveRunTo, runOfSelection } from './move.ts';
 
 /** The pointer must move this far from the press before it is a drag and not a click. */
-export const DRAG_SLOP = 4;
+const DRAG_SLOP = 4;
 /**
  * How far from the press a drag from a block's handle goes before it can drop anywhere: the handle is
  * beside the block, so every gap is a place the pointer is nearest to, and a few pixels of a shaking
  * hand would otherwise move the block.
  */
-export const HANDLE_ARM = 24;
+const HANDLE_ARM = 24;
 /** The editor's edge, in pixels, where a drag scrolls. */
 const SCROLL_EDGE = 36;
 
@@ -34,7 +34,7 @@ export interface DragGeometry {
   extent(view: EditorView, run: BlockRun): { top: number; bottom: number };
 }
 
-export const pageGeometry: DragGeometry = {
+const pageGeometry: DragGeometry = {
   gapY(view, gap) {
     // The text's own edges: a block's line block holds the space above it too.
     const top = (pos: number) =>
@@ -89,7 +89,7 @@ export function draggableRead(view: EditorView): { run: BlockRun; read: FileRead
 }
 
 /** The room that opens at the drop place, in px at the theme's own text size (#1200). */
-export const DROP_SPACE = 24;
+const DROP_SPACE = 24;
 
 /** Where the drop place is: the position and the side of it the room opens on, or null for none. */
 const setDropSpace = StateEffect.define<{ pos: number; side: -1 | 1 } | null>();

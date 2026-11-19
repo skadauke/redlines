@@ -42,7 +42,7 @@ import { deleteReach, deleteWholeTableSelection } from './reach.ts';
 import { selectionInTable, shownCellAt } from './stops.ts';
 
 /** A key that moves the caret in a table, as the keymap names it. */
-export type MoveKey =
+type MoveKey =
   | 'ArrowUp'
   | 'ArrowDown'
   | 'Home'
@@ -85,12 +85,6 @@ function hereIn(state: EditorState): Here | null {
   const row = found.table.rows.find((r) => r.cells.includes(found.cell));
   return row ? { table: found.table, row, cell: found.cell, head: main.head } : null;
 }
-
-/** Whether the caret is in a cell of a table. */
-export function inTable(state: EditorState): boolean {
-  return hereIn(state) !== null;
-}
-
 function goTo(view: EditorView, pos: number): boolean {
   const selection = visibleSelection(view.state, EditorSelection.single(pos));
   if (!selection.eq(view.state.selection)) {
@@ -648,7 +642,7 @@ export const macTableCommands: Readonly<Record<string, Command>> = {
 
 /** Moves the caret as `key` says, where it is in a table; false where it isn't, or the key is
  * CodeMirror's. */
-export function moveInTable(view: EditorView, key: MoveKey): boolean {
+function moveInTable(view: EditorView, key: MoveKey): boolean {
   switch (key) {
     case 'ArrowUp':
       return vertical(view, false);

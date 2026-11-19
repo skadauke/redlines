@@ -46,7 +46,7 @@ import { openBlock, textWithoutOpen } from './open.ts';
 export const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 /** A key as CodeMirror names it, with its modifiers. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
-export type KeyName =
+type KeyName =
   | 'Enter'
   | 'Escape'
   | 'Shift-Enter'
@@ -165,7 +165,7 @@ export interface StepResult {
   caretLine: { text: string; col: number };
 }
 
-export interface ScriptResult {
+interface ScriptResult {
   script: Script;
   /** The file the script starts from, as the editor was given it. */
   start: string;
@@ -531,7 +531,7 @@ function itemLines(body: string): number {
 }
 
 /** How many more marker lines a file has than micromark reads items in it. */
-export function unreadItems(file: string): number {
+function unreadItems(file: string): number {
   // The front matter is YAML, whose `- ` lines no Markdown reader reads as items.
   const whole = bodyOf(file);
   const body = whole.slice(Math.max(0, frontMatterEnd(whole)));

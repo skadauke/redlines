@@ -39,7 +39,7 @@ export const codeStyle = HighlightStyle.define([
 ]);
 
 /** A colored stretch of code: the class the style gives it. */
-export interface CodeSpan {
+interface CodeSpan {
   from: number;
   to: number;
   class: string;

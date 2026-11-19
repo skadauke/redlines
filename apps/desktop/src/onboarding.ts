@@ -53,7 +53,7 @@ export interface TourDeps {
 }
 
 /** How the Welcome mode ended: through its three screens, or skipped from any of them. */
-export type WelcomeEnd = 'finished' | 'skipped';
+type WelcomeEnd = 'finished' | 'skipped';
 
 const STEPS = 4;
 

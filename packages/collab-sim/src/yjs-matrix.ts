@@ -9,10 +9,10 @@ import { WORKLOADS } from './workloads.ts';
 import type { WorkloadName } from './workloads.ts';
 import { runYjsReplay } from './yjs-replay.ts';
 
-export type Arm = 'plain' | 'yarray' | 'ylamport';
+type Arm = 'plain' | 'yarray' | 'ylamport';
 export const ARMS: readonly Arm[] = ['plain', 'yarray', 'ylamport'];
 
-export interface YCell {
+interface YCell {
   name: string;
   workload: WorkloadName;
   clients?: number;
@@ -45,7 +45,7 @@ export const YCELLS: YCell[] = [
   },
 ];
 
-export interface RunSummary {
+interface RunSummary {
   seed: number;
   corrupted: boolean;
   invalid: boolean;

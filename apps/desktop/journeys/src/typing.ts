@@ -11,7 +11,7 @@ import type { Page } from '@playwright/test';
  */
 export type TypingSpeed = 'human' | 'fast' | 'burst' | number;
 
-export function delayOf(speed: TypingSpeed): number {
+function delayOf(speed: TypingSpeed): number {
   if (typeof speed === 'number') return speed;
   return speed === 'human' ? 70 : speed === 'fast' ? 25 : 0;
 }

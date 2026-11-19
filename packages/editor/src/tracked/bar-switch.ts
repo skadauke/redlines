@@ -25,7 +25,7 @@ export const barClickHandlers =
  * The bar a pointer is over: its line (or a table row's first cell), and where the line starts. The
  * bar of a line of text is the piece of it beside one run of screen lines (`bar-layer.ts`).
  */
-export interface LocatedBar {
+interface LocatedBar {
   element: Element;
   /** The start of the bar's line. */
   pos: number;
@@ -50,7 +50,7 @@ export interface BarGeometry {
   lineTop(view: EditorView, pos: number): number;
 }
 
-export interface BarSwitchOptions {
+interface BarSwitchOptions {
   geometry?: BarGeometry;
 }
 
@@ -296,7 +296,7 @@ const BARS_COOL: Record<string, string> = {};
  * what is under the pointer in the margin is the content or a line. CodeMirror keeps the
  * attributes of its editor and takes away a class set by hand at its next update.
  */
-export const barsHot = StateField.define<boolean>({
+const barsHot = StateField.define<boolean>({
   create: () => false,
   update(value, tr) {
     const set = tr.effects.findLast((effect) => effect.is(setBarsHot));

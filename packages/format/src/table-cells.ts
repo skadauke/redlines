@@ -12,7 +12,7 @@ import type { TableRead } from './table.ts';
 import type { MarkRange, Parsed, Range } from './types.ts';
 
 /** A cell of a table in a file: the text between its pipes, and where it stands in the table. */
-export interface CellSpot {
+interface CellSpot {
   table: TableRead;
   /** The row's index in `table.rows`: 0 is the header. */
   row: number;
@@ -24,7 +24,7 @@ export interface CellSpot {
 
 /** A mark of a table's rows or columns, a move, or an alignment change: decided in the tiers of
  * decide.ts, and not a mark of one cell's text. */
-export function isStructural(mark: MarkRange): boolean {
+function isStructural(mark: MarkRange): boolean {
   return (
     (mark.kind === 'ins' && (mark.payload === 'row' || mark.payload === 'col')) ||
     (mark.kind === 'del' && /^(?:row|col)=/.test(mark.payload ?? '')) ||
@@ -67,7 +67,7 @@ export function cellOfEdits(
 }
 
 /** What a change in `spot`'s cell is checked against (format §3.7, "Cells apart"). */
-export interface CellScope {
+interface CellScope {
   /** The ids of the marks that lie wholly in the text of another cell of the table: nothing they
    * bring in or take out can reach this cell. A mark of the table's rows or columns, one that
    * crosses a pipe, and one outside the table are not of them. */

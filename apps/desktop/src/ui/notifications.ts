@@ -25,7 +25,7 @@ export function stayMs(text: string, timeout: number): number {
   return Math.max(timeout, readingMs(text, READING_BASE_MS));
 }
 
-export interface NotificationAction {
+interface NotificationAction {
   label: string;
   /** Does what the notification offers. The notification stays until this closes it. */
   run(notification: Notification): void;

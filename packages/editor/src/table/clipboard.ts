@@ -14,14 +14,14 @@ import {
   type FontStacks,
   markdownToHtml,
 } from '../clipboard/copy-html.ts';
-import { type Rect, rectOf } from './cells.ts';
+import { rectOf } from './cells.ts';
 import { type Cell, type Table, cellAtCol } from './model.ts';
 import { cellText } from './escape.ts';
 import { reachOf } from './reach.ts';
 import type { EmojiLookup } from '../preview/emoji.ts';
 
 /** One stretch of what is copied: Markdown text, or cells with the table's alignments. */
-export type CopyPart = { md: string } | { rows: string[][]; header: boolean; aligns: string[] };
+type CopyPart = { md: string } | { rows: string[][]; header: boolean; aligns: string[] };
 
 /** What a copy of cells puts on the clipboard: the text, and what the HTML is made of. */
 export interface TableCopy {
@@ -98,23 +98,6 @@ export function partsToHtml(
     )
     .join('');
 }
-
-/** The HTML table of a rectangle's cells: their newest text with its inline formatting. */
-export function rectToHtml(
-  state: EditorState,
-  rect: Rect,
-  fonts: FontStacks = DEFAULT_FONTS,
-  altOnly: (href: string) => boolean = () => false,
-  emoji?: EmojiLookup,
-): string {
-  return partsToHtml(
-    [partOf(rect.table, rect.rows, rect.cols, newestOf(state)).part],
-    fonts,
-    altOnly,
-    emoji,
-  );
-}
-
 /**
  * What copying the selection puts on the clipboard when it is cells: a rectangle's cells, or a
  * selection reaching into a table, the text outside it and the cells of the rows it reaches. Null

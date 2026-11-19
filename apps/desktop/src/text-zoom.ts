@@ -19,7 +19,7 @@ import {
 import { railSqueezes } from '@redlines/review';
 import { applyTextSize, stepSize, watchPinch } from './text-size.ts';
 
-export interface TextZoomOptions {
+interface TextZoomOptions {
   view: EditorView;
   scroller: HTMLElement;
   root: HTMLElement;

@@ -28,7 +28,7 @@ import {
 import type { Bibliography, StyleName } from '@redlines/citations';
 
 /** The bibliography of a document and the style its citations are printed in. */
-export interface Citations {
+interface Citations {
   bib: Bibliography;
   style: StyleName;
 }

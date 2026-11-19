@@ -36,7 +36,7 @@ const CODE_FENCE = /^[ \t]*(`{3,}|~{3,})/;
 const MAY_MATTER = /^[ \t]*[`~:]/;
 
 /** The attributes of an opening fence: `{.class #id key="value"}`, or one bare class (`::: warning`). */
-export function readAttributes(text: string): {
+function readAttributes(text: string): {
   classes: string[];
   attributes: Record<string, string>;
 } {

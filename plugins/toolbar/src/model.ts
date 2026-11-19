@@ -15,7 +15,7 @@
 
 export type Summoned = 'docked' | 'keyboard' | 'context';
 
-export interface ToolbarState {
+interface ToolbarState {
   /** How the toolbar was summoned; null while it is away. */
   how: Summoned | null;
   /** The preference: the toolbar is at the bottom of the window, shown without being summoned. */
@@ -50,7 +50,7 @@ export function setAtBottom(state: ToolbarState, atBottom: boolean): ToolbarStat
 }
 
 /** What a press of the toolbar's key (⌘⇧P) does. */
-export type KeyAction = 'show-at-caret' | 'hide' | 'focus-toolbar' | 'focus-document';
+type KeyAction = 'show-at-caret' | 'hide' | 'focus-toolbar' | 'focus-document';
 
 /**
  * ⌘⇧P: away, it shows at the caret; shown at the caret or the pointer, it goes. Docked, it can't

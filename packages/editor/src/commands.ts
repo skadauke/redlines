@@ -55,17 +55,9 @@ export const disabledReasonOf = (
   return command.disabledReason?.(state);
 };
 
-const isEnabled = (command: EditorCommand, state: EditorState) =>
-  disabledReasonOf(command, state) === undefined;
-
 /** The ids of the commands that are active in `state`. */
 export const activeCommands = (commands: readonly EditorCommand[], state: EditorState) =>
   commands.filter((command) => command.isActive?.(state)).map(({ id }) => id);
-
-/** The ids of the commands that can run in `state`. */
-export const enabledCommands = (commands: readonly EditorCommand[], state: EditorState) =>
-  commands.filter((command) => isEnabled(command, state)).map(({ id }) => id);
-
 /** The reason of each registered command that can't run in `state`, by id. */
 export function disabledReasons(
   commands: readonly EditorCommand[],
@@ -78,11 +70,6 @@ export function disabledReasons(
   }
   return reasons;
 }
-
-/** A command's title in `state`. */
-export const titleOf = (command: EditorCommand, state: EditorState): string =>
-  typeof command.title === 'function' ? command.title(state) : command.title;
-
 /** A command's title before there is a state to read: what its function says of an empty document,
  * so a title function must work on a state that has none of the editor's fields. */
 export const baseTitle = (command: EditorCommand): string =>

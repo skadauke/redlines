@@ -20,7 +20,7 @@ import type { MarkerRange } from './edit-support.ts';
 import type { Ledger, MarkKind, Parsed, Person } from './types.ts';
 
 /** A marker of a mark, as the reading of a break needs it. */
-export interface MarkerAt {
+interface MarkerAt {
   id: string;
   kind: MarkKind;
   role: 'open' | 'close';
@@ -299,7 +299,7 @@ function splitsInFront(
  * `markerAt` gives the marker that starts at a position, if one does; the markers of the split's
  * own mark, `id`, go with it.
  */
-export function breakDependsOn(
+function breakDependsOn(
   text: string,
   from: number,
   at: number,
@@ -429,7 +429,7 @@ export function breakDependsOn(
 }
 
 /** A split whose break could read otherwise once another change is decided, and that change. */
-export interface DependentBreak {
+interface DependentBreak {
   split: string;
   other: string;
 }

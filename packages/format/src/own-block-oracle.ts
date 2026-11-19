@@ -15,7 +15,7 @@ import { bodyOf, expectBlocksAs, reading } from './test-helpers.ts';
 
 /** The words of a file as micromark reads them: its text, without the tags, the markers and a task's
  * box, as one run of words. */
-export const micromarkText = (text: string): string =>
+const micromarkText = (text: string): string =>
   micromark(bodyOf(text), { allowDangerousHtml: true })
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<[^>]*>/g, ' ')
@@ -25,7 +25,7 @@ export const micromarkText = (text: string): string =>
     .trim();
 
 /** The file with one decision made, or undefined where it has no form. */
-export function decided(text: string, id: string, how: 'a' | 'r'): string | undefined {
+function decided(text: string, id: string, how: 'a' | 'r'): string | undefined {
   try {
     return applyChanges(text, how === 'a' ? accept(text, id) : reject(text, id));
   } catch (error) {
