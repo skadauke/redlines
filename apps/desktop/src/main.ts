@@ -2156,6 +2156,16 @@ if (
   void import('./sync-check.ts').then(({ runSyncCheck }) => runSyncCheck());
 }
 
+// Debug only (sheet-check.ts): the sheet of every interface element, for the look sweep.
+if (
+  import.meta.env.DEV &&
+  (import.meta.env['VITE_SHEET_CHECK'] || new URLSearchParams(location.search).has('sheet-check'))
+) {
+  void import('./sheet-check.ts').then(({ runSheetCheck }) =>
+    runSheetCheck(editor, { notify: (options) => notifications.show(options) }),
+  );
+}
+
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_SIMPLE_CHECK']) {
   void import('./simple-check.ts').then(({ runSimpleCheck }) => runSimpleCheck(editor));
