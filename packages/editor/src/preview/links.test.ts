@@ -2,6 +2,7 @@
 // ⌘-click on a link opens its address through the host, with a hint on hover (design §5.2).
 
 import { forceParsing } from '@codemirror/language';
+import { StateEffect } from '@codemirror/state';
 import { showTooltip } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
@@ -414,6 +415,39 @@ describe('the hint on a link (design §5.2)', () => {
     expect(hint()?.textContent).toContain('https://example.org/a?b=1&c=2');
     expect(hint()?.getAttribute('aria-hidden')).toBe('true');
     mouse(link, 'mouseleave');
+    expect(hint()).toBeNull();
+  });
+
+  it('goes on from one half of a link that wraps to the other, with no new pause (#380)', () => {
+    // A link over two lines is two drawn elements: moving between them is moving within the link.
+    const editor = load('A [first half\nsecond half](https://example.org/w) here.\n', {
+      openLink: vi.fn(),
+    });
+    const halves = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-link')];
+    expect(halves.length).toBe(2);
+    mouse(halves[0]!, 'mousemove', { clientX: 5, clientY: 5 });
+    vi.advanceTimersByTime(300);
+    // The pointer crosses to the other half before the pause is over: the pause is not started again.
+    mouse(halves[1]!, 'mousemove', { clientX: 6, clientY: 25 });
+    vi.advanceTimersByTime(100);
+    expect(hint()?.textContent).toContain('https://example.org/w');
+    // And with the hint shown, crossing keeps it.
+    mouse(halves[0]!, 'mousemove', { clientX: 7, clientY: 5 });
+    expect(hint()).not.toBeNull();
+    mouse(halves[0]!, 'mouseleave');
+    expect(hint()).toBeNull();
+  });
+
+  it('does not show while another tooltip does, as a change’s card over a link (#380)', () => {
+    const editor = load(DOC, { openLink: vi.fn() });
+    const card = showTooltip.of({
+      pos: 0,
+      above: true,
+      create: () => ({ dom: document.createElement('div') }),
+    });
+    editor.view.dispatch({ effects: StateEffect.appendConfig.of(card) });
+    mouse(linkNamed(editor, 'web link'), 'mousemove', { clientX: 5, clientY: 5 });
+    vi.advanceTimersByTime(500);
     expect(hint()).toBeNull();
   });
 
