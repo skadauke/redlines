@@ -4459,8 +4459,7 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   (`dialectOfName`: `qmd` and `rmd` are pandoc's, every other name GitHub's) in the edit's context
   (`EditContext.dialect`, `UntrackedContext.dialect`), and it is GitHub's when left out. Rules that
   only pandoc has are held in a pandoc file alone: no marker on a `:::` fence line, in an `@fig-x`
-  or `[@a; @b]` token, or in `^x^`, and a typed div is one insertion (rule 9, §9.4), at the start of a paragraph too (a callout
-  typed whole before text, with its blank line, has its closer alone after the closing fence, #1169). The same text
+  or `[@a; @b]` token, or in `^x^`, and a typed div is one insertion (rule 9, §9.4). The same text
   in a `.md` file is text, which takes marks as any other. The library reads the file's text in both
   alike, so the views, decisions and the ledger don't depend on the dialect.
 - Emoji are the character itself in every file type. Shortcodes (`:tent:`) don't render in pandoc,
@@ -4527,8 +4526,10 @@ A file changes only when its content does.
   of it is a deletion, and text typed next to it stands outside it). A div typed with Track Changes
   on, from its opening fence to the end of the typed text, is one insertion with no `split`
   marker inside; its closer stands alone on the line after the closing fence, as after a code
-  fence (§3.3). This holds at the top level of the file; in a quote or a list item the typed
-  fence lines keep the old form (not built).
+  fence (§3.3). It holds at the start of a paragraph too, where the typed text ends with its
+  blank line and text follows: the breaks typed after the last text stay behind the closer, as
+  after a code fence (#1169). This holds at the top level of the file; in a quote or a list item
+  the typed fence lines keep the old form (not built).
 - knitr runs code it finds inside HTML comments, in payloads and in the ledger alike, so both
   escape every backtick (§2.5). This was verified with knitr 1.51.
 - No Redlines comment starts with `#`, which Jupytext's cell markers and Quarto's editing comments
