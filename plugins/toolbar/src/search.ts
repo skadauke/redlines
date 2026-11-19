@@ -6,7 +6,7 @@
 import { toolbarIcon } from './icons.ts';
 import { type Control, type Entry, search } from './palette.ts';
 
-export interface SearchDeps {
+interface SearchDeps {
   /** The index, as it is now. */
   entries(): Entry[];
   /** What the last line says and does for a query, or null when the host can't ask. */

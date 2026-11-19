@@ -13,13 +13,13 @@
 import { newestView, type Range } from '@redlines/format';
 
 /** One passage the answer cites. */
-export interface Source {
+interface Source {
   n: number;
   /** The words, as the agent copied them. */
   quote: string;
 }
 
-export interface ParsedAnswer {
+interface ParsedAnswer {
   /** The answer's prose, with its [1] markers, without the Sources. */
   body: string;
   sources: Source[];

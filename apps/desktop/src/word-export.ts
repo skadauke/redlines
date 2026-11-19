@@ -8,7 +8,7 @@ import { basename, dirname } from './host.ts';
 import { PASSING_MS } from './ui/notifications.ts';
 import type { NotificationOptions } from './ui/notifications.ts';
 
-export interface WordExportParts {
+interface WordExportParts {
   host: Pick<Host, 'exportWord' | 'reveal'>;
   /** The document's text, with its marks. */
   text: string;

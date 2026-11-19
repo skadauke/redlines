@@ -3,7 +3,7 @@
 // agent's, so the DOM is built with `textContent` only and never with markup, and a link is drawn
 // only for an address that is a web page.
 
-export interface MarkdownDeps {
+interface MarkdownDeps {
   /** Opens a web address; without it a link is drawn as its text. */
   openLink?: (url: string) => void;
 }

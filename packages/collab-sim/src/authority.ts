@@ -44,7 +44,7 @@ export type PushResult =
   /** The changes don't apply to the text, which no derivation should produce. */
   | { status: 'invalid'; version: number };
 
-export interface AuthorityStats {
+interface AuthorityStats {
   pushes: number;
   /** Pushes whose base was behind the head. */
   stale: number;

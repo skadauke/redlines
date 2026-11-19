@@ -160,7 +160,7 @@ function rawAsks(state: EditorState): boolean {
 }
 
 /** Where tracked edits take their time and the random bytes of new ids from. */
-export interface EditSource {
+interface EditSource {
   now: () => Date;
   random?: (n: number) => Uint8Array;
 }

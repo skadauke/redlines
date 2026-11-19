@@ -163,7 +163,7 @@ const CHUNKS = [
 ];
 
 /** What a random document holds besides the blocks every one may have. */
-export interface RandomDocumentOptions {
+interface RandomDocumentOptions {
   /** The dialect of the file the document is in (format §9.1). In the pandoc dialect the document
    * mixes ordinary Markdown with what Quarto has: `:::` divs and callouts (a nested one too), code
    * chunks, includes, headings with attributes, and, inside the text, citations, cross-references,

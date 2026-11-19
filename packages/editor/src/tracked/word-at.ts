@@ -14,7 +14,7 @@ import { pointAt, shownRuns, shownText } from './corrections.ts';
 import { autocorrects } from './smart-typing.ts';
 
 /** A word that a spell checker may be asked about, with where it is. */
-export interface WordAt extends Range {
+interface WordAt extends Range {
   /** The text the page shows from `from` to `to`. */
   word: string;
   /** The block's text before the word, for the checker to tell its language from. */

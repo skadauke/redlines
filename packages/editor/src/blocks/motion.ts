@@ -140,7 +140,7 @@ export function planParagraphMotion(
 }
 
 /** The text of the block at `pos` that a triple-click there selects: not its line break. */
-export function blockTextAt(state: EditorState, pos: number): { from: number; to: number } | null {
+function blockTextAt(state: EditorState, pos: number): { from: number; to: number } | null {
   const block = blockAt(state, pos);
   if (!block || block.kind === 'rule') return null;
   // A block that takes no text (code, a table row, HTML) has its lines: the line's text.
@@ -422,7 +422,7 @@ function tailBefore(state: EditorState, pos: number): number | null {
  * row, or lands at the start of the next block by its column (not past the end of the row above),
  * is the move's own. Moves up, which CodeMirror takes to the near edge, are as they are.
  */
-export function settleVertical(
+function settleVertical(
   view: EditorView,
   start: SelectionRange,
   moved: SelectionRange,
@@ -469,7 +469,7 @@ const settled =
  * The keys that move down by a row or a page, CodeMirror's commands with the end of a row settled
  * (#491). The keys that move up are CodeMirror's, which rest in front of the closers.
  */
-export const verticalKeys = Prec.high(
+const verticalKeys = Prec.high(
   keymap.of([
     { key: 'ArrowDown', run: settled(cursorLineDown), shift: settled(selectLineDown) },
     { key: 'PageDown', run: settled(cursorPageDown), shift: settled(selectPageDown) },

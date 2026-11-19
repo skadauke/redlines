@@ -12,7 +12,7 @@ const WORDS = 'the quick brown fox jumps over a lazy dog while reviewers read ev
  * A table of `rows` rows and 5 columns, with `marks` insertions in its cells, spread over its rows,
  * for the document that measures what a table costs. `ids` are the marks' ids.
  */
-export function bigTable(rows: number, marks: number, ids: readonly string[]): string {
+function bigTable(rows: number, marks: number, ids: readonly string[]): string {
   const lines = [
     '| Item | Count | Place | Note | Owner |',
     '| ---- | ----- | ----- | ---- | ----- |',

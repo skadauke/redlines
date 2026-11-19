@@ -19,7 +19,7 @@ export const IDLE_MS = 150;
 export const SELECTION_MS = 40;
 
 /** What the label counts. */
-export interface Words {
+interface Words {
   total: number;
   /** The words a selection covers, or null when nothing with a word in it is selected. */
   selected: number | null;
@@ -123,7 +123,7 @@ export function textPartsLabel(parts: TextParts): string {
   ].join('\n');
 }
 
-export interface WordCount {
+interface WordCount {
   /**
    * The document changed (the default): counts once the changes stop. Only the selection changed
    * (`textChanged` false): counts after `SELECTION_MS`, since the text is already read, unless a

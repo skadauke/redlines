@@ -65,7 +65,7 @@ export interface Summary {
   replyBody?: string;
 }
 
-export type Derived =
+type Derived =
   | { ok: true; changes: TextChange[]; summary: Summary }
   | { ok: false; reason: string; crash?: boolean };
 

@@ -206,7 +206,7 @@ function inReplaced(tr: Transaction, at: number): number | null {
  * leaves it: the native caret then has no box to stand in and shows late, at the next selection
  * change, with the keys typed meanwhile going in at a place the page no longer holds.
  */
-export function seatCaret(view: EditorView): void {
+function seatCaret(view: EditorView): void {
   const { main } = view.state.selection;
   if (!main.empty || !view.hasFocus || view.composing) return;
   const root = view.root as unknown as { getSelection?: () => Selection | null };
@@ -675,7 +675,7 @@ const returnAtEndKey = blockKey((view) => {
  * quote or a list carries on over a line with no blank line above it. Null in every other place, for
  * CodeMirror's ↓ (#514).
  */
-export function planDownAtEnd(view: EditorView): KeyEdit | null {
+function planDownAtEnd(view: EditorView): KeyEdit | null {
   const { state } = view;
   const { main } = state.selection;
   if (!main.empty || state.selection.ranges.length > 1) return null;

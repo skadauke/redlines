@@ -4,7 +4,7 @@
 // agent's edits.
 
 /** A change in the old text's offsets. Lists of them are sorted and don't overlap. */
-export interface Change {
+interface Change {
   from: number;
   to: number;
   insert: string;

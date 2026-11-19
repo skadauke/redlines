@@ -4,7 +4,7 @@
 
 import { icon } from './icons.ts';
 
-export const PASSING_MS = 2400;
+const PASSING_MS = 2400;
 
 export interface Notice {
   /** Shows a notice that stays until `onDismiss` runs from its close button, or null to clear it. */

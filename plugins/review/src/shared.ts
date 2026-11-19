@@ -109,7 +109,7 @@ export function spanOf(mark: MarkRange): Range {
  * The text of `ranges` as it reads, without the markers of any marks inside them, or what carries
  * an opener on a line of its own.
  */
-export function textOf(parsed: Parsed, ranges: readonly Range[]): string {
+function textOf(parsed: Parsed, ranges: readonly Range[]): string {
   const markers = parsed.marks
     .flatMap(({ segments }) =>
       segments.flatMap((segment) => {
@@ -133,7 +133,7 @@ export function textOf(parsed: Parsed, ranges: readonly Range[]): string {
 }
 
 /** The text a change put in, as it reads: an insertion's, or a substitution's new text. */
-export function insertedText(parsed: Parsed, change: MarkRange): string {
+function insertedText(parsed: Parsed, change: MarkRange): string {
   return textOf(
     parsed,
     change.segments.map(({ content }) => content),
@@ -150,7 +150,7 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
  * Characters are what a reader sees as one, so an emoji is never cut in half. Empty for white
  * space alone.
  */
-export function shorten(text: string): string {
+function shorten(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   const chars = [...graphemes.segment(flat)].map(({ segment }) => segment);
   if (chars.length <= QUOTE_LIMIT) return flat;
@@ -177,7 +177,7 @@ export function readable(text: string): string {
 }
 
 /** What a change took out and what it put in. */
-export interface ChangeTexts {
+interface ChangeTexts {
   /** A deletion's text, or the text a substitution replaced; empty for the other kinds. */
   old: string;
   /** An insertion's text, or a substitution's new text; a split's line break; else empty. */
@@ -190,24 +190,21 @@ export interface ChangeTexts {
 export const isRowInsertion = (change: MarkRange) =>
   change.kind === 'ins' && change.payload === 'row';
 /** Whether a change is a deleted table row (format §3.7). */
-export const isRowDeletion = (change: MarkRange) =>
+const isRowDeletion = (change: MarkRange) =>
   change.kind === 'del' && /^row=/.test(change.payload ?? '');
 
 /** Whether a change is a row moved: the row at its new place. */
-export const isRowMove = (change: MarkRange) =>
-  isRowInsertion(change) && change.entry.move !== undefined;
+const isRowMove = (change: MarkRange) => isRowInsertion(change) && change.entry.move !== undefined;
 
 /** Whether a change is an inserted table column (format §3.7). */
-export const isColInsertion = (change: MarkRange) =>
-  change.kind === 'ins' && change.payload === 'col';
+const isColInsertion = (change: MarkRange) => change.kind === 'ins' && change.payload === 'col';
 
 /** Whether a change is a deleted table column (format §3.7). */
-export const isColDeletion = (change: MarkRange) =>
+const isColDeletion = (change: MarkRange) =>
   change.kind === 'del' && /^col=/.test(change.payload ?? '');
 
 /** Whether a change is a column moved: the column at its new place. */
-export const isColMove = (change: MarkRange) =>
-  isColInsertion(change) && change.entry.move !== undefined;
+const isColMove = (change: MarkRange) => isColInsertion(change) && change.entry.move !== undefined;
 
 /**
  * What changes of rows or columns did, in the words of a card and a note: `Inserted row`,
@@ -370,7 +367,7 @@ function ledgerTime(date: Date): Time {
 }
 
 /** An edit by `author`, now. Only the fields `author` has are written to the ledger's people. */
-export function editContext(author: Author, dialect?: MarkdownDialect): EditContext {
+function editContext(author: Author, dialect?: MarkdownDialect): EditContext {
   const person: Person = { handle: author.handle, name: author.name };
   if (author.email !== undefined) person.email = author.email;
   if (author.agent !== undefined) person.agent = author.agent;

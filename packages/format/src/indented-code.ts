@@ -333,7 +333,7 @@ const LEAD = /^(?:[ \t>]|(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$))*/;
 
 /** The kinds of HTML block that may be open above a line, whose end the line could hold: a comment
  * ends at `-->` and a declaration, such as `<!DOCTYPE`, at `>`, and every marker has both. */
-export interface HtmlOpen {
+interface HtmlOpen {
   comment: boolean;
   declaration: boolean;
 }

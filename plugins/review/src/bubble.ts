@@ -24,7 +24,7 @@ import {
 } from './shared.ts';
 
 /** What the card needs of the rail: the comment's text as the note draws it, and the Reply box. */
-export interface BubbleHost {
+interface BubbleHost {
   renderText?(thread: Thread): Node | string;
   /** Opens the thread's note with its reply box, as its Reply button does. */
   reply(thread: string): void;

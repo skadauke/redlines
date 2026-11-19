@@ -21,7 +21,7 @@ import { correctText, pointAt, shownRuns, shownText } from './corrections.ts';
 import { autocorrects } from './smart-typing.ts';
 
 /** What the host is asked: the correction of `word`, or null. `before` is the block up to it. */
-export type CorrectWord = (word: string, before: string) => Promise<string | null>;
+type CorrectWord = (word: string, before: string) => Promise<string | null>;
 
 /** A word, with an apostrophe inside, at the end of the text. */
 const WORD_AT_END = /\p{L}+(?:['’]\p{L}+)*$/u;

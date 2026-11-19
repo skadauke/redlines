@@ -4,8 +4,8 @@
 // themes, the page's own code, the journeys, this workflow) runs them all.
 
 /** The areas a journey can be tagged with (`test.describe('lists @lists', …)`). */
-export const AREAS = ['lists', 'blocks', 'tables', 'links', 'views'] as const;
-export type Area = (typeof AREAS)[number];
+const AREAS = ['lists', 'blocks', 'tables', 'links', 'views'] as const;
+type Area = (typeof AREAS)[number];
 
 type Effect = readonly Area[] | 'all';
 

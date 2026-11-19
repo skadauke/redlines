@@ -32,7 +32,7 @@ import {
 import { missingCaret, missingSpec } from './missing.ts';
 
 /** A cell of a table by its row (0 the header) and column. */
-export interface CellRef {
+interface CellRef {
   row: number;
   col: number;
 }

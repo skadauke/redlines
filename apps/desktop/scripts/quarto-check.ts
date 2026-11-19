@@ -38,7 +38,7 @@ import type { EditContext, TextChange } from '@redlines/format';
 type Engine = 'markdown' | 'knitr' | 'jupyter';
 type Format = 'html' | 'docx' | 'typst';
 
-export interface Result {
+interface Result {
   probe: string;
   format: Format;
   engine: Engine;
@@ -279,7 +279,7 @@ function firstDifference(a: string, b: string): string {
   return `at ${i}: "${a.slice(Math.max(0, i - 20), i + 30)}" vs "${b.slice(Math.max(0, i - 20), i + 30)}"`;
 }
 
-export function run(argv: string[]): number {
+function run(argv: string[]): number {
   const formats = (
     argv.includes('--to') ? (argv[argv.indexOf('--to') + 1] ?? '') : 'html,docx,typst'
   )

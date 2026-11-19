@@ -183,7 +183,7 @@ export type Marker =
   | { type: 'close'; id: string; from: number; to: number };
 
 /** A `<!-- redlines` comment: where it starts, where its first line ends, and where its `-->` is. */
-export interface LedgerCandidate {
+interface LedgerCandidate {
   start: number;
   headerEnd: number;
   end: number;
@@ -264,7 +264,7 @@ export function scanAfter(
 }
 
 /** The scan of `text` if it is among the last few, and none otherwise: it never scans. */
-export function knownScan(text: string): Scan | undefined {
+function knownScan(text: string): Scan | undefined {
   for (const known of recent) if (known.text === text) return known.scanned;
   return undefined;
 }

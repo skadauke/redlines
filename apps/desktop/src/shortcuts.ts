@@ -91,7 +91,7 @@ export function ariaKey(key: string): string {
 }
 
 /** Whether a key has ⌘, ⌃ or ⌥: a key with only ⇧, or none, would be typing. */
-export function hasCommandModifier(key: string): boolean {
+function hasCommandModifier(key: string): boolean {
   return /^(?:(?:Ctrl|Alt|Shift|Mod)-)*(?:Ctrl|Alt|Mod)-/.test(key);
 }
 
@@ -249,7 +249,7 @@ const CODE_KEYS: Readonly<Record<string, string>> = {
 };
 
 /** What a key press says to a recorder. */
-export type Recorded =
+type Recorded =
   | { kind: 'key'; key: string }
   | { kind: 'cancel' }
   | { kind: 'clear' }

@@ -51,7 +51,7 @@ export async function startMonitor(page: Page): Promise<void> {
  * and when another browser of another run is on the machine (another worktree's journeys) the
  * number would be theirs too, and the answer is null. Null as well where `ps` can't say.
  */
-export function webkitMemoryMB(): number | null {
+function webkitMemoryMB(): number | null {
   try {
     const out = execFileSync('ps', ['-axo', 'pid=,ppid=,rss=,command='], { encoding: 'utf8' });
     let kb = 0;

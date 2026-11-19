@@ -4,7 +4,7 @@ import { run } from './run.ts';
 import type { CliIo } from './run.ts';
 
 /** The time of every test, with the seconds and milliseconds that the ledger leaves out. */
-export const NOW = new Date('2026-10-31T23:30:45.678Z');
+const NOW = new Date('2026-10-31T23:30:45.678Z');
 
 /** What a command did. */
 export interface Run {
@@ -20,7 +20,7 @@ export interface Run {
 }
 
 /** What a test can change about the machine a command runs on. */
-export interface Machine {
+interface Machine {
   /** What standard input holds. */
   stdin?: string;
   /** Symbolic links: the path each one leads to. */

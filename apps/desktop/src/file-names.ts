@@ -7,10 +7,10 @@
  * The kinds of document: Markdown has three views, Track Changes and a ledger; Plain-only has
  * none of them.
  */
-export type DocumentKind = 'markdown' | 'plain-only';
+type DocumentKind = 'markdown' | 'plain-only';
 
 /** The dialects of Markdown: GitHub's, and Pandoc's, which R Markdown and Quarto write. */
-export type MarkdownDialect = 'gfm' | 'pandoc';
+type MarkdownDialect = 'gfm' | 'pandoc';
 
 /**
  * The extensions of Markdown documents by dialect (format §9.1), lowercase: Markdown, and the R
@@ -18,7 +18,7 @@ export type MarkdownDialect = 'gfm' | 'pandoc';
  * as an image's size. `src-tauri/src/project.rs` holds the same table, and a test says they agree
  * (`src-tauri/src/document_types.rs`).
  */
-export const MARKDOWN_EXTENSIONS: Readonly<Record<MarkdownDialect, readonly string[]>> = {
+const MARKDOWN_EXTENSIONS: Readonly<Record<MarkdownDialect, readonly string[]>> = {
   gfm: ['md', 'markdown'],
   pandoc: ['qmd', 'rmd'],
 };

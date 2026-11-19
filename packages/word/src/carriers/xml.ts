@@ -37,7 +37,7 @@ export function xmlSafe(text: string): boolean {
 }
 
 /** The attributes of a start tag's text, by local name (`rl:id="b1"` is `id`). */
-export function attributesOf(tag: string): Record<string, string> {
+function attributesOf(tag: string): Record<string, string> {
   const found: Record<string, string> = {};
   for (const match of tag.matchAll(/\s(?:[\w.-]+:)?([\w.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
     found[match[1] as string] = unescapeXml((match[2] ?? match[3]) as string);

@@ -25,7 +25,7 @@ import { colorClass } from '../tracked/colors.ts';
 export const GHOST_ROWS = 8;
 
 /** A stretch of a cell's text, and the color of whoever deleted it. */
-export interface GhostRun {
+interface GhostRun {
   text: string;
   color: number;
 }

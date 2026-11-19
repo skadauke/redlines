@@ -27,13 +27,13 @@ import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
 import { closersBelow, deletionLine } from './table-rows.ts';
 import type { MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 
-export const ONE_LINE_CELL = 'In a table, write a pipe as \\| and a line break as <br>.';
+const ONE_LINE_CELL = 'In a table, write a pipe as \\| and a line break as <br>.';
 
 /** The tables of the last text asked about: an edit asks of the same text again and again. */
 let last: { text: string; tables: TableRead[] } | undefined;
 
 /** The tables of `text`, read once for the same text. */
-export function tablesIn(text: string, parsed?: Parsed): TableRead[] {
+function tablesIn(text: string, parsed?: Parsed): TableRead[] {
   if (last?.text === text) return last.tables;
   const read = parsed ?? parse(text);
   const tables = readTables(text, read);
@@ -472,7 +472,7 @@ export function ruleThree(
  * character and nothing is escaped or added; a backslash that is itself escaped (an even run) stays
  * in front of the point.
  */
-export function beforeBackslash(text: string, at: number): number {
+function beforeBackslash(text: string, at: number): number {
   let run = 0;
   while (text[at - 1 - run] === '\\') run++;
   return run % 2 === 1 ? at - 1 : at;
@@ -830,7 +830,7 @@ export function straddlingMarks(
 }
 
 /** The comments and highlights that have a marker in a table's rows (format §3.7, rule 6). */
-export interface TableAnnotations {
+interface TableAnnotations {
   /** The markers inside the rows that go: those of the comments that lie wholly in them, and every one
    * of a highlight that has one there, which goes whole. */
   removals: TextChange[];
@@ -961,7 +961,7 @@ const FENCE_CLOSE_OR_RULE =
   /^[ \t>]*(?:(?:`{3,}|~{3,})[ \t]*|(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
 
 /** What stands next to a table, as far as deleting it whole with Track Changes on can tell (rule 6). */
-export interface TableNeighbours {
+interface TableNeighbours {
   /** The block after the table is a fenced code block (in a list item or not). */
   fenceAfter: boolean;
   /** That fence never closes: no line after it closes it before the ledger. */
@@ -1136,7 +1136,7 @@ export function outerPipeWrites(text: string, edit: TextChange, parsed?: Parsed)
 
 /** A position of a text after `writes` are made in it. Text at the place of a leading pipe moves after
  * it, text at a trailing one stays before it. */
-export function pipeShifted(writes: readonly PipeWrite[], at: number): number {
+function pipeShifted(writes: readonly PipeWrite[], at: number): number {
   return (
     at +
     writes

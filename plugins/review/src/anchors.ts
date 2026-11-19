@@ -15,7 +15,7 @@ export interface Anchor extends Range {
  * An anchor through edits. What is put in right at its ends stays outside it. With its text
  * deleted, it is on the point where the text was.
  */
-export function mapAnchor(range: Range, changes: ChangeDesc): Range {
+function mapAnchor(range: Range, changes: ChangeDesc): Range {
   const from = changes.mapPos(range.from, 1);
   return { from, to: Math.max(from, changes.mapPos(range.to, -1)) };
 }
@@ -44,7 +44,7 @@ function replacement(range: Range, changes: ChangeDesc, doc: Text): Range {
  * finds its text, else as edits map it. Text that a reload changed is what replaced it, which
  * shows, and the anchor says it changed; an empty anchor has no text to lose.
  */
-export function follow(
+function follow(
   range: Anchor,
   changes: ChangeDesc,
   before: Text,
@@ -70,7 +70,7 @@ export function followAnchor(range: Anchor, tr: Transaction): Anchor {
 const CONTEXT = 32;
 
 /** An anchor's text, and some of the text on either side of it. */
-export interface AnchorContext {
+interface AnchorContext {
   quote: string;
   before: string;
   after: string;

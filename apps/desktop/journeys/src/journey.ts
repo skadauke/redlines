@@ -24,7 +24,7 @@ export { expect };
 export type Scheme = 'light' | 'dark';
 export type ViewName = 'clean' | 'simple' | 'redlines' | 'raw';
 
-export interface StartOptions {
+interface StartOptions {
   /** The document's text, with its ledger if it has changes. Default: the page's own sample. */
   doc?: string;
   /**
@@ -92,7 +92,7 @@ declare global {
   }
 }
 
-export interface Caret {
+interface Caret {
   /** The selection's anchor and head, as offsets in the document. */
   anchor: number;
   head: number;

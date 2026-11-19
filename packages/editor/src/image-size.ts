@@ -33,7 +33,7 @@ const TOKEN = /(?:[^\s"'=]+=(?:"[^"]*"|'[^']*'|\S*)|"[^"]*"|'[^']*'|\S+)/g;
 export type ImageAlign = 'left' | 'center' | 'right';
 
 /** One attribute of an `<img>` tag: its name in lowercase, its value read, and its text. */
-export interface Attribute {
+interface Attribute {
   name: string;
   /** The value with its quotes taken off and its character references read; null for none. */
   value: string | null;
@@ -68,7 +68,7 @@ export interface ImageElement {
 }
 
 /** A change to the document's text. */
-export interface TextEdit {
+interface TextEdit {
   from: number;
   to: number;
   insert: string;
@@ -448,7 +448,7 @@ export const IMAGE_ATTRIBUTES =
   "This image has attributes that an aligned image can't keep. Remove them first, or leave it unaligned.";
 
 /** The edit that gives an image its look: its changes, whether it parts a paragraph, or why not. */
-export interface LookEdit {
+interface LookEdit {
   changes: TextEdit[];
   /** The edit parts the paragraph below the image from it, which Track Changes may refuse. */
   parts?: boolean;
@@ -494,7 +494,7 @@ export function lookEdit(
  * under it: the tag would be an HTML block, and the lines under it would be raw HTML, so the
  * paragraph is parted after the image, and a break that parts a paragraph is not yet tracked there.
  */
-export const IMAGE_PARTS_PARAGRAPH =
+const IMAGE_PARTS_PARAGRAPH =
   'Resizing this image would turn the lines under it into HTML. Press Return after the image first, or turn off Track Changes.';
 
 /**
@@ -545,7 +545,7 @@ export function escapeAlt(text: string, inTable: boolean): string {
 }
 
 /** The change that gives `image` the alt text, or null where it has that text already. */
-export function altEdit(state: EditorState, image: ImageElement, alt: string): TextEdit | null {
+function altEdit(state: EditorState, image: ImageElement, alt: string): TextEdit | null {
   const wanted = alt.replace(/\s+/g, ' ').trim();
   // The alt it has is what is asked for: nothing to write, however the image happens to be written.
   if (image.alt === wanted) return null;
@@ -609,7 +609,7 @@ export function setImageAlt(view: EditorView, alt: string, at?: number): boolean
  * The change that points `image` at the file `src` (a path relative to the document, decoded), or null where it points there already. Only the address changes: the alt
  * text, the title, the width and the alignment stay as they are written (Crop, #624).
  */
-export function srcEdit(state: EditorState, image: ImageElement, src: string): TextEdit | null {
+function srcEdit(state: EditorState, image: ImageElement, src: string): TextEdit | null {
   // The address as a link writes it, so that a path with a space is not written twice over.
   const address = destination(src);
   if (image.src === address) return null;

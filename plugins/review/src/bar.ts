@@ -342,7 +342,7 @@ interface Controls {
 }
 
 /** Where the panel goes: the box of the change, the box of the text column, the window. */
-export interface PanelSpace {
+interface PanelSpace {
   change: { left: number; right: number; top: number; bottom: number };
   column: { left: number; right: number };
   visible: { left: number; top: number; right: number; bottom: number };

@@ -15,7 +15,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-export const DOC = [
+const DOC = [
   'Intro.',
   '',
   '| a | b | c |',

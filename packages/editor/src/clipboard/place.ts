@@ -18,7 +18,7 @@ import { GFM, parser } from '@lezer/markdown';
 const markdown = parser.configure(GFM);
 
 /** A paste as one text for the caret, or as a part for the caret and a part for the line's end. */
-export type Placement = { text: string } | { text: string; rest: string; at: number };
+type Placement = { text: string } | { text: string; rest: string; at: number };
 
 /** The blocks of Markdown, each as written and whether it is a paragraph. */
 function blocksOf(text: string): { text: string; paragraph: boolean; to: number }[] {

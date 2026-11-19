@@ -264,7 +264,7 @@ function newestViewOf(text: string): DocView {
 
 /** A change that makes the original view: `opener` is the marker, with its carrier, whose old
  * text it brings back, for a deletion or a substitution. */
-export interface OriginalChange extends TextChange {
+interface OriginalChange extends TextChange {
   opener?: Range;
 }
 

@@ -17,10 +17,10 @@ import type { MarkerRange } from './markers.ts';
 import type { MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
 /** The kinds of block a change replaces whole. */
-export type CodeKind = 'fenced' | 'math' | 'html' | 'indented';
+type CodeKind = 'fenced' | 'math' | 'html' | 'indented';
 
 /** A block of code, math or raw text, and the part of it that an edit may fall in. */
-export interface CodeBlock {
+interface CodeBlock {
   kind: CodeKind;
   /** The start of its first line. */
   from: number;
@@ -52,7 +52,7 @@ export interface CodeBlock {
 }
 
 /** A pending change that holds a block, and whose it is. */
-export interface Holder {
+interface Holder {
   mark: MarkRange;
   content: Range;
   own: boolean;
@@ -84,7 +84,7 @@ const isBreak = (insert: string) =>
 
 /** What `codeBlockOf` finds: the block the edits touch, the edits (a line break typed at the start of
  * the closing line moved to the end of the line before), and whether every one is in the code. */
-export interface Located {
+interface Located {
   block: CodeBlock;
   edits: TextChange[];
   inCode: boolean;
@@ -92,7 +92,7 @@ export interface Located {
 
 /** The words for code that is not built yet: the edit is refused, and with Track Changes off every
  * key works as in any code. */
-export const NOT_BUILT = {
+const NOT_BUILT = {
   item: "A tracked change can't go in code that starts a list item yet. Turn off Track Changes to edit it.",
   container:
     "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.",

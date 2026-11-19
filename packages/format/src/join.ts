@@ -44,7 +44,7 @@ export interface Run {
   new: string[];
 }
 
-export function tokens(s: string): string[] {
+function tokens(s: string): string[] {
   return s.match(TOKEN) ?? [];
 }
 
@@ -298,7 +298,7 @@ function prefixesKept(before: string, after: string, firstLine: boolean): boolea
  *
  * @param base where `runs` start in the old text that `spans` are offsets of.
  */
-export function wholeBlock(
+function wholeBlock(
   runs: readonly Run[],
   guards: JoinGuards,
   base = 0,
@@ -345,7 +345,7 @@ export function wholeBlock(
 
 /** A stretch of an edit's runs: a block's, a break between blocks that is unchanged, or a change
  * that adds or takes away a block break (a barrier), which is in no block. */
-export interface Part {
+interface Part {
   kind: 'block' | 'break' | 'barrier';
   runs: Run[];
   /** Where the part starts in the old text. */

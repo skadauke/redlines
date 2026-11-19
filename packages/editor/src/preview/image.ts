@@ -23,7 +23,7 @@ import { textPx } from './theme.ts';
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 /** Turns a local image path, as written in the document, into a URL the page can load, or null. */
-export type ImageResolver = (src: string) => string | null;
+type ImageResolver = (src: string) => string | null;
 
 /** The host's resolver (`EditorOptions.resolveImage`). */
 export const imageResolver = Facet.define<ImageResolver, ImageResolver | null>({
@@ -31,7 +31,7 @@ export const imageResolver = Facet.define<ImageResolver, ImageResolver | null>({
 });
 
 /** A local image's bytes, base64, with its type, for a copy to embed; null when it can't be read. */
-export type ImageData = (path: string) => Promise<{ mimeType: string; data: string } | null>;
+type ImageData = (path: string) => Promise<{ mimeType: string; data: string } | null>;
 
 /** The host's reader of local image files (`EditorOptions.imageData`). */
 export const imageReader = Facet.define<ImageData, ImageData | null>({
@@ -39,13 +39,13 @@ export const imageReader = Facet.define<ImageData, ImageData | null>({
 });
 
 /** An image's size in px, as its file says: what a page may reserve the room for before it loads. */
-export interface ImageSize {
+interface ImageSize {
   width: number;
   height: number;
 }
 
 /** The host's answer for the size of a local image, as written in the document; null for unknown. */
-export type ImageSizer = (src: string) => ImageSize | null | Promise<ImageSize | null>;
+type ImageSizer = (src: string) => ImageSize | null | Promise<ImageSize | null>;
 
 /** The host's sizer (`EditorOptions.imageSize`). */
 export const imageSizer = Facet.define<ImageSizer, ImageSizer | null>({

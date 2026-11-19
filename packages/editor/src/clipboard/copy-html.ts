@@ -119,7 +119,7 @@ export interface DocumentParts {
 const COLUMN_PX = 624;
 
 /** The size in px of an image given as a `data:` address, read from its header; null if unknown. */
-export function dataImageSize(url: string): { width: number; height: number } | null {
+function dataImageSize(url: string): { width: number; height: number } | null {
   const comma = url.indexOf(',');
   if (!/^data:image\/[\w+.-]+;base64$/i.test(url.slice(0, comma))) return null;
   let bytes: Uint8Array;

@@ -15,7 +15,7 @@ import { blockLeaves, bodyOf, problemsOf } from './test-helpers.ts';
  * What each comment and highlight of a file is: the line of its opener and the line of its closer (or
  * `point`), as text without any marker, so that it says which row of a table the marker is in.
  */
-export function annotationLines(text: string): string[] {
+function annotationLines(text: string): string[] {
   const line = (at: number) =>
     text
       .slice(lineStart(text, at), lineEnd(text, at))
@@ -35,7 +35,7 @@ export function annotationLines(text: string): string[] {
 
 /** Every state that deciding the changes of `text` comes to, in any order; a decision that is refused
  * ends its order. */
-export function statesOf(text: string): string[] {
+function statesOf(text: string): string[] {
   const seen = new Set<string>();
   const walk = (current: string) => {
     if (seen.has(current)) return;

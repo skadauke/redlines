@@ -707,7 +707,7 @@ function runAt(
 }
 
 /** A paragraph of a file's body, and its plain text on each reading of punctuation asked for. */
-export interface PlainParagraph {
+interface PlainParagraph {
   range: Range;
   plain: string[];
 }

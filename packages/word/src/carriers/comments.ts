@@ -51,7 +51,7 @@ const PARTS = {
 } as const;
 
 /** `word/commentsExtended.xml`. */
-export function commentsExtendedXml(comments: CommentCarrier[]): string {
+function commentsExtendedXml(comments: CommentCarrier[]): string {
   const items = comments
     .map(
       (comment) =>
@@ -64,7 +64,7 @@ export function commentsExtendedXml(comments: CommentCarrier[]): string {
 }
 
 /** `word/commentsIds.xml`. */
-export function commentsIdsXml(comments: CommentCarrier[]): string {
+function commentsIdsXml(comments: CommentCarrier[]): string {
   const items = comments
     .map(
       (comment) =>
@@ -75,7 +75,7 @@ export function commentsIdsXml(comments: CommentCarrier[]): string {
 }
 
 /** `word/commentsExtensible.xml`. */
-export function commentsExtensibleXml(comments: CommentCarrier[]): string {
+function commentsExtensibleXml(comments: CommentCarrier[]): string {
   const items = comments
     .map(
       (comment) =>

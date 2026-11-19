@@ -119,7 +119,7 @@ export function intact(proxy: string, payload: string): boolean {
 
 /** The old text of a payload as the original view shows it: its own marks rejected. Where the
  * payload takes the ledger into itself (`intact`), the old text as it is. */
-export function originalOfPayload(payload: string, ledger: string, prefix = ''): string {
+function originalOfPayload(payload: string, ledger: string, prefix = ''): string {
   const proxy = payloadFile(prefix + payload, ledger);
   if (!intact(proxy, prefix + payload)) return payload;
   return withoutPrefix(originalView(proxy).text, prefix);

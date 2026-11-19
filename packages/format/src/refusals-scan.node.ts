@@ -8,7 +8,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 /** A place in the sources that refuses (or may refuse) an edit. */
-export interface RefusalSite {
+interface RefusalSite {
   /** The path from the repository's root. */
   file: string;
   /** The line it is on, from 1. */
@@ -22,7 +22,7 @@ export interface RefusalSite {
 }
 
 /** The directories whose sources are read, from the repository's root. */
-export const SCANNED = ['packages/format/src', 'packages/editor/src'];
+const SCANNED = ['packages/format/src', 'packages/editor/src'];
 
 const PLUGINS = 'plugins';
 

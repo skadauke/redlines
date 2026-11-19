@@ -159,7 +159,7 @@ function segmentsOf(
 }
 
 /** The ids of the marks in payloads, all depths. */
-export function payloadIds(payloads: readonly PayloadMarks[]): string[] {
+function payloadIds(payloads: readonly PayloadMarks[]): string[] {
   return payloads.flatMap((site) => [
     ...site.marks.map((mark) => mark.id),
     ...payloadIds(site.payloads),

@@ -226,7 +226,7 @@ const UNITS: Record<string, string> = {
  * `{r, echo=FALSE}`), else what its lines use — a tab if they are indented by tabs, else the
  * smallest indentation any of them has, else two spaces.
  */
-export function indentUnit(state: EditorState, block: Block): string {
+function indentUnit(state: EditorState, block: Block): string {
   const { doc } = state;
   const first = doc.lineAt(block.lines.from);
   if (block.kind === 'front-matter') return '  ';

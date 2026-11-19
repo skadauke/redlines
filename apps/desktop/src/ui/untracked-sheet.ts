@@ -13,7 +13,7 @@ import type {
 } from '@redlines/editor';
 import type { UntrackedAnswers } from '../untracked-answers.ts';
 
-export interface UntrackedSheetOptions {
+interface UntrackedSheetOptions {
   /** The window the sheet is attached to. */
   container: HTMLElement;
   /** The path of the document, which "Don't ask again" is kept for; null before it is saved. */

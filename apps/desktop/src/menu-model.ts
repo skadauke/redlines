@@ -151,7 +151,7 @@ export interface MenuState {
 }
 
 /** One of the Mac's standard items, which it draws and handles itself. */
-export interface StandardRow {
+interface StandardRow {
   item:
     | 'Separator'
     | 'Undo'
@@ -212,7 +212,7 @@ export interface SubmenuRow {
 
 export type MenuRow = StandardRow | ActionRow | SubmenuRow;
 
-export interface AppMenu {
+interface AppMenu {
   title: string;
   rows: readonly MenuRow[];
   /** The Mac's Window menu, to which it adds the open windows. */

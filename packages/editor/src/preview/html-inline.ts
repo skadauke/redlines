@@ -23,7 +23,7 @@ const OPENING = new RegExp(String.raw`^<([a-zA-Z][a-zA-Z0-9-]*)(${ATTRIBUTE}*)\s
 const CLOSING = /^<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>/;
 
 /** A tag that is read: its lowercase name, whether it closes, and the text of its attributes. */
-export interface HtmlTag {
+interface HtmlTag {
   name: string;
   closing: boolean;
   attributes: string;

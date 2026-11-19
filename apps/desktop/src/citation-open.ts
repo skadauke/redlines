@@ -5,7 +5,7 @@
 
 import { isDocument, opensInDefaultApp } from './host.ts';
 
-export interface CitationOpenDeps {
+interface CitationOpenDeps {
   allowDocument(path: string): Promise<void>;
   openInNewWindow(path: string, line?: number): unknown;
   notice(message: string): void;

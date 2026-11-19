@@ -13,10 +13,10 @@ import { elementOf, elementsOf, escapeXml, unescapeXml, xmlSafe } from './xml.ts
 
 /** The part's namespace, and so its schema reference. Bump the number on a change that an older
  * reader would misread. */
-export const SOURCE_NAMESPACE = 'urn:redlines:source:1';
+const SOURCE_NAMESPACE = 'urn:redlines:source:1';
 
 /** The name the exporter gives the part. */
-export const SOURCE_PART = 'customXml/redlines-source.xml';
+const SOURCE_PART = 'customXml/redlines-source.xml';
 
 const ITEM_PROPS = 'customXml/itemProps-redlines-source.xml';
 const CUSTOM_XML_REL =

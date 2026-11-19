@@ -39,7 +39,7 @@ const PLAIN = new Set([
 ]);
 
 /** A subscript or superscript in a line of text: where it starts, ends, and which it is. */
-export interface Script {
+interface Script {
   from: number;
   to: number;
   kind: 'sub' | 'sup';

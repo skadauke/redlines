@@ -16,7 +16,7 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export interface PageParts {
+interface PageParts {
   /** The file's name. */
   title: string;
   /** A line over the document, as text. */

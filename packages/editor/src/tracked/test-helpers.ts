@@ -4,7 +4,7 @@ import { EditorView, type WidgetType } from '@codemirror/view';
 import type { Editor } from '../index.ts';
 import { trackedDecorations } from './decorations.ts';
 
-export interface Found {
+interface Found {
   from: number;
   to: number;
   kind: 'line' | 'mark' | 'replace' | 'widget';

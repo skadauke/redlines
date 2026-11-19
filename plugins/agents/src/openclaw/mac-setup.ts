@@ -54,13 +54,13 @@ export const MAC_TIMES: MacTimes = { extension: 12_000, signIn: 15_000 };
 
 export type MacButtonId = 'install' | 'app-store' | 'open' | 'sign-in' | 'restart';
 
-export interface MacButton {
+interface MacButton {
   id: MacButtonId;
   label: string;
   primary?: boolean;
 }
 
-export interface MacPlan {
+interface MacPlan {
   /** What is being waited for, with a mark that waits. */
   waiting: string | null;
   /** What to do or what to know, in plain words. */

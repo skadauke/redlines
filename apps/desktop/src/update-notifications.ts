@@ -29,7 +29,7 @@ export function unavailableText(reason: Unavailable): string {
   }
 }
 
-export interface UpdatePresenter {
+interface UpdatePresenter {
   /** Check for Updates…: checks now and says what it found. */
   checkForUpdates(): Promise<void>;
 }

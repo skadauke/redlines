@@ -9,7 +9,7 @@
 export const PRINT_ID = 'rl-print';
 
 /** The longest the dialog waits for the images of the page. */
-export const IMAGE_WAIT_MS = 8000;
+const IMAGE_WAIT_MS = 8000;
 
 /** The container for the printed page, made on first use as the last child of the body. */
 export function printContainer(doc: Document = document): HTMLElement {
@@ -161,7 +161,7 @@ export function keepHeadingsWithNext(root: ParentNode): void {
   }
 }
 
-export interface PrintParts {
+interface PrintParts {
   /** The host's print: opens the dialog, and resolves without waiting for it to close. */
   print: () => Promise<void>;
   /** Puts the page to be printed in place, and returns what takes it away (`fillPrintPage`). */

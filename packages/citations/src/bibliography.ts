@@ -41,7 +41,7 @@ const LETTERS: Record<string, string> = {
 };
 
 /** BibTeX text as plain text: braces dropped, accents and letters written out. */
-export function plain(value: string): string {
+function plain(value: string): string {
   return value
     .replace(/\\(['`"^~cv])\s*\{?\\?([A-Za-z])\}?/g, (all, accent: string, letter: string) => {
       const base = letter.toLowerCase();

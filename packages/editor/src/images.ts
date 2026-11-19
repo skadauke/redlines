@@ -275,7 +275,7 @@ export function imageSpot(
  * (the gaps of `image-drop.ts`): `before` and `after` are the line breaks that set the link apart
  * from the text on either side, written with it. Null when the document takes no image there.
  */
-export function blockSpot(
+function blockSpot(
   view: EditorView,
   pos: number,
   wrap: { before: string; after: string },
@@ -373,7 +373,7 @@ export const imageSaverFacet = Facet.define<
 >({ combine: (values) => values[0] });
 
 /** A picture the host fetched by its address: its bytes, their type and the extension to save with. */
-export interface FetchedImage {
+interface FetchedImage {
   bytes: Uint8Array<ArrayBuffer>;
   type: string;
   extension: string;
