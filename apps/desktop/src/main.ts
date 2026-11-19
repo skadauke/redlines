@@ -78,7 +78,8 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
-import { requestPane } from './preferences/pane-request.ts';
+import { requestPane, type RequestedPane } from './preferences/pane-request.ts';
+import { menuPaletteCommands } from './menu-palette.ts';
 import { fillPrintPage, plainPageHtml, printPage } from './print.ts';
 import { exportToWord } from './word-export.ts';
 import { openWord } from './word-import.ts';
@@ -1201,8 +1202,13 @@ async function readImageForAgent(src: string): Promise<{ mimeType: string; data:
  * agent itself; it asks for the pane, and Preferences shows it.
  */
 function openAgentPreferences(): void {
+  openPreferencesPane('agents');
+}
+
+/** Opens Preferences on `pane` (the palette's lines for the panes, and the Agents pane above). */
+function openPreferencesPane(pane: RequestedPane): void {
   if (!isTauri) return notice.flash('Preferences are in the app.');
-  requestPane('agents');
+  requestPane(pane);
   invoke('open_preferences').catch((error: unknown) => {
     console.error('Could not open Preferences', error);
     notice.flash('Couldn’t open Preferences.');
@@ -1280,6 +1286,15 @@ const acceptAllAndStopTracking = () => {
 const changeSettings = (change: Partial<Settings>) => {
   settings = keepWindowOwn(settings, updateSettings(change), change);
 };
+
+/** The panes of the Preferences window, by name, for the palette. */
+const PREFERENCE_PANES: readonly (readonly [RequestedPane, string])[] = [
+  ['general', 'General'],
+  ['editor', 'Editor'],
+  ['appearance', 'Appearance'],
+  ['agents', 'Agents'],
+  ['shortcuts', 'Shortcuts'],
+];
 
 /**
  * What the toolbar's palette offers besides the registry's commands: the app's own commands and
@@ -1379,6 +1394,22 @@ function toolbarCommands(): AppCommand[] {
       run: () => commands.checkForUpdates(),
       available: () => updateNotifications !== undefined,
     },
+    // Each pane of Preferences, to go to it by name (the Preferences window has its own search).
+    ...PREFERENCE_PANES.map(([pane, label]): AppCommand => ({
+      id: `app.preferences.${pane}`,
+      title: `Open ${label} Preferences`,
+      synonyms: ['settings', 'options', 'preferences', label.toLowerCase()],
+      run: () => openPreferencesPane(pane),
+    })),
+    // Every other row of the menu bar (About Redlines, New, Open, the exports, zoom, …).
+    ...menuPaletteCommands(
+      menuModel,
+      () => menuState,
+      ({ row }) => {
+        const key = row.id ? shortcutBook.keyOf(row.id) : null;
+        return key ? displayKey(key) : undefined;
+      },
+    ),
   ];
 }
 
