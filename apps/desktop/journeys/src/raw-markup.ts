@@ -203,14 +203,7 @@ export const KNOWN: readonly KnownCase[] = [
     text,
     why: `the Word export carries ${what} as text`,
   })),
-  ...(
-    [
-      ['attributes', /\{#/, 'attributes'],
-      ['reference', /@(?:sec|fig|tbl|eq)-/, 'references typed as they are'],
-      ['math', /\$\$/, 'the display formula'],
-      ['sub-sup-strike', /\^2\^/, 'the superscript'],
-    ] as const
-  ).map(([rule, text, what]): KnownCase => ({
+  ...([['math', /\$\$/, 'the display formula']] as const).map(([rule, text, what]): KnownCase => ({
     issue: 1216,
     doc: ['Build 21.qmd', 'frontmatter.qmd'],
     surfaces: ['quicklook'],

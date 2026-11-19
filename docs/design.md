@@ -2748,7 +2748,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
   line over its code. HTML is drawn from the same allowed list as Clean (§5.2), never live: no script,
   no style, and nothing the document can make load. Quarto divs are drawn too (a `.callout-*` div is a
-  quiet labelled box, any other div its text). An image that is a file in the
+  quiet labelled box, any other div its text). In a `.qmd` or `.Rmd` file the preview draws what the editor
+  draws of Quarto's syntax (`quarto.ts`): the attributes of a heading, a figure or a formula as a small
+  gray chip, a table's caption with its label ("Table 1:"), a cross-reference as its target's label
+  ("Figure 1") with a fine dotted underline, and `H~2~O` and `x^2^` as a subscript and a superscript. An image that is a file in the
   document's project is drawn, an `<img>` tag at its `width` and `height` when these are digits; any other is its alt text, and one from a server is never loaded.
   - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
     `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
