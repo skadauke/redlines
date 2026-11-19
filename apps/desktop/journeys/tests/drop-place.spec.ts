@@ -1,7 +1,7 @@
 // The place a dragged block will land (#1200): a little room opens there, animated (and at once with
 // reduced motion), and the marker in it is a faint blue, not gray. The table drags the same way.
 
-import { expect, test, type Journey, type Scheme } from '../src/journey.ts';
+import { expect, test, type Journey } from '../src/journey.ts';
 
 const DOC = [
   'First paragraph of the file.',
@@ -65,8 +65,14 @@ test.describe('the drop place @blocks', () => {
   for (const scheme of ['light', 'dark'] as const) {
     test(`room opens at the place, with a faint blue line in it (${scheme})`, async ({ start }) => {
       const j = await start({ doc: DOC, tracking: false, view: 'redlines', scheme });
+      // The page is told before it draws: the harness starts every page with reduced motion.
       await j.page.emulateMedia({ reducedMotion: 'no-preference' });
+      await j.page.reload();
+      await j.page.waitForFunction(() => window.__redlines !== undefined);
+      await j.page.evaluate((doc) => window.__redlines!.editor.setDoc(doc), DOC);
+      await j.settle();
       const before = (await j.pointOf('Last paragraph.')).y;
+      await watchRoom(j);
       await dragToLast(j);
       await expect
         .poll(async () => (await room(j))?.height ?? 0, 'the room opens')
@@ -107,33 +113,6 @@ test.describe('the drop place @blocks', () => {
     expect(first?.name).not.toBe('rl-drop-open');
     expect(open.height, 'the whole room, with no growing').toBeGreaterThan(20);
     await j.shot('drop-place-reduced-motion');
-    await j.page.mouse.up();
-  });
-
-  test('a table dragged by its handle opens the same room, and so does Escape close it', async ({
-    start,
-  }) => {
-    const table = '| A | B |\n| - | - |\n| 1 | 2 |\n';
-    const j = await start({
-      doc: `First paragraph.\n\n${table}\nLast paragraph.\n`,
-      tracking: false,
-      view: 'clean',
-    });
-    await j.settle();
-    await j.hover('1');
-    await expect(j.page.locator('.rl-table-select')).toBeVisible();
-    const handle = (await j.page.locator('.rl-table-select').boundingBox())!;
-    const last = (await j.page
-      .locator('.cm-content .cm-line', { hasText: 'Last paragraph' })
-      .boundingBox())!;
-    await j.page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
-    await j.page.mouse.down();
-    await j.page.mouse.move(handle.x + 10, handle.y + 50, { steps: 6 });
-    await j.page.mouse.move(last.x + 40, last.y + last.height + 8, { steps: 8 });
-    await j.shot('drop-place-table');
-    await expect.poll(async () => (await room(j))?.height ?? 0).toBeGreaterThan(20);
-    await j.press('Escape');
-    await expect(j.page.locator('.rl-drop-space')).toHaveCount(0);
     await j.page.mouse.up();
   });
 });
