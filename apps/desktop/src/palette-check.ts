@@ -135,6 +135,61 @@ async function checks(
     commands,
   );
 
+  // The place's review card is stacked above the bar, as one widget, and no card of its own shows
+  // over the page (#1190): the word is inside an insertion.
+  const bubble = palette?.querySelector<HTMLElement>('.rl-toolbar-bubble');
+  const barRow = palette?.querySelector<HTMLElement>('.rl-toolbar-bar');
+  await sleep(500);
+  report(
+    'right-click-on-a-change-stacks-its-card-above-the-bar',
+    !!bubble &&
+      !!barRow &&
+      /Inserted/.test(bubble.textContent ?? '') &&
+      bubble.getBoundingClientRect().bottom <= barRow.getBoundingClientRect().top &&
+      !document.querySelector('.cm-tooltip .rl-card'),
+    {
+      bubble: bubble?.textContent,
+      shownOverThePage: !!document.querySelector('.cm-tooltip .rl-card'),
+    },
+  );
+  const rightClickBubble = bubble?.textContent;
+  escape();
+  await sleep(50);
+  // ⇧⌘P at the caret opens what a right-click there opened, and the selection keeps its highlight.
+  const inChange = word('comments', 'Redlines shows');
+  view.dispatch({
+    selection: { anchor: view.posAtDOM(inChange.startContainer, inChange.startOffset) + 3 },
+  });
+  editor.commands.run('toolbar.show');
+  await sleep(150);
+  report(
+    'shift-cmd-p-opens-the-same-card-and-bar',
+    query<HTMLElement>('.rl-toolbar-bubble')?.textContent === rightClickBubble &&
+      !!query('.rl-toolbar-bar'),
+    { bubble: query<HTMLElement>('.rl-toolbar-bubble')?.textContent, wanted: rightClickBubble },
+  );
+  escape();
+  await sleep(50);
+  const selected = word('every', 'Redlines shows');
+  view.dispatch({
+    selection: {
+      anchor: view.posAtDOM(selected.startContainer, selected.startOffset),
+      head: view.posAtDOM(selected.endContainer, selected.endOffset),
+    },
+  });
+  editor.commands.run('toolbar.show');
+  await sleep(150);
+  report(
+    'selection-keeps-its-highlight-while-the-bar-is-open',
+    document.querySelector('.rl-toolbar-held')?.textContent === 'every',
+    document.querySelector('.rl-toolbar-held')?.textContent,
+  );
+  escape();
+  await sleep(50);
+  // The next checks start from a right-click on the word again.
+  rightClick(at.x, at.y);
+  await sleep(150);
+
   // The hint comes after the delay. A row of text has none (it names itself); a grayed item's hint
   // says why it can't be used, and so does a button of a shared line of icons, with the keys.
   const grayed = palette?.querySelector<HTMLElement>('.rl-toolbar-item[data-reason]');

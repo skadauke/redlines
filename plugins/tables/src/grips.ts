@@ -123,7 +123,7 @@ export const GRIPS_STYLE = `
 @media (prefers-reduced-motion: reduce) { .rl-grip::before, .rl-col-grip::before { transition: none; } }
 .rl-plus-line, .rl-col-plus-line { position: absolute; height: 1px; background: var(--rl-ink-3); pointer-events: none; }
 .rl-col-plus-line { width: 1px; }
-.rl-drop-line { position: absolute; height: 3px; border-radius: 2px; background: var(--rl-ink-2); pointer-events: none; }
+.rl-drop-line { position: absolute; height: 3px; border-radius: 2px; background: var(--rl-drop, rgba(10, 100, 255, 0.45)); pointer-events: none; }
 .rl-drop-line[hidden] { display: none; }
 .rl-drag-copy {
   position: absolute; max-width: 320px; padding: 4px 10px; border-radius: 4px; opacity: 0.85;

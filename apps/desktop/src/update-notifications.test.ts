@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createNotifications, PASSING_MS } from './ui/notifications.ts';
+import { createNotifications, PASSING_MS, stayMs } from './ui/notifications.ts';
 import { presentUpdates, unavailableText } from './update-notifications.ts';
 import type { CheckResult, Unavailable, Updates, UpdateState } from './updates.ts';
 
@@ -121,8 +121,10 @@ describe('update notifications', () => {
     become({ phase: 'ready', version: '0.2.0' });
     button('Restart to update').click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(texts()).toEqual(['Redlines couldn’t update itself. It will try again later.']);
-    await vi.advanceTimersByTimeAsync(PASSING_MS);
+    const said = 'Redlines couldn’t update itself. It will try again later.';
+    expect(texts()).toEqual([said]);
+    // It stays as long as it takes to read.
+    await vi.advanceTimersByTimeAsync(stayMs(said, PASSING_MS));
     expect(texts()).toEqual([]);
   });
 
@@ -140,7 +142,7 @@ describe('update notifications', () => {
       // One answer at a time: each replaces the one before.
       expect(texts()).toEqual([text]);
     }
-    await vi.advanceTimersByTimeAsync(PASSING_MS);
+    await vi.advanceTimersByTimeAsync(stayMs(unavailableText('disk-image'), PASSING_MS));
     expect(texts()).toEqual([]);
   });
 

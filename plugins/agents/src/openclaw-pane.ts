@@ -7,7 +7,7 @@
 // `openClawCommand`) and says no, with a line to show, to what it won't run.
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
-import { renderGuided, type GuidedDeps, type GuidedOptions } from './openclaw/guided.ts';
+import { renderGuided, type GuidedDeps } from './openclaw/guided.ts';
 import { button, el, reasonOf, row, textField } from './pane-dom.ts';
 import { skillControls, type PaneSkill } from './skill-controls.ts';
 
@@ -47,8 +47,6 @@ export interface OpenClawDeps {
    * as a node (openclaw/sheet.ts). Without it, only the `openclaw` command's form is offered.
    */
   guided?: GuidedDeps;
-  /** For screenshots and tests: the screen the guided sheet opens at, with what it knows. */
-  guidedStart?: GuidedOptions['start'];
 }
 
 /** Whether a Gateway's address is on this Mac: its host is the machine's own. */
@@ -290,14 +288,7 @@ export function renderOpenClaw(
 
   adding.append(...closed());
   control.append(
-    ...(deps.guided
-      ? [
-          renderGuided(deps.guided, {
-            alive,
-            ...(deps.guidedStart ? { start: deps.guidedStart } : {}),
-          }),
-        ]
-      : []),
+    ...(deps.guided ? [renderGuided(deps.guided, { alive })] : []),
     items,
     adding,
     problem,

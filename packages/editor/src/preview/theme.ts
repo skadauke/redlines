@@ -449,8 +449,10 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-image:not(.rl-image-own) .rl-image-frame': { verticalAlign: 'middle' },
   '.rl-image:not(.rl-image-own) .rl-image-frame img': { display: 'block', margin: '0' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
-  // A click selects the image: an outline in the theme's focus-ring ink, and its handles.
-  '.rl-image-selected img': { outline: '2px solid var(--rl-ink-3)' },
+  // A click selects the image: a very faint outline, and its handles (#1195).
+  '.rl-image-selected img': {
+    outline: '1px solid color-mix(in srgb, var(--rl-ink-3) 40%, transparent)',
+  },
   '.rl-image-selected .rl-image-handle': { opacity: '1' },
   '&.rl-image-is-selected .cm-line::selection, &.rl-image-is-selected .cm-line *::selection': {
     backgroundColor: 'transparent',
@@ -487,12 +489,12 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-image-frame:hover .rl-image-handle, .rl-image:not(.rl-image-own):hover .rl-image-handle, .rl-image-resizing .rl-image-handle':
     { opacity: '1' },
-  // The line a dragged image file shows between blocks (#681), in the theme's gray, never red.
+  // The line a dragged image file shows between blocks (#681), the faint blue of every drop marker.
   '.rl-drop-line': {
     position: 'absolute',
     height: '2px',
     borderRadius: '1px',
-    backgroundColor: 'var(--rl-ink-2, #6a6a6f)',
+    backgroundColor: 'var(--rl-drop, rgba(10, 100, 255, 0.45))',
     pointerEvents: 'none',
     zIndex: '5',
   },
