@@ -29,6 +29,8 @@ export interface BubbleView {
   choice?: AskChoice | null;
   /** Whether Open in New Window is offered: the host can open a window with text. */
   canOpenWindow: boolean;
+  /** Whether Open in Chat is offered: the document's chat is in the window (#1194). */
+  canOpenChat?: boolean;
 }
 
 export interface BubbleHandlers {
@@ -48,6 +50,8 @@ export interface BubbleHandlers {
   openPreferences?: () => void;
   makeComment(): void;
   openWindow(): void;
+  /** Opens the sidebar at the chat, where this exchange is. */
+  openChat?: () => void;
   copy(): void;
   /** Whether the passage `quote` is in the document now. */
   has(quote: string): boolean;
@@ -329,6 +333,9 @@ export function createBubble(handlers: BubbleHandlers): Bubble {
       if (answered && !working && next === null) {
         actions.append(
           action('Make Comment', 'comment', () => handlers.makeComment()),
+          ...(view.canOpenChat === true
+            ? [action('Open in Chat', 'chat', () => handlers.openChat?.())]
+            : []),
           ...(view.canOpenWindow
             ? [action('Open in New Window', 'window', () => handlers.openWindow())]
             : []),
