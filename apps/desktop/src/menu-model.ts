@@ -393,11 +393,6 @@ export function appMenuModel(
           action: () => commands.revealInFinder(),
           enabled: (state) => state.hasFile,
         },
-        {
-          text: 'Open in Another Window',
-          action: () => commands.openAnotherWindow(),
-          enabled: (state) => state.hasFile,
-        },
         SEPARATOR,
         // Closing asks about unsaved edits through the window's close request.
         { item: 'CloseWindow', text: 'Close' },
@@ -540,6 +535,13 @@ export function appMenuModel(
             text: 'Show Word Count',
             action: () => commands.toggleWordCount(),
             textFor: (state) => (state.showWordCount ? 'Hide Word Count' : 'Show Word Count'),
+          },
+          SEPARATOR,
+          // Word's name and place for the second window of one document.
+          {
+            text: 'New Window',
+            action: () => commands.openAnotherWindow(),
+            enabled: (state) => state.hasFile,
           },
         ],
         [

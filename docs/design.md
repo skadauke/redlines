@@ -1924,7 +1924,7 @@ own). The text below is the design they follow.
 
 ### 7.1a One document in several windows
 
-File › Open in Another Window shows the document in a second window of the app, and the two are
+View › New Window (Word's name and place) shows the document in a second window of the app, and the two are
 one session on one Mac, with no network, no account and no invitation.
 
 - **One window leads.** It runs the authority (the TypeScript in `packages/collab`) and is the
