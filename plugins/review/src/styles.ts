@@ -54,7 +54,8 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     width: '100%',
     padding: `${notePx(6)} ${notePx(10)} ${notePx(9)}`,
     border: '1px solid var(--rl-rule)',
-    borderRadius: notePx(8),
+    // The theme's card radius, as what floats has it, with the note's scale.
+    borderRadius: 'calc(var(--rl-radius-card) * var(--rl-note-scale, 1))',
     // Room around a new comment's note, scrolled into view as it opens.
     scrollMargin: notePx(12),
     transition: 'border-color 120ms ease',

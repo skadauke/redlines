@@ -170,14 +170,7 @@ export const KNOWN: readonly KnownCase[] = [
     text: /\{\.column/,
     why: 'the fences of a div that isn’t a callout are drawn as source',
   },
-  ...(
-    [
-      ['attributes', /\{#/, 'attributes'],
-      ['reference', /@(?:sec|fig|tbl|eq)-/, 'references typed as they are'],
-      ['math', /\$\$/, 'the display formula'],
-      ['sub-sup-strike', /\^2\^/, 'the superscript'],
-    ] as const
-  ).map(([rule, text, what]): KnownCase => ({
+  ...([['math', /\$\$/, 'the display formula']] as const).map(([rule, text, what]): KnownCase => ({
     issue: 1216,
     doc: ['Build 21.qmd', 'frontmatter.qmd'],
     surfaces: ['quicklook'],
