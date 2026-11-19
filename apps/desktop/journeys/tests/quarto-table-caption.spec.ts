@@ -31,7 +31,9 @@ test.describe('quarto table captions @tables', () => {
           chip: line?.querySelector('.rl-attr-chip')?.textContent ?? null,
         };
       });
-      expect(caption.text).toBe('Table 1: #tbl-owners'.replace('#tbl-owners', 'Who owns what #tbl-owners'));
+      expect(caption.text).toBe(
+        'Table 1: #tbl-owners'.replace('#tbl-owners', 'Who owns what #tbl-owners'),
+      );
       expect(caption.chip).toBe('#tbl-owners');
       expect(await j.page.locator('.cm-content').innerText()).not.toContain('{#tbl');
       await j.shot(`quarto-table-caption-${view}`);
