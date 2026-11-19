@@ -199,6 +199,31 @@ function inReplaced(tr: Transaction, at: number): number | null {
 }
 
 /**
+ * Puts the browser's own selection exactly where CodeMirror puts the caret, after a key that
+ * rebuilt the lines (#1158). When the line's elements change under a selection, WebKit moves the
+ * selection's node and offset to wherever the removal leaves them (the end of the line's element,
+ * past its last child), and CodeMirror, which finds that position equivalent to the one it wants,
+ * leaves it: the native caret then has no box to stand in and shows late, at the next selection
+ * change, with the keys typed meanwhile going in at a place the page no longer holds.
+ */
+export function seatCaret(view: EditorView): void {
+  const { main } = view.state.selection;
+  if (!main.empty || !view.hasFocus) return;
+  const root = view.root as unknown as { getSelection?: () => Selection | null };
+  const selection = root.getSelection?.();
+  if (!selection?.focusNode || !view.contentDOM.contains(selection.focusNode)) return;
+  const at = view.domAtPos(main.head);
+  if (
+    selection.isCollapsed &&
+    selection.focusNode === at.node &&
+    selection.focusOffset === at.offset
+  ) {
+    return;
+  }
+  selection.collapse(at.node, at.offset);
+}
+
+/**
  * Dispatches a key's edit: one step to undo, apart from the typing around it, recorded by the
  * tracked layer as its user event says, and, for a Return, kept in the record of Returns.
  */
@@ -268,6 +293,7 @@ export function applyKeyEdit(
     if (tracked && view.state.doc !== before && view.state.field(viewModeField) === 'clean') {
       view.dispatch({ effects: setViewModeEffect.of(view.state.facet(markupViewFacet)) });
     }
+    if (view.state.doc !== before) seatCaret(view);
     return true;
   }
   const tr = view.state.update({
@@ -285,6 +311,7 @@ export function applyKeyEdit(
     return applyKeyEdit(view, edit.fallback);
   }
   view.dispatch(tr);
+  if (tr.docChanged) seatCaret(view);
   return true;
 }
 
