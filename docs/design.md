@@ -2474,7 +2474,11 @@ differences:
   exactly a key of that shape (`acp_gate.rs`), and a toolbox is refused to it as an empty list is
   to any other agent. Without an agent named in the form, the key is bare, and a Gateway with more
   than one agent says so (`Use an agent-prefixed session key or select an agent explicitly`), in the
-  line the run fails with: name the agent then.
+  line the run fails with: name the agent then. A thread longer than 60,000 characters is cut
+  from its start, and says so (the newest words are what the request answers), so that a prompt
+  stays far inside the bridge's 2 MiB. The bridge runs with `OPENCLAW_HIDE_BANNER=1` and
+  `OPENCLAW_SUPPRESS_NOTES=1`, which the app adds to its environment, so that the last line of its
+  error stream is the failure and not a note.
 - **A turn the Gateway cut short is a failure.** The bridge says it as a message of the agent's own
   that begins `[OpenClaw interruption]` and then ends the turn as it ends one that was answered; the
   provider reads it as the run's error (`Moby stopped: …`), not as a reply to post.
@@ -2483,8 +2487,11 @@ differences:
   a user name, a password, a query, a fragment or a port that isn't a number, where a token could
   ride, is refused (a path is allowed, since a Gateway may be mounted at one, and the address is
   shown in lists of programs: put nothing secret in it); and the file has to be there, be a file
-  and not a link (OpenClaw refuses one) and hold from one byte to 16 KiB, which is looked at
-  without reading it. The question says where the document and the thread go, warns of a `ws://`
+  and not a link (OpenClaw refuses one), be the person's own (a file of the system's, or of
+  another user, is refused), have no second name (a hard link) and be reached by a path with no
+  link in it, and hold from one byte to 16 KiB, which is looked at without reading it. A program
+  of another name that is `acp --url …` (a wrapper) is never held to the whole shape, but a
+  `--token` or `--password` on its line is refused all the same. The question says where the document and the thread go, warns of a `ws://`
   address, which isn't encrypted, unless it is on this Mac (`localhost`, `127.0.0.1`, `[::1]`: what
   goes there stays on it, or goes through a tunnel its owner made), and of a token file that other
   people on the Mac can read.
