@@ -24,6 +24,9 @@ export function space(kind: keyof typeof SPACE): string {
 
 type ThemeSpec = Parameters<typeof EditorView.baseTheme>[0];
 
+/** The clip that keeps a quote's bar out of the space around the quote, and leaves its sides. */
+const QUOTE_CLIP = 'inset(var(--rl-clip-top, 0px) -100vw var(--rl-clip-bottom, 0px) -100vw)';
+
 /**
  * A rule for each kind of space: above a block's first line, below the text of the line above
  * code, front matter or a table, whose first line is tinted or not drawn, and outside an alert's
@@ -47,6 +50,20 @@ function spaceRules(): ThemeSpec {
     // clip's insets and corners are variables, so a single line that is both ends takes both.
     const clipped =
       'inset(var(--rl-clip-top, 0px) 0 var(--rl-clip-bottom, 0px) 0 round var(--rl-clip-rt, 0px) var(--rl-clip-rt, 0px) var(--rl-clip-rb, 0px) var(--rl-clip-rb, 0px))';
+    // A quote's bar is the line's border, which would be drawn through the space above the quote
+    // and the space below it, where a block under it takes it as padding on its last line (#1183):
+    // the bar is clipped to the text's own lines (sideways it is left whole). The space between
+    // a quote's paragraphs ('loose') is inside the quote, and the bar goes on through it.
+    if (kind === 'block' || kind === 'h1' || kind === 'heading') {
+      rules[`.cm-line.rl-quote.rl-space-${kind}`] = {
+        '--rl-clip-top': space(kind),
+        clipPath: QUOTE_CLIP,
+      };
+    }
+    rules[`.cm-line.rl-quote.rl-space-${kind}-below`] = {
+      '--rl-clip-bottom': space(kind),
+      clipPath: QUOTE_CLIP,
+    };
     rules[`.cm-line.rl-callout-first.rl-space-${kind}-apart`] = {
       paddingTop: `calc(${space(kind)} + ${textPx(10)})`,
       '--rl-clip-top': space(kind),
@@ -423,12 +440,16 @@ export const baseThemeSpec: ThemeSpec = {
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
   },
-  '.rl-callout-fold:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
-  '.rl-callout-fold:focus': { outline: 'none' },
-  '.rl-callout-fold:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
-  '.rl-callout-menu:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
-  '.rl-callout-menu:focus': { outline: 'none' },
-  '.rl-callout-menu:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
+  '.rl-callout-fold:hover, .rl-callout-fold:focus-visible': {
+    color: 'var(--rl-ink)',
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+  },
+  '.rl-callout-fold:focus, .rl-callout-fold:focus-visible': { outline: 'none' },
+  '.rl-callout-menu:hover, .rl-callout-menu:focus-visible': {
+    color: 'var(--rl-ink)',
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+  },
+  '.rl-callout-menu:focus, .rl-callout-menu:focus-visible': { outline: 'none' },
   '.rl-callout-pending, .rl-callout-pending .rl-callout-icon': { color: 'var(--rl-color)' },
 
   // Images: no frame. One on a line of its own is centered, at most as wide as the text column;

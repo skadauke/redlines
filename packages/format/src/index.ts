@@ -17,6 +17,8 @@ export type { BlockRead } from './block-read.ts';
 export { idsIn, isId, newId } from './ids.ts';
 export { decodePayload, encodePayload } from './payload.ts';
 export { plainPayload } from './changes.ts';
+export { describePictureChange, pictureOf } from './picture-change.ts';
+export type { Picture } from './picture-change.ts';
 export { parse, parseStats } from './parse.ts';
 export type { Change as ParseChange } from './scan.ts';
 export { applyChanges, eolOf } from './changes.ts';
