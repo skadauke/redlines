@@ -16,14 +16,17 @@ We will ship the sync in <!--sub xjf9 May-->June<!--/xjf9-->, <!--cmt w6mp-->aft
 
 - A word count in the <!--cmt tkc9-->title<!--/tkc9--> bar
 - A <!--del nj8s dark--> theme for print
-- Footnotes<!--ins mnsm-->\n- Tags in the sidebar\n- Search in comments<!--/mnsm-->
+- Footnotes<!--ins mnsm-->
+- Tags in the sidebar
+- Search in comments<!--/mnsm-->
 
 ## Lists
 
 - Import of .docx files
 - Import of Google Docs through .docx
   - Suggestions kept as tracked changes
-  - Comments kept as comments<!--ins vq35-->\n  - Replies kept too<!--/vq35-->
+  - Comments kept as comments<!--ins vq35-->
+  - Replies kept too<!--/vq35-->
 - <!--cmt vqng-->
   A progress bar<!--/vqng--> for big files
 - A sample file to try it on

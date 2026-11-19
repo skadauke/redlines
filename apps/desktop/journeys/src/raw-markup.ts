@@ -186,17 +186,6 @@ export const KNOWN: readonly KnownCase[] = [
     text: /\{\.column/,
     why: 'the fences of a div that isn’t a callout are drawn as source',
   },
-  {
-    // Closed as "not a bug in the exporter": the Test Drive's document holds the two characters
-    // backslash and n where line breaks belonged. The copy keeps them as they were, so this check
-    // is shown to see them; the entry stays for as long as the copy does.
-    issue: 1178,
-    doc: 'Build 21.md',
-    surfaces: ['redlines', 'clean', 'simple', 'word', 'quicklook'],
-    rule: 'literal-newline',
-    text: /\\n/,
-    why: 'the document holds a literal \\n in two insertions',
-  },
   // The exports read a Quarto document as Markdown with its Quarto syntax left in.
   ...(
     [
