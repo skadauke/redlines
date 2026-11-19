@@ -10,7 +10,7 @@
 
 .rl-onb-step {
   margin-bottom: 4px;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-small);
 }
 
@@ -83,7 +83,7 @@
   margin: 10px 0 0 auto;
   padding: 0;
   border: 0;
-  color: var(--rl-ink-3);
+  color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-small);
   text-decoration: underline;
 }
