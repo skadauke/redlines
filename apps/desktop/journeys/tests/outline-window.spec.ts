@@ -43,10 +43,10 @@ test.describe('the outline window @views', () => {
         'Schedule',
       ]);
       // Under the button, inside the window, over the page.
-      const [card, control, size] = await Promise.all([
+      const size = j.page.viewportSize();
+      const [card, control] = await Promise.all([
         window_(j).locator('.rl-outline-panel').boundingBox(),
         button(j).boundingBox(),
-        j.page.viewportSize(),
       ]);
       expect(card!.y).toBeGreaterThanOrEqual(control!.y + control!.height);
       expect(card!.x + card!.width).toBeLessThanOrEqual(size!.width);
