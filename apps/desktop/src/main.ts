@@ -566,6 +566,9 @@ const editor = createEditor(element('#editor'), {
           notice.flash(typeof error === 'string' ? error : 'Couldn’t open the included file.');
         });
     },
+    // What Quarto leaves beside the document and above it (the outputs under its chunks) is read
+    // by the same path, from the document's own place.
+    documentPath: () => imageDocument,
   },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).

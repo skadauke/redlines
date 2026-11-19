@@ -524,6 +524,44 @@ Redlines covers everything in the Markdown Guide's
   which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
+- **Quarto outputs, read-only under each chunk** (#1174): Redlines never runs code, and a reviewer
+  still sees what a reader sees, from what Quarto left with the document. For a `.qmd`, beside the
+  document and in the folders above it up to the project's, it looks, in this order, for the
+  project's freeze file (`_freeze/<path of the document from the project's folder, with no
+  extension>/execute-results/<format>.json`, whose `result.markdown` is the executed document as
+  pandoc Markdown and whose `hash` is the MD5 of the file that was run), the Markdown file that
+  `keep-md` leaves (`<name>.md`) and the notebook that `keep-ipynb` leaves (`<name>.ipynb`), through
+  the same reader as the includes, so only inside the project the window may read. The first
+  file that reads and is Quarto's is the one used; a file whose format is not understood is
+  no file, since Quarto's own formats are not promised to stay.
+  - **Matching.** The executable chunks of the document (a fence whose info is an engine in braces:
+    `{r}`, `{python}`, `{julia}`; not `{ojs}`, `{mermaid}` or `{dot}`, nor a plain code block) are
+    paired in order with the cells of the file, by the chunk's label (`#| label:`) or else by its
+    code text with the `#|` lines and trailing blanks left out. A cell is given to one chunk only.
+    A chunk with no match, such as one edited since it ran or one never run, has no output drawn.
+  - **Drawn.** Under the chunk's closing fence, a block set apart by a rule at its left, in the grays
+    of the page: a small label, "Output from the last run", and the output as the file has it: text
+    in a code block, a table as a table, a figure as a picture (a freeze file's pictures are in
+    `_freeze/<document>/figure-<format>/`, which the picture's `<name>_files/` path is mapped to;
+    a notebook's are in the cell). It cannot be edited, is not a part of the file and is never
+    saved, copied as text of the document or exported: Word export draws the chunk, as before.
+    HTML widgets and anything but Markdown, text and pictures are left out.
+  - **Stale, for each chunk.** An output is stale when its chunk's code is not the code of the saved
+    cell it came from, compared with the `#|` lines and trailing blanks left out: the label then
+    says "Output from the last run, stale" (its hint: the chunk's code has changed since it ran), in
+    the page's italic gray. Every other output says "Output from the last run". It is the chunk's own
+    code that decides, not the document's: Redlines' marks and comments live in the file, so a
+    comment or a tracked change anywhere would change the file's hash and make every output stale.
+    A chunk matched by its code is the same code by definition; only a chunk matched by its label and
+    edited since can be stale (a chunk with no label whose code changed has no match, and no output).
+    A freeze file's `hash` is not compared; it is read and kept as a note.
+  - **Nothing.** No file, no match, a file that can't be read, a Markdown file (`.md`), or the Plain
+    view: nothing is drawn, no message, and no space is kept.
+  - **Read again** when the window is looked at again (a render that happened meanwhile shows up),
+    not on each keystroke.
+  - Not done: reading the rendered HTML, Word or PDF of a document, `<name>_files/` of a live render
+    and `.quarto/` (the research found nothing documented to rely on); showing outputs in the
+    included files.
 - **Heading attributes:** in `.qmd` and `.Rmd`, the `{#sec-intro}` after a heading's text is a small gray chip
   (the interface's small size, never the heading's), with its source shown while the caret is in it.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
