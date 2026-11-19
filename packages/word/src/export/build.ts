@@ -280,10 +280,6 @@ function oldParagraph(was: { type: string; indent?: number }): Record<string, un
   return {};
 }
 
-/** Whether a block is a line of a code block. */
-const isCodeLine = (block: Block | undefined): boolean =>
-  block !== undefined && block.type === 'code';
-
 const BODY_FONT = 'Arial';
 const TEXT_COLOR = '222222';
 
@@ -737,7 +733,9 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
     // around them: a table has no space of its own, so the block after it takes it as `before`
     // (#1179).
     const before = blocks[index - 1]?.type === 'table' ? BLOCK_GAP : undefined;
-    const joinsNext = leaf.type === 'code' && isCodeLine(blocks[index + 1]);
+    const next = blocks[index + 1];
+    const joinsNext =
+      leaf.type === 'code' && next?.type === 'code' && next.codeBlock === leaf.codeBlock;
     if (before !== undefined || leaf.type === 'code') {
       shape.spacing = { before, after: joinsNext ? 0 : BLOCK_GAP };
     }

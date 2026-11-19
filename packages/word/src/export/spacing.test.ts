@@ -51,6 +51,17 @@ describe('the space between blocks (#1179)', () => {
   });
 });
 
+describe('two code blocks side by side (#1179)', () => {
+  it('are two blocks with a gap between them', async () => {
+    const document = await documentOf('```\none\ntwo\n```\n\n```\nthree\n```\n');
+    const by = (word: string) =>
+      paragraphs(document).find((p) => p.includes(`>${word}<`)) as string;
+    expect(spacingOf(by('one'))).toMatch(/w:after="0"/);
+    expect(spacingOf(by('two'))).toMatch(/w:after="120"/);
+    expect(spacingOf(by('three'))).toMatch(/w:after="120"/);
+  });
+});
+
 describe('inline code (#1179)', () => {
   it('has a light gray shading on its run, and the text around it has none', async () => {
     const document = await documentOf('Some `inline code` here.\n');
