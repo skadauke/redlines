@@ -273,8 +273,15 @@ pub fn run_install(host: &dyn Host, report: &dyn Fn(InstallState)) -> InstallSta
             );
         }
     };
+    // The folder with the download goes however this ends, a panic included.
+    struct Cleanup<'a>(&'a dyn Host, &'a Path);
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            self.0.remove_dir(self.1);
+        }
+    }
+    let _cleanup = Cleanup(host, &dir);
     let finish = |state: InstallState| {
-        host.remove_dir(&dir);
         report(state.clone());
         state
     };
@@ -483,13 +490,13 @@ impl Host for Mac {
     fn download(&self, url: &str, to: &Path) -> Result<(), String> {
         let status = Command::new("/usr/bin/curl")
             .args([
-                "-fsSL",
+                // The versioned address on pkgs.tailscale.com, fetched as it is: a redirect (to
+                // another host, or any) is not followed, and fails.
+                "-fsS",
                 "--proto",
                 "=https",
-                "--proto-redir",
-                "=https",
                 "--max-redirs",
-                "3",
+                "0",
                 "--max-filesize",
                 "209715200",
                 "--max-time",
@@ -699,6 +706,18 @@ fn set_state(state: InstallState) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(state);
 }
 
+/// The install, with a panic in it turned into a failure the window can show (it must not leave
+/// the window waiting for ever); the download's folder is removed on the way out of the panic.
+pub fn run_guarded(host: &dyn Host, report: &dyn Fn(InstallState)) -> InstallState {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_install(host, report)))
+        .unwrap_or_else(|_| {
+            InstallState::new(
+                Phase::Failed,
+                "Something went wrong while installing Tailscale, and nothing else was changed.",
+            )
+        })
+}
+
 /// Starts the install, which runs on a thread of its own: the window asks `tailscale_install_state`
 /// for how it goes. Asked again while it runs, it does nothing more.
 #[tauri::command]
@@ -713,14 +732,7 @@ pub fn tailscale_install() {
         *state = Some(InstallState::new(Phase::Working, "Looking at this Mac…"));
     }
     std::thread::spawn(|| {
-        // A panic must not leave the window waiting for ever.
-        let last = std::panic::catch_unwind(|| run_install(&Mac, &set_state)).unwrap_or_else(|_| {
-            InstallState::new(
-                Phase::Failed,
-                "Something went wrong while installing Tailscale, and nothing else was changed.",
-            )
-        });
-        set_state(last);
+        set_state(run_guarded(&Mac, &set_state));
     });
 }
 
@@ -1068,6 +1080,54 @@ mod tests {
         };
         let (last, _) = run(&host);
         assert!(last.step.contains("isn’t in Applications"), "{}", last.step);
+    }
+
+    #[test]
+    fn a_panic_in_the_install_is_a_failure_and_the_download_is_removed() {
+        struct Panics(Fake);
+        impl Host for Panics {
+            fn is_admin(&self) -> bool {
+                self.0.is_admin()
+            }
+            fn package(&self) -> Package {
+                self.0.package()
+            }
+            fn work_dir(&self) -> Result<PathBuf, String> {
+                self.0.work_dir()
+            }
+            fn download(&self, url: &str, to: &Path) -> Result<(), String> {
+                self.0.download(url, to)
+            }
+            fn signature(&self, pkg: &Path) -> Checked {
+                self.0.signature(pkg)
+            }
+            fn assessment(&self, _: &Path) -> Checked {
+                panic!("the program could not be run");
+            }
+            fn install(&self, pkg: &Path) -> Result<(), InstallStop> {
+                self.0.install(pkg)
+            }
+            fn open(&self, target: &str) -> Result<(), String> {
+                self.0.open(target)
+            }
+            fn tailscale_found(&self) -> bool {
+                self.0.tailscale_found()
+            }
+            fn remove_dir(&self, dir: &Path) {
+                self.0.remove_dir(dir)
+            }
+        }
+        let host = Panics(Fake::good());
+        let last = run_guarded(&host, &|_| {});
+        assert_eq!(last.phase, Phase::Failed);
+        assert!(
+            last.step.contains("nothing else was changed"),
+            "{}",
+            last.step
+        );
+        assert!(host.0.called("download"));
+        assert!(host.0.called("remove /fake/work"), "the download was left");
+        assert!(!host.0.called("install"));
     }
 
     #[test]
