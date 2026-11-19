@@ -4549,14 +4549,22 @@ A file changes only when its content does.
   marker inside; its closer stands alone on the line after the closing fence, as after a code
   fence (§3.3). This holds at the top level of the file and in a quote (also one in a list item or in
   another quote), the closer standing alone on the line after the closing fence behind the quote's
-  prefix (`> :::` then `> <!--/k3x9-->`), as in a fenced code block (#1234). In a list item, a div typed after a blank line (the item's second
-  paragraph, which makes it loose in every state) is one insertion too, its leading line breaks inside
-  it with no `split`, so that no state has the div glued to the text before it, and its closer alone on
-  the line after the closing fence (`- one<!--ins k3x9-->⏎⏎  ::: {.callout-tip}⏎  A.⏎  :::⏎  <!--/k3x9-->`;
-  #1234). A div typed first in an item, or right under its text with one line break, has no such form:
-  the closer alone on a line is an HTML block after the item's text, and a tight item renders a line
-  break that the newest view does not have. It is written as a replacement of the list where one holds
-  it (§3.12), and otherwise the person is asked before it is made without tracking (§3.13).
+  prefix (`> :::` then `> <!--/k3x9-->`), as in a fenced code block (#1234). In a list item the closer alone on a line inside a tight
+  item is an HTML block after the item's text, which renders a line break that the newest view does not
+  have, so the closer is written where it reads alike (#1234). A div typed after a blank line (a
+  further paragraph of the item, which makes it loose in every state) is one insertion that takes all
+  the typed text before the fence with it, with no `split`, so that no state has the div glued to the
+  text before it, and its closer stands in the item behind the item's prefix (`- one<!--ins k3x9-->⏎⏎
+  ::: {.callout-tip}⏎  A.⏎  :::⏎  <!--/k3x9-->`). Any other div (first in an item, or right under its
+  text) is one insertion whose closer stands at the prefix of the outermost list's parent, which is
+  empty at the top level and the quote's `> ` in a quote, as a quote's closer does: outside the list
+  (`- one<!--ins k3x9--><!--split m4zp-->⏎  ::: {.callout-tip}⏎  A.⏎  :::⏎<!--/k3x9-->`), and it reads alike
+  where nothing of the list follows the item. Where more of the list follows, the list is replaced
+  (§3.12: `<!--sub k3x9 - one⏎- two-->⏎- one⏎  :::…⏎- two<!--/k3x9-->`). Where no list holds it
+  (a line of the div that leaves the item, which has no form), the person is asked before it is made
+  without tracking, "This div can't be tracked in a list item. Make it without tracking?" (§3.13), and
+  an agent, which can't be asked, is told in words that say what to do. A div in a list in a quote
+  nested two levels deep, with more of the list after it, is not built.
 - knitr runs code it finds inside HTML comments, in payloads and in the ledger alike, so both
   escape every backtick (§2.5). This was verified with knitr 1.51.
 - No Redlines comment starts with `#`, which Jupytext's cell markers and Quarto's editing comments

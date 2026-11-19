@@ -64,16 +64,18 @@ export const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.
 export const DIV_FENCE = 'A marker can not stand on a :::\u00a0line, the fence of a div.';
 
 /**
- * Why a div typed first in a list item, or right under its text, is no fine write (format §9.4,
- * #1234): the closer of its insertion, alone on a line, is an HTML block after the item's text, and a
- * tight item reads a line break that the view lacks. It is written as a replacement of the list
- * where one holds it, and otherwise the person is asked before it is made untracked.
+ * Why a div typed in a list item has no tracked write (format §9.4, #1234): its closer stands at the
+ * prefix of the outermost list's parent, which reads alike where the item is the last block of its
+ * lists, and a replacement of the list holds it where another item follows; where no list holds
+ * it (a nested item with another item after it), the editor asks before it is made without
+ * tracking, and an agent, which can't be asked, is told this.
  */
 export const DIV_IN_ITEM =
-  'A div typed in a list item right under its text, or first in it, has no place for the marker that closes its insertion.';
+  "A div can't be tracked in this list item, since more of the list follows it. Type it after the last item of the list, or turn Track Changes off.";
 
 /** The question the editor asks about it: the edit is made without tracking when the person says so. */
-export const DIV_IN_ITEM_ASK = `${DIV_IN_ITEM} Make it without tracking?`;
+export const DIV_IN_ITEM_ASK =
+  "This div can't be tracked in a list item. Make it without tracking?";
 
 /** A line that is a fenced div's fence: three or more colons after the quote markers. */
 const DIV_FENCE_LINE = /^[ \t>]*:{3,}/;

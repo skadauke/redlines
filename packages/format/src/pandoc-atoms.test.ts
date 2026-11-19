@@ -143,61 +143,108 @@ describe('a div typed whole in a quote is one insertion (§9.4, #1234)', () => {
 });
 
 describe('a div typed in a list item (§9.4, #1234)', () => {
-  const DIV = '\n\n  ::: {.callout-tip}\n  A.\n  :::';
-  const IDS = ['k3x9', 'm4yz', 'p5qr', 'w8nn', 'b3dn', 'c4fr'];
-  const loose: [string, string, number][] = [
-    ['after the text of an item, as its second paragraph', '- one\n\nAfter.', '- one'.length],
-    ['the same with another item after it', '- one\n- two\n\nAfter.', '- one'.length],
-    ['in a nested item', '- one\n  - two\n\nAfter.', '- one\n  - two'.length],
+  const D = '::: {.callout-tip}\n  A.\n  :::';
+  const deeper = (text: string, by: string) => text.replaceAll('\n  ', `\n${by}`);
+  const IDS = ['k3x9', 'm4yz', 'p5qr', 'w8nn', 'b3dn', 'c4fr', 'd5gs', 'f6hj', 'g7km', 'h8nq'];
+  // [name, document, where the typing starts (after this text of it), what is typed, the body written]
+  const cases: [string, string, string, string, string][] = [
+    [
+      'right under the text of the only item: the closer stands outside the list',
+      '- one\n\nAfter.',
+      '- one',
+      `\n  ${D}`,
+      '- one<!--ins k3x9--><!--split m4zp-->\n  ::: {.callout-tip}\n  A.\n  :::\n<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'first in an empty item',
+      '- \n\nAfter.',
+      '- ',
+      D,
+      '- <!--ins k3x9-->\n  ::: {.callout-tip}\n  A.\n  :::\n<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'under the last of two items',
+      '- one\n- two\n\nAfter.',
+      '- one\n- two',
+      `\n  ${D}`,
+      '- one\n- two<!--ins k3x9--><!--split m4zp-->\n  ::: {.callout-tip}\n  A.\n  :::\n<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'under a nested item that ends the list',
+      '- one\n  - two\n\nAfter.',
+      '- one\n  - two',
+      `\n    ${deeper(D, '    ')}`,
+      '- one\n  - two<!--ins k3x9--><!--split m4zp-->\n    ::: {.callout-tip}\n    A.\n    :::\n<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'in an item of a list in a quote that ends the list',
+      '> - one\n\nAfter.',
+      '> - one',
+      `\n>   ${deeper(D, '>   ')}`,
+      '> - one<!--ins k3x9--><!--split m4zp-->\n>   ::: {.callout-tip}\n>   A.\n>   :::\n> <!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'under the first of two items: the list is replaced, the closer after it',
+      '- one\n- two\n\nAfter.',
+      '- one',
+      `\n  ${D}`,
+      '<!--sub k3x9 - one\\n- two-->\n- one\n  ::: {.callout-tip}\n  A.\n  :::\n- two<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'in an item of a list in a quote with another item after it',
+      '> - one\n> - two\n\nAfter.',
+      '> - one',
+      `\n>   ${deeper(D, '>   ')}`,
+      '> <!--sub k3x9 - one\\n> - two-->\n>\n> - one\n>   ::: {.callout-tip}\n>   A.\n>   :::\n> - two<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'under a nested item with another after it',
+      '- one\n  - two\n  - three\n\nAfter.',
+      '- one\n  - two',
+      `\n    ${deeper(D, '    ')}`,
+      '- one\n  <!--sub k3x9 - two\\n  - three-->\n  - two\n    ::: {.callout-tip}\n    A.\n    :::\n  - three<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'after a blank line: a second paragraph, the closer in the item',
+      '- one\n\nAfter.',
+      '- one',
+      `\n\n  ${D}`,
+      '- one<!--ins k3x9-->\n\n  ::: {.callout-tip}\n  A.\n  :::\n  <!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'after typed text and a blank line',
+      '- one\n\nAfter.',
+      '- one',
+      `\n\n  Intro.\n\n  ${D}`,
+      '- one<!--ins k3x9-->\n\n  Intro.\n\n  ::: {.callout-tip}\n  A.\n  :::\n  <!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'the same in a nested item',
+      '- one\n  - two\n\nAfter.',
+      '- one\n  - two',
+      `\n\n    Intro.\n\n    ${deeper(D, '    ')}`,
+      '- one\n  - two<!--ins k3x9-->\n\n    Intro.\n\n    ::: {.callout-tip}\n    A.\n    :::\n    <!--/k3x9-->\n\nAfter.',
+    ],
   ];
-  for (const [name, doc, at] of loose) {
-    it(`${name}: one insertion, no marker on a fence line, every order reads alike`, () => {
+  for (const [name, doc, before, typed, expected] of cases) {
+    it(`${name}: no marker on a fence line, every order reads alike`, () => {
       const start = file(doc);
-      const typed = name.startsWith('in a nested') ? DIV.replaceAll('\n  ', '\n    ') : DIV;
+      const at = before.length;
       const done = trackedEdits(
         start,
         [{ from: at, to: at, insert: typed }],
         context(ada, IDS, QMD),
       );
       const after = applyChanges(start, done.changes);
+      expect(after.split('<!-- redlines')[0]!.trimEnd()).toBe(expected);
       const fences = bodyOf(after)
         .split('\n')
         .filter((line) => /^[ \t>]*:{3,}/.test(line));
       expect(fences.length).toBeGreaterThanOrEqual(2);
       expect(fences.filter((line) => line.includes('<!--'))).toEqual([]);
-      expect(parse(after).marks.filter((mark) => mark.kind === 'split')).toEqual([]);
       expectEveryOrderRead(name, after);
       expect(bodyOf(applyChanges(after, rejectAll(after))).trimEnd()).toBe(bodyOf(start).trimEnd());
       expect(parse(applyChanges(after, acceptAll(after))).marks).toEqual([]);
     });
   }
-
-  it('first in an empty item, or right under its text, is no fine write: widened or asked about', () => {
-    for (const [doc, at, typed] of [
-      ['- \n\nAfter.', 2, '::: {.callout-tip}\n  A.\n  :::'],
-      ['- one\n\nAfter.', 5, '\n  ::: {.callout-tip}\n  A.\n  :::'],
-    ] as const) {
-      const start = file(doc);
-      let after: string | undefined;
-      try {
-        after = applyChanges(
-          start,
-          trackedEdits(start, [{ from: at, to: at, insert: typed }], context(ada, IDS, QMD))
-            .changes,
-        );
-      } catch (error) {
-        // No marker was written: the caller widens it or asks (an EditError).
-        expect(String(error)).toMatch(/div typed in a list item/);
-      }
-      if (after !== undefined) {
-        // Where a replacement of the list holds it, every order reads alike and no fence has a marker.
-        expect(
-          bodyOf(after)
-            .split('\n')
-            .filter((line) => /^[ \t>]*:{3,}/.test(line) && line.includes('<!--')),
-        ).toEqual([]);
-        expectEveryOrderRead('widened', after);
-      }
-    }
-  });
 });

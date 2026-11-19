@@ -1170,6 +1170,9 @@ function wholeIndentedCode(tokens: Token[], linePrefix: string, where: TypedAt, 
   }
 }
 
+/** The prefix of a line that ends in a list marker. */
+const LIST_PREFIX_END = /(?:[-*+]|\d{1,9}[.)])[ \t]+$/;
+
 /** A line of typed text that is the fence of a pandoc div: three or more colons, then attributes. */
 const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
 
@@ -1220,26 +1223,44 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
     'brk' in token ? [token.brk.slice(token.brk.lastIndexOf('\n') + 1)] : [],
   );
   const container = tails.at(-1) ?? linePrefix;
+  let closer = container;
+  // In a list a div is never written with a marker on a fence line (it reads otherwise than the
+  // view): where no form below holds it, it is the signal that the list's edit is widened or asked
+  // about, not the old form (#1234).
+  const inList =
+    linePrefix !== '' && (LIST_PREFIX_END.test(linePrefix) || !/>[ ]?$/.test(container));
+  const bail = (): boolean => {
+    if (inList) throw new EditError(DIV_IN_ITEM, 'no-legal-placement');
+    return false;
+  };
   if (linePrefix === '' ? tails.some((tail) => tail !== '') : false) return false;
   if (linePrefix !== '') {
-    if (tails.length === 0 || tails.some((tail) => tail !== container)) return false;
-    if (continuationPrefix(container) !== container) return false;
-    // In a list item the closer alone on its line is an HTML block after the div's text. Where the
-    // div is a block of its own after a blank line, in the typed text (a second paragraph of the
-    // item, which makes the item loose in every state), the breaks before it go into the insertion
-    // with it, so that no state has the div glued to the text before it, and the file reads as the
-    // view. Where it is not (the first block of the item, or after one line break), a tight item
-    // would read a line break that the view has not: the edit is no fine write, and is widened or
-    // asked about as any other (#1234).
-    if (!/>[ \t]*$/.test(container)) {
+    if (tails.length === 0 || tails.some((tail) => tail !== container)) return bail();
+    if (continuationPrefix(container) !== container) return bail();
+    // In a list item the closer alone on its line inside the item is an HTML block after the div's
+    // text, which a tight item reads with a line break that the view lacks (#1234). Two forms read
+    // alike. Where the last line break before the fence is blank, the div is a block of its own in
+    // an item that is loose in every state: all the typed text before the fence goes into the
+    // insertion with it (no `split`, so no state has the div glued to the text before it), and the
+    // closer stands in the item. Otherwise the closer stands at the prefix of the list's parent,
+    // outside the item, as a quote's closer stands at the quote's prefix, which reads alike where
+    // the item is the last block of its list; anywhere else the list is replaced (the widening).
+    if (inList) {
       const lead = tokens.slice(0, first);
-      const blankLead =
-        lead.length > 0 &&
-        lead.every((token) => 'brk' in token) &&
-        lead.some((token) => 'brk' in token && BLANK_IN_BREAK.test(token.brk));
-      if (!blankLead) throw new EditError(DIV_IN_ITEM, 'no-legal-placement');
-      rest = tokens.slice(0);
-      first = 0;
+      const lastBreak = lead.at(-1);
+      if (lastBreak && 'brk' in lastBreak && BLANK_IN_BREAK.test(lastBreak.brk)) {
+        rest = tokens.slice(0);
+        first = 0;
+      } else {
+        // The prefix of the outermost list's parent: the quote markers before its lists, or none.
+        const parent = /^(?:[ \t]*>[ ]?)*/.exec(linePrefix)?.[0] ?? '';
+        const continues = (following: string | undefined) =>
+          following !== undefined &&
+          following.startsWith(parent) &&
+          /^(?:[ \t]+|(?:[-*+]|\d{1,9}[.)])[ \t])/.test(following.slice(parent.length));
+        if (continues(where.following)) throw new EditError(DIV_IN_ITEM, 'no-legal-placement');
+        closer = parent;
+      }
     }
     // A typed line that is not the container's would end the div there.
     if (
@@ -1247,14 +1268,14 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
         (token) => 'brk' in token && token.prefix !== container && token.prefix !== linePrefix,
       )
     ) {
-      return false;
+      return bail();
     }
   } else if (rest.some((token) => 'brk' in token && token.prefix !== '')) return false;
   const text = rest.map((token) => ('text' in token ? token.text : token.brk)).join('');
   // The break after the last line is the one that the closer stands behind (format §3.3).
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const done = /\n[ \t>]*$/.test(text) && (linePrefix === '' ? /\n$/.test(text) : true);
-  tokens.splice(first, rest.length, { text: done ? text : text + eol + container, fence: true });
+  tokens.splice(first, rest.length, { text: done ? text : text + eol + closer, fence: true });
   return true;
 }
 
