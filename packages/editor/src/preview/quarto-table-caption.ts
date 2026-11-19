@@ -132,7 +132,13 @@ const plugin = ViewPlugin.fromClass(
   },
   {
     decorations: (v) => v.decorations,
-    provide: (p) => EditorView.atomicRanges.of((view) => view.plugin(p)?.atoms ?? Decoration.none),
+    provide: (p) =>
+      EditorView.atomicRanges.of(
+        // (A view that is still being made, or one that a test stands in for, has no plugins yet.)
+        (view) =>
+          (typeof view.plugin === 'function' ? view.plugin(p)?.atoms : undefined) ??
+          Decoration.none,
+      ),
   },
 );
 
