@@ -322,10 +322,16 @@ The window, on the desktop:
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
-- **A toolbar, shown only when summoned** (#504). It is summoned three ways. The wrench in the
-  title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
-  puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
-  in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
+- **The outline button** (#1193). The first of the three icons at the right of the title bar, left
+  of the eye, opens the outline as a window under the button, over the page, and puts it away
+  (pressed while it shows). It lists every heading, goes to one on a click and then goes away, and
+  goes away on Esc or a press elsewhere. It reaches the outline at every text size: the outline in
+  the left margin has no room at the largest sizes, and the window does not depend on the margin.
+  (It took the place of the wrench, which showed the toolbar docked: the toolbar is summoned as
+  below, and Preferences keeps it docked.)
+- **A toolbar, shown only when summoned** (#504). It is summoned two ways, and Preferences can keep
+  it docked. ⇧⌘P (Show Toolbar, in the View menu) shows it at the caret and puts it away, with the
+  keyboard in it. A right-click shows it
   at the pointer, where it takes the place of the system's context menu. Both open the same bar: on
   a change, a comment or a highlight, that place's review card (who, what, and Accept and Reject,
   Resolve and Reply, or Remove) is stacked above the bar in the same card, under the spelling rows;
@@ -338,7 +344,7 @@ The window, on the desktop:
   it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
   elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›
   Editor › Show the toolbar at the bottom keeps it docked from the start, for those who want it
-  always shown; the wrench still puts it away for that window. Nothing else is drawn at the bottom
+  always shown. Nothing else is drawn at the bottom
   of the window to summon it (the handle that was there is gone, decided on 2026-11-15). It is a
   small card in one row: **Ask | Insert · Review · [List] · [Table] · [Image] · Format · Edit**, a vertical line after
   Ask. Each name opens a menu on a click (hovering from one open menu to another switches menus),
@@ -1296,7 +1302,7 @@ key the person chose beats a binding of the editor's or a plugin's own.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
-| Show the toolbar               | ⇧⌘P (at the caret; the title bar's wrench docks it)                                           | Ctrl+Shift+P              |
+| Show the toolbar               | ⇧⌘P (at the caret; Preferences can dock it)                                           | Ctrl+Shift+P              |
 | Show the outline               | ⌃⌘O (View › Show Outline: opens the list and puts the focus on the heading you are reading)  | —                         |
 | Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
@@ -1486,7 +1492,7 @@ a new email under the same name becomes an alias in the ledger
 **Should (v1 if time allows):**
 
 - a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the toolbar (§5.1), which
-  opens from the title bar's wrench, on ⇧⌘P and on right-click rather than floating over a
+  opens on ⇧⌘P and on right-click rather than floating over a
   selection by itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in
   it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
@@ -1743,7 +1749,7 @@ app's File › Print and Export as PDF are its own).
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
-| `toolbar`    | The toolbar: the title bar's wrench, right-click and ⇧⌘P (§5.1) | —               |
+| `toolbar`    | The toolbar: right-click and ⇧⌘P (§5.1) | —               |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 

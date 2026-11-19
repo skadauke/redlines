@@ -76,7 +76,7 @@ test.describe('the palette in the toolbar @views', () => {
 
   test('Esc gives the bar back, and the docked bar is searched too', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
-    await j.page.locator('.rl-wrench-button').click();
+    await j.dockToolbar();
     await j.press('Meta+Shift+P');
     await j.page.keyboard.type('bold');
     expect(await names(j)).toContain('Bold');

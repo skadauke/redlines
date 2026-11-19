@@ -329,8 +329,8 @@ body {
   outline-offset: -2px;
 }
 
-/* The wrench is pressed while the toolbar shows. */
-.rl-wrench-button[aria-pressed='true'] {
+/* The outline's button is pressed while its window shows. */
+.rl-outline-button[aria-pressed='true'] {
   background: var(--rl-pressed);
   color: var(--rl-ink);
 }
