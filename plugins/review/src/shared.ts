@@ -20,6 +20,7 @@ import {
   type FormatOp,
   alignLabel,
   deletedTable,
+  describePictureChange,
   formatChange,
   type InlineFormat,
   type MarkRange,
@@ -289,7 +290,7 @@ export function describeChange(parsed: Parsed, change: MarkRange): string {
     return `Inserted ${quote(added)}`;
   }
   if (change.kind === 'del') return isBreak(old) ? 'Joined paragraphs' : `Deleted ${quote(old)}`;
-  return `Replaced ${quote(old)} with ${quote(added)}`;
+  return describePictureChange(old, added) ?? `Replaced ${quote(old)} with ${quote(added)}`;
 }
 
 /** What the changes of one suggestion did: `Inserted 2 rows` for rows inserted together, else each
