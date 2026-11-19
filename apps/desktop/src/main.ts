@@ -246,7 +246,9 @@ function sessionStatus(): string | undefined {
   if (!session) return undefined;
   if (sessionState === 'offline') return 'Offline: your edits are kept';
   if (sessionState === 'ended') return 'No longer in the session';
-  return sessionPeers > 0 ? `In ${sessionPeers + 1} windows` : undefined;
+  // Which window this is, as Word numbers the windows of one document ("Window 2").
+  if (sessionPeers === 0) return undefined;
+  return session.number === null ? `In ${sessionPeers + 1} windows` : `Window ${session.number}`;
 }
 
 /** Joins the session of the document at `path`, as its leader when there is none yet. */
@@ -801,6 +803,9 @@ const review = createReview(editor, {
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
 const toolbar = createToolbar(editor, {
   container: main,
+  // A right-click on a change, a comment or a highlight, and ⇧⌘P there, stack its review card above
+  // the bar, as one widget (#1190).
+  bubbleAt: (at) => review.bubbleAt(at),
   // The palette (type with the toolbar open) searches the app's own commands and settings beside
   // the registry's; a setting is a live control in its line (toolbar-commands.ts).
   appCommands: () => toolbarCommands(),
@@ -808,6 +813,8 @@ const toolbar = createToolbar(editor, {
   askAbout: () => void editor.commands.run('ask.start'),
   // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
+  // A bar at the pointer has the place's card in itself: hovering shows no other over the page.
+  onFloating: (floating) => review.holdCards(floating),
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
   // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),

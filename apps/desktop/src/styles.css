@@ -266,7 +266,10 @@ body {
 }
 
 .rl-title-edited {
+  /* Beside the name, not part of it: regular and italic where the name is bold. */
   color: var(--rl-ink-2);
+  font-style: italic;
+  font-weight: 400;
 }
 
 .rl-titlebar-end {

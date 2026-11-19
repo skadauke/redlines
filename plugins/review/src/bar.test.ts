@@ -409,15 +409,13 @@ describe('review bar', () => {
     expect(editor.getUiState().view).toBe('redlines');
   });
 
-  it('opens the card of the change when a bar is clicked in the simple look, bar closed (#664)', () => {
+  it('leaves a click on a bar to the core in the simple look, which switches back (#1156)', () => {
     const { editor } = mount(doc);
     const handle = (pos: number) =>
       editor.view.state.facet(barClickHandlers).some((handler) => handler(editor.view, pos));
     editor.setViewMode('simple');
-    expect(handle(0)).toBe(true);
-    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
-    // A bar with no change at it is left to the core, which switches the looks.
-    expect(handle(doc.indexOf('\n\n') + 1)).toBe(false);
+    expect(handle(0)).toBe(false);
+    expect(editor.view.dom.querySelector('.rl-card-what')).toBeNull();
   });
 
   it('pins the card of the clicked line, not of a change that ends the line above', () => {

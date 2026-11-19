@@ -1,6 +1,6 @@
 // Debug only: checks Redlines' simple look in WebKit, where happy-dom can't: the click on a change
-// bar through real layout (the target found by `posAtCoords` and the layer's bars: it opens the
-// card of the change there and leaves the look, as #716 made it; the line kept where it was, the
+// bar through real layout (the target found by `posAtCoords` and the layer's bars: it switches
+// between the looks, Simple back to Redlines too (#1156), the line kept where it was, the
 // hand and the wider bar), and the drawing as the page has it. Serve the page with
 // `VITE_SIMPLE_CHECK=1 pnpm dev` (or `pnpm tauri dev`, for WKWebView) and open it in WebKit: it
 // reads nothing in a release build. Each check reports one console line, `SIMPLE-CHECK <name> pass`
@@ -257,7 +257,7 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
     },
   },
   {
-    name: 'click-opens-the-card-and-keeps-the-line-and-the-look',
+    name: 'click-in-simple-switches-back-to-redlines-and-keeps-the-line',
     async run(editor) {
       await open(editor, 'simple');
       const target = barTarget(editor);
@@ -265,18 +265,42 @@ const CHECKS: { name: string; run: (editor: Editor) => Promise<Result> }[] = [
       const taken = click(editor, target.x, target.y);
       await frames();
       const after = editor.getUiState();
-      // In Simple, a click on a change's bar opens that change's card, and the look stays (#664).
-      const card = editor.view.dom.querySelector('.rl-card-what')?.textContent ?? null;
-      if (!taken || after.markupView !== 'simple' || !card) {
-        return { taken, view: after.view, markupView: after.markupView, card };
+      // In Simple, a click on a change's bar is the way back to the full markup (#1156).
+      if (!taken || after.view !== 'redlines' || after.markupView !== 'redlines') {
+        return { taken, view: after.view, markupView: after.markupView };
       }
       // The line that was under the pointer is where it was, to the pixel.
-      const moved = target.line.isConnected
-        ? target.line.getBoundingClientRect().top - target.top
-        : null;
       const next = barTarget(editor);
       const drift = next ? next.top - target.top : null;
-      return drift === null || Math.abs(drift) > 1 ? { moved, drift } : null;
+      return drift === null || Math.abs(drift) > 1 ? { drift } : null;
+    },
+  },
+  {
+    name: 'a-journey-from-redlines-to-simple-and-back-by-the-bar-and-by-the-menu',
+    async run(editor) {
+      const problems: Problem = {};
+      for (const way of ['bar', 'view-redlines', 'simple-look'] as const) {
+        await open(editor, 'redlines');
+        const target = barTarget(editor);
+        if (!target) return { note: 'no bar drawn' };
+        click(editor, target.x, target.y);
+        await frames();
+        if (editor.getUiState().view !== 'simple') problems[`${way}-in`] = editor.getUiState().view;
+        const inSimple = barTarget(editor);
+        if (!inSimple) return { note: 'no bar drawn in Simple' };
+        if (way === 'bar') click(editor, inSimple.x, inSimple.y);
+        else if (way === 'view-redlines') editor.showView('redlines');
+        else editor.switchLook();
+        await frames();
+        const ui = editor.getUiState();
+        if (ui.view !== 'redlines' || ui.markupView !== 'redlines') {
+          problems[`${way}-back`] = { view: ui.view, markupView: ui.markupView };
+        }
+        const back = barTarget(editor);
+        const drift = back ? back.top - target.top : null;
+        if (drift === null || Math.abs(drift) > 1) problems[`${way}-drift`] = drift;
+      }
+      return Object.keys(problems).length ? problems : null;
     },
   },
   {
