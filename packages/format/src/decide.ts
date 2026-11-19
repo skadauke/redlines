@@ -155,7 +155,9 @@ function beforeFence(text: string, mark: MarkRange): boolean {
  * change with operations they can't undo. Comments are resolved instead. */
 export function isDecidable(mark: MarkRange): boolean {
   if (isTableMark(mark)) return isRowMark(mark) || isColMark(mark);
-  if (mark.entry.move !== undefined) return false;
+  // A half of a move with no group is held for its other half; the halves of a move of blocks share a
+  // group (§3.14), and are decided with it, as any group is.
+  if (mark.entry.move !== undefined && mark.entry.group === undefined) return false;
   if (mark.kind === 'fmt') return decidesFormat(mark);
   return (
     mark.kind === 'ins' ||

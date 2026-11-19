@@ -10,6 +10,7 @@ import type { Range as TextRange } from '@redlines/format';
 import { openBlock } from '../blocks/open.ts';
 import { isGapLine, leafKind, loose } from '../blocks/structure.ts';
 import { calloutOf } from './callout.ts';
+import type { QuartoBox } from './quarto-callout.ts';
 import { parsedField } from '../tracked/field.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -209,10 +210,19 @@ export interface Space {
    * out.
    */
   clip?: boolean;
+  /**
+   * A table under a table: neither has a line to take the space, so a spacer of this height stands
+   * above the second.
+   */
+  spacer?: boolean;
 }
 
 /** The space above each leaf block but the first, given the leaf blocks in document order. */
-export function spacings(state: Reading, leaves: readonly SyntaxNode[]): Space[] {
+export function spacings(
+  state: Reading,
+  leaves: readonly SyntaxNode[],
+  quarto: readonly QuartoBox[] = [],
+): Space[] {
   const found: Space[] = [];
   const lists = new Map<number, boolean>();
   const looseness = (list: SyntaxNode) => {
@@ -221,6 +231,16 @@ export function spacings(state: Reading, leaves: readonly SyntaxNode[]): Space[]
     return value;
   };
   const { doc } = state;
+  // A Quarto callout is a box like an alert's (#1183): the blocks in it are in its box, and the
+  // space after it is kept out of its tint, on the last line that is drawn.
+  const quartoBox = (node: SyntaxNode) => {
+    const line = doc.lineAt(node.from).number;
+    return quarto.find((box) => line >= box.open && line <= box.close);
+  };
+  const boxIn = (node: SyntaxNode): number | null => {
+    const box = quartoBox(node);
+    return boxOf(state, node) ?? (box ? -box.open : null);
+  };
   let above: SyntaxNode | null = null;
   for (const leaf of leaves) {
     if (isGap(state, leaf)) continue;
@@ -228,19 +248,24 @@ export function spacings(state: Reading, leaves: readonly SyntaxNode[]): Space[]
       const spacing = spacingOf(state, above, leaf, looseness);
       const boxed = (node: SyntaxNode) => BOXED.has(node.name) || startsCallout(state, node);
       // Tinted: the block's own lines, or the lines of the alert it is in.
-      const tinted = (node: SyntaxNode) => TINTED.has(node.name) || boxOf(state, node) !== null;
+      const tinted = (node: SyntaxNode) => TINTED.has(node.name) || boxIn(node) !== null;
       // A block inside the same alert as the one above is in the same box.
-      const apartBoxes = boxOf(state, leaf) !== boxOf(state, above) || boxOf(state, leaf) === null;
+      const apartBoxes = boxIn(leaf) !== boxIn(above) || boxIn(leaf) === null;
       const tintedStart = TINTED.has(leaf.name) || startsCallout(state, leaf);
       const apart = apartBoxes && tintedStart && (tinted(above) || above.name === 'Table');
       const clip = apartBoxes && leaf.name === 'Table' && tinted(above);
       const below = !apart && !clip && boxed(leaf) && !boxed(above);
+      // Under a table, a table has no line to take the space: a spacer stands between them.
+      const spacer = above.name === 'Table' && leaf.name === 'Table';
       found.push({
-        line: doc.lineAt(below || clip ? above.to : leaf.from).number,
+        line: clip
+          ? (quartoBox(above)?.last ?? doc.lineAt(above.to).number)
+          : doc.lineAt(below ? above.to : leaf.from).number,
         spacing,
         below,
         ...(apart ? { apart } : {}),
         ...(clip ? { clip } : {}),
+        ...(spacer ? { spacer } : {}),
       });
     }
     above = leaf;

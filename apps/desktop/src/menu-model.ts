@@ -93,6 +93,8 @@ export interface MenuCommands {
    */
   writeToLog?(): void;
   revealDevLog?(): void;
+  /** Help › Replay Onboarding, in dev builds only (#1206): the first-launch sheet and tour again. */
+  replayOnboarding?(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
@@ -618,6 +620,9 @@ export function appMenuModel(
               { text: 'Write to Log…', action: () => commands.writeToLog?.() },
               { text: 'Reveal Dev Log', action: () => commands.revealDevLog?.() },
             ]
+          : []),
+        ...(commands.replayOnboarding
+          ? [{ text: 'Replay Onboarding', action: () => commands.replayOnboarding?.() }]
           : []),
         SEPARATOR,
         { text: 'Show Agent Logs', action: () => commands.showAgentLogs() },
