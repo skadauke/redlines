@@ -66,11 +66,10 @@ export const calloutMenuTheme = EditorView.baseTheme({
     textAlign: 'left',
     cursor: 'default',
   },
-  // The pressed gray, which shows on the card in every theme (the tint is the card's own gray in the
-  // dark ones), and a bar that does not depend on a color to be seen.
+  // The hover fill every row has (the pressed gray at 55%), and a bar that does not depend on a color to be seen.
   '.rl-callout-item:hover, .rl-callout-item:focus': {
     outline: 'none',
-    backgroundColor: 'var(--rl-pressed)',
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
     boxShadow: 'inset 2px 0 0 var(--rl-ink-2)',
   },
   '.rl-callout-rule': { height: '1px', margin: '4px 6px', backgroundColor: 'var(--rl-rule)' },
