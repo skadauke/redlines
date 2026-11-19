@@ -71,6 +71,23 @@ describe('an image under the selection (#675)', () => {
     expect(image?.querySelectorAll('.rl-image-handle')).toHaveLength(2);
   });
 
+  it('is the same drawn picture when selected, with one set of handles, not drawn again (#1195)', () => {
+    const editor = editorWith(DOC, local, 0);
+    const before = editor.view.contentDOM.querySelector('.rl-image');
+    expect(before, 'the picture is drawn').not.toBeNull();
+    expect(before?.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+    editor.view.dispatch({ selection: { anchor: from, head: to } });
+    const all = editor.view.contentDOM.querySelectorAll('.rl-image');
+    expect(all, 'one picture, not two').toHaveLength(1);
+    expect(all[0], 'the same element, so that its handles stay where they are').toBe(before);
+    expect(all[0]?.classList.contains('rl-image-selected')).toBe(true);
+    expect(editor.view.contentDOM.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+    editor.view.dispatch({ selection: { anchor: 0 } });
+    expect(editor.view.contentDOM.querySelector('.rl-image')).toBe(before);
+    expect(before?.classList.contains('rl-image-selected')).toBe(false);
+    expect(editor.view.contentDOM.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+  });
+
   it('shows its source only when the selection has an end inside it', () => {
     expect(drawn(editorWith(DOC, local, from + 4))).toHaveLength(0);
     const editor = editorWith(DOC, local, 0);
