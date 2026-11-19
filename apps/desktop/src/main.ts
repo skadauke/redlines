@@ -103,6 +103,8 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createDevLog, tauriDevLogLink } from './dev-log.ts';
+import { askDevNote } from './ui/dev-note.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
 import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
@@ -176,6 +178,17 @@ const app = element('.rl-app');
 const main = element('.rl-main');
 const scroller = element('.rl-scroller');
 const notice = createNotice(main);
+// The dev log, in a build that isn't a release (dev-log.ts, #1205): what the person is told, and
+// what the editor refuses, is kept in it, and so are errors and agent runs below.
+const devLog = await createDevLog(isTauri ? tauriDevLogLink() : null);
+if (devLog.enabled) {
+  const flash = notice.flash.bind(notice);
+  notice.flash = (text) => {
+    devLog.log('alert', text);
+    flash(text);
+  };
+  devLog.watchKeys(document);
+}
 const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
@@ -423,7 +436,10 @@ const untrackedAnswers = createUntrackedAnswers();
 const editor = createEditor(element('#editor'), {
   doc: '',
   commandKeys: shortcutBook.commandKeys,
-  onError: (error) => crashes?.caught(error),
+  onError: (error) => {
+    devLog.log('error', error instanceof Error ? error.message : String(error));
+    crashes?.caught(error);
+  },
   author,
   // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
   askUntracked: createUntrackedSheet({
@@ -519,7 +535,10 @@ const editor = createEditor(element('#editor'), {
     runsSawChange();
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
-  onNotice: (message) => notice.flash(message),
+  onNotice: (message) => {
+    devLog.log('refusal', message);
+    notice.flash(message);
+  },
   // Image files pasted into the document, or dropped on it where the page gets the drop itself (a
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
@@ -1035,6 +1054,18 @@ const runs = createRuns({
   onEnded: () => void sidebar.refresh(),
 });
 runsSawChange = () => runs.documentChanged();
+// Each change of an agent run's line is a line of the dev log: which agent, and how it stands.
+if (devLog.enabled) {
+  runs.subscribe((thread) => {
+    const line = runs.line(thread);
+    devLog.log(
+      'agent',
+      line === null
+        ? `thread ${thread} line cleared`
+        : `thread ${thread} ${line.agentName} ${line.kind}${line.kind === 'failed' ? `: ${line.message}` : ''}`,
+    );
+  });
+}
 // Each thread's live line, drawn again in its note whenever it changes. A failure the person
 // can't see, or a question waiting where nobody sees it, in a thread scrolled away, is also told of
 // in the lower-right corner.
@@ -1661,6 +1692,26 @@ const commands: MenuCommands = {
     if (crashes) void crashes.revealLog();
     else notice.flash('The log is in the app.');
   },
+  // Dev builds only: a release build has no dev log, and its Help menu has neither row.
+  ...(devLog.enabled
+    ? {
+        writeToLog: () => {
+          void askDevNote({ container: app, restoreFocus: () => editor.focus() }).then((note) => {
+            if (note === null) return;
+            const { from, to } = editor.view.state.selection.main;
+            void devLog
+              .writeNote(note, {
+                text: editor.getDoc(),
+                selection: { from, to },
+                view: editor.getUiState().view,
+                tracking: editor.getUiState().tracking,
+              })
+              .then(() => notice.flash('Written to the dev log.'));
+          });
+        },
+        revealDevLog: () => devLog.reveal(),
+      }
+    : {}),
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. Of the

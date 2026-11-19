@@ -279,6 +279,24 @@ describe('the menu model', () => {
     expect(model.menus.find((menu) => menu.title === 'Help')?.helpMenu).toBe(true);
   });
 
+  it('has Write to Log… and Reveal Dev Log in a dev build, and neither in a release build (#1205)', () => {
+    const release = appMenuModel(commands(), registryOf());
+    expect(readsAll(release, 'Help').flat().join()).not.toMatch(/Dev Log|Write to Log/);
+    const writeToLog = vi.fn();
+    const dev = appMenuModel({ ...commands(), writeToLog, revealDevLog: vi.fn() }, registryOf());
+    expect(readsAll(dev, 'Help')).toEqual([
+      ['Report a Problem…', undefined],
+      ['Reveal Log', undefined],
+      '---',
+      ['Write to Log…', undefined],
+      ['Reveal Dev Log', undefined],
+      '---',
+      ['Show Agent Logs', undefined],
+    ]);
+    actionRow(dev, 'Help', 'Write to Log…').action();
+    expect(writeToLog).toHaveBeenCalledOnce();
+  });
+
   it('runs each item’s command', () => {
     const c = commands();
     const model = appMenuModel(c, registryOf());

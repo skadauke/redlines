@@ -86,6 +86,12 @@ export interface MenuCommands {
   reportProblem(): void;
   /** Help › Reveal Log: the crash log in Finder. */
   revealCrashLog(): void;
+  /**
+   * Help › Write to Log… and Reveal Dev Log, in dev builds only (#1205): a release build has no dev
+   * log, and leaves these out, so that its Help menu has neither row.
+   */
+  writeToLog?(): void;
+  revealDevLog?(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
@@ -603,6 +609,13 @@ export function appMenuModel(
       rows: [
         { text: 'Report a Problem…', action: () => commands.reportProblem() },
         { text: 'Reveal Log', action: () => commands.revealCrashLog() },
+        ...(commands.writeToLog && commands.revealDevLog
+          ? [
+              SEPARATOR,
+              { text: 'Write to Log…', action: () => commands.writeToLog?.() },
+              { text: 'Reveal Dev Log', action: () => commands.revealDevLog?.() },
+            ]
+          : []),
         SEPARATOR,
         { text: 'Show Agent Logs', action: () => commands.showAgentLogs() },
       ],
