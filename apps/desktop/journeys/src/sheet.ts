@@ -51,6 +51,8 @@ export interface Specimen {
   views?: readonly string[];
   /** States in which it may be gone (the element a drag takes up is replaced by a ghost). */
   mayVanish?: readonly State[];
+  /** Puts the page back after its states (a sidebar that was opened is closed). */
+  after?: (j: Journey) => Promise<void>;
 }
 
 const AWAY = { x: 5, y: 5 };
@@ -155,6 +157,197 @@ const chooseWithKeys = (items: string) => async (j: Journey) => {
 const hoverItem = (items: string) => async (j: Journey) => {
   await pointAt(j, j.page.locator(items).filter({ visible: true }).nth(2));
 };
+
+// ----- Part 2: the review, the callout, the find bar, the sidebar, the outline, the Quarto chips -----
+
+/** A change's card, from a click on the insertion. */
+const openCard = async (j: Journey) => {
+  await rest(j);
+  await j.page.getByText('insertion').first().click();
+  await j.page.locator('.rl-card').filter({ visible: true }).first().waitFor();
+  await j.page.mouse.move(AWAY.x, AWAY.y);
+};
+
+/** The callout's menu: its button, and the popover a click on it opens. */
+const openCalloutMenu = async (j: Journey) => {
+  await rest(j);
+  const button = j.page.locator('.rl-callout-menu').first();
+  await pointAt(j, j.page.locator('.rl-callout-head').first());
+  await button.click();
+  await j.page.locator('.rl-callout-item').filter({ visible: true }).first().waitFor();
+  await j.page.mouse.move(AWAY.x, AWAY.y);
+};
+
+/** The find bar, from ⌘F in the document. */
+const openFind = async (j: Journey) => {
+  await rest(j);
+  await j.page.locator('.cm-content').click();
+  await j.page.keyboard.press('Meta+f');
+  await j.page.locator('.rl-find-bar').waitFor({ state: 'visible' });
+  await j.page.mouse.move(AWAY.x, AWAY.y);
+};
+
+/** The sidebar's list of files, from the button that opens it. */
+const openSidebar = async (j: Journey) => {
+  await rest(j);
+  // The button says which it is: Show files, or Hide files.
+  const show = j.page.getByRole('button', { name: 'Show files' });
+  if (await show.count()) await show.click();
+  await j.page.getByRole('button', { name: 'Hide files' }).waitFor();
+  await j.page.waitForTimeout(250);
+};
+const closeSidebar = async (j: Journey) => {
+  const hide = j.page.getByRole('button', { name: 'Hide files' });
+  if (await hide.count()) await hide.click();
+  await j.page.getByRole('button', { name: 'Show files' }).waitFor();
+};
+
+/** The outline's list of headings, from the pointer on its ticks. */
+const openOutline = async (j: Journey) => {
+  await rest(j);
+  await j.page.locator('.rl-outline-panel').first().hover();
+  await j.page.locator('.rl-outline-item').filter({ visible: true }).first().waitFor();
+};
+
+/** A specimen that is a button or a row, reached in `rest`, `hover` and `keys` by the same moves. */
+function pressable(
+  name: string,
+  family: 'buttons' | 'rows',
+  selector: string,
+  open: (j: Journey) => Promise<void>,
+  more: Partial<Specimen> = {},
+): Specimen {
+  const nth = (j: Journey) => {
+    const items = j.page.locator(selector).filter({ visible: true });
+    return family === 'rows' ? items.first() : items.last();
+  };
+  return {
+    name,
+    family,
+    selector,
+    selectorFor: { hover: `${selector}:hover`, keys: `${selector}:focus-visible` },
+    reach: {
+      ...(more.selectorFor?.selected ? { selected: open } : {}),
+      rest: open,
+      hover: async (j) => {
+        await open(j);
+        await nth(j).hover({ force: true });
+      },
+      keys: async (j) => {
+        await open(j);
+        await j.page.keyboard.press('Shift');
+        await nth(j).focus();
+      },
+    },
+    ...more,
+  };
+}
+
+const MORE: readonly Specimen[] = [
+  // The change card and its buttons; the bar beside the change.
+  {
+    name: 'change-card',
+    family: 'cards',
+    selector: '.rl-card',
+    views: ['redlines', 'simple'],
+    reach: {
+      rest: openCard,
+      hover: async (j) => {
+        await openCard(j);
+        await pointAt(j, j.page.locator('.rl-card').filter({ visible: true }).first());
+      },
+    },
+  },
+  pressable('card-button', 'buttons', '.rl-card-button', openCard, {
+    views: ['redlines', 'simple'],
+  }),
+  {
+    name: 'change-bar',
+    family: 'bars',
+    selector: '.rl-bar-seg',
+    views: ['redlines', 'simple'],
+    reach: {
+      rest,
+      hover: async (j) => {
+        await rest(j);
+        await pointAt(j, j.page.locator('.rl-bar-seg').first());
+      },
+      selected: async (j) => {
+        await rest(j);
+        await j.page.locator('.rl-bar-seg').first().click({ force: true });
+        await j.page.mouse.move(AWAY.x, AWAY.y);
+      },
+    },
+  },
+  // The callout's menu.
+  pressable('callout-menu-button', 'buttons', '.rl-callout-menu', rest),
+  {
+    name: 'callout-popover',
+    family: 'cards',
+    selector: '.rl-callout-popover',
+    reach: { rest: openCalloutMenu },
+  },
+  pressable('callout-item', 'rows', '.rl-callout-item', openCalloutMenu, {
+    frame: '.rl-callout-popover',
+  }),
+  // The find bar and its toggles.
+  { name: 'find-bar', family: 'cards', selector: '.rl-find-bar', reach: { rest: openFind } },
+  pressable('find-toggle', 'buttons', '.rl-find-toggle', openFind, { frame: '.rl-find-bar' }),
+  // The sidebar's files and the outline's headings.
+  pressable('sidebar-item', 'rows', '.rl-sidebar-item', openSidebar, {
+    selectorFor: {
+      rest: '.rl-sidebar-item:not(:hover):not([aria-current="page"])',
+      hover: '.rl-sidebar-item:hover',
+      keys: '.rl-sidebar-item:focus-visible',
+      selected: '.rl-sidebar-item[aria-current="page"]',
+    },
+    after: closeSidebar,
+    frame: '.rl-sidebar-list',
+  }),
+  {
+    ...pressable('outline-item', 'rows', '.rl-outline-item', openOutline, {
+      selectorFor: {
+        rest: '.rl-outline-item:not(:hover)',
+        hover: '.rl-outline-item:hover',
+        keys: '.rl-outline-item:focus-visible',
+      },
+      frame: '.rl-outline-panel',
+    }),
+    // No `hover`: a scripted pointer never lands on a row before the panel shuts (listed in the PR).
+    reach: {
+      rest: openOutline,
+      keys: async (j) => {
+        await openOutline(j);
+        await j.page.keyboard.press('Shift');
+        await j.page.locator('.rl-outline-item').first().focus();
+      },
+    },
+  },
+  // The Quarto chips, in a Quarto file.
+  ...(
+    [
+      ['reference-chip', '.rl-xref'],
+      ['citation-chip', '.rl-cite'],
+    ] as const
+  ).map(([name, selector]): Specimen => ({
+    name,
+    family: 'chips',
+    selector,
+    views: ['clean', 'simple'],
+    reach: {
+      rest,
+      hover: async (j) => {
+        await rest(j);
+        await pointAt(j, j.page.locator(selector).first());
+      },
+      selected: async (j) => {
+        await rest(j);
+        await j.page.locator(selector).first().click();
+        await j.page.mouse.move(AWAY.x, AWAY.y);
+      },
+    },
+  })),
+];
 
 export const SPECIMENS: readonly Specimen[] = [
   // ----- Handles: the picture's, and the table's -----
@@ -355,6 +548,7 @@ export const SPECIMENS: readonly Specimen[] = [
       },
     },
   })),
+  ...MORE,
 ];
 
 /** What the page says of a specimen's style (and of its pseudo-element), in a state. */
@@ -430,6 +624,20 @@ export const FAMILIES: readonly Family[] = [
     of: ['rows', 'buttons'],
     how: { across: 'keys' },
     props: ['outlineStyle', 'outlineWidth', 'outlineColor'],
+  },
+  {
+    name: 'chips',
+    rule: 'a chip in the text is one shape: one radius, one fill, one ink',
+    of: ['chips'],
+    how: { across: 'rest' },
+    props: ['borderTopLeftRadius', 'backgroundColor', 'color', 'borderTopWidth'],
+  },
+  {
+    name: 'chosen',
+    rule: 'the chosen row (the checked view, the open file) has one fill',
+    of: ['rows'],
+    how: { across: 'selected' },
+    props: ['backgroundColor'],
   },
 ];
 
@@ -527,16 +735,22 @@ export const KNOWN: readonly KnownDisagreement[] = [
     why: 'rows take 55% of the pressed gray, buttons the full gray, the action the rule gray, and the title bar’s buttons none',
   },
   {
-    issue: 1191,
-    family: 'keys-like-hover',
-    props: ['backgroundColor'],
-    why: 'a key-chosen menu row is the full pressed gray, unlike its hover (the palette; the same shape in the other rows)',
-  },
-  {
     issue: 1247,
     family: 'keys-like-hover',
-    props: ['outlineStyle'],
-    why: 'buttons show a ring when chosen with the keys and no fill, unlike their hover',
+    props: ['backgroundColor', 'outlineStyle'],
+    why: 'buttons show a ring when chosen with the keys and no fill, unlike their hover; the eye’s menu rows a heavier fill (the palette’s were fixed by #1191)',
+  },
+  {
+    issue: 1283,
+    family: 'chosen',
+    props: ['backgroundColor'],
+    why: 'the checked row of the eye’s menu and the open file in the sidebar have different fills',
+  },
+  {
+    issue: 1172,
+    family: 'chips',
+    props: ['color'],
+    why: 'a reference chip is in the full ink, a citation chip in the gray one (both are heavy chips; #1172 makes them text with a dotted underline)',
   },
   {
     issue: 1247,
