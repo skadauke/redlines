@@ -128,7 +128,8 @@ describe('a table laid out as a table', () => {
 
   it('makes two tables a blank line apart two wrappers, with the blank line in neither', () => {
     const editor = load(`${PLAIN}\n\n${PLAIN}`);
-    const found = wrappers(editor);
+    // The space between them (#1183) is a spacer, which stands in a wrapper of its own and has no rows.
+    const found = wrappers(editor).filter((w) => rows(w).length > 0);
     expect(found).toHaveLength(2);
     expect(found.map((w) => rows(w).length)).toEqual([2, 2]);
     const lines = [...content(editor).querySelectorAll('.cm-line')];
