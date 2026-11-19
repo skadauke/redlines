@@ -26,8 +26,7 @@ import {
   viewModeField,
 } from '../tracked/field.ts';
 import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
-import { joinsNewestStep } from '../history/index.ts';
-import { openBlock, returnAnnotation, setOpenEffect, takeBackChanges } from './open.ts';
+import { openBlock, setOpenEffect, takeBackChanges } from './open.ts';
 import {
   authoredWrite,
   contextFor,
@@ -100,19 +99,49 @@ export function moveBlocks(view: EditorView, up: boolean): boolean {
   // and the key does nothing, with no notice.
   if (!gap) {
     // Code that nothing closes holds the rest of its container, so it has nowhere to go: the
-    // closing fence is written first, tracked with Track Changes on, and the block moves (#1203).
+    // closing fence is written first and the block moves, in one step (#1203). With Track Changes
+    // on the fence is tracked with the move; where the move can't be tracked, the whole step is
+    // made untracked, fence included, after the person is asked.
     const closing = !read.back && run.unclosed ? closingFence(read.file, run, up) : null;
     if (!closing) return true;
-    view.dispatch({
-      changes: closing,
-      userEvent: 'input.break',
-      annotations: [isolateHistory.of('before'), returnAnnotation.of(true)],
+    const base = read.file;
+    const closed = (changes: ChangeSet): FileRead => ({
+      file: base.update({
+        changes,
+        selection: EditorSelection.single(changes.mapPos(base.selection.main.head, -1)),
+        filter: false,
+      }).state,
+      back: changes,
     });
-    // The move that follows is one step with it: one Undo gives both back.
-    const after = asFile(view.state);
-    const next = after && runOfSelection(after.file);
+    const text = base.doc.toString();
+    const edits = [closing];
+    let tracked: ChangeSet;
+    let plainChanges: ChangeSet;
+    try {
+      plainChanges = untrackedWrite(base, text, base.field(parsedField), edits).changes;
+      tracked = base.field(trackingField)
+        ? authoredWrite(base, text, base.field(parsedField), edits).changes
+        : plainChanges;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      // The fence can't be written here: the block stays, and the reason is the old one.
+      view.dispatch({ effects: refusedEditEffect.of(UNCLOSED_FENCE) });
+      return true;
+    }
+    const first = closed(tracked);
+    const second = closed(plainChanges);
+    const next = runOfSelection(first.file);
     const to = next && neighbourGap(next, up);
-    return next && to ? moveRunTo(view, next, to, after, true) : true;
+    if (!next || !to) return true;
+    const other = runOfSelection(second.file);
+    const otherGap = other && neighbourGap(other, up);
+    return moveRunTo(
+      view,
+      next,
+      to,
+      first,
+      other && otherGap ? { read: second, run: other, gap: otherGap } : undefined,
+    );
   }
   return moveRunTo(view, run, gap, read);
 }
@@ -153,16 +182,18 @@ function closingFence(
 /** Moves `run` to `gap` and keeps it selected, as it was (a caret stays at its place in the text). */
 export function moveRunTo(
   view: EditorView,
-  run: BlockRun,
-  gap: BlockGap,
+  run0: BlockRun,
+  gap0: BlockGap,
   read?: FileRead,
-  joinsPrevious = false,
+  fallback?: { read: FileRead; run: BlockRun; gap: BlockGap },
 ): boolean {
   // The state the run is read in: the file's, with an empty paragraph taken back (`asFile`), and
   // the changes that did it, which the step makes first.
-  const state = read?.file ?? view.state;
-  const back = read?.back ?? null;
-  const text = state.doc.toString();
+  let run = run0;
+  let gap = gap0;
+  let state = read?.file ?? view.state;
+  let back = read?.back ?? null;
+  let text = state.doc.toString();
   const tracking = state.field(trackingField);
   let changes: ChangeSet;
   let moved: Range;
@@ -192,6 +223,14 @@ export function moveRunTo(
         // (design: widen, alert or disable, §3.1), never refused.
         untracked = true;
         if (error.reason !== 'too-large') asking = NOT_MARKABLE;
+        if (fallback) {
+          // The closing fence the move began with was written tracked, which an untracked move
+          // can't sit beside: the whole step is made untracked, the fence plain as well.
+          ({ run, gap } = fallback);
+          state = fallback.read.file;
+          back = fallback.read.back;
+          text = state.doc.toString();
+        }
         const plain = plainMove(state, text, run, gap, true);
         if (!plain) return false;
         ({ changes, moved, intent } = plain);
@@ -215,12 +254,7 @@ export function moveRunTo(
   const recorded = recordedAs(
     intent.kind === 'typing' && back ? { ...intent, revert: changesOf(back) } : intent,
   );
-  const annotations = [
-    trackedEditAnnotation.of(true),
-    isolateHistory.of(joinsPrevious ? 'after' : 'full'),
-    ...(joinsPrevious ? [joinsNewestStep.of(true)] : []),
-    recorded,
-  ];
+  const annotations = [trackedEditAnnotation.of(true), isolateHistory.of('full'), recorded];
   // From the document as it was (the open paragraph in it): taken back, then moved, in one step.
   const whole = back ? back.compose(changes) : changes;
   if (tracking && untracked) {
