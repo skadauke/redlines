@@ -483,51 +483,95 @@ function carriesProjectImage(event: DragEvent): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes(PROJECT_IMAGE_TYPE);
 }
 
+/** What the host does with an image file of the project dragged into the document. */
+interface ProjectDrops {
+  linkFor: (dragged: string) => string | null;
+  notice: ((message: string) => void) | undefined;
+}
+
+const projectDropsFacet = Facet.define<ProjectDrops, ProjectDrops | null>({
+  combine: (values) => values[0] ?? null,
+});
+
+const dropLines = new WeakMap<EditorView, ReturnType<typeof dropLine>>();
+const dropLineOf = (view: EditorView) => {
+  let line = dropLines.get(view);
+  if (!line) dropLines.set(view, (line = dropLine(view)));
+  return line;
+};
+
+/**
+ * The pointer of a drag of an image file from the sidebar is at client height `y`: a line shows the
+ * gap between blocks it is nearest. False where the document takes no such drag.
+ */
+export function overProjectImage(view: EditorView, y: number): boolean {
+  if (!view.state.facet(projectDropsFacet)) return false;
+  const near = nearestGap(view, y);
+  if (near) dropLineOf(view).show(near.y);
+  else dropLineOf(view).hide();
+  return true;
+}
+
+/** The drag is over: the line goes. */
+export function leaveProjectImage(view: EditorView): void {
+  dropLineOf(view).hide();
+}
+
+/**
+ * An image file of the project, `dragged`, is dropped at client height `y`: a link to it is written
+ * as a block of its own at the nearest gap between blocks, as the person's own insertion (tracked
+ * while Track Changes is on, one step for Undo). The host says what to write (`projectImageLink`).
+ */
+export function dropProjectImage(view: EditorView, y: number, dragged: string): void {
+  dropLineOf(view).hide();
+  const drops = view.state.facet(projectDropsFacet);
+  if (!drops || rawIsReadOnly(view.state)) return;
+  const link = dragged ? drops.linkFor(dragged) : null;
+  if (link === null) return;
+  const near = nearestGap(view, y);
+  if (!near) return;
+  const { gap } = near;
+  blockSpot(view, gap.pos, { before: gap.before, after: gap.after }, drops.notice)?.insert([link]);
+}
+
 /**
  * The drag of an image file from the sidebar (#681): a line shows the gap between blocks that the
- * pointer is nearest, and the drop writes a link, a block of its own, there, as the person's own
- * insertion (tracked while Track Changes is on, one step for Undo).
+ * pointer is nearest, and the drop writes a link, a block of its own, there. The sidebar's rows are
+ * dragged with the pointer (`overProjectImage`, `dropProjectImage`), since the app's web view
+ * delivers no drag events of the page's own; a drag that carries the file's path as data (a page
+ * that has them) is the same.
  */
 function projectDrops(
   linkFor: (dragged: string) => string | null,
   notice: ((message: string) => void) | undefined,
 ): Extension {
-  const lines = new WeakMap<EditorView, ReturnType<typeof dropLine>>();
-  const lineOf = (view: EditorView) => {
-    let line = lines.get(view);
-    if (!line) lines.set(view, (line = dropLine(view)));
-    return line;
-  };
-  return EditorView.domEventHandlers({
-    dragover(event, view) {
-      if (!carriesProjectImage(event)) return false;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-      const near = nearestGap(view, event.clientY);
-      if (near) lineOf(view).show(near.y);
-      return true;
-    },
-    dragleave(event, view) {
-      if (!carriesProjectImage(event)) return false;
-      if (!(event.relatedTarget instanceof Node) || !view.dom.contains(event.relatedTarget)) {
-        lineOf(view).hide();
-      }
-      return false;
-    },
-    drop(event, view) {
-      if (!carriesProjectImage(event)) return false;
-      event.preventDefault();
-      lineOf(view).hide();
-      if (rawIsReadOnly(view.state)) return true;
-      const dragged = event.dataTransfer?.getData(PROJECT_IMAGE_TYPE) ?? '';
-      const link = dragged ? linkFor(dragged) : null;
-      if (link === null) return true;
-      const near = nearestGap(view, event.clientY);
-      if (!near) return true;
-      const { gap } = near;
-      const spot = blockSpot(view, gap.pos, { before: gap.before, after: gap.after }, notice);
-      spot?.insert([link]);
-      return true;
-    },
-  });
+  return [
+    projectDropsFacet.of({ linkFor, notice }),
+    EditorView.domEventHandlers({
+      dragover(event, view) {
+        if (!carriesProjectImage(event)) return false;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        overProjectImage(view, event.clientY);
+        return true;
+      },
+      dragleave(event, view) {
+        if (!carriesProjectImage(event)) return false;
+        if (!(event.relatedTarget instanceof Node) || !view.dom.contains(event.relatedTarget)) {
+          leaveProjectImage(view);
+        }
+        return false;
+      },
+      drop(event, view) {
+        if (!carriesProjectImage(event)) return false;
+        event.preventDefault();
+        dropProjectImage(
+          view,
+          event.clientY,
+          event.dataTransfer?.getData(PROJECT_IMAGE_TYPE) ?? '',
+        );
+        return true;
+      },
+    }),
+  ];
 }

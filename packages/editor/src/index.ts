@@ -58,6 +58,7 @@ import { tabItems } from './blocks/tab-items.ts';
 import { tableMarkers } from './table/markers.ts';
 import { imageFetcherFacet, images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
+export { dropProjectImage, leaveProjectImage, overProjectImage } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { blankRun, openBlock, openBlocks, takeBackChanges, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
