@@ -373,6 +373,7 @@ fn session(
     emit: &mut dyn FnMut(Event),
     keep_token: &mut dyn FnMut(Secret),
     stop: &AtomicBool,
+    offered: u64,
 ) -> Ended {
     let timing = config.timing;
     let mut socket = match open(&config.target, timing.open) {
@@ -391,11 +392,13 @@ fn session(
         emit,
         keep_token,
         stop,
+        offered,
     );
     let _ = socket.close(None);
     outcome
 }
 
+#[allow(clippy::too_many_arguments)] // the connection's few collaborators, and the protocol offered
 fn run(
     socket: &mut Socket,
     config: &Config,
@@ -404,6 +407,7 @@ fn run(
     emit: &mut dyn FnMut(Event),
     keep_token: &mut dyn FnMut(Secret),
     stop: &AtomicBool,
+    offered: u64,
 ) -> Ended {
     let timing = config.timing;
     let until = || Instant::now() + timing.open;
@@ -429,18 +433,21 @@ fn run(
     let signature = config.identity.sign(&protocol::signed_text(
         &device_id, "node", signed_at, secret, &nonce,
     ));
-    let connect = protocol::connect_request(&Connect {
-        id: "1",
-        display_name: &config.display_name,
-        version: &config.version,
-        device_id: &device_id,
-        public_key: &config.identity.public_key(),
-        signature: &signature,
-        signed_at_ms: signed_at,
-        nonce: &nonce,
-        credential_kind: credential.kind(),
-        credential: secret,
-    });
+    let connect = protocol::connect_request(
+        &Connect {
+            id: "1",
+            display_name: &config.display_name,
+            version: &config.version,
+            device_id: &device_id,
+            public_key: &config.identity.public_key(),
+            signature: &signature,
+            signed_at_ms: signed_at,
+            nonce: &nonce,
+            credential_kind: credential.kind(),
+            credential: secret,
+        },
+        offered,
+    );
     if let Err(ended) = send(socket, connect) {
         return ended;
     }
@@ -686,6 +693,10 @@ pub fn start(
     let thread = std::thread::spawn(move || {
         let timing = config.timing;
         let mut first = Some(first);
+        // The protocol offered: the current one, and the one before it when the Gateway says that
+        // is what it expects. Each is tried once before a Gateway is called too new.
+        let mut offered = protocol::PROTOCOL;
+        let mut tried = vec![offered];
         let mut wait = timing.backoff_start;
         let mut pairing_since: Option<Instant> = None;
         emit(Event::Status(Status::Connecting));
@@ -711,7 +722,18 @@ pub fn start(
                 }
                 emit(event);
             };
-            let ended = session(&config, &credential, &host, &mut report, &mut keep, &flag);
+            let ended = session(
+                &config,
+                &credential,
+                &host,
+                &mut report,
+                &mut keep,
+                &flag,
+                offered,
+            );
+            if connected {
+                tried.clear();
+            }
             // A connection that held for a while starts the waits over; one that drops at once,
             // again and again, does not.
             if connected && began.elapsed() >= timing.backoff_max {
@@ -751,6 +773,17 @@ pub fn start(
                 Ended::Refused(Refusal::BadToken) => {
                     emit(Event::Status(Status::Failed(Failure::BadToken)));
                     return;
+                }
+                Ended::Refused(Refusal::TooNew {
+                    protocol: Some(expected),
+                }) if [protocol::PROTOCOL, protocol::NODE_FALLBACK_PROTOCOL]
+                    .contains(&expected)
+                    && !tried.contains(&expected) =>
+                {
+                    // The Gateway wants the other of the two protocols: offer it, at once.
+                    offered = expected;
+                    tried.push(expected);
+                    first = Some(credential);
                 }
                 Ended::Refused(Refusal::TooNew { protocol }) => {
                     emit(Event::Status(Status::Failed(Failure::TooNew { protocol })));
@@ -852,6 +885,11 @@ mod tests {
 
     /// Reads the node's `connect` and checks its signature as a Gateway would. Returns its params.
     fn take_connect(socket: &mut Ws, frames: &Frames, nonce: &str) -> Value {
+        take_connect_at(socket, frames, nonce, protocol::PROTOCOL)
+    }
+
+    /// The same, checking the one protocol the node offered.
+    fn take_connect_at(socket: &mut Ws, frames: &Frames, nonce: &str, offered: u64) -> Value {
         let connect = read_frame(socket, frames).expect("a connect frame");
         assert_eq!(connect["method"], "connect");
         let params = connect["params"].clone();
@@ -886,6 +924,8 @@ mod tests {
             &Signature::from_bytes(&signature.try_into().unwrap()),
         )
         .expect("the signature of the greeting's nonce");
+        assert_eq!(params["minProtocol"], offered);
+        assert_eq!(params["maxProtocol"], offered);
         assert_eq!(params["role"], "node");
         assert_eq!(params["commands"], json!(["mcp.tools.call.v1"]));
         params
@@ -1329,6 +1369,67 @@ mod tests {
         }
         let good = r#"{"server":"redlines","tool":"view"}"#;
         assert!(answer_call(&Tools, &published, COMMAND, good, None).is_ok());
+    }
+
+    /// #1162: a node offers protocol 4, and a Gateway that takes nodes only at 3 says so
+    /// (`protocol mismatch`, `expectedProtocol: 3`): the node offers 3 at once, with the same code.
+    #[test]
+    fn a_gateway_that_expects_protocol_3_is_offered_3_after_4() {
+        let gateway = fake(vec![
+            Box::new(|socket, frames| {
+                greet(socket, "a");
+                take_connect_at(socket, frames, "a", 4);
+                text(
+                    socket,
+                    json!({"type": "res", "id": "1", "ok": false, "error": {
+                        "code": "INVALID_REQUEST", "message": "protocol mismatch",
+                        "details": {"code": "PROTOCOL_MISMATCH", "expectedProtocol": 3}}}),
+                );
+            }),
+            Box::new(|socket, frames| {
+                greet(socket, "b");
+                let params = take_connect_at(socket, frames, "b", 3);
+                assert_eq!(params["auth"], json!({"bootstrapToken": CODE}));
+                hello(socket, Some("dt-3"));
+                read_frame(socket, frames);
+                drain(socket, frames);
+            }),
+        ]);
+        let mut run = Run::start(&gateway, Credential::SetupCode(secret(CODE)), None);
+        run.wait("connected", |event| {
+            matches!(event, Event::Status(Status::Connected { .. }))
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+        assert!(
+            !run.statuses()
+                .iter()
+                .any(|s| matches!(s, Status::Failed(_)))
+        );
+    }
+
+    /// A Gateway that wants neither 3 nor 4 is newer, after each was offered once.
+    #[test]
+    fn a_gateway_that_wants_a_protocol_beyond_both_is_newer_without_a_loop() {
+        let gateway = fake(vec![Box::new(|socket, frames| {
+            greet(socket, "a");
+            take_connect_at(socket, frames, "a", 4);
+            text(
+                socket,
+                json!({"type": "res", "id": "1", "ok": false, "error": {
+                    "code": "INVALID_REQUEST", "message": "protocol mismatch",
+                    "details": {"code": "PROTOCOL_MISMATCH", "expectedProtocol": 5}}}),
+            );
+        })]);
+        let run = Run::start(
+            &gateway,
+            Credential::Token(secret(TOKEN)),
+            Some(TOKEN),
+        );
+        run.wait("too new", |event| {
+            *event == Event::Status(Status::Failed(Failure::TooNew { protocol: Some(5) }))
+        });
+        gateway.thread.join().unwrap();
     }
 
     #[test]

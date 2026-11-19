@@ -29,8 +29,17 @@
 
 use serde_json::{Value, json};
 
-/// The protocol version this was written against, and the only one it offers.
-pub const PROTOCOL: u64 = 3;
+/// The protocol a node offers first: OpenClaw's current one (`PROTOCOL_VERSION = 4`,
+/// `packages/gateway-protocol/src/version.ts`). A Gateway logs `legacy node protocol accepted ...
+/// upgrade recommended` for a node that offers 3, and a later one may stop accepting it.
+pub const PROTOCOL: u64 = 4;
+
+/// The lowest protocol a Gateway takes from a node (`MIN_NODE_PROTOCOL_VERSION = 3`), which a node
+/// offers when the Gateway answers a `connect` of [`PROTOCOL`] with a protocol mismatch that
+/// expects 3, as OpenClaw's own node host does (`resolveConnectRequestFailure` in
+/// `packages/gateway-client/src/client.ts`: it retries when `details.expectedProtocol` is the
+/// other protocol and the error is `PROTOCOL_MISMATCH` or says "protocol mismatch").
+pub const NODE_FALLBACK_PROTOCOL: u64 = 3;
 
 /// The one command this node declares, and so the only one a Gateway may send it. Never
 /// `system.run` or anything that runs a program.
@@ -269,9 +278,11 @@ pub fn classify(error: &WireError, offered_setup_code: bool) -> Refusal {
         return Refusal::PairingRequired { request_id };
     }
     if has(&["protocol"]) && has(&["mismatch", "unsupported", "newer", "version", "unknown"]) {
+        // `expectedProtocol` is what the Gateway wanted instead of what was offered.
         let protocol = error
             .details
-            .get("maxProtocol")
+            .get("expectedProtocol")
+            .or_else(|| error.details.get("maxProtocol"))
             .or_else(|| error.details.get("protocol"))
             .and_then(Value::as_u64);
         return Refusal::TooNew { protocol };
@@ -366,14 +377,15 @@ pub struct Connect<'a> {
     pub credential: &'a str,
 }
 
-pub fn connect_request(c: &Connect<'_>) -> String {
+/// The node's `connect`, offering exactly protocol `offered` ([`PROTOCOL`], or the fallback).
+pub fn connect_request(c: &Connect<'_>, offered: u64) -> String {
     json!({
         "type": "req",
         "id": c.id,
         "method": "connect",
         "params": {
-            "minProtocol": PROTOCOL,
-            "maxProtocol": PROTOCOL,
+            "minProtocol": offered,
+            "maxProtocol": offered,
             "client": {
                 "id": CLIENT_ID,
                 "displayName": c.display_name,
@@ -633,20 +645,30 @@ mod tests {
 
     #[test]
     fn connect_declares_the_one_command_and_the_node_role() {
-        let text = connect_request(&Connect {
-            id: "1",
-            display_name: "Redlines on Ada's MacBook",
-            version: "0.2.0",
-            device_id: "dev",
-            public_key: "pk",
-            signature: "sig",
-            signed_at_ms: 5,
-            nonce: "n",
-            credential_kind: "token",
-            credential: "secret-1",
-        });
+        let text = connect_request(
+            &Connect {
+                id: "1",
+                display_name: "Redlines on Ada's MacBook",
+                version: "0.2.0",
+                device_id: "dev",
+                public_key: "pk",
+                signature: "sig",
+                signed_at_ms: 5,
+                nonce: "n",
+                credential_kind: "token",
+                credential: "secret-1",
+            },
+            PROTOCOL,
+        );
         let frame: Value = serde_json::from_str(&text).unwrap();
         let params = &frame["params"];
+        // Protocol 4, and only 4 (#1162); the fallback offers only 3.
+        assert_eq!(
+            (params["minProtocol"].clone(), params["maxProtocol"].clone()),
+            (json!(4), json!(4))
+        );
+        assert_eq!(PROTOCOL, 4);
+        assert_eq!(NODE_FALLBACK_PROTOCOL, 3);
         assert_eq!(params["role"], "node");
         assert_eq!(params["commands"], json!(["mcp.tools.call.v1"]));
         assert_eq!(params["auth"], json!({"token": "secret-1"}));
@@ -684,18 +706,21 @@ mod tests {
             signed_text("d", "node", 7, "tok", "n"),
             "v2|d|node-host|node|node||7|tok|n"
         );
-        let text = connect_request(&Connect {
-            id: "1",
-            display_name: "x",
-            version: "1",
-            device_id: "d",
-            public_key: "p",
-            signature: "s",
-            signed_at_ms: 1,
-            nonce: "n",
-            credential_kind: "token",
-            credential: "t",
-        });
+        let text = connect_request(
+            &Connect {
+                id: "1",
+                display_name: "x",
+                version: "1",
+                device_id: "d",
+                public_key: "p",
+                signature: "s",
+                signed_at_ms: 1,
+                nonce: "n",
+                credential_kind: "token",
+                credential: "t",
+            },
+            PROTOCOL,
+        );
         let frame: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(frame["params"]["client"]["id"], "node-host");
         assert_eq!(frame["params"]["client"]["mode"], "node");
