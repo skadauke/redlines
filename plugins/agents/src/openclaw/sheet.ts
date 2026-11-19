@@ -893,17 +893,27 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
     const pairing = node?.state === 'pairing' ? node : null;
     const reached = node !== null && node.state !== 'connecting';
     nodes.push(
-      el('h1', undefined, pairing ? 'Waiting for your agent to approve this Mac' : 'Connecting…'),
+      el(
+        'h1',
+        undefined,
+        pairing?.again
+          ? 'Waiting for your agent to approve this Mac again'
+          : pairing
+            ? 'Waiting for your agent to approve this Mac'
+            : 'Connecting…',
+      ),
     );
     nodes.push(
       el(
         'p',
         'rl-oc-sub',
-        pairing
-          ? 'Your agent sees a request from “Redlines on ' +
+        pairing?.again
+          ? 'This Mac was connected before, and its details changed. Approving it replaces the sign-in Redlines kept, so afterwards you will need a new setup code (a token you typed keeps working without one).'
+          : pairing
+            ? 'Your agent sees a request from “Redlines on ' +
               mac +
               '”. It should show you the code below. If the codes match, tell it yes.'
-          : 'Redlines is reaching the Gateway with your setup code.',
+            : 'Redlines is reaching the Gateway with your setup code.',
       ),
     );
     const code = el('div', 'rl-oc-code', pairing?.code ?? '···-···');

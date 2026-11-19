@@ -17,7 +17,7 @@ export interface TitleBarState {
   name: string;
   dirty: boolean;
   /**
-   * Where the document stands in a session with other windows, beside its name: "In 2 windows", or
+   * Where the document stands in a session with other windows, beside its name: "Window 2", or
    * that edits are kept while the session can't be reached. Nothing for a document held alone.
    */
   sync?: string;

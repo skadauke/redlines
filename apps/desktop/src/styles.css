@@ -266,7 +266,10 @@ body {
 }
 
 .rl-title-edited {
+  /* Beside the name, not part of it: regular and italic where the name is bold. */
   color: var(--rl-ink-2);
+  font-style: italic;
+  font-weight: 400;
 }
 
 .rl-titlebar-end {
@@ -664,6 +667,35 @@ body {
   color: var(--rl-ink-2);
 }
 
+/* An image dragged out of the sidebar (#1198): its name follows the pointer, in a small card. */
+.rl-sidebar-image {
+  touch-action: none;
+  user-select: none;
+}
+
+.rl-sidebar-drag {
+  position: fixed;
+  z-index: 1000;
+  max-width: 240px;
+  padding: 3px 10px;
+  overflow: hidden;
+  border: 1px solid var(--rl-rule);
+  border-radius: 6px;
+  background: var(--rl-card);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
+  font-size: var(--rl-size-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+body.rl-image-dragging,
+body.rl-image-dragging * {
+  cursor: copy !important;
+  user-select: none;
+}
+
 .rl-sidebar-folder svg {
   flex: none;
   margin-left: -4px;
@@ -932,6 +964,19 @@ body {
   font-size: var(--rl-size-ui-small);
 }
 
+.rl-sheet-field {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 7px;
+  background: var(--rl-card, Canvas);
+  color: var(--rl-ink);
+  font: inherit;
+  font-size: var(--rl-size-ui);
+}
+
 .rl-sheet-buttons {
   display: flex;
   justify-content: flex-end;
@@ -960,6 +1005,7 @@ body {
 }
 
 .rl-sheet-button:focus-visible,
+.rl-sheet-field:focus-visible,
 .rl-sheet-check input:focus-visible {
   outline: 2px solid var(--rl-ink-2);
   outline-offset: 1px;
