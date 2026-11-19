@@ -55,6 +55,27 @@ test.describe('dragging a selection past the edge @selection', () => {
     }
   }
 
+  test('a drag from one table that stops over a second table keeps the text selection (#1159)', async ({
+    start,
+  }) => {
+    const table = (word: string) => `| A | B |\n| --- | --- |\n| ${word} | two |\n`;
+    const j = await start({
+      doc: `${table('first cell')}\nBetween the tables.\n\n${table('second cell')}\nThe end.\n`,
+      tracking: false,
+      view: 'clean',
+    });
+    const from = await j.pointOf('first cell');
+    const to = await j.pointOf('second cell');
+    await j.page.mouse.move(from.x + 2, from.y);
+    await j.page.mouse.down();
+    await j.page.mouse.move(to.x + 2, to.y, { steps: 10 });
+    await j.page.mouse.up();
+    const text = await j.cmText();
+    const { anchor, head } = await j.caret();
+    expect(anchor, 'from the first cell').toBeLessThan(text.indexOf('Between'));
+    expect(head, 'to the second table').toBeGreaterThan(text.indexOf('second cell') - 12);
+  });
+
   for (const tracking of [false, true]) {
     test(`past the bottom, then the top, scrolls and selects, Track Changes ${tracking ? 'on' : 'off'} (#1159)`, async ({
       start,
