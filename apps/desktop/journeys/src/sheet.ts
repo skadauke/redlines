@@ -724,18 +724,6 @@ export interface KnownDisagreement {
  */
 export const KNOWN: readonly KnownDisagreement[] = [
   {
-    issue: 1288,
-    family: 'cards',
-    props: ['borderTopLeftRadius'],
-    why: 'the change card and the callout’s popover are at 10 px, the other cards at 12 px',
-  },
-  {
-    issue: 1288,
-    family: 'card-radius',
-    props: ['borderTopLeftRadius'],
-    why: 'the same: the change card and the callout’s popover are at 10 px',
-  },
-  {
     issue: 1199,
     family: 'handles',
     props: ['borderTopLeftRadius', 'backgroundColor', 'boxShadow'],
@@ -752,12 +740,6 @@ export const KNOWN: readonly KnownDisagreement[] = [
     family: 'keys-like-hover',
     props: ['backgroundColor', 'outlineStyle'],
     why: 'buttons show a ring when chosen with the keys and no fill, unlike their hover; the eye’s menu rows a heavier fill (the palette’s were fixed by #1191)',
-  },
-  {
-    issue: 1283,
-    family: 'chosen',
-    props: ['backgroundColor'],
-    why: 'the checked row of the eye’s menu and the open file in the sidebar have different fills',
   },
   {
     issue: 1172,
