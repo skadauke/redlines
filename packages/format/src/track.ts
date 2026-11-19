@@ -1265,6 +1265,39 @@ function typingOf(tokens: readonly Token[]): Typing {
   };
 }
 
+/** A line of a table: pipes, after the prefix of its container. */
+const TABLE_LINE = /^[ \t]*(?:>[ \t]*)*\|/;
+
+/**
+ * Where the text typed has the rows of a table, one line after another (the table is a block of its
+ * own, or in an item or a quote), the breaks between its rows are text of the change, not splits: a
+ * row that ends in a marker is no delimiter row, so the file read as it is, every change pending,
+ * would show the table as a paragraph (#1279). The breaks before the first row and after the last stay
+ * splits. True when a break was changed.
+ */
+function tableRowBreaks(tokens: Token[]): boolean {
+  let changed = false;
+  for (let i = 1; i + 1 < tokens.length; i++) {
+    const token = tokens[i];
+    const before = tokens[i - 1];
+    const after = tokens[i + 1];
+    if (
+      token &&
+      'brk' in token &&
+      before &&
+      'text' in before &&
+      after &&
+      'text' in after &&
+      TABLE_LINE.test(before.text.slice(before.text.lastIndexOf('\n') + 1)) &&
+      TABLE_LINE.test(after.text)
+    ) {
+      tokens[i] = { text: token.brk };
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 /**
  * The spaces that end the line before `position`, as the text shows them (the markers between them
  * and in front of `position` are not seen), and whether they stand together in the file, right
@@ -4522,6 +4555,10 @@ function planEdit(plan: Plan, edit: TextChange): void {
         }
       }
     }
+    // The rows of a table typed as a block are one line break apart in the text of the change, with no
+    // split between them: a row that ends in a marker is no delimiter row, so the file read as it is
+    // (every change pending) would show the table as a paragraph (#1279).
+    if (tableRowBreaks(tokens)) plain = true;
     // The line break in front of a prefix is typed again as text, not as a break: it is not new. A
     // split that the range took in is cancelled with its break, and the break is not typed again.
     if (lead !== '' && from === covers.from && to === covers.to) tokens.unshift({ text: lead });

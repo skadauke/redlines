@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { blockRunAt, trackedBlockMove } from './block-move.ts';
 import { applyChanges } from './changes.ts';
+import { fineEdits } from './track.ts';
 import { expectEveryOrderRead } from './oracle.ts';
 import { ada, context, file } from './test-helpers.ts';
 import { newestView, originalView } from './views.ts';
@@ -34,8 +35,37 @@ const FILES: Record<string, string> = {
   'under headings': `# Head\n\n${TABLE}\n\n## Sub\n\nText.\n\nMore.\n`,
   'next to another table': `${TABLE}\n\nMid.\n\n| C | D |\n| - | - |\n| 3 | 4 |\n\nEnd.\n`,
   'in a quote, with blocks around': `> Quote.\n>\n> ${TABLE.replaceAll('\n', '\n> ')}\n>\n> After.\n\nOutside.\n`,
+  'in a list item, with other items': `- one\n- two\n\n  ${TABLE.replaceAll('\n', '\n  ')}\n\n  after\n- three\n\nEnd.\n`,
+  'across ten blocks (no cap)': `${TABLE}\n\n${Array.from({ length: 10 }, (_, i) => `Block ${i}.`).join('\n\n')}\n`,
   CRLF: `One.\n\n${TABLE}\n\nThree.\n\nFour.\n`.replaceAll('\n', '\r\n'),
 };
+
+/** The same file with a one-line paragraph where the table is, for the count to be read beside. */
+function asParagraph(body: string): string {
+  const lines = body.split(/(?<=\n)/);
+  const at = lines.findIndex((line) => line.includes('| A | B |'));
+  const prefix = /^(\s*(?:>\s?)*)/.exec(lines[at]!)?.[1] ?? '';
+  const eol = lines[at]!.endsWith('\r\n') ? '\r\n' : '\n';
+  lines.splice(at, 3, `${prefix}Moved.${eol}`);
+  return lines.join('');
+}
+
+const counts: string[] = [];
+
+describe('a table typed or pasted with Track Changes on (#1279)', () => {
+  it('is written with its rows one line break apart, and reads as a table in every order', () => {
+    const text = file('One.\n\nTwo.\n');
+    const at = text.indexOf('Two.');
+    const { changes } = fineEdits(text, [{ from: at, to: at, insert: `${TABLE}\n\n` }], {
+      ...context(ada),
+      random: source(5),
+    });
+    const after = applyChanges(text, changes);
+    expect(after).not.toMatch(/\|<!--split/);
+    expectEveryOrderRead('pasted table', after);
+    expect(newestView(after).text).toContain(TABLE);
+  });
+});
 
 describe('a tracked move of a table to every gap (#1279)', () => {
   for (const [name, body] of Object.entries(FILES)) {
@@ -53,12 +83,32 @@ describe('a tracked move of a table to every gap (#1279)', () => {
         const result = trackedBlockMove(text, run!, gap, { ...context(ada), random: source(7) });
         expect(result, label).toBeDefined();
         const after = applyChanges(text, result!.changes);
-        expectEveryOrderRead(label, after);
+        const refused = expectEveryOrderRead(label, after);
+        // Beside the same move of a paragraph: no more decisions are refused.
+        const para = file(asParagraph(body));
+        const pview = newestView(para);
+        const pat = pview.text.indexOf('Moved.');
+        const prun = blockRunAt(para, {
+          from: pview.map.toSource(pat, 1),
+          to: pview.map.toSource(pat + 'Moved.'.length, -1),
+        });
+        const pgap = prun?.gaps.find((g) => g.index === gap.index);
+        if (prun && pgap) {
+          const pdone = trackedBlockMove(para, prun, pgap, { ...context(ada), random: source(7) });
+          const pafter = applyChanges(para, pdone!.changes);
+          const prefused = expectEveryOrderRead(`${label} (paragraph)`, pafter);
+          counts.push(`${label}: table ${refused.length}, paragraph ${prefused.length}`);
+          expect(refused.length, `${label}: refused decisions`).toBeLessThanOrEqual(
+            prefused.length,
+          );
+        }
         // Rejected, the file is the original; accepted, the table has moved whole.
         expect(originalView(after).text.replace(/\r/g, ''), label).toBe(
           originalView(text).text.replace(/\r/g, ''),
         );
-        const newest = newestView(after).text.replace(/\r/g, '').replace(/^> ?/gm, '');
+        const newest = newestView(after)
+          .text.replace(/\r/g, '')
+          .replace(/^[ \t>]*/gm, '');
         expect(newest, label).toContain(TABLE);
       }
     });
@@ -85,5 +135,11 @@ describe('a tracked move of a table to every gap (#1279)', () => {
     const newest = newestView(text).text;
     expect(newest.indexOf('| A | B |')).toBeLessThan(newest.indexOf('| C | D |'));
     expect(newest.indexOf('| C | D |')).toBeLessThan(newest.indexOf('One.'));
+  });
+});
+
+describe('the counts', () => {
+  it('are printed', () => {
+    console.log(counts.join('\n'));
   });
 });

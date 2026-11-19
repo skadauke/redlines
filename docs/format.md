@@ -3690,15 +3690,26 @@ deletion.
   So is a move that leaves two lists side by side (a paragraph between them moved away, or a list
   moved up to one): the newest view reads them as one list and the marker between them in the file
   reads two, so no fine write is tried, and where no unit passes either, the person is asked (#883).
-- **A table moves as a replacement (#1279).** A run that is a table, with a caption that follows it or
-  not, is written as the widened replacement at once, to every gap and not only the ones beside it. The
-  fine write ends each row it inserts with a marker (a split's), and a row with a marker after it is
-  not a delimiter row, so the file with the move pending would read the table as a paragraph. The
-  replacement's new text is the table's lines as they are, in a substitution whose old text is the
-  blocks from the old place to the new, so the file reads a table in every order of decisions (judged by
-  micromark, in `block-move-table.test.ts`: between blocks, first and last in a file, under headings,
-  next to another table, in a quote, with CRLF line ends, and several moves to the top in a row). A
-  move that reaches more blocks than a widened edit may is asked about first, as above.
+- **A table's rows are not split (#1279).** A table moves, to any gap, as other blocks do: the deletion
+  at the old place holds the table's lines, the insertion at the new place wraps the whole table, and
+  the break that sets it apart is one split before it (on the previous block's line, or after it at
+  the end of the file), so that the blocks the move passes are not touched, and another person's
+  changes in them stay pending, decided only by their author. The rows inside the insertion are one
+  line break apart as text of the change, with no split on each: a row that ends in a marker is not a
+  delimiter row, and the file with the move pending would read the table as a paragraph. The same
+  holds for any text written with Track Changes on that holds the rows of a table, typed, pasted or
+  moved, whether the table is a block of its own or in a list item or a quote. At the top of the
+  file the opener of the insertion stands alone on the line before the table, as §3.3 has it, and
+  the closer alone after it. Judged by micromark (`block-move-table.test.ts`, with a paragraph's
+  move beside it for the count of decisions refused, and `block-move-table-bo.test.ts`, which passes
+  another person's insertion, deletion, substitution, comment and split): every order of accept and
+  reject reads alike, rejecting Ada's move gives the body back byte for byte, and accepting it
+  leaves the other person's marks as they were. A table has no limit on how many blocks it passes.
+  Where no fine form reads alike, a table is never widened across another person's pending changes,
+  since a replacement that holds them in its old text would turn them into plain text when it is
+  accepted: the person is asked first and the move is made untracked (§3.13), as for any edit no unit
+  can hold. (A format change of another person's in a block the move passes, or in the table, is
+  such a case.)
 - **Pending changes in the blocks.** Where the blocks a move takes out hold a pending change (an
   insertion, deletion, replacement, split or format change, whoever made it), the move is written as
   the widened replacement at once: the fine write would put the deletions among the markers of
