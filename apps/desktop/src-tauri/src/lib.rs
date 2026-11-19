@@ -65,6 +65,7 @@ mod file_scope;
 // The app's updates, which no window owns: the checks, the download and the install, whether this
 // copy can update itself, and starting the new version after an update.
 mod crash;
+mod chats;
 mod recovery;
 mod session;
 mod updates;
@@ -423,6 +424,10 @@ pub fn run() {
             session::session_wal_append,
             session::session_wal_read,
             session::session_wal_start,
+            chats::chat_write,
+            chats::chat_read,
+            chats::chat_delete,
+            chats::chat_move,
             recovery::recovery_read,
             recovery::recovery_delete,
             crash::crash_log_page,
