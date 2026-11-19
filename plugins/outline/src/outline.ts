@@ -47,7 +47,16 @@ export interface OutlineOptions {
   notice?: (message: string) => void;
   /** How long the pointer rests on a cut-off heading before its full text shows: the title bar's `TOOLTIP_MS`. */
   tooltipMs?: number;
+  /**
+   * The box of the control that opens the outline as a window (the title bar's button): the window
+   * hangs under it, at the right. Default: under the element marked `data-outline-control`, else at
+   * the top right of the window.
+   */
+  floatingAnchor?: () => { bottom: number; right: number } | null;
 }
+
+/** Sent from the document, bubbling, when the outline's window opens or closes (`detail`: whether it shows). */
+export const FLOATING_EVENT = 'rl-outline-floating';
 
 /** How long after the text changes the headings are read again: not at each keystroke. */
 const REFRESH_MS = 250;
@@ -145,6 +154,8 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
      */
     private pinned: number | null = null;
     private open = false;
+    /** Shown as a window over the page, from the title bar's button, wherever the margin is. */
+    private floating = false;
     private hovered = false;
     private focusedIn = false;
     private host: HTMLElement | null = null;
@@ -220,6 +231,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       clearTimeout(this.closeTimer);
       clearTimeout(this.tipTimer);
       this.doc.removeEventListener('keydown', this.escape, true);
+      this.doc.removeEventListener('pointerdown', this.pressed, true);
       this.doc.removeEventListener('scroll', this.locateSoon, true);
       this.doc.defaultView?.removeEventListener('resize', this.locateSoon);
       this.resizes?.disconnect();
@@ -234,6 +246,75 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       this.focusItem(this.current);
       return true;
     }
+
+    isFloating(): boolean {
+      return this.floating;
+    }
+
+    /**
+     * Opens the outline as a window under the title bar's button, wherever the margin is, or puts it
+     * away. False where there are too few headings to show one.
+     */
+    toggleFloating(): boolean {
+      if (this.floating) {
+        this.closeFloating();
+        return true;
+      }
+      if (this.headings.length < MIN_HEADINGS) return false;
+      this.floating = true;
+      const { nav } = this;
+      nav.dataset['floating'] = 'true';
+      nav.hidden = false;
+      // Under the control that shows it (marked `data-outline-control`), unless the host says where.
+      const anchor =
+        options.floatingAnchor?.() ??
+        this.doc.querySelector('[data-outline-control]')?.getBoundingClientRect();
+      const win = this.doc.defaultView ?? window;
+      nav.style.left = 'auto';
+      nav.style.height = 'auto';
+      nav.style.top = `${(anchor?.bottom ?? 40) + 6}px`;
+      nav.style.right = `${anchor ? Math.max(8, win.innerWidth - anchor.right) : 12}px`;
+      nav.style.maxHeight = `calc(100vh - ${(anchor?.bottom ?? 40) + 20}px)`;
+      this.doc.body.append(nav);
+      this.host = null;
+      // A press elsewhere puts it away, as it does the toolbar.
+      this.doc.addEventListener('pointerdown', this.pressed, true);
+      this.locate();
+      this.setOpen(true);
+      this.focusItem(this.current);
+      this.announce();
+      return true;
+    }
+
+    private closeFloating(refocus = true): void {
+      if (!this.floating) return;
+      this.floating = false;
+      const { nav } = this;
+      delete nav.dataset['floating'];
+      for (const side of ['right', 'maxHeight'] as const) nav.style[side] = '';
+      this.doc.removeEventListener('pointerdown', this.pressed, true);
+      this.setOpen(false);
+      // Back in the margin, placed again by the pane.
+      this.host = null;
+      this.render();
+      this.locate();
+      if (refocus && nav.contains(this.doc.activeElement)) this.view.focus();
+      this.announce();
+    }
+
+    private announce(): void {
+      this.doc.dispatchEvent(
+        new CustomEvent(FLOATING_EVENT, { bubbles: true, detail: this.floating }),
+      );
+    }
+
+    /** A press outside the window, other than on the control that shows it, puts it away. */
+    private readonly pressed = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || this.nav.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-outline-control]')) return;
+      this.closeFloating(false);
+    };
 
     /**
      * The headings of the document. Where the text is the one they were read from and the parse has
@@ -290,6 +371,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
         const moved = this.headings.findIndex((heading) => heading.from === focusedFrom);
         if (moved >= 0) hadFocus = moved;
       }
+      if (this.floating && this.headings.length < MIN_HEADINGS) this.closeFloating(false);
       this.nav.hidden = this.headings.length < MIN_HEADINGS;
       this.ticks.replaceChildren(
         ...this.headings.map(({ level }) => {
@@ -328,7 +410,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
     /** Where the outline stands, whether its lines have room, and which section is being read. */
     private locate(): void {
       const pane = geometry.pane(this.view);
-      if (pane) {
+      if (pane && !this.floating) {
         if (this.host !== pane.host) {
           this.host = pane.host;
           pane.host.append(this.nav);
@@ -425,7 +507,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
     private scheduleClose(): void {
       clearTimeout(this.closeTimer);
       this.closeTimer = setTimeout(() => {
-        if (!this.hovered && !this.focusedIn) this.setOpen(false);
+        if (!this.floating && !this.hovered && !this.focusedIn) this.setOpen(false);
       }, CLOSE_MS);
     }
 
@@ -445,6 +527,7 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       // Out of the way at once: the pointer that stays over it opens nothing until it comes again.
       clearTimeout(this.openTimer);
       this.setOpen(false);
+      this.closeFloating(false);
     }
 
     private readonly hint = (event: MouseEvent) => {
@@ -470,7 +553,13 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
 
     private readonly escape = (event: KeyboardEvent) => {
       // The list handles its own Escape, which also gives the focus back.
-      if (event.key !== 'Escape' || !this.open || this.focusedIn) return;
+      if (event.key !== 'Escape' || !this.open) return;
+      if (this.floating) {
+        event.preventDefault();
+        this.closeFloating();
+        return;
+      }
+      if (this.focusedIn) return;
       this.unhint();
       this.setOpen(false);
     };
@@ -513,7 +602,8 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
       else if (event.key === 'End') to = last;
       else if (event.key === 'Escape') {
         event.preventDefault();
-        this.setOpen(false);
+        if (this.floating) this.closeFloating();
+        else this.setOpen(false);
         this.view.focus();
         return;
       }
@@ -553,6 +643,19 @@ export function createOutline(editor: Editor, options: OutlineOptions = {}): () 
         if (!instance) return false;
         if (instance.focusCurrent()) return true;
         // Nothing to show: a key that did nothing without a word would be no answer.
+        options.notice?.(TOO_FEW);
+        return options.notice !== undefined;
+      },
+    },
+    {
+      id: 'outline.toggle',
+      title: 'Outline',
+      group: 'outline',
+      runsInFields: true,
+      // The title bar's button: the outline as a window under it, at every text size.
+      run: () => {
+        if (!instance) return false;
+        if (instance.toggleFloating()) return true;
         options.notice?.(TOO_FEW);
         return options.notice !== undefined;
       },

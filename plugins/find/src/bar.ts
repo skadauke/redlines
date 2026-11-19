@@ -9,7 +9,8 @@
 // opens first if need be, and ⇧Tab comes back. A red pen in the replace box says Track Changes is on.
 
 import { type Extension } from '@codemirror/state';
-import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { EditorView, keymap, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { Prec } from '@codemirror/state';
 import { type EditorState } from '@codemirror/state';
 import { type Editor, undo } from '@redlines/editor';
 import {
@@ -24,6 +25,9 @@ import {
   step,
 } from './search.ts';
 import { BAR_INSET, BAR_ROOM, findTheme } from './styles.ts';
+
+/** The room kept between a moved bar and the window's edge. */
+const EDGE = 8;
 
 const mac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '');
 
@@ -134,6 +138,8 @@ class FindBar {
     one: HTMLButtonElement;
   };
   private wasOpen = false;
+  /** Where a person moved the bar to (its top left, in the window), kept while the editor lives. */
+  private moved: { left: number; top: number } | null = null;
   /** The last selection that was not a match: what Find in Selection limits to, once a match is current. */
   private chosen: { from: number; to: number } | null = null;
 
@@ -325,10 +331,61 @@ class FindBar {
       this.settleOnMatch();
     });
     root.addEventListener('keydown', (event) => this.key(event, editor));
+    root.addEventListener('pointerdown', (event) => this.startDrag(event));
     view.dom.append(root);
     this.root = root;
     this.refresh();
+    this.apply();
     this.place();
+  }
+
+  /**
+   * Moves the bar with the pointer from any part of it that isn't a control, as the toolbar's card
+   * moves: the padding, the gaps, the count and the line that says why. It stays where it was
+   * left, inside the window, until the editor is gone.
+   */
+  private startDrag(event: PointerEvent): void {
+    const { root } = this;
+    const target = event.target;
+    if (!root || event.button !== 0 || !(target instanceof Element)) return;
+    if (target.closest('button, input')) return;
+    const win = root.ownerDocument.defaultView ?? window;
+    const box = root.getBoundingClientRect();
+    const grab = { x: event.clientX - box.left, y: event.clientY - box.top };
+    event.preventDefault();
+    root.classList.add('rl-find-dragging');
+    const move = (e: PointerEvent) => {
+      this.moved = this.clamp(win, e.clientX - grab.x, e.clientY - grab.y);
+      this.apply();
+    };
+    const stop = () => {
+      root.classList.remove('rl-find-dragging');
+      win.removeEventListener('pointermove', move);
+      win.removeEventListener('pointerup', stop);
+      win.removeEventListener('pointercancel', stop);
+    };
+    win.addEventListener('pointermove', move);
+    win.addEventListener('pointerup', stop);
+    win.addEventListener('pointercancel', stop);
+  }
+
+  /** A top left that keeps the bar inside the window. */
+  private clamp(win: Window, left: number, top: number): { left: number; top: number } {
+    const width = this.root?.offsetWidth ?? 0;
+    const height = this.root?.offsetHeight ?? 0;
+    return {
+      left: Math.max(EDGE, Math.min(left, win.innerWidth - width - EDGE)),
+      top: Math.max(EDGE, Math.min(top, win.innerHeight - height - EDGE)),
+    };
+  }
+
+  /** Puts the bar where a person left it. */
+  private apply(): void {
+    const { root, moved } = this;
+    if (!root || !moved) return;
+    root.style.left = `${moved.left}px`;
+    root.style.top = `${moved.top}px`;
+    root.style.right = 'auto';
   }
 
   private hide(): void {
@@ -448,6 +505,14 @@ class FindBar {
       },
       write: ({ top, right }) => {
         if (!this.root) return;
+        if (this.moved) {
+          // Where a person left it, kept inside a window that has shrunk.
+          const win = this.root.ownerDocument.defaultView ?? window;
+          this.moved = this.clamp(win, this.moved.left, this.moved.top);
+          this.apply();
+          return;
+        }
+        this.root.style.left = '';
         this.root.style.top = `${top}px`;
         this.root.style.right = `${right}px`;
       },
@@ -483,6 +548,19 @@ export function findBar(
   host: FindHost = {},
 ): { extension: Extension; focus(replace?: boolean): void } {
   const plugin = ViewPlugin.define((view) => new FindBar(view, editor, host));
-  const extension = [findField, plugin, findTheme, EditorView.scrollMargins.of(barRoom)];
+  // Esc in the document closes Find while it is open (in the bar, the bar's own key does).
+  const escape = Prec.high(
+    keymap.of([
+      {
+        key: 'Escape',
+        run: (view) => {
+          if (!findState(view.state).open) return false;
+          view.dispatch({ effects: setFind.of({ open: false }) });
+          return true;
+        },
+      },
+    ]),
+  );
+  const extension = [findField, plugin, findTheme, escape, EditorView.scrollMargins.of(barRoom)];
   return { extension, focus: (replace) => editor.view.plugin(plugin)?.focus(replace) };
 }

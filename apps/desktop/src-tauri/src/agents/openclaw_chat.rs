@@ -49,10 +49,20 @@ impl ChatError {
             ChatError::Refused(Refusal::ApproveAgain { request_id }) => {
                 // OpenClaw hands a waiting client no token when an approval replaces its own: the
                 // one Redlines holds stops working, and a new setup code starts over.
-                let approve = request_id.as_deref().map_or_else(
-                    || "`openclaw devices approve <requestId>`".to_owned(),
-                    |id| format!("`openclaw devices approve {id}`"),
-                );
+                // The id is the Gateway's, and goes into a command the person may paste: only plain
+                // characters are let through.
+                let approve = request_id
+                    .as_deref()
+                    .filter(|id| {
+                        !id.is_empty()
+                            && id
+                                .chars()
+                                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                    })
+                    .map_or_else(
+                        || "`openclaw devices approve <requestId>`".to_owned(),
+                        |id| format!("`openclaw devices approve {id}`"),
+                    );
                 format!(
                     "This Mac has to be approved again before it can chat: its owner runs \
                      `openclaw devices list`, then {approve}. Approving replaces this Mac’s chat \
@@ -180,7 +190,7 @@ pub fn connect_operator_with(
     stop: &AtomicBool,
 ) -> Result<(Socket, Option<Secret>), ChatError> {
     let mut last = ChatError::Refused(Refusal::BadToken);
-    for (device, secret) in secrets {
+    for (index, (device, secret)) in secrets.iter().enumerate() {
         let secret = Secret::new(secret.expose())
             .map_err(|_| ChatError::Unreachable("The token is damaged.".to_owned()))?;
         let credential = if *device {
@@ -189,8 +199,13 @@ pub fn connect_operator_with(
             Credential::Token(secret)
         };
         match connect_operator(config, &credential, stop) {
-            Err(ChatError::Refused(Refusal::BadToken)) => {
-                last = ChatError::Refused(Refusal::BadToken);
+            Err(error @ ChatError::Refused(Refusal::BadToken)) => last = error,
+            // A device token that needs approval again is not the end while a shared token is
+            // kept: that one is tried first.
+            Err(error @ ChatError::Refused(Refusal::ApproveAgain { .. }))
+                if *device && index + 1 < secrets.len() =>
+            {
+                last = error;
             }
             done => return done,
         }
@@ -454,7 +469,10 @@ mod tests {
             let claimed = params["client"]["deviceFamily"]
                 .as_str()
                 .unwrap_or_default();
-            if !paired.family.is_empty() && !claimed.eq_ignore_ascii_case(paired.family) {
+            // (A connection that holds the Gateway's shared token is the owner's, and is let in.)
+            let owner = !paired.shared.is_empty()
+                && params["auth"]["token"].as_str() == Some(paired.shared);
+            if !owner && !paired.family.is_empty() && !claimed.eq_ignore_ascii_case(paired.family) {
                 refused(
                     socket,
                     "NOT_PAIRED",
@@ -932,6 +950,53 @@ mod tests {
             .unwrap();
         assert_eq!(error, ChatError::Refused(Refusal::BadToken));
         gateway.finish();
+    }
+
+    /// A device token that needs approval again is not the end while a shared token is kept.
+    #[test]
+    fn an_approval_asked_for_again_tries_the_shared_token_first() {
+        let paired = Paired {
+            family: "iPad",
+            token: "dt-1",
+            shared: "typed-1",
+        };
+        let gateway = fake_paired_n(2, paired);
+        let stop = AtomicBool::new(false);
+        let secrets = [
+            (true, Secret::new("dt-1").unwrap()),
+            (false, Secret::new("typed-1").unwrap()),
+        ];
+        let (_, issued) = connect_operator_with(&gateway.config, &secrets, &stop).unwrap();
+        assert!(issued.is_some());
+        gateway.finish();
+        // Without one, it is the state it was.
+        let gateway = fake_paired_n(1, paired);
+        let alone = [(true, Secret::new("dt-1").unwrap())];
+        let error = connect_operator_with(&gateway.config, &alone, &stop)
+            .err()
+            .unwrap();
+        assert!(matches!(
+            error,
+            ChatError::Refused(Refusal::ApproveAgain { .. })
+        ));
+        gateway.finish();
+    }
+
+    /// The Gateway's request id goes into a command the person may paste: only plain characters.
+    #[test]
+    fn the_request_id_in_the_command_is_only_plain_characters() {
+        let said = |id: &str| {
+            ChatError::Refused(Refusal::ApproveAgain {
+                request_id: Some(id.to_owned()),
+            })
+            .message()
+        };
+        assert!(said("r-9_A").contains("`openclaw devices approve r-9_A`"));
+        for bad in ["r; rm -rf ~", "$(x)", "a b", "r`x`", "", "r\n9"] {
+            let text = said(bad);
+            assert!(text.contains("approve <requestId>`"), "{bad:?}: {text}");
+            assert!(!text.contains(bad) || bad.is_empty(), "{bad:?}: {text}");
+        }
     }
 
     #[test]

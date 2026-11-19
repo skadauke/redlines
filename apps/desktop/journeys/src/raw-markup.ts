@@ -131,38 +131,6 @@ export const KNOWN: readonly KnownCase[] = [
     why: 'a callout whose title holds an insertion shows its marker',
   },
   {
-    issue: 1170,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'attributes',
-    text: /\{#sec-/,
-    why: 'a heading’s {#sec-…} is drawn as part of the heading',
-  },
-  {
-    issue: 1212,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'attributes',
-    text: /\{#tbl-/,
-    why: 'a table’s caption line and its {#tbl-…} are drawn as source',
-  },
-  {
-    issue: 1173,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'math',
-    text: /\$\$/,
-    why: 'the display formula shows as source',
-  },
-  {
-    issue: 1173,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'attributes',
-    text: /\{#eq-/,
-    why: 'the formula’s {#eq-mass} shows as source',
-  },
-  {
     issue: 1176,
     doc: 'Build 21.qmd',
     surfaces: ['redlines', 'clean', 'simple'],
@@ -170,39 +138,7 @@ export const KNOWN: readonly KnownCase[] = [
     text: /~2~/,
     why: 'H~2~O shows as source',
   },
-  {
-    issue: 1172,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'reference',
-    text: /@sec-intro/,
-    why: 'a reference to a section isn’t drawn as a link',
-  },
-  // The exports read a Quarto document as Markdown with its Quarto syntax left in.
-  ...(
-    [
-      ['attributes', /\{[#.]/, 'callout fences’ and headings’ attributes'],
-      ['fence', /:::/, 'callout fences'],
-      ['reference', /@(?:sec|fig|tbl|eq)-/, 'references typed as they are'],
-      ['math', /\$\$/, 'the display formula'],
-      ['sub-sup-strike', /\^2\^/, 'the superscript'],
-    ] as const
-  ).map(([rule, text, what]): KnownCase => ({
-    issue: 1215,
-    doc: ['Build 21.qmd', 'divs.qmd', 'frontmatter.qmd'],
-    surfaces: ['word'],
-    rule,
-    text,
-    why: `the Word export carries ${what} as text`,
-  })),
-  ...(
-    [
-      ['attributes', /\{#/, 'attributes'],
-      ['reference', /@(?:sec|fig|tbl|eq)-/, 'references typed as they are'],
-      ['math', /\$\$/, 'the display formula'],
-      ['sub-sup-strike', /\^2\^/, 'the superscript'],
-    ] as const
-  ).map(([rule, text, what]): KnownCase => ({
+  ...([['math', /\$\$/, 'the display formula']] as const).map(([rule, text, what]): KnownCase => ({
     issue: 1216,
     doc: ['Build 21.qmd', 'frontmatter.qmd'],
     surfaces: ['quicklook'],

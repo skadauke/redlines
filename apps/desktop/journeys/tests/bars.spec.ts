@@ -75,7 +75,7 @@ test.describe('change bars @views', () => {
     expect(cursor).not.toBe('pointer');
   });
 
-  test('a click on a bar still switches the look', async ({ start }) => {
+  test('a click on a bar switches the look, to Simple and back (#1156)', async ({ start }) => {
     const j = await withBars(start);
     const { centers } = await bars(j);
     await j.page.mouse.click(centers[0]!.x, centers[0]!.y);
