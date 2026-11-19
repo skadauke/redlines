@@ -65,11 +65,8 @@ mod file_scope;
 // The app's updates, which no window owns: the checks, the download and the install, whether this
 // copy can update itself, and starting the new version after an update.
 mod crash;
-<<<<<<< HEAD
 mod chats;
-=======
 mod dev_log;
->>>>>>> origin/epic/1155
 mod recovery;
 mod session;
 mod updates;
