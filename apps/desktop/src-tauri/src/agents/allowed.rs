@@ -915,17 +915,15 @@ pub mod tests {
     #[test]
     fn protective_flags_cant_be_left_out() {
         // These ran a folder's own `SessionStart` hook, and brought back the person's config.
-        assert!(
-            claude(&[
-                "-p",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--",
-                "hi"
-            ])
-            .is_err()
-        );
+        assert!(claude(&[
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--",
+            "hi"
+        ])
+        .is_err());
         assert!(codex(&["exec", "--skip-git-repo-check", "--", "hi"]).is_err());
         assert!(claude(&["-p"]).is_err());
         assert!(claude(&[]).is_err());
