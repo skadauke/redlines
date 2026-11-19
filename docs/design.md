@@ -667,7 +667,7 @@ them) and emails written as autolinks (opened as `mailto:`; in `[x](logo@2x.png)
 space in the path of a `<...>` destination opens as `%20`, and an image that is a link's text opens it too: the limit of a copy, which turns `javascript:` and its kin into plain
 text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
 the address again before it runs the system's opener, and the website's demos open a new tab. A
-link that doesn't open is left to the editor like any text, with no hint. A relative link to
+link that doesn't open is left to the editor like any text, with no hint. A link that wraps over two lines is one link to the hint: moving the pointer from one half to the other goes on with its pause and its hint. The hint doesn't show while another tooltip does, as a change's card over a link in the full markup. A relative link to
 another document doesn't open yet.
 
 ### 5.3 Views: Clean, Redlines, Plain
@@ -787,7 +787,10 @@ mode has no counterpart in the desktop app.
   value an older version stored is ignored.
 - **An edit that can't be tracked asks first** (#714, #730; [format §3.13](format.md#313-untracked-edits)).
   Redlines widens an edit to the smallest unit that holds it, written as a replacement, rather than
-  refuse it ([format §3.12](format.md#312-widened-replacements)). Where no unit can hold the edit,
+  refuse it ([format §3.12](format.md#312-widened-replacements)), and says so once, in a passing
+  notice that never takes the focus: "Tracked as a replacement of the whole table, so that the file
+  and the document read alike." (the unit named is the table, list, quote, code block, list item or
+  paragraph; #1188). Code is written as a replacement of its block by rule, and says nothing. Where no unit can hold the edit,
   or it is in the YAML front matter or in Plain while Track Changes is on, a sheet asks "This edit
   can't be tracked. Make it without tracking?", with a line that says why, Cancel, Make Edit and
   "Don't ask again in this document" (Return and Esc are Cancel; the answer is the app's, kept by
@@ -1197,7 +1200,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
   new column, in its row. Delete Table (no default key) follows Delete Column in the menu and
   deletes the whole table the caret or the selection is in. A column's handle is the same pill, turned
-  (16 × 5 px, growing to 22 × 8), just above the column at the table's top edge; a click selects the column (⇧ extends)
+  (22 × 6 px, growing to 28 × 9), drawn as the picture's resize handles are: white, with a dark hairline and a soft shadow, in both themes, just above the column at the table's top edge; a click selects the column (⇧ extends)
   when it is released, and a right-click selects it and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
   alignments with the caret's column checked, Clear Contents); a drag moves the columns, and the
   others selected with them, to any boundary, the last included, with a vertical drop line and the
@@ -1214,9 +1217,16 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   or the strip; **Add row** is a strip as wide as the table, 4 px below it, while the pointer is
   over the bottom row or the strip. A click adds a column (or a row) at the end: the same insertion
   as the + between columns and rows and the Table menu, so with Track Changes on it is the tracked
-  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it,
-  selects the whole table, as Select Table does; it stands aside while a + is where it would be. Each
-  has a hint after the title bar's delay.
+  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it, drawn
+  as the handles are and with a move icon (four arrows), selects the whole table, as Select Table
+  does, and a drag from it moves the whole table: a line shows between blocks where it will land,
+  letting go moves it there as one step (tracked as a move with Track Changes on), and Escape lets it
+  go. The press must go 24 px before the table can drop anywhere, so that a shaking hand moves
+  nothing. A Quarto or Pandoc caption (a `:` paragraph after the table) moves with it. With Track
+  Changes on it goes to any gap too: a tracked move of a table is written with its rows unsplit
+  (format §3.14, #1279). It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
+  A grip's menu is used from the keyboard: Down, Up and Tab choose an item, which looks as one under
+  the pointer, Return runs it and Escape closes the menu.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
   Word's keys align the paragraph) are in the Table menu and the column grip's menu, the caret's
   column checked, and align the columns the selection touches, one step to undo with the selection
@@ -1397,6 +1407,12 @@ paragraph of its own and not an item of the bullet list above it, a table 6.5 in
 shaded gray, and a quote's paragraphs in `class=MsoQuote`, which Word reads as its "Quote" style,
 #1181); File › Print and Export as PDF are built.
 
+- **A picture copied in Word** reaches a web view at the size it has on the page; Word's own drawing
+  format on the pasteboard (`com.microsoft.Art--GVML-ClipFormat`, an Office package) holds the
+  original, so the app reads it natively when it is there (`read_office_picture`, only for the window
+  that has the keys, up to 50 MB), takes the largest picture under `clipboard/media/` of the
+  package when it is the picture that was pasted (larger, of its shape), and saves it in its own
+  format; without the package, or with another picture, the paste is the one the page has (#1182).
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
@@ -2471,7 +2487,11 @@ differences:
   exactly a key of that shape (`acp_gate.rs`), and a toolbox is refused to it as an empty list is
   to any other agent. Without an agent named in the form, the key is bare, and a Gateway with more
   than one agent says so (`Use an agent-prefixed session key or select an agent explicitly`), in the
-  line the run fails with: name the agent then.
+  line the run fails with: name the agent then. A thread longer than 60,000 characters is cut
+  from its start, and says so (the newest words are what the request answers), so that a prompt
+  stays far inside the bridge's 2 MiB. The bridge runs with `OPENCLAW_HIDE_BANNER=1` and
+  `OPENCLAW_SUPPRESS_NOTES=1`, which the app adds to its environment, so that the last line of its
+  error stream is the failure and not a note.
 - **A turn the Gateway cut short is a failure.** The bridge says it as a message of the agent's own
   that begins `[OpenClaw interruption]` and then ends the turn as it ends one that was answered; the
   provider reads it as the run's error (`Moby stopped: …`), not as a reply to post.
@@ -2480,8 +2500,14 @@ differences:
   a user name, a password, a query, a fragment or a port that isn't a number, where a token could
   ride, is refused (a path is allowed, since a Gateway may be mounted at one, and the address is
   shown in lists of programs: put nothing secret in it); and the file has to be there, be a file
-  and not a link (OpenClaw refuses one) and hold from one byte to 16 KiB, which is looked at
-  without reading it. The question says where the document and the thread go, warns of a `ws://`
+  and not a link (OpenClaw refuses one), be the person's own (a file of the system's, or of
+  another user, is refused), have no second name (a hard link) and be reached by a path with no
+  link in it, and hold from one byte to 16 KiB, which is looked at without reading it. A program
+  of another name with `acp` among its arguments (a wrapper) is never held to the whole shape, but
+  a `--token` or `--password` on its line is refused all the same. The file is looked at again
+  before each run, in the same words (a swap between that look and OpenClaw's own open of the file
+  can't be closed from the host); the case of its letters and the system's own links (`/tmp`,
+  `/var`, `/etc` are in `/private`) are no reason to refuse it. The question says where the document and the thread go, warns of a `ws://`
   address, which isn't encrypted, unless it is on this Mac (`localhost`, `127.0.0.1`, `[::1]`: what
   goes there stays on it, or goes through a tunnel its owner made), and of a token file that other
   people on the Mac can read.
@@ -2724,16 +2750,24 @@ the text:
   about", with the selected passage quoted, so the chat is the full record of every question put to
   an agent about the document, and an answer that was only glanced at can be found again.
 - **The answer shows briefly in the main window,** in Ask's bubble (§8.5), so that the writer keeps
-  their focus: the bubble is a short view of the turn, and it goes by itself some seconds after
-  the answer is complete, unless the pointer is on it or it holds a follow-up. **Open in Chat** (the
-  bubble's action, beside Open in New Window) opens the sidebar at that turn. Make Comment and Copy
-  stay as they are.
+  their focus: the bubble is a short view of the turn, and it goes by itself once the answer is
+  complete, after 4 seconds and the answer's words at 200 a minute (at most 90 seconds), the rule
+  of a notification's time on screen (#1185). The pointer on it holds it, and a second after the
+  pointer leaves it goes; a follow-up being typed holds it, and a field emptied again lets it go;
+  a failure or the first-run question on its line holds it. Only an answer starts the time, so a
+  follow-up's answer starts it again. **Open in Chat** (the bubble's action, first of its four)
+  closes it and opens the sidebar at the chat's newest message, with the keyboard in the
+  composer. Make Comment, Open in New Window and Copy stay as they are.
 - **A follow-up in the bubble is the chat's next turn,** and the chat's next message is a follow-up
   of the Ask: one conversation, and the agent sees the earlier turns whichever started them.
 - **Read-only holds.** An Ask's turn is read-only whatever the chat's level becomes, and the chat
   marks it so.
-- Esc or a press elsewhere closes the bubble, and stops a run still going, as before; the turn
-  stays in the chat, with "Stopped" as its answer.
+- Esc or a press elsewhere closes the bubble, and stops a run still going, as before. An Ask that
+  was never answered has no turn in the chat; a chat message that is stopped or fails stays in the
+  history as an unanswered turn ("Stopped", or the failure's one line), is never sent to an agent
+  as an answer, and is in the column with the words the person wrote.
+- **The turn in the chat** has the passage quoted above the question ("Asked about"), the answer
+  as the agent wrote it with its Sources apart, and is kept like any other turn.
 - With the panel open at the document's chat, the bubble still shows: the bubble is for the text,
   the panel for the conversation.
 
@@ -2792,7 +2826,7 @@ list's search finds a question again by its words.
 1. The sidebar's Chat view with the document's chat: the column, the composer, answers rendered as
    Markdown, the picker with the agents and their models, the live line, history kept per document
    in the app's data, Stop, Retry and Copy. Read-only.
-2. Ask writing its turn into the chat, with the bubble that goes by itself and Open in Chat.
+2. Ask writing its turn into the chat, with the bubble that goes by itself and Open in Chat (written).
 3. The sidebar's foot.
 4. Later: edits at the document's level, chats with none, the chat list, Start Over, folding old
    turns, answers that cite with links to ranges, Codex's efforts.

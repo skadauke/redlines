@@ -119,7 +119,23 @@ export function widen(
    * holds the mark whole, is tried before the unit is given with the mark left out (#265). */
   beside = false,
 ): Widened {
-  return withDialect(ctx.dialect, () => widenIn(text, edits, ctx, beside));
+  const done = withDialect(ctx.dialect, () => widenIn(text, edits, ctx, beside));
+  heard.push(done.unit);
+  // What nobody took in this turn of the event loop was a try that was not written: it is dropped.
+  if (heard.length === 1) queueMicrotask(() => (heard.length = 0));
+  return done;
+}
+
+/** The units `widen` wrote since the last `drainWidenings`, in this turn of the event loop. */
+const heard: WidenedUnit[] = [];
+
+/**
+ * The units that edits were widened to since the last call, for the editor to say so (#1188): the
+ * writer that makes a transaction takes them as it records the edit. Only what `widen` wrote in
+ * this turn of the event loop is there, so that a try made long ago is not told as an edit's.
+ */
+export function drainWidenings(): WidenedUnit[] {
+  return heard.splice(0, heard.length);
 }
 
 function widenIn(
@@ -265,8 +281,17 @@ function widenIn(
       sorted.some(
         (edit) => edit.insert.includes('\n') || text.slice(edit.from, edit.to).includes('\n'),
       ) && /^(?: {4,}|\t)\S|^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to));
+    // Indented code with a list line close below it: the code's replacement puts its closer's line
+    // between them, and micromark reads an item that doesn't start at 1 as one after it, and as text
+    // after the code without it (#601). The item is outside the paragraph that the change is in, so
+    // the whole file is read.
+    const codeAboveItem = boundary && closed.kind === 'code';
     const kept =
-      done && !((fromSpare || fenced || broken) && readsOtherMicromark(text, done.changes))
+      done &&
+      !(
+        (fromSpare || fenced || broken || codeAboveItem) &&
+        readsOtherMicromark(text, done.changes, codeAboveItem)
+      )
         ? done
         : undefined;
     if (kept && (!beside || kept.touchingOthers.length === 0)) return kept;
@@ -920,13 +945,15 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
       /^(?: {4}|\t)/.test(edit.insert) &&
       prefix === '' &&
       /^[ \t]*(?:<!--[^]*?-->[ \t]*)*(?:\r?\n|$)/.test(text.slice(edit.to));
-    // Text typed in indented code or an item's text never changes the blocks: only a line break can.
-    if (!startsCode && !edit.insert.includes('\n') && edit.from === edit.to) return false;
+    // (Text typed in indented code is written as the whole code block, whose closer's line then
+    // stands between the code and a list line below it: that is read too, #601.)
     if (!startsCode && !/^(?: {4}|\t)/.test(text.slice(start))) return false;
     let at = lineEnd(text, edit.to);
     for (let i = 0; i < 4 && at < text.length; i++) {
-      const next = lineEnd(text, at + 1);
-      if (LIST_LINE.test(text.slice(at + 1, next))) return true;
+      // (A line's end is at its CR in a file with CRLF line breaks: the next line starts after both.)
+      const from = at + (text[at] === '\r' ? 2 : 1);
+      const next = lineEnd(text, from);
+      if (LIST_LINE.test(text.slice(from, next))) return true;
       at = next;
     }
     return false;

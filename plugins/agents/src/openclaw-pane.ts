@@ -135,7 +135,10 @@ export function renderOpenClaw(
       'on this Mac. Write @ and the name in a comment: the document and that comment thread go to ' +
       'the Gateway, wherever it runs, and the agent’s last message is posted as a reply. It can’t ' +
       'change the document. Redlines passes the token file’s path to openclaw and never reads ' +
-      'the file.',
+      'the file. To make the token file, run openclaw gateway auth-token --show in a terminal on ' +
+      'the Gateway’s computer, and save what it prints in a file only you can read. A Gateway ' +
+      'elsewhere may first ask its owner to approve the openclaw command as a device ' +
+      '(openclaw devices list, then openclaw devices approve).',
   );
 
   // The skill is for an OpenClaw on this Mac: it is looked at only where an agent's Gateway is here.

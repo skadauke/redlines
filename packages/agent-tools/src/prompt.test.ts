@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DOCUMENT_LIMIT,
+  THREAD_LIMIT,
   agentPrompt,
   quoteBlock,
   nodeToolsPrompt,
@@ -79,6 +80,8 @@ describe('agentPrompt', () => {
     );
     expect(prompt).toContain("person's home folder");
     expect(prompt).toContain('Hidden files and folders');
+    // A project inside a hidden folder is left out too, and the prompt says so (#382).
+    expect(prompt).toContain('inside a hidden folder');
     expect(prompt).toContain('Library');
     expect(prompt).toContain('do not change them');
     expect(prompt.split('\n').filter((line) => line.startsWith('System:'))).toEqual([]);
@@ -252,6 +255,22 @@ describe('replyOnlyRequest', () => {
     // A document that fits is not touched.
     expect(replyOnlyRequest({ thread, document, request: 'Hi' })).not.toContain(
       'The document goes on',
+    );
+  });
+
+  it('cuts a thread that is too long from its start, and says so', () => {
+    const lines = Array.from({ length: 3000 }, (_, n) => `line ${String(n)} ${'y'.repeat(30)}`);
+    const long = lines.join('\n');
+    const message = replyOnlyRequest({ thread: long, document, request: 'Hi' });
+    expect(message).toContain('The thread goes back further: only its last');
+    // The newest words are kept, from the start of a line, and the oldest are not.
+    expect(message).toContain('line 2999 ');
+    expect(message).not.toContain('line 0 ');
+    expect(message).toMatch(/characters are here\.\]\nline \d+ /);
+    expect(message.length).toBeLessThan(THREAD_LIMIT + 5_000 + document.length + 1_000);
+    // A thread that fits is not touched.
+    expect(replyOnlyRequest({ thread, document, request: 'Hi' })).not.toContain(
+      'goes back further',
     );
   });
 

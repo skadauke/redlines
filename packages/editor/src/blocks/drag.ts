@@ -17,6 +17,12 @@ import { asFile, type FileRead, moveRunTo, runOfSelection } from './move.ts';
 
 /** The pointer must move this far from the press before it is a drag and not a click. */
 export const DRAG_SLOP = 4;
+/**
+ * How far from the press a drag from a block's handle goes before it can drop anywhere: the handle is
+ * beside the block, so every gap is a place the pointer is nearest to, and a few pixels of a shaking
+ * hand would otherwise move the block.
+ */
+export const HANDLE_ARM = 24;
 /** The editor's edge, in pixels, where a drag scrolls. */
 const SCROLL_EDGE = 36;
 
@@ -395,4 +401,88 @@ export function blockDrag(): Extension {
       '&.rl-block-dragging, &.rl-block-dragging .cm-content': { cursor: 'grabbing' },
     }),
   ];
+}
+
+/**
+ * A press at the handle of a block that is drawn apart from its text, such as a table's (#1199), and
+ * the drag from it: past `HANDLE_ARM`, which is clearly away from the handle, the block (`range`, its text) is dragged as selected blocks are,
+ * with the line between blocks, and letting go moves it there (one step to undo, tracked with Track
+ * Changes on); Escape lets it go where it was. A press that doesn't move calls `onClick`. False
+ * where the press is no drag at all (a document that can't be edited): `onClick` is then the
+ * caller's to run.
+ */
+export function dragBlockAt(
+  view: EditorView,
+  range: { from: number; to: number },
+  event: MouseEvent,
+  onClick: () => void,
+): boolean {
+  if (view.state.readOnly || !view.contentDOM.isContentEditable) return false;
+  const doc = view.dom.ownerDocument;
+  const win = doc.defaultView;
+  const start = { x: event.clientX, y: event.clientY };
+  const pressed = view.state.doc;
+  let drag: BlockDrag | undefined;
+  let y = event.clientY;
+  let frame = 0;
+  const finish = () => {
+    doc.removeEventListener('mousemove', onMove, true);
+    doc.removeEventListener('mouseup', onUp, true);
+    doc.removeEventListener('keydown', onKey, true);
+    win?.removeEventListener('blur', abandon);
+    if (frame) win?.cancelAnimationFrame(frame);
+    frame = 0;
+    ending.delete(view);
+  };
+  function abandon() {
+    finish();
+    drag?.cancel();
+  }
+  const tick = () => {
+    frame = 0;
+    if (!drag) return;
+    if (!view.state.doc.eq(pressed)) return abandon();
+    if (drag.scrollFor(y)) {
+      drag.move(y);
+      frame = win?.requestAnimationFrame(tick) ?? 0;
+    }
+  };
+  const onMove = (e: MouseEvent) => {
+    y = e.clientY;
+    if (!drag) {
+      // Clearly away from the handle first: a press that shakes a little is a click.
+      if (Math.hypot(e.clientX - start.x, y - start.y) < HANDLE_ARM) return;
+      if (!view.state.doc.eq(pressed)) return abandon();
+      // The block is the selection, as it is for a drag of selected blocks.
+      view.dispatch({
+        selection: EditorSelection.range(range.from, range.to),
+        userEvent: 'select',
+      });
+      const found = draggableRead(view);
+      if (!found) return abandon();
+      drag = new BlockDrag(view, found.run, pageGeometry, found.read);
+    }
+    drag.move(y);
+    if (!frame && win) frame = win.requestAnimationFrame(tick);
+  };
+  const onUp = () => {
+    finish();
+    // The selection that made the drag is the document's; the text is what was pressed on.
+    if (drag) {
+      if (view.state.doc.eq(pressed)) drag.drop();
+      else drag.cancel();
+    } else if (view.state.doc.eq(pressed)) onClick();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    abandon();
+  };
+  doc.addEventListener('mousemove', onMove, true);
+  doc.addEventListener('mouseup', onUp, true);
+  doc.addEventListener('keydown', onKey, true);
+  win?.addEventListener('blur', abandon);
+  ending.set(view, abandon);
+  return true;
 }

@@ -543,6 +543,8 @@ body {
 
 .rl-app[data-sidebar='open'] .rl-sidebar {
   width: var(--rl-sidebar-width, 240px);
+  /* The page beside it keeps its 360 px (see SIDEBAR_COVERS), whatever width was stored. */
+  max-width: calc(100vw - 360px);
 }
 
 /* While the edge is dragged the width follows the pointer, with no glide behind it. */
@@ -561,6 +563,8 @@ body {
     bottom: 0;
     left: 0;
     z-index: 1;
+    /* Covering, it leaves a strip of the page, so that its edge is still there to drag. */
+    max-width: calc(100vw - 40px);
     box-shadow: var(--rl-shadow);
   }
 

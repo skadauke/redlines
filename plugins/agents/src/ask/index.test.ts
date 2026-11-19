@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeProvider, fakeRelay, type FakeScript } from '../fake-provider.ts';
 import { createMacAgents } from '../mac-agents.ts';
 import { type Ask, createAsk, type AskOptions } from './index.ts';
+import type { AskTurn } from './session.ts';
+import { BASE_MS, MOST_MS, shownFor } from './timing.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const DOC =
@@ -51,9 +53,13 @@ interface Options {
   generation?: { value: number };
   /** The comment rail, which lays the bubble out among its notes where it can. */
   pinToRail?: AskOptions['pinToRail'];
+  /** The document's chat is in the window: turns go into it, and Open in Chat is offered (#1194). */
+  chat?: boolean;
 }
 
 function mount(options: Options = {}) {
+  const turns: AskTurn[] = [];
+  const chatOpened = { count: 0 };
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, {
@@ -115,6 +121,16 @@ function mount(options: Options = {}) {
       return () => {};
     },
     ...(options.pinToRail ? { pinToRail: options.pinToRail } : {}),
+    ...(options.chat === true
+      ? {
+          onTurn: (turn: AskTurn) => {
+            turns.push(turn);
+          },
+          openInChat: () => {
+            chatOpened.count++;
+          },
+        }
+      : {}),
     ...(options.window === false
       ? {}
       : {
@@ -139,6 +155,8 @@ function mount(options: Options = {}) {
     attached,
     focus,
     generation,
+    turns,
+    chatOpened,
   };
 }
 
@@ -1690,5 +1708,123 @@ describe('in the comment rail', () => {
       expect(heardOf(rail.pins[1]!.held)).toEqual(heard);
       expect(bubble()?.classList).toContain('rl-qa-railed');
     });
+  });
+});
+
+describe('Ask and the document’s chat (#1194)', () => {
+  it('keeps every answered turn in the chat, with the passage it was about', async () => {
+    const { editor, turns } = mount({ chat: true });
+    start(editor);
+    ask('What does this mean?');
+    await answered();
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({
+      question: 'What does this mean?',
+      answer: 'A lien is a claim.',
+      about: 'first lien',
+    });
+  });
+
+  it('keeps nothing in the chat without one', async () => {
+    const { editor, turns } = mount({ chat: false });
+    start(editor);
+    ask('Q');
+    await answered();
+    expect(turns).toEqual([]);
+  });
+
+  it('offers Open in Chat only with a chat, which closes the bubble and opens the sidebar', async () => {
+    const without = mount();
+    start(without.editor);
+    ask('Q');
+    await answered();
+    expect(button('Open in Chat')).toBeUndefined();
+    without.ask.close();
+
+    const { editor, chatOpened } = mount({ chat: true });
+    start(editor);
+    ask('Q');
+    await answered();
+    button('Open in Chat')!.click();
+    expect(chatOpened.count).toBe(1);
+    expect(bubble()).toBeNull();
+  });
+});
+
+describe('how long the bubble stays (#1194)', () => {
+  it('follows the answer’s length: a base, and its words at 200 a minute', () => {
+    expect(shownFor('')).toBe(BASE_MS);
+    expect(shownFor('one two three four')).toBe(BASE_MS + 1200);
+    expect(shownFor(Array(200).fill('word').join(' '))).toBe(BASE_MS + 60_000);
+    expect(shownFor(Array(5000).fill('word').join(' '))).toBe(MOST_MS);
+    // A long answer stays longer than a short one.
+    expect(shownFor('a '.repeat(100))).toBeGreaterThan(shownFor('a '.repeat(10)));
+  });
+
+  it('goes by itself once the time for the answer has passed, and not before', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const text = 'one two three four';
+    const made = mount({ script: answers(text) });
+    start(made.editor);
+    ask('Q');
+    await vi.waitFor(() => expect(answerOf()).not.toBeNull(), { timeout: 2000 });
+    vi.advanceTimersByTime(shownFor(text) - 100);
+    expect(bubble()).not.toBeNull();
+    vi.advanceTimersByTime(200);
+    expect(bubble()).toBeNull();
+  });
+
+  it('stays while the pointer is on it, and goes a moment after the pointer leaves', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const text = 'one two';
+    const made = mount({ script: answers(text) });
+    start(made.editor);
+    ask('Q');
+    await vi.waitFor(() => expect(answerOf()).not.toBeNull(), { timeout: 2000 });
+    const el = bubble()!;
+    const hover = vi.spyOn(el, 'matches').mockReturnValue(true);
+    vi.advanceTimersByTime(shownFor(text) + 100);
+    expect(bubble()).not.toBeNull();
+    hover.mockReturnValue(false);
+    el.dispatchEvent(new Event('pointerleave'));
+    vi.advanceTimersByTime(BASE_MS - 100);
+    expect(bubble()).not.toBeNull();
+    vi.advanceTimersByTime(200);
+    expect(bubble()).toBeNull();
+  });
+
+  it('stays while it holds a follow-up, and goes once the follow-up is cleared', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const text = 'one two';
+    const made = mount({ script: answers(text) });
+    start(made.editor);
+    ask('Q');
+    await vi.waitFor(() => expect(answerOf()).not.toBeNull(), { timeout: 2000 });
+    const box = field()!;
+    box.value = 'And the Borrower?';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(shownFor(text) + BASE_MS * 3);
+    expect(bubble()).not.toBeNull();
+    box.value = '';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(BASE_MS + 100);
+    expect(bubble()).toBeNull();
+  });
+
+  it('does not go while a failure is on its line', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const made = mount({
+      script: async function* () {
+        await Promise.resolve();
+        yield { type: 'error', message: 'Claude stopped.' } as const;
+      },
+    });
+    start(made.editor);
+    ask('Q');
+    await vi.waitFor(() => expect(document.querySelector('.rl-live-line')).not.toBeNull(), {
+      timeout: 2000,
+    });
+    vi.advanceTimersByTime(MOST_MS);
+    expect(bubble()).not.toBeNull();
   });
 });
