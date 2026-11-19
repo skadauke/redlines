@@ -945,3 +945,42 @@ describe('an alignment change of a table', () => {
     });
   });
 });
+
+describe('blocks moved (format §3.14, #1201)', () => {
+  const MOVED = file(
+    'One.\n\n<!--del h6nb Two.\\n\\n-->\n\nThree.\n\n<!--ins j7nb-->Two.<!--/j7nb-->',
+    [
+      ...PEOPLE,
+      'marks:',
+      '  h6nb: {by: bo, at: 2026-10-31T09:30Z, group: g4tz, move: j7nb}',
+      '  j7nb: {by: bo, at: 2026-10-31T09:30Z, group: g4tz, move: h6nb}',
+    ],
+  );
+
+  it('is one card, Moved block, drawn with a double underline at the new place', async () => {
+    const moved = parse(MOVED);
+    expect(describeChanges(moved, moved.marks)).toBe('Moved block');
+    const { editor } = mount(MOVED);
+    editor.setViewMode('redlines');
+    const marked = editor.view.contentDOM.querySelector('.rl-ins.rl-moved');
+    expect(marked?.textContent).toContain('Two.');
+    await clickOn(editor, '.rl-ins.rl-moved');
+    expect(what(editor)).toBe('Moved block');
+    expect(document.querySelectorAll('.rl-card').length).toBe(1);
+  });
+
+  it('Accept decides both halves, and Reject gives the blocks back where they were', async () => {
+    const accepted = mount(MOVED, { real: true });
+    accepted.editor.setViewMode('redlines');
+    await clickOn(accepted.editor, '.rl-ins.rl-moved');
+    button(card(accepted.editor)!, 'Accept').click();
+    expect(accepted.editor.getDoc()).not.toContain('<!--');
+    expect(accepted.editor.getDoc()).toContain('Three.\n\nTwo.');
+    const rejected = mount(MOVED, { real: true });
+    rejected.editor.setViewMode('redlines');
+    await clickOn(rejected.editor, '.rl-ins.rl-moved');
+    button(card(rejected.editor)!, 'Reject').click();
+    expect(rejected.editor.getDoc()).not.toContain('<!--');
+    expect(rejected.editor.getDoc()).toContain('One.\n\nTwo.\n\nThree.');
+  });
+});
