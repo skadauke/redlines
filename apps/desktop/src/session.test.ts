@@ -173,6 +173,20 @@ async function settle(...windows: Window[]): Promise<void> {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Waits until `done` holds, for as long as it takes (the test's own timeout ends a wait that never does). */
+async function until(done: () => boolean): Promise<void> {
+  while (!done()) await wait(2);
+}
+
+/**
+ * Waits until the leader has seen the other window, which is when it tells that window its Track
+ * Changes setting: the peers are known when each says where its caret is, a moment after it joins.
+ */
+async function joinedAndTold(leader: Window, joiner: Window): Promise<void> {
+  for (const w of [leader, joiner]) w.editor.view.dispatch({ selection: { anchor: 2 } });
+  await until(() => joiner.heardTracking.length > 0);
+}
+
 describe('a document in two windows', () => {
   it('shows the leader’s text in the window that joins, and both type at once', async () => {
     const app = new FakeApp();
@@ -199,39 +213,20 @@ describe('a document in two windows', () => {
     const one = await windowOn(app, 'doc-1', BASE);
     const two = await windowOn(app, 'doc-2', '');
     await settle(one, two);
-    const on: boolean[] = [];
-    const shared = (w: Window, value: boolean) => {
-      w.editor.setTracking(value, { inFile: false });
-      return w.session.shareTracking(value);
-    };
-    expect(two.editor.getUiState().tracking).toBe(false);
-    await shared(one, true);
-    await wait(20);
-    on.push(one.editor.getUiState().tracking, two.editor.getUiState().tracking);
-    await shared(two, false);
-    await wait(20);
-    on.push(one.editor.getUiState().tracking, two.editor.getUiState().tracking);
-    expect(on).toEqual([true, true, false, false]);
-    expect(two.heardTracking).toEqual([true]);
-    expect(one.heardTracking).toEqual([false]);
-  });
-
-  it('turns Track Changes on and off in every window of the document (#1166)', async () => {
-    const app = new FakeApp();
-    const one = await windowOn(app, 'doc-1', BASE);
-    const two = await windowOn(app, 'doc-2', '');
-    await settle(one, two);
+    // The leader tells a window that joins its setting once the peers are known, which is later
+    // than the join: let that be over, so that it can't land in the middle of the toggles.
+    await joinedAndTold(one, two);
+    two.heardTracking.length = 0;
     const tracking = () => [one, two].map((w) => w.editor.getUiState().tracking);
     const turn = async (w: Window, on: boolean) => {
       w.editor.setTracking(on, { inFile: false });
       await w.session.shareTracking(on);
-      await wait(20);
     };
     expect(tracking()).toEqual([false, false]);
     await turn(one, true);
-    expect(tracking()).toEqual([true, true]);
+    await until(() => tracking().every(Boolean));
     await turn(two, false);
-    expect(tracking()).toEqual([false, false]);
+    await until(() => tracking().every((on) => !on));
     expect(two.heardTracking).toEqual([true]);
     expect(one.heardTracking).toEqual([false]);
   });
@@ -242,8 +237,7 @@ describe('a document in two windows', () => {
     one.editor.setTracking(true, { inFile: false });
     const two = await windowOn(app, 'doc-2', '');
     await settle(one, two);
-    for (const w of [one, two]) w.editor.view.dispatch({ selection: { anchor: 2 } });
-    await wait(400);
+    await joinedAndTold(one, two);
     expect(two.editor.getUiState().tracking).toBe(true);
     expect(two.heardTracking).toEqual([true]);
   });
