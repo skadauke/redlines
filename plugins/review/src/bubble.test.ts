@@ -97,6 +97,18 @@ describe('the review card of a place, for the toolbar', () => {
   });
 });
 
+describe('holding the cards', () => {
+  it('puts away a change’s card when the toolbar takes over, and keeps the next from hovering', async () => {
+    const { review, editor } = mount(doc);
+    click(editor.view.contentDOM.querySelector('.rl-ins')!, editor.view.contentDOM);
+    await tick();
+    expect(editor.view.dom.querySelector('.rl-card')).not.toBeNull();
+    review.holdCards(true);
+    expect(editor.view.dom.querySelector('.rl-card')).toBeNull();
+    review.holdCards(false);
+  });
+});
+
 describe('a left click on a highlight', () => {
   it('opens its card alone', async () => {
     const { editor } = mount(doc);

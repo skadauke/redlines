@@ -781,6 +781,8 @@ const toolbar = createToolbar(editor, {
   askAbout: () => void editor.commands.run('ask.start'),
   // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
+  // A bar at the pointer has the place's card in itself: hovering shows no other over the page.
+  onFloating: (floating) => review.holdCards(floating),
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
   // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),

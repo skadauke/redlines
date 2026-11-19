@@ -1455,4 +1455,16 @@ describe('the review card of a place (#1190)', () => {
     toolbar.show();
     expect(held().length).toBe(0);
   });
+
+  it('tells the host while a bar at the pointer or the caret is open, and not for a docked one', () => {
+    const floating: boolean[] = [];
+    const { editor, toolbar } = mount('Hello wrold there', {
+      onFloating: (is) => floating.push(is),
+    });
+    rightClick(editor);
+    toolbar.show();
+    toolbar.toggle();
+    toolbar.toggle();
+    expect(floating).toEqual([true, false, false, false]);
+  });
 });

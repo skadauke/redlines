@@ -378,6 +378,8 @@ export function cards(ctx: ReviewContext): {
   close(view: EditorView): void;
   /** Pins the card of change `id` over its first segment, as a click on it would. */
   pinChange(view: EditorView, id: string): void;
+  /** While held, hovering shows no card (the toolbar has it in its own); a click still pins one. */
+  hold(held: boolean): void;
   /** The change at `pos`, or under `el`: the one a right-click there is on. */
   changeAtPlace(view: EditorView, pos: number, el: Element | null): MarkRange | null;
 } {
@@ -395,8 +397,9 @@ export function cards(ctx: ReviewContext): {
   /** The change under the pointer: the deleted text it is over, else the text at `pos`. */
   const pointedAt = (view: EditorView, pos: number, side: -1 | 1): Found | null =>
     pointedAtPlace(view, changesOf(ctx), pos, side, hovered);
+  let held = false;
   const cardAt = (view: EditorView, pos: number, side: -1 | 1): Tooltip | null => {
-    const found = pinning ?? (redlines(view) ? pointedAt(view, pos, side) : null);
+    const found = pinning ?? (redlines(view) && !held ? pointedAt(view, pos, side) : null);
     if (!found) return null;
     const { from, to } = found.span;
     // Not clipped: CodeMirror puts away a tooltip whose anchor is above the top of the editor's own
@@ -502,6 +505,9 @@ export function cards(ctx: ReviewContext): {
       const segment = change?.segments[0];
       if (!change || !segment) return;
       pin(view, { change, span: segmentSpan(segment), start: visibleStart(segment) });
+    },
+    hold: (on) => {
+      held = on;
     },
     changeAtPlace: (view, pos, el) =>
       pointedAtPlace(view, changesOf(ctx), pos, 1, el)?.change ??

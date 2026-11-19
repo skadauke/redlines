@@ -83,6 +83,11 @@ export interface ToolbarOptions {
   notice(message: string): void;
   /** Called when the toolbar appears or goes away, however it came to: the wrench follows it. */
   onChange?(shown: boolean): void;
+  /**
+   * Called when a toolbar at the pointer or the caret appears (true) or goes away or is docked
+   * (false): the host holds the hover cards of its own while it is open.
+   */
+  onFloating?(floating: boolean): void;
 }
 
 export interface Toolbar {
@@ -444,6 +449,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     spelling = rows;
     bubble = card;
     holdSelection();
+    options.onFloating?.(next !== 'docked');
     draw(rows?.rows ?? null);
     // Docked, CSS places it; elsewhere, `place` does, with a left and a top of its own.
     panel.classList.toggle('rl-toolbar-docked', next === 'docked');
@@ -518,6 +524,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     drawn = null;
     spelling = null;
     bubble = null;
+    options.onFloating?.(false);
     searching?.element.remove();
     searching = null;
     panel.removeAttribute('data-search');

@@ -48,6 +48,9 @@ test.describe('the bar and the review card of a place @views', () => {
       toolbar(j).locator('.rl-toolbar-bar').boundingBox(),
     ]);
     expect(card!.y + card!.height).toBeLessThanOrEqual(bar!.y);
+    // Not even after the pointer has rested on the change long enough for a hover card.
+    await j.page.waitForTimeout(600);
+    await expect(j.page.locator('.cm-tooltip .rl-card')).toHaveCount(0);
     await j.shot('right-click-change');
   });
 

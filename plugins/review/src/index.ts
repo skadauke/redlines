@@ -159,6 +159,11 @@ export interface ReviewController {
    * decide, and send a bubbling `rl-bubble-done` event from the card, for the toolbar to go.
    */
   bubbleAt(at: { pos: number; target?: Element | null }): HTMLElement | null;
+  /**
+   * While the toolbar is open, hovering a change shows no card of its own over the page: the
+   * toolbar's card is the one. The host holds it as the toolbar shows and lets go as it goes.
+   */
+  holdCards(held: boolean): void;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
@@ -313,12 +318,15 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
 
   const bubbleHost = {
     renderText: (thread: Thread) => {
-      const render = options.extras?.renderText;
-      if (!render) return thread.text;
+      const { extras } = options;
+      if (!extras?.renderText) return thread.text;
       const person = view.state
         .field(parsedField)
         .ledger.people.find(({ handle }) => handle === thread.by);
-      return render({ id: thread.id, by: thread.by, text: thread.text, resized: () => {} }, person);
+      return extras.renderText(
+        { id: thread.id, by: thread.by, text: thread.text, resized: () => {} },
+        person,
+      );
     },
     reply: (thread: string) => void notes.replyTo(thread),
   };
@@ -368,6 +376,10 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       report();
     },
     bubbleAt,
+    holdCards(held) {
+      changeCards.hold(held);
+      if (held) changeCards.close(view);
+    },
     startComment: (initialText) => notes.startComment(initialText),
     hasDraft: () => notes.hasDraft(),
     saveDrafts: () => notes.saveDrafts(),
