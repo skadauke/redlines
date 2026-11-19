@@ -5538,6 +5538,36 @@ function pastLoneDeletion(text: string, at: number): number {
   return segment.open.to;
 }
 
+/**
+ * Text and a line break typed at once (a paste) at the end of the line above the author's own
+ * paragraph break: the line break is typed behind the break, at the start of the next paragraph,
+ * which is the same text (three line breaks in a row), where it leaves no break side by side with
+ * the split's, whose orders of decision read differently (#120, §3.4). Undefined where the edit is
+ * no such paste: not at the end of a line right in front of the author's own split, whose break is a
+ * blank line and nothing else, in a paragraph with no prefix.
+ */
+function lineBreakBehind(
+  text: string,
+  edit: TextChange,
+  ctx: EditContext,
+): TextChange[] | undefined {
+  const typed = /^([^\r\n]+)\n$/.exec(edit.insert);
+  if (!typed || edit.from !== edit.to) return undefined;
+  const open = /^<!--split ([a-z0-9]{4})-->/.exec(text.slice(edit.from, edit.from + 40));
+  if (!open) return undefined;
+  const mark = parse(text).marks.find((found) => found.id === open[1]);
+  const segment = mark?.segments[0];
+  if (mark?.kind !== 'split' || mark.entry.by !== ctx.author.handle || !segment) return undefined;
+  const end = breakEnd(text, segment.open.to);
+  if (text.slice(segment.open.to, end) !== '\n\n' || /^[ \t>]/.test(text.slice(end, end + 1))) {
+    return undefined;
+  }
+  return [
+    { from: edit.from, to: edit.to, insert: typed[1] ?? '' },
+    { from: end, to: end, insert: '\n' },
+  ];
+}
+
 function editsWidening(
   text: string,
   edits: readonly TextChange[],
@@ -5549,6 +5579,8 @@ function editsWidening(
     const at = pastLoneDeletion(text, edits[0]!.from);
     if (at !== edits[0]!.from) edits = [{ ...edits[0]!, from: at, to: at }];
   }
+  const behind = edits.length === 1 ? lineBreakBehind(text, edits[0]!, ctx) : undefined;
+  if (behind) edits = behind;
   // A block's start typed into an empty item is a block of its own in the newest view, and the file
   // reads it as text of the item (#583): the whole item is written as a replacement.
   if (edits.some((edit) => startsBlockInEmptyItem(text, edit))) {
