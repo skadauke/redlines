@@ -470,13 +470,13 @@ const theme = EditorView.baseTheme({
     userSelect: 'text',
   },
   '.rl-output-label': {
-    color: 'var(--rl-ink-3)',
+    color: 'var(--rl-ink-2)',
     fontFamily: 'var(--rl-font-ui)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
     lineHeight: '1.4',
     marginBottom: textPx(4),
   },
-  '.rl-output-stale .rl-output-label': { color: 'var(--rl-ink-2)', fontStyle: 'italic' },
+  '.rl-output-stale .rl-output-label': { fontStyle: 'italic' },
   '.rl-output-body': {
     fontSize: '0.92em',
     overflowX: 'auto',
