@@ -2,6 +2,11 @@
 // size-budget.json. `vite build` writes website/public/embed/ with a manifest. Run through
 // `pnpm --filter @redlines/website-embed size`; the site's `npm run embed:check` runs the same
 // script. Raising a budget takes a deliberate commit that edits size-budget.json.
+//
+// On an Epic's integration branch, and on a pull request into one, CI sets REDLINES_SIZE=epic and
+// the JavaScript may go past its budget by the file's `jsEpicAllowanceBytes`, with a warning, as
+// in apps/embed-smoke/scripts/check-size.ts, which says why. The stylesheet and the fonts keep
+// their budgets everywhere.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -19,7 +24,9 @@ const budget = JSON.parse(readFileSync(join(root, 'size-budget.json'), 'utf8')) 
   jsGzipBytes: number;
   cssGzipBytes: number;
   fontBytes: number;
+  jsEpicAllowanceBytes: number;
 };
+const epic = process.env.REDLINES_SIZE === 'epic';
 
 const manifestFile = join(out, 'manifest.json');
 if (!existsSync(manifestFile))
@@ -46,16 +53,26 @@ const fonts = fontFiles
 
 const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`;
 let over = 0;
-const check = (label: string, what: string, bytes: number, limit: number) => {
-  console.log(`${label} ${kb(bytes)} ${what} (${bytes} bytes); budget ${kb(limit)}`);
-  if (bytes > limit) {
+const check = (label: string, what: string, bytes: number, limit: number, allowance = 0) => {
+  const most = limit + (epic ? allowance : 0);
+  const onEpic = most > limit ? `, and ${kb(most)} (${most} bytes) on an Epic's branch` : '';
+  console.log(
+    `${label} ${kb(bytes)} ${what} (${bytes} bytes); budget ${kb(limit)} (${limit} bytes)${onEpic}`,
+  );
+  if (bytes > most) {
     over++;
+    const which = most > limit ? "the budget and the Epic's allowance" : 'budget';
     console.error(
-      `Over budget by ${kb(bytes - limit)}. Raise size-budget.json deliberately, or cut.`,
+      `Over ${which} by ${kb(bytes - most)} (${bytes - most} bytes). Raise size-budget.json deliberately, or cut.`,
+    );
+  } else if (bytes > limit) {
+    // A GitHub annotation: the run passes, and the pull request shows the warning.
+    console.log(
+      `::warning title=Website embed size::${label}: ${bytes - limit} bytes over the budget, within the Epic's allowance; the Epic's final sweep sets the budget to what it measures.`,
     );
   }
 };
-check('js', 'gzipped', gzipped(js!), budget.jsGzipBytes);
+check('js', 'gzipped', gzipped(js!), budget.jsGzipBytes, budget.jsEpicAllowanceBytes);
 check('css', 'gzipped', gzipped(css!), budget.cssGzipBytes);
 check('fonts', 'as served', fonts, budget.fontBytes);
 if (over > 0) process.exit(1);
