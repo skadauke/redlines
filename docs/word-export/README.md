@@ -168,6 +168,7 @@ export's `report` (an option, a list of `{kind, message}`) names the ones that n
 | Line break inside an insertion, or in a substitution's new text | A new tracked paragraph (a list item with its marker, a nested item at its indent) for each line | Two characters backslash and `n` are text and stay text in `w:t`; a test holds both (#1178) |
 | Comment on deleted text (`about` a deletion) | A comment range around the deleted runs                       | Word drops such a comment when the deletion is accepted                           |
 | Opening without a question to save | The settings, font table and properties that Word writes itself (all the compatibility settings of Word 2013, the color scheme mapping, language and separators, the fonts, the application properties), and dates to the second | Not checked in Word by the author of the change (#1180) |
+| Space between blocks, code shading | The block after a table opens with 6 pt (`w:spacing w:before="120"`); a code block's last line closes with 6 pt, its other lines touch; a code block has light gray paragraph shading (`F2F2F2`) and inline code the same gray as run shading (`w:shd`) | A table has no space of its own in Word (#1179) |
 | Task item                             | A box, `☐` or `☒`, and no bullet; a checked or unchecked box is the old box deleted and the new inserted | Word has no tracked checkbox: a task is only text                       |
 
 ## Proof of concept

@@ -24,6 +24,7 @@ import {
   InsertedTextRun,
   LevelFormat,
   Packer,
+  ShadingType,
   Paragraph,
   Table,
   TableCell,
@@ -105,6 +106,10 @@ const HEADINGS = [
 ] as const;
 
 const CODE_FONT = 'Courier New';
+/** The light gray behind code, in a block and in a run (#1179). */
+const CODE_FILL = 'F2F2F2';
+/** The space, in twips, that Word's own styles put between blocks (the document's `after`). */
+const BLOCK_GAP = 120;
 const INDENT = 720;
 const BULLETS = 'redlines-bullets';
 const NUMBERS = 'redlines-numbers';
@@ -225,6 +230,7 @@ function formatProps(fmt: Fmt) {
     italics: fmt.italic || undefined,
     strike: fmt.strike || undefined,
     font: fmt.code ? CODE_FONT : undefined,
+    shading: fmt.code ? { type: ShadingType.CLEAR, fill: CODE_FILL, color: 'auto' } : undefined,
     subScript: fmt.sub || undefined,
     superScript: fmt.sup || undefined,
   };
@@ -722,8 +728,17 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
       shape.border = { bottom: { style: BorderStyle.SINGLE, size: 6, color: '999999', space: 1 } };
     }
     if (leaf.type === 'code') {
-      shape.shading = { fill: 'F2F2F2' };
-      shape.spacing = { after: 0 };
+      shape.shading = { fill: CODE_FILL };
+    }
+    // The lines of a code block touch, and the block, a quote and a table stand apart from what is
+    // around them: a table has no space of its own, so the block after it takes it as `before`
+    // (#1179).
+    const before = blocks[index - 1]?.type === 'table' ? BLOCK_GAP : undefined;
+    const next = blocks[index + 1];
+    const joinsNext =
+      leaf.type === 'code' && next?.type === 'code' && next.codeBlock === leaf.codeBlock;
+    if (before !== undefined || leaf.type === 'code') {
+      shape.spacing = { before, after: joinsNext ? 0 : BLOCK_GAP };
     }
     // A task item shows its box, not a bullet.
     const task = leaf.atoms.some((atom) => atom.kind === 'text' && atom.task);
