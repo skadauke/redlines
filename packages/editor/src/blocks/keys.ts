@@ -208,7 +208,7 @@ function inReplaced(tr: Transaction, at: number): number | null {
  */
 export function seatCaret(view: EditorView): void {
   const { main } = view.state.selection;
-  if (!main.empty || !view.hasFocus) return;
+  if (!main.empty || !view.hasFocus || view.composing) return;
   const root = view.root as unknown as { getSelection?: () => Selection | null };
   const selection = root.getSelection?.();
   if (!selection?.focusNode || !view.contentDOM.contains(selection.focusNode)) return;
