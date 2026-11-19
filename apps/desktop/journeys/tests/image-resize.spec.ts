@@ -259,8 +259,20 @@ test.describe('resizing an image @blocks', () => {
       await j.page.evaluate(() => window.__redlines!.editor.setViewMode('simple'));
       const bar = (await j.page.locator('.rl-bar-seg').first().boundingBox())!;
       await j.page.mouse.click(bar.x + bar.width / 2, bar.y + bar.height / 2);
+      // #1156: a click on a bar in Simple goes back to Redlines and opens no card; the card of a
+      // change comes from the change itself: in Redlines, the pointer over the resized picture.
+      await j.settle();
+      expect(
+        await j.page.evaluate(() => window.__redlines!.editor.getUiState()['view']),
+        'the bar in Simple goes back to Redlines',
+      ).toBe('redlines');
+      await expect(j.page.locator('.rl-card'), 'the bar opens no card').toHaveCount(0);
+      await image.hover();
       const card = j.page.locator('.rl-card');
-      await expect(card, 'the bar opens the change’s card').toBeVisible();
+      await expect(
+        card,
+        'the pointer over the resized picture opens the change’s card',
+      ).toBeVisible();
       await expect(card).toContainText('Resized picture');
       await j.shot(`image-resize-tracked-card-${scheme}`);
     });
