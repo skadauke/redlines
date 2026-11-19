@@ -2,8 +2,9 @@
 // and fades after a few seconds, and its selection, tinted; while a selection lasts, its caret and
 // flag stay, so that it is clear who marked what (#1168). Positions arrive as the sender kept
 // them (in the confirmed text at a version) and are placed in what this window shows; between two
-// messages they move with the text, as any position does. Colors are the authority's, the same in
-// every window: `p1` to `p6`, which the style sheet draws.
+// messages they move with the text, as any position does. A person's color is their author color in
+// this document (`--rl-author-<n>`, as their changes are drawn), the same in every window of theirs
+// and never shared with another person here.
 
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
@@ -14,8 +15,8 @@ import type { DecorationSet } from '@codemirror/view';
 export interface PeerView {
   clientID: string;
   name: string;
-  /** `p1` to `p6`: the authority's choice for this window. */
-  color: string;
+  /** The person's author color in this document, 1 to 8 (`colorsOf`); 0 for gray. */
+  color: number;
   head: number;
   anchor: number;
   /** When it last moved, in ms: the flag shows for a few seconds after. */
@@ -25,24 +26,9 @@ export interface PeerView {
 /** How long a flag shows after its window last moved. */
 export const FLAG_MS = 5000;
 
-/** The colors the authority hands out, as tokens the style sheet turns into colors. */
-export const PALETTE = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'] as const;
-
-const COLORS = [
-  ['p1', '#2f6bd0'],
-  ['p2', '#0e7f68'],
-  ['p3', '#b03c92'],
-  ['p4', '#a8650b'],
-  ['p5', '#6b52d1'],
-  ['p6', '#18819b'],
-] as const;
-
 export const STYLE_ID = 'rl-sync-style';
 
 export const STYLE = `
-:root {
-${COLORS.map(([token, color], i) => `  --rl-presence-${i + 1}: ${color}; /* ${token} */`).join('\n')}
-}
 .rl-presence-caret {
   position: relative;
   display: inline-block;
@@ -60,7 +46,7 @@ ${COLORS.map(([token, color], i) => `  --rl-presence-${i + 1}: ${color}; /* ${to
   padding: 1px 6px;
   border-radius: 4px 4px 4px 0;
   background: var(--rl-presence-color);
-  color: #fff;
+  color: var(--rl-page);
   font-family: var(--rl-font-ui);
   font-size: var(--rl-size-ui-small);
   font-style: normal;
@@ -96,11 +82,9 @@ ${COLORS.map(([token, color], i) => `  --rl-presence-${i + 1}: ${color}; /* ${to
 }
 `;
 
-/** The token as a custom property the rules above read. */
-const colorVar = (token: string): string => {
-  const at = PALETTE.indexOf(token as (typeof PALETTE)[number]);
-  return `var(--rl-presence-${at < 0 ? 1 : at + 1})`;
-};
+/** The author color as the value the rules above read. */
+const colorVar = (color: number): string =>
+  color >= 1 && color <= 8 ? `var(--rl-author-${color})` : 'var(--rl-ink-2)';
 
 class Caret extends WidgetType {
   readonly #peer: PeerView;

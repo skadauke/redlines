@@ -7,7 +7,7 @@
 import { createEditor, type Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { colorOfPerson, EVENTS, joinSession, ordinalOf, PortLog } from './session.ts';
+import { EVENTS, joinSession, ordinalOf, PortLog } from './session.ts';
 import type { Joined, Moved, Session, SessionPorts } from './session.ts';
 
 const BASE = 'First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.\n';
@@ -350,17 +350,9 @@ describe('what the windows are called', () => {
     expect(ordinalOf('doc-12')).toBe(13);
   });
 
-  it('colors a person from their handle, in the palette', () => {
-    expect(colorOfPerson('ada')).toBe(colorOfPerson('ada'));
-    expect(colorOfPerson('ada')).toMatch(/^p[1-6]$/);
-    const used = new Set(['ada', 'bo', 'cy', 'di', 'ed', 'fay'].map(colorOfPerson));
-    expect(used.size).toBeGreaterThan(1);
-  });
-
-  it('gives each window a name, and one person one color in every window, through a handover (#1168)', async () => {
+  it('gives each window a name that every window shows it by, through a handover', async () => {
     const app = new FakeApp();
-    const color = colorOfPerson('ada');
-    const peers: Record<string, { name: string; color?: string }[]> = {};
+    const peers: Record<string, { name: string }[]> = {};
     const named = async (label: string, doc: string) => {
       const editor = editorFor(doc);
       const session = await joinSession(app.ports(label), editor, {
@@ -368,7 +360,7 @@ describe('what the windows are called', () => {
         person: { handle: 'ada', name: 'Ada' },
         save: () => Promise.resolve(editor.view.state.doc.toString()),
         onPeers: (list) => {
-          peers[label] = list.map((peer) => ({ name: peer.name, color: peer.color }));
+          peers[label] = list.map((peer) => ({ name: peer.name }));
         },
         saveDelayMs: 20,
       });
@@ -382,18 +374,15 @@ describe('what the windows are called', () => {
     for (const w of [one, two, three]) w.editor.view.dispatch({ selection: { anchor: 2 } });
     await wait(250);
     expect(peers['doc-1']).toEqual(
-      expect.arrayContaining([
-        { name: 'Ada (window 3)', color },
-        { name: 'Ada (window 4)', color },
-      ]),
+      expect.arrayContaining([{ name: 'Ada (window 3)' }, { name: 'Ada (window 4)' }]),
     );
     // The leader closes; the next one hosts. Window 3 is still window 3, in the same color.
     await one.session.stop();
     await wait(400);
     for (const w of [two, three]) w.editor.view.dispatch({ selection: { anchor: 3 } });
     await wait(250);
-    expect(peers['doc-2']).toEqual(expect.arrayContaining([{ name: 'Ada (window 4)', color }]));
-    expect(peers['doc-3']).toEqual(expect.arrayContaining([{ name: 'Ada (window 3)', color }]));
+    expect(peers['doc-2']).toEqual(expect.arrayContaining([{ name: 'Ada (window 4)' }]));
+    expect(peers['doc-3']).toEqual(expect.arrayContaining([{ name: 'Ada (window 3)' }]));
   });
 });
 

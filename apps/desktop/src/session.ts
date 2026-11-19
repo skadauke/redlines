@@ -21,7 +21,7 @@ import {
   type WalRecord,
 } from '@redlines/collab';
 import type { Editor } from '@redlines/editor';
-import { PALETTE, syncEditor, syncText, type SyncBinding, type SyncState } from '@redlines/sync';
+import { syncEditor, syncText, type SyncBinding, type SyncState } from '@redlines/sync';
 
 /** What the app answers a window that joins a document's session. */
 export interface Joined {
@@ -269,16 +269,9 @@ export function ordinalOf(label: string): number {
 
 /**
  * Anyone in a session of this app's windows may be in it: they are the person's own. Each window is
- * named for its number, and every window of one person has the person's color, the same in every
- * window (#1168): colors are few, and a second one for the same person would match someone else's.
+ * named for its number. Its color is not chosen here: the others draw a window in its person's author
+ * color of the document, the same in every window of theirs (#1168).
  */
-/** The color a person is shown in, one of the palette's, from their handle: the same in every window. */
-export function colorOfPerson(handle: string): string {
-  let hash = 5381;
-  for (const char of handle) hash = (Math.imul(hash, 33) + char.codePointAt(0)!) >>> 0;
-  return PALETTE[hash % PALETTE.length]!;
-}
-
 function authenticateFor(person: { handle: string; name: string }) {
   return (credential: unknown): AuthResult => {
     if (typeof credential !== 'object' || credential === null || !('key' in credential)) {
@@ -289,7 +282,6 @@ function authenticateFor(person: { handle: string; name: string }) {
       handle: person.handle,
       name: `${person.name} (window ${n})`,
       role: 'owner',
-      color: colorOfPerson(person.handle),
     };
   };
 }
