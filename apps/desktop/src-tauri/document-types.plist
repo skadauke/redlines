@@ -190,16 +190,16 @@
     </dict>
   </array>
   <key>NSDesktopFolderUsageDescription</key>
-  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
+  <string>Redlines opens and saves your documents here, and reads the pictures and included files beside them. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSDocumentsFolderUsageDescription</key>
-  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
+  <string>Redlines opens and saves your documents here, and reads the pictures and included files beside them. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSDownloadsFolderUsageDescription</key>
-  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
+  <string>Redlines opens and saves your documents here, and reads the pictures and included files beside them. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSFileProviderDomainUsageDescription</key>
-  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
+  <string>Redlines opens and saves your documents here, and reads the pictures and included files beside them. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSNetworkVolumesUsageDescription</key>
-  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
+  <string>Redlines opens and saves your documents here, and reads the pictures and included files beside them. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
   <key>NSRemovableVolumesUsageDescription</key>
-  <string>Redlines opens and saves your documents here. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
+  <string>Redlines opens and saves your documents here, and reads the pictures and included files beside them. If you let an agent such as Claude or Codex read your home folder, it reads other files here through Redlines, and changes only the document.</string>
 </dict>
 </plist>

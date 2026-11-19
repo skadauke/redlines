@@ -131,36 +131,12 @@ export const KNOWN: readonly KnownCase[] = [
     why: 'a callout whose title holds an insertion shows its marker',
   },
   {
-    issue: 1173,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'math',
-    text: /\$\$/,
-    why: 'the display formula shows as source',
-  },
-  {
-    issue: 1173,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'attributes',
-    text: /\{#eq-/,
-    why: 'the formula’s {#eq-mass} shows as source',
-  },
-  {
     issue: 1176,
     doc: 'Build 21.qmd',
     surfaces: ['redlines', 'clean', 'simple'],
     rule: 'sub-sup-strike',
     text: /~2~/,
     why: 'H~2~O shows as source',
-  },
-  {
-    issue: 1172,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'reference',
-    text: /@sec-intro/,
-    why: 'a reference to a section isn’t drawn as a link',
   },
   {
     issue: 1213,
@@ -170,14 +146,7 @@ export const KNOWN: readonly KnownCase[] = [
     text: /\{\.column/,
     why: 'the fences of a div that isn’t a callout are drawn as source',
   },
-  ...(
-    [
-      ['attributes', /\{#/, 'attributes'],
-      ['reference', /@(?:sec|fig|tbl|eq)-/, 'references typed as they are'],
-      ['math', /\$\$/, 'the display formula'],
-      ['sub-sup-strike', /\^2\^/, 'the superscript'],
-    ] as const
-  ).map(([rule, text, what]): KnownCase => ({
+  ...([['math', /\$\$/, 'the display formula']] as const).map(([rule, text, what]): KnownCase => ({
     issue: 1216,
     doc: ['Build 21.qmd', 'frontmatter.qmd'],
     surfaces: ['quicklook'],

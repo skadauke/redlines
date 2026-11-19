@@ -62,6 +62,14 @@ that widget but the picture's resize handles (`.rl-image-handle`): a row's or co
 select-table square with its move icon, are white with a 1 px dark hairline and a soft shadow, the
 same in both themes, so that they show on any ground and look alike. A grip's menu is a menu as above (12 px radius, 32 px rows), and the row dragged is a card.
 
+## The drop marker
+
+Wherever something is dragged to a place between blocks (selected blocks, a table, a picture from the
+sidebar or Finder, the rows of a table), the place is marked by one 3 px line in `--rl-drop`, a faint
+blue, the one color that is neither a person's nor the pen's, in both themes. Where blocks are dragged
+(`blocks/drag.ts`) a little room also opens there, 24 px at the theme's own text size, which grows in
+0.14 s and appears at once when the system asks for reduced motion; the line stands in the middle of it.
+
 ## Buttons
 
 An icon button is `--rl-ink-2` on no ground, `--rl-ink` and `--rl-rule` under the pointer and when

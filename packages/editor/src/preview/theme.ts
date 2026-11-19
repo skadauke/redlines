@@ -489,12 +489,12 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-image-frame:hover .rl-image-handle, .rl-image:not(.rl-image-own):hover .rl-image-handle, .rl-image-resizing .rl-image-handle':
     { opacity: '1' },
-  // The line a dragged image file shows between blocks (#681), in the theme's gray, never red.
+  // The line a dragged image file shows between blocks (#681), the faint blue of every drop marker.
   '.rl-drop-line': {
     position: 'absolute',
     height: '2px',
     borderRadius: '1px',
-    backgroundColor: 'var(--rl-ink-2, #6a6a6f)',
+    backgroundColor: 'var(--rl-drop, rgba(10, 100, 255, 0.45))',
     pointerEvents: 'none',
     zIndex: '5',
   },

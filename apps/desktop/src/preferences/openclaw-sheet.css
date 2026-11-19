@@ -364,6 +364,17 @@
   display: none;
 }
 
+/* A card, a note and a button under the list of computers: a gap between them. */
+.rl-oc-status {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rl-oc-status > .rl-pref-button {
+  align-self: flex-start;
+}
+
 /* The agent's card. */
 .rl-oc-guided {
   display: flex;
