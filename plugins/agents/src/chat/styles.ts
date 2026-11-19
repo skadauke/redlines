@@ -11,6 +11,10 @@ export const CHAT_STYLE = `
 .rl-chat-log { flex: 1; min-height: 0; padding: 4px 14px 12px; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; outline: none; }
 .rl-chat-msg { margin: 0 0 14px; min-width: 0; overflow-wrap: anywhere; }
 .rl-chat-mine { display: flex; justify-content: flex-end; }
+.rl-chat-mine-about { flex-direction: column; align-items: flex-end; }
+.rl-chat-about { display: flex; flex-direction: column; gap: 1px; max-width: 88%; margin: 0 0 4px; padding-left: 8px; border-left: 2px solid var(--rl-rule); color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); }
+.rl-chat-about-label { font-weight: 700; }
+.rl-chat-about-quote { overflow-wrap: anywhere; }
 .rl-chat-bubble { max-width: 88%; padding: 6px 11px; border-radius: var(--rl-radius-card); background: var(--rl-pressed); white-space: pre-wrap; }
 .rl-chat-from { margin: 0 0 2px; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); }
 .rl-chat-theirs { position: relative; }

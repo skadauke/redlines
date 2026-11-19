@@ -34,7 +34,7 @@ const isRecordOf = (value: unknown): value is Record<string, unknown> =>
 
 function turnOf(value: unknown): AskTurn | null {
   if (!isRecordOf(value)) return null;
-  const { question, answer, agent, web, at, model } = value;
+  const { question, answer, agent, web, at, model, about } = value;
   if (typeof question !== 'string' || typeof answer !== 'string' || !isRecordOf(agent)) return null;
   if (typeof agent['id'] !== 'string' || typeof agent['name'] !== 'string') return null;
   return {
@@ -44,6 +44,7 @@ function turnOf(value: unknown): AskTurn | null {
     ...(web === true ? { web: true as const } : {}),
     ...(typeof at === 'number' && Number.isFinite(at) ? { at } : {}),
     ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof about === 'string' ? { about } : {}),
   };
 }
 

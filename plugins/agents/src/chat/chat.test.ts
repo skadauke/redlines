@@ -217,3 +217,49 @@ describe('a message in Markdown', () => {
     expect(root.textContent).toContain('[b](javascript:alert(1))');
   });
 });
+
+describe('an Ask’s turn in the chat (#1194)', () => {
+  const asked = {
+    question: 'What is a lien?',
+    answer: 'A lien is a claim on property.',
+    agent: { id: 'claude', name: 'Claude' },
+    about: 'a first lien on the property',
+  };
+
+  it('is drawn with the passage it was about, kept, and read by the agent with the next message', async () => {
+    const { chat, claude, store } = setup();
+    chat.follow('/repo/plan.md', 1, 'plan.md');
+    await vi.waitFor(() => expect(chat.el.querySelector('.rl-chat-empty')).not.toBeNull());
+    chat.addTurn(asked);
+    await vi.waitFor(() => expect(theirs(chat)).toHaveLength(1));
+    expect(chat.el.querySelector('.rl-chat-about-quote')?.textContent).toBe(
+      '“a first lien on the property”',
+    );
+    expect(chat.el.querySelector('.rl-chat-about-label')?.textContent).toBe('Asked about');
+    await vi.waitFor(() => expect(store.kept.has('/repo/plan.md')).toBe(true));
+    expect(parseRecord(store.kept.get('/repo/plan.md') ?? null).turns[0]).toMatchObject({
+      about: 'a first lien on the property',
+      at: expect.any(Number),
+    });
+    send(chat, 'And a second lien?');
+    await vi.waitFor(() => expect(theirs(chat)).toHaveLength(2));
+    expect(claude.requests.at(-1)?.prompt).toContain('A lien is a claim on property.');
+  });
+
+  it('waits for the chat to be read when the Ask is answered first', async () => {
+    const { chat } = setup();
+    chat.addTurn(asked);
+    chat.follow('/repo/plan.md', 1, 'plan.md');
+    await vi.waitFor(() => expect(theirs(chat)).toHaveLength(1));
+    expect(chat.el.querySelector('.rl-chat-bubble')?.textContent).toBe('What is a lien?');
+  });
+
+  it('keeps an empty first question as what it asked, which is to explain the passage', async () => {
+    const { chat } = setup();
+    chat.follow('/repo/plan.md', 1, 'plan.md');
+    await vi.waitFor(() => expect(chat.el.querySelector('.rl-chat-empty')).not.toBeNull());
+    chat.addTurn({ ...asked, question: '' });
+    await vi.waitFor(() => expect(theirs(chat)).toHaveLength(1));
+    expect(chat.el.querySelector('.rl-chat-bubble')?.textContent).toContain('Explain this');
+  });
+});

@@ -9,6 +9,7 @@ import type { AgentScope } from '@redlines/plugin-api';
 import { renderLiveLine, type LiveLineActions } from '../live-line.ts';
 import type { LiveLine } from '../runs.ts';
 import type { AskChoice, AskTurn } from '../ask/session.ts';
+import { EXPLAIN } from '../ask/session.ts';
 import { renderMarkdown } from './markdown.ts';
 import { addChatStyle } from './styles.ts';
 
@@ -46,6 +47,8 @@ export interface ChatPanel {
   readonly el: HTMLElement;
   render(view: ChatView): void;
   focusComposer(): void;
+  /** Scrolls to the newest message. */
+  reveal(): void;
   destroy(): void;
 }
 
@@ -88,6 +91,12 @@ const COPY = 'M5.5 5.5h7v7h-7zM3.5 10.5v-7h7';
 
 /** The lines the composer grows to before it scrolls. */
 const MAX_LINES = 6;
+
+/** The passage an Ask was about, on one line, cut for the column. */
+function shortQuote(quote: string): string {
+  const flat = quote.replace(/\s+/g, ' ').trim();
+  return flat.length > 120 ? `${flat.slice(0, 119).trimEnd()}…` : flat;
+}
 
 let count = 0;
 
@@ -213,7 +222,17 @@ export function createChatPanel(handlers: ChatHandlers): ChatPanel {
 
   function message(turn: AskTurn): HTMLElement[] {
     const mine = el('div', 'rl-chat-msg rl-chat-mine');
-    mine.append(el('div', 'rl-chat-bubble', turn.question));
+    // An Ask's turn says which passage it was about.
+    if (turn.about !== undefined) {
+      const about = el('div', 'rl-chat-about');
+      about.append(
+        el('span', 'rl-chat-about-label', 'Asked about'),
+        el('span', 'rl-chat-about-quote', `“${shortQuote(turn.about)}”`),
+      );
+      mine.classList.add('rl-chat-mine-about');
+      mine.append(about);
+    }
+    mine.append(el('div', 'rl-chat-bubble', turn.question.trim() === '' ? EXPLAIN : turn.question));
     const theirs = el('div', 'rl-chat-msg rl-chat-theirs');
     const name = turn.model ? `${turn.agent.name} · ${modelName(turn)}` : turn.agent.name;
     theirs.append(el('div', 'rl-chat-from', name));
@@ -443,6 +462,10 @@ export function createChatPanel(handlers: ChatHandlers): ChatPanel {
     },
     focusComposer() {
       field.focus();
+    },
+    reveal() {
+      following = true;
+      toEnd();
     },
     destroy() {
       document.removeEventListener('pointerdown', away, true);

@@ -75,6 +75,11 @@ export interface AskTurn {
   at?: number;
   /** The model that wrote it, as the agent lists it, when one was asked for. */
   model?: string;
+  /**
+   * For a turn that Ask made (#1194): the passage of the document it was about, which the chat
+   * shows above the question. The session itself never sets it.
+   */
+  about?: string;
 }
 
 /** The agent that answers the next question, and the models it can be told to run (#507). */
@@ -115,6 +120,11 @@ export interface AskSession {
    * undefined is the default agent. The model goes back to Preferences' choice for that agent.
    */
   setAgent(agent: string | undefined): void;
+  /**
+   * Adds a turn that was answered elsewhere, such as an Ask's in the document's chat, so that the
+   * next message goes to the agent with it. It is not reported to `onTurn`.
+   */
+  addTurn(turn: AskTurn): void;
   /** The answer to the first-run question: read the folder, just this document, or not at all. */
   answerConsent(answer: AgentScope | 'no'): void;
   /** Stops the run, and leaves the question unanswered. */
@@ -591,6 +601,10 @@ export function createAskSession(
       picked = { model };
       const agent = lastAgent;
       if (agent) set({ choice: choiceOf(agent) });
+    },
+    addTurn(turn) {
+      if (closed) return;
+      set({ turns: [...state.turns, turn] });
     },
     setAgent(id) {
       if (closed || id === chosen) return;

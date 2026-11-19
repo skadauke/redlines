@@ -6,7 +6,13 @@
 
 import type { AgentInfo } from '@redlines/plugin-api';
 import { copyText } from '../ask/actions.ts';
-import { createAskSession, type AskDeps, type AskSession, type AskState } from '../ask/session.ts';
+import {
+  createAskSession,
+  type AskDeps,
+  type AskSession,
+  type AskState,
+  type AskTurn,
+} from '../ask/session.ts';
 import { parseRecord, recordText, TURNS_KEPT, type ChatRecord, type ChatStore } from './history.ts';
 import { createChatPanel, type ChatPanel } from './panel.ts';
 
@@ -35,6 +41,13 @@ export interface Chat {
    * another path is the same document, renamed or saved, and its chat goes with it.
    */
   follow(path: string | null, generation: number, name: string): void;
+  /**
+   * Adds a turn that was answered outside the chat, an Ask's (#1194): it is kept in the document's
+   * chat and the agent sees it with the next message. Before the chat has been read it waits.
+   */
+  addTurn(turn: AskTurn): void;
+  /** Shows the newest message, where an Ask's answer was just kept. */
+  reveal(): void;
   focus(): void;
   destroy(): void;
 }
@@ -51,6 +64,8 @@ export function createChat(options: ChatOptions): Chat {
   } | null = null;
   /** Counts the documents followed, so that a read that finishes late is dropped. */
   let epoch = 0;
+  /** Turns that came before the chat was read, kept for when it is. */
+  const waiting: AskTurn[] = [];
   let agents: readonly AgentInfo[] = [];
   let destroyed = false;
 
@@ -154,10 +169,18 @@ export function createChat(options: ChatOptions): Chat {
     if (record.agent !== undefined) session.setAgent(record.agent);
     if (record.model !== undefined) session.setModel(record.model);
     open.session = session;
+    for (const turn of waiting.splice(0)) keep(open, turn);
     open.unsubscribe = session.subscribe((state) => {
       if (current === open) draw(state);
     });
     return open;
+  }
+
+  /** Puts a turn that was answered elsewhere into the chat. */
+  function keep(open: NonNullable<typeof current>, turn: AskTurn): void {
+    open.session?.addTurn(turn);
+    open.record = { ...open.record, turns: [...open.record.turns, turn].slice(-TURNS_KEPT) };
+    save(open);
   }
 
   function end(open: NonNullable<typeof current>): void {
@@ -205,6 +228,13 @@ export function createChat(options: ChatOptions): Chat {
         },
       );
     },
+    addTurn(turn) {
+      if (destroyed) return;
+      const stamped = turn.at === undefined ? { ...turn, at: Date.now() } : turn;
+      if (current?.session) keep(current, stamped);
+      else waiting.push(stamped);
+    },
+    reveal: () => panel.reveal(),
     focus: () => panel.focusComposer(),
     destroy() {
       destroyed = true;
