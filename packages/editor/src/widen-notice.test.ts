@@ -2,6 +2,7 @@
 // An edit that is widened to the unit that holds it, so that the file and the document read alike,
 // says so once, quietly, through `onNotice` (#1188); an edit written as it was made says nothing.
 import { forceParsing } from '@codemirror/language';
+import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from '../../../plugins/formatting/src/index.ts';
 import { createEditor, type Editor } from './index.ts';
@@ -49,10 +50,20 @@ function load(doc: string, tracking: boolean): Editor {
   return editor;
 }
 
-const boldKey = (editor: Editor) =>
-  editor.view.contentDOM.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, metaKey: true, bubbles: true }),
-  );
+const boldKey = (editor: Editor) => {
+  forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+  for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
+    if (
+      runScopeHandlers(
+        editor.view,
+        new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true, ...mod }),
+        'editor',
+      )
+    ) {
+      return;
+    }
+  }
+};
 
 const widened = () => notices.filter((message) => message.startsWith('Tracked as a replacement'));
 
@@ -72,6 +83,20 @@ describe('the notice of a widened edit (#1188)', () => {
     editor.view.dispatch({ selection: { anchor: from, head: CROSSING.indexOf('33') + 2 } });
     boldKey(editor);
     expect(editor.getDoc()).not.toBe(CROSSING);
+    expect(widened()).toEqual([widenedNotice(['table'])]);
+  });
+
+  it('is shown once for a delimiter typed in a table cell beside another person’s bold', () => {
+    const rest = '  |  *b*  |\n| --- | --- |\n|  alpha  |  x y  |';
+    const doc = `|  ca<!--fmt n3pq +bold-->**f**<!--/n3pq-->é${rest}${LEDGER(BO('n3pq'))}`;
+    const editor = load(doc, true);
+    editor.view.dispatch({ selection: { anchor: 3 } });
+    editor.view.dispatch({
+      changes: { from: 3, insert: '**' },
+      selection: { anchor: 5 },
+      userEvent: 'input.type',
+    });
+    expect(editor.getDoc()).toContain('<!--sub');
     expect(widened()).toEqual([widenedNotice(['table'])]);
   });
 

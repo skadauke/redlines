@@ -725,7 +725,10 @@ mode has no counterpart in the desktop app.
   value an older version stored is ignored.
 - **An edit that can't be tracked asks first** (#714, #730; [format §3.13](format.md#313-untracked-edits)).
   Redlines widens an edit to the smallest unit that holds it, written as a replacement, rather than
-  refuse it ([format §3.12](format.md#312-widened-replacements)). Where no unit can hold the edit,
+  refuse it ([format §3.12](format.md#312-widened-replacements)), and says so once, in a passing
+  notice that never takes the focus: "Tracked as a replacement of the whole table, so that the file
+  and the document read alike." (the unit named is the table, list, quote, code block, list item or
+  paragraph; #1188). Code is written as a replacement of its block by rule, and says nothing. Where no unit can hold the edit,
   or it is in the YAML front matter or in Plain while Track Changes is on, a sheet asks "This edit
   can't be tracked. Make it without tracking?", with a line that says why, Cancel, Make Edit and
   "Don't ask again in this document" (Return and Esc are Cancel; the answer is the app's, kept by

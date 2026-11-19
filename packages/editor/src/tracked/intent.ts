@@ -93,7 +93,7 @@ export function recordedAs(intent: Unnamed): ReturnType<typeof intentAnnotation.
     ...intent,
     id: newIntentId(),
     ...(widened.length > 0 ? { widened } : {}),
-  } as Intent);
+  });
 }
 
 /**
@@ -200,7 +200,7 @@ function stream(seed: string, n: number): Uint8Array {
   return out;
 }
 
-/** What the unit is called in the notice. */
+/** What each unit is called in the notice, the biggest first. */
 const UNIT_NAMES: Record<UnitKind, string> = {
   table: 'table',
   list: 'list',
@@ -215,7 +215,10 @@ const UNIT_NAMES: Record<UnitKind, string> = {
  * the words of a person. The biggest unit is the one named, when an edit widened to several.
  */
 export function widenedNotice(units: readonly UnitKind[]): string {
-  const order: UnitKind[] = ['table', 'list', 'quote', 'code', 'item', 'block'];
-  const kind = order.find((each) => units.includes(each)) ?? 'block';
-  return `Tracked as a replacement of the whole ${UNIT_NAMES[kind]}, so that the file and the document read alike.`;
+  const kind = (Object.keys(UNIT_NAMES) as UnitKind[]).find((each) => units.includes(each));
+  return `Tracked as a replacement of the whole ${UNIT_NAMES[kind ?? 'block']}, so that the file and the document read alike.`;
 }
+
+/** Whether a notice is the one of a widened edit: it says what was written, and refuses nothing. */
+export const isWidenedNotice = (message: string): boolean =>
+  message.startsWith('Tracked as a replacement of the whole ');

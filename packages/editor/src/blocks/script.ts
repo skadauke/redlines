@@ -31,6 +31,7 @@ import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
 import { redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { plainPastes } from '../tracked/clipboard.ts';
+import { isWidenedNotice } from '../tracked/intent.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { openBlock, textWithoutOpen } from './open.ts';
 
@@ -385,7 +386,10 @@ function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted 
     author: ada,
     tracking: script.tc,
     showLineBreakMarks: script.lineBreakMarks ?? false,
-    onNotice: (message) => refusals.push(message),
+    // The notice of a widened edit says what was written; a refusal is what a row is held to.
+    onNotice: (message) => {
+      if (!isWidenedNotice(message)) refusals.push(message);
+    },
     // A host with an Image menu, whose commands a script may run (#526).
     openImage: () => {},
     extensions: [
