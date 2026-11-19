@@ -1,7 +1,7 @@
 // What the parts of the review interface share: the editor they work on and its changes, how they
 // write to the ledger, and how a refused action shows.
 
-import type { EditorView, Rect } from '@codemirror/view';
+import { EditorView, type Rect } from '@codemirror/view';
 import {
   calloutName,
   dialectFacet,
@@ -467,6 +467,28 @@ export function visibleSpace(view: EditorView): Rect {
     space.bottom = Math.min(space.bottom, rect.bottom);
   }
   return space;
+}
+
+/**
+ * How far below the top of `rect` CodeMirror's clip puts it away, and how far to lower it to stay:
+ * CodeMirror hides a tooltip whose anchor ends above the top of the editor's own box plus the scroll
+ * margins a host keeps (the title bar's room), and `HoverTooltipHost` takes no `clip: false` from
+ * the tooltip it hosts. Where the page scrolls, that box is the whole document, which starts
+ * below that room already, so a change on the document's first lines would be put away while it is
+ * in plain sight: `visibleSpace` says where the page can be seen. The anchor is lowered to just
+ * clear of the clip, and the card's offset takes the shift back (it can only be below, then).
+ */
+export function clearOfClip(view: EditorView, rect: Rect): { rect: Rect; shift: number } {
+  let top = view.scrollDOM.getBoundingClientRect().top;
+  let margin = 0;
+  for (const provider of view.state.facet(EditorView.scrollMargins)) {
+    margin = Math.max(margin, provider(view)?.top ?? 0);
+  }
+  top += margin;
+  // Only what can be seen is lowered: what is under the title bar is put away, as it should be.
+  if (rect.bottom > top || rect.bottom <= visibleSpace(view).top) return { rect, shift: 0 };
+  const shift = top + 1 - rect.bottom;
+  return { rect: { ...rect, bottom: rect.bottom + shift }, shift };
 }
 
 /** An element with a class, and text if given. */

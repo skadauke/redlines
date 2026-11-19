@@ -555,6 +555,8 @@ Redlines covers everything in the Markdown Guide's
   - Not done: reading the rendered HTML, Word or PDF of a document, `<name>_files/` of a live render
     and `.quarto/` (the research found nothing documented to rely on); showing outputs in the
     included files.
+- **Heading attributes:** in `.qmd` and `.Rmd`, the `{#sec-intro}` after a heading's text is a small gray chip
+  (the interface's small size, never the heading's), with its source shown while the caret is in it.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
 - **Emoji:** the character itself in every file type, because shortcodes don't render in pandoc,
   Quarto or VS Code. Typing `:` and two letters lists the emoji whose names (gemoji's, GitHub's
