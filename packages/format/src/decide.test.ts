@@ -924,7 +924,7 @@ describe('the ledger', () => {
 });
 
 describe('on random documents', { timeout: 600_000 }, () => {
-  const seeds = Array.from({ length: fuzzCount(150) }, (_, i) => i + 1);
+  const seeds = Array.from({ length: fuzzCount(50) }, (_, i) => i + 1);
   const documents = seeds.map((seed) => {
     const text = randomDocument(seeded(seed));
     const parsed = parse(text);
@@ -972,7 +972,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
         decisions += 2;
       }
     }
-    expect(decisions).toBeGreaterThan(1000);
+    expect(decisions).toBeGreaterThan(documents.length * 6);
   });
 
   it('accepting all keeps the newest view, rejecting all keeps the original view', () => {

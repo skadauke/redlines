@@ -320,6 +320,22 @@ const openInNewWindow = (path?: string, line?: number) =>
  * has allowed the page to load from it (`showImages`). Null until then, and in a browser tab.
  */
 let imageFolder: string | null = null;
+/** Settles when the project of the open document is found (`showImages`): what reads beside it waits. */
+let projectKnown: Promise<void> = Promise.resolve();
+let projectPending = false;
+let projectFound: () => void = () => {};
+
+/** From the moment a document starts loading until its project is found, what reads beside it waits. */
+function awaitProject(): void {
+  if (projectPending) return;
+  projectPending = true;
+  projectKnown = new Promise<void>((resolve) => {
+    projectFound = () => {
+      projectPending = false;
+      resolve();
+    };
+  });
+}
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
@@ -505,14 +521,22 @@ const editor = createEditor(element('#editor'), {
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
     return file === null ? null : imageSizes.of(file);
   },
+  // Math is drawn as MathML by Temml, loaded when a document has a formula.
+  math: () => import('temml').then((module) => module.default),
   // An include of a Quarto document (`{{< include _part.qmd >}}`) is read and opened as a file of
   // its own, as a local image is found: relative to the document, and only inside its project (a
   // browser tab's one folder in memory has no path of its own).
   includes: {
     read: async (path) => {
+      // The project is found a moment after the document opens: an include asked for before that
+      // waits for it, and isn't "not found" for being early (#1175).
+      await projectKnown;
       const file = includedFile(path);
       if (file === null) return null;
       try {
+        // The file plugin reads only the files the person opened or saved: the app allows this one
+        // as it allows a document that the sidebar lists, if it is inside the document's project.
+        await host.allowDocument(file);
         return await host.read(file);
       } catch {
         return null;
@@ -520,7 +544,13 @@ const editor = createEditor(element('#editor'), {
     },
     open: (path) => {
       const file = includedFile(path);
-      if (file !== null) void controller.open(file);
+      if (file === null) return;
+      host
+        .allowDocument(file)
+        .then(() => controller.open(file))
+        .catch((error: unknown) => {
+          notice.flash(typeof error === 'string' ? error : 'Couldn’t open the included file.');
+        });
     },
     // What Quarto leaves beside the document and above it (the outputs under its chunks) is read
     // by the same path, from the document's own place.
@@ -688,6 +718,17 @@ const attachAgentPicker = (field: HTMLTextAreaElement, agentsOnly = false) => {
     // The default agent comes first in the list (#528).
     agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
     agentsOnly,
+    // For someone with no OpenClaw agent yet: a last row that opens its setup, a window of its own.
+    ...(isTauri
+      ? {
+          connectOpenClaw: () => {
+            void invoke('open_openclaw_setup').catch((error: unknown) => {
+              console.error('Could not open the OpenClaw setup', error);
+              notice.flash('Couldn’t open the OpenClaw setup.');
+            });
+          },
+        }
+      : {}),
   });
 };
 
@@ -797,7 +838,7 @@ const review = createReview(editor, {
   },
 });
 
-// The toolbar: shown only when summoned (the title bar's wrench, ⇧⌘P at the caret, a right-click at
+// The toolbar: shown only when summoned (⇧⌘P at the caret, a right-click at
 // the pointer, in place of WebKit's own menu), or at the bottom of the window by preference
 // (settings.toolbarAtBottom, below). Its items are commands of the registry, so it
 // registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
@@ -812,7 +853,6 @@ const toolbar = createToolbar(editor, {
   appCommands: () => toolbarCommands(),
   // Ask has no way yet to start with a question typed: its box opens for the selection.
   askAbout: () => void editor.commands.run('ask.start'),
-  // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
   // A bar at the pointer has the place's card in itself: hovering shows no other over the page.
   onFloating: (floating) => review.holdCards(floating),
@@ -838,6 +878,9 @@ const toolbar = createToolbar(editor, {
     : {}),
 });
 
+// The title bar's outline button is pressed while the outline shows as a window.
+document.addEventListener('rl-outline-floating', () => render());
+
 const documentHost: Host = {
   ...host,
   // Drafts discarded to open another document are forgotten, not kept for the next time it opens.
@@ -861,6 +904,7 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
     if (path === imageDocument) return;
     imageDocument = path;
     imageFolder = null;
+    awaitProject();
   },
   // A change on disk that is nothing but the work of this person's agents is a step to undo.
   author: () => author.handle,
@@ -995,12 +1039,20 @@ const projectOf = (path: string) => host.projectRoot(path);
  * Lets the preview load the images in the project of the document at `path`: its sidebar folder,
  * which the app allows the page to load from. The images are drawn again once that is so.
  */
-async function showImages(path: string | null): Promise<void> {
+function showImages(path: string | null): Promise<void> {
   imageFolder = null;
   imageWatch.forget();
   imageSizes.forget();
   editor.refreshImages();
-  if (path === null) return;
+  if (path === null) {
+    projectFound();
+    return Promise.resolve();
+  }
+  awaitProject();
+  return findProject(path).finally(() => projectFound());
+}
+
+async function findProject(path: string): Promise<void> {
   try {
     const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
     // Another file may have opened meanwhile.
@@ -1559,7 +1611,7 @@ installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
   keyOf: (id) => shortcutBook.keyOf(id),
-  toggleToolbar: () => toolbar.toggle(),
+  toggleOutline: () => void editor.commands.run('outline.toggle'),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleTracking,
@@ -1891,7 +1943,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    toolbarShown: toolbar.isOpen(),
+    outlineShown: document.querySelector('.rl-outline[data-floating]') !== null,
   });
   menuState = {
     plainOnly: ui.kind === 'plain-only',
@@ -2071,6 +2123,7 @@ if (isTauri) {
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
     exposeForJourneys(editor, controller, {
+      dockToolbar: (docked) => toolbar.setAtBottom(docked),
       openFile: async (path, text) => {
         await host.write(path, text);
         await controller.open(path);

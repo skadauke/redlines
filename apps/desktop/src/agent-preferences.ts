@@ -15,13 +15,8 @@ import {
   type SetupResult,
   type SkillInstalled,
   type SkillState,
-  type GatewayProbe,
-  type NewOpenClawConnection,
-  type NodeStatus,
-  type OpenClawChange,
-  type OpenClawConnection,
-  type TailscaleStatus,
 } from '@redlines/agents';
+import type { OpenClawChange, OpenClawConnection } from '@redlines/agents';
 import type { HostProcesses } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { acpAgents, findProgram, homeAccess, runProgram, type AcpAgent } from './agent-programs.ts';
@@ -114,57 +109,13 @@ export const agentSkills = {
 };
 
 /**
- * This Mac's Tailscale, for the setup of an OpenClaw agent on another computer (agents/tailscale.rs):
- * looking changes nothing; the app and the download page only open, and Redlines never starts,
- * stops or signs in Tailscale.
+ * A change to an OpenClaw connection (a level, a folder): giving one more is a question of the
+ * system's, which this window can neither draw nor answer, and fails with a line to show when the
+ * person says no. Only Preferences changes a connection.
  */
-export const tailscale = {
-  status: () => invoke<TailscaleStatus>('tailscale_status'),
-  openApp: () => invoke<void>('tailscale_open_app'),
-  download: () => invoke<void>('tailscale_download'),
-};
-
-/**
- * The OpenClaw connections the person made (agents/connections.rs): their records, and a flag for
- * each secret that is kept, never a secret. Adding one, or giving one more (a level, a folder),
- * is a question of the system's, which this window can neither draw nor answer, and fails with a
- * line to show when the person says no. A token the person typed goes to files only this user can
- * read, and is never shown or returned.
- */
-export const openClawConnections = {
-  list: () => invoke<OpenClawConnection[]>('openclaw_connections'),
-  add: (connection: NewOpenClawConnection) =>
-    invoke<OpenClawConnection[]>('openclaw_connection_add', { new: connection }),
+export const openClawChanges = {
   change: (handle: string, change: OpenClawChange) =>
     invoke<OpenClawConnection[]>('openclaw_connection_change', { handle, change }),
-  remove: (handle: string) =>
-    invoke<OpenClawConnection[]>('openclaw_connection_remove', { handle }),
-  useToken: (handle: string, token: string) =>
-    invoke<OpenClawConnection[]>('openclaw_use_token', { handle, token }),
-};
-
-/**
- * The connection of an OpenClaw agent to its Gateway (agents/openclaw_nodes.rs, node.rs): started
- * with the setup code the person pasted, which goes to the app and is never kept or shown, or with
- * the token the app kept; its status is polled; stopping it leaves the agent in the list.
- */
-export const openClawNode = {
-  connect: (handle: string, setupCode: string | null) =>
-    invoke<void>('openclaw_node_connect', { handle, setupCode }),
-  status: (handle: string) => invoke<NodeStatus | null>('openclaw_node_status', { handle }),
-  stop: (handle: string) => invoke<void>('openclaw_node_stop', { handle }),
-  /** This Mac's name as its owner knows it. */
-  thisMac: () => invoke<string>('openclaw_this_mac'),
-};
-
-/**
- * Whether an OpenClaw Gateway answers at an address, which the person typed or picked (agents/
- * gateway.rs): the app opens its WebSocket, reads its greeting and closes, and sends nothing.
- * `suffix` completes a bare computer name with the Tailscale network's name.
- */
-export const gateway = {
-  probe: (address: string, suffix: string | null) =>
-    invoke<GatewayProbe>('gateway_probe', { address, suffix }),
 };
 
 /**

@@ -4542,8 +4542,11 @@ A file changes only when its content does.
   of it is a deletion, and text typed next to it stands outside it). A div typed with Track Changes
   on, from its opening fence to the end of the typed text, is one insertion with no `split`
   marker inside; its closer stands alone on the line after the closing fence, as after a code
-  fence (§3.3). This holds at the top level of the file; in a quote or a list item the typed
-  fence lines keep the old form (not built).
+  fence (§3.3). This holds at the top level of the file and in a quote (also one in a list item or in
+  another quote), the closer standing alone on the line after the closing fence behind the quote's
+  prefix (`> :::` then `> <!--/k3x9-->`), as in a fenced code block (#1234). In a list item the typed
+  fence lines keep the old form (not built): the closer alone on a line is an HTML block after the
+  div's text, and in a tight item that renders a line break that the newest view does not have.
 - knitr runs code it finds inside HTML comments, in payloads and in the ledger alike, so both
   escape every backtick (§2.5). This was verified with knitr 1.51.
 - No Redlines comment starts with `#`, which Jupytext's cell markers and Quarto's editing comments

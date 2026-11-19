@@ -43,7 +43,7 @@ export const calloutMenuTheme = EditorView.baseTheme({
     margin: '0',
     padding: '4px',
     border: '1px solid var(--rl-rule)',
-    borderRadius: '10px',
+    borderRadius: 'var(--rl-radius-card, 12px)',
     backgroundColor: 'var(--rl-card)',
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',

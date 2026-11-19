@@ -1,6 +1,7 @@
 // This Mac's Tailscale, as the setup sheet's second screen shows it (docs/research/openclaw-connection.md,
 // screen 2): the state the app reads (src-tauri/src/agents/tailscale.rs, which only looks), and the
-// three checks in plain words. The words avoid "node", "tailnet" and "backend": a person sees
+// three checks in plain words. What the setup does about each (install, open, sign in, restart) is
+// mac-setup.ts. The words avoid "node", "tailnet" and "backend": a person sees
 // "Tailscale", "signed in" and "your other computers".
 
 /** What `tailscale_status` returns (`Status` in agents/tailscale.rs). */
@@ -14,6 +15,10 @@ export interface TailscaleStatus {
   peers: TailscalePeer[];
   blocked: boolean;
   health: string[];
+  /** Where in System Settings macOS asks to allow Tailscale's network extension. */
+  allow_in: string;
+  /** Whether HTTPS certificates are on for the network, which Tailscale Serve needs; null: not said. */
+  https: boolean | null;
 }
 
 export interface TailscalePeer {
@@ -27,7 +32,7 @@ export interface TailscalePeer {
 
 /** One of the three rows: done, waiting for the one above it, or the one that needs something. */
 export interface Check {
-  id: 'installed' | 'signed-in' | 'sees-others';
+  id: 'installed' | 'signed-in' | 'sees-others' | 'https';
   title: string;
   /** The line under the title, when there is one. */
   detail?: string;
@@ -35,7 +40,7 @@ export interface Check {
 }
 
 /** The one button the screen offers for what it found, when it offers one. */
-export type TailscaleAction = 'download' | 'open' | 'sign-in' | 'again';
+export type TailscaleAction = 'install' | 'open' | 'sign-in' | 'again';
 
 export interface TailscaleView {
   checks: [Check, Check, Check];
@@ -48,6 +53,25 @@ export interface TailscaleView {
   action: TailscaleAction | null;
   /** Whether Continue is open. */
   ready: boolean;
+}
+
+/**
+ * The check of the network's HTTPS certificates, which Tailscale Serve needs to give a Gateway its
+ * `https://` address: for a Mac that is signed in, and nothing for one that isn't or when Tailscale
+ * doesn't say. It never stops the person (the Gateway may be reached another way).
+ */
+export function httpsCheck(status: TailscaleStatus): Check | null {
+  if ((status.state !== 'ready' && status.state !== 'no-peers') || status.https === null) {
+    return null;
+  }
+  return status.https
+    ? { id: 'https', title: 'HTTPS certificates are on for your network', mark: 'ok' }
+    : {
+        id: 'https',
+        title: 'HTTPS certificates are off for your network',
+        detail: 'Tailscale Serve needs them to give your agent’s Gateway an https:// address.',
+        mark: 'no',
+      };
 }
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -84,9 +108,9 @@ export function tailscaleView(status: TailscaleStatus): TailscaleView {
         title: 'Redlines reaches your other computer over Tailscale',
         failure: 'tailscale-missing',
         note:
-          'Download the app from tailscale.com, open it, and sign in with the same account as ' +
-          'your other computer. Come back here; Redlines notices by itself.',
-        action: 'download',
+          'Redlines installs Tailscale, then you sign in with the same account as your other ' +
+          'computer. Redlines notices by itself.',
+        action: 'install',
         ready: false,
       };
     case 'off':

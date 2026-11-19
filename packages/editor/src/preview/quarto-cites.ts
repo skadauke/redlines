@@ -1,7 +1,8 @@
-// Citations as chips (docs/research/quarto.md, Q9 and decision 3): `[@smith2020]`, `[@a; @b, p. 4]`
-// and a narrative `@smith2020` are drawn as a small chip with the cited keys, the way the
-// cross-references of quarto-refs.ts are, and with no bibliography to read, nothing else is
-// claimed: the chip says what was cited, not who wrote it. The chip is as atomic as the citation is
+// Citations as links (docs/research/quarto.md, Q9 and decision 3): `[@smith2020]`, `[@a; @b, p. 4]`
+// and a narrative `@smith2020` are drawn as the cited keys, in the text's own look with a fine dotted
+// underline, the way the cross-references of quarto-refs.ts are, and with no bibliography to read,
+// nothing else is claimed: the text says what was cited, not who wrote it. A click puts the caret
+// there and shows the source; ⌘-click goes to the bibliography's entry, once there is one to go to. The chip is as atomic as the citation is
 // (a marker never stands inside one, format §3.1, rule 9); the source shows while the caret is on
 // it. The kinds that Quarto numbers (`@fig-x`, `@sec-x`…) are cross-references, not citations, and
 // are left to quarto-refs.ts. A citation inside code, a comment marker, front matter or the ledger
@@ -17,7 +18,7 @@ import {
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { dialectFacet } from '../dialect.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
-import { blanked } from './quarto-refs.ts';
+import { blanked, pressLink } from './quarto-refs.ts';
 
 /** The kinds of label that Quarto numbers: a key that starts with one is a cross-reference. */
 const XREF = /^(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-/;
@@ -142,23 +143,31 @@ export function citationsOf(doc: Text): readonly Citation[] {
 
 class CiteWidget extends WidgetType {
   readonly text: string;
+  readonly length: number;
 
-  constructor(text: string) {
+  constructor(text: string, length: number) {
     super();
     this.text = text;
+    this.length = length;
   }
 
   override eq(other: CiteWidget): boolean {
-    return other.text === this.text;
+    return other.text === this.text && other.length === this.length;
   }
 
-  override toDOM(): HTMLElement {
-    const chip = document.createElement('span');
-    chip.className = 'rl-cite';
-    chip.textContent = this.text;
-    chip.setAttribute('role', 'note');
-    chip.setAttribute('aria-label', `Citation: ${this.text}`);
-    return chip;
+  override toDOM(view: EditorView): HTMLElement {
+    const link = document.createElement('span');
+    link.className = 'rl-cite';
+    link.textContent = this.text;
+    link.setAttribute('role', 'link');
+    link.setAttribute('aria-label', `Citation: ${this.text}. Click to edit`);
+    // (No bibliography entry to go to yet: ⌘-click does nothing more than a click's caret.)
+    link.addEventListener('mousedown', (event) => pressLink(view, event, link, this.length, null));
+    return link;
+  }
+
+  override ignoreEvent(event: Event): boolean {
+    return event.type === 'mousedown';
   }
 }
 
@@ -173,7 +182,7 @@ export function citeDecorations(state: EditorState): DecorationSet {
   for (const { from, to, text } of citations) {
     if (ledger && from >= ledger.from) break;
     if (state.selection.ranges.some((range) => range.from <= to && range.to >= from)) continue;
-    ranges.push(Decoration.replace({ widget: new CiteWidget(text) }).range(from, to));
+    ranges.push(Decoration.replace({ widget: new CiteWidget(text, to - from) }).range(from, to));
   }
   return Decoration.set(ranges, true);
 }
@@ -193,19 +202,7 @@ const field = StateField.define<DecorationSet>({
   ],
 });
 
-/** A small chip like the cross-reference's, a quieter gray: a citation has no place to go. */
-const theme = EditorView.baseTheme({
-  '.rl-cite': {
-    display: 'inline-block',
-    padding: '0 0.3em',
-    borderRadius: '4px',
-    backgroundColor: 'var(--rl-tint)',
-    color: 'var(--rl-ink-2)',
-    lineHeight: '1.35',
-  },
-});
-
-/** Citations drawn as chips in a pandoc file. */
+/** Citations drawn as links in a pandoc file (the look is quarto-refs.ts's). */
 export function quartoCites(): Extension {
-  return [field, theme];
+  return [field];
 }

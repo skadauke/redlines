@@ -356,6 +356,18 @@ export interface EditorOptions {
    */
   includes?: IncludeHost;
   /**
+   * Loads the engine that draws math (`$x^2$`, `$$ E = mc^2 $$`): TeX in, MathML out (Temml's
+   * `renderToString`). It is the host's to import, so that a page that doesn't (the website's
+   * embed) never holds it, and it is called only when a document has a formula. Default: none, and
+   * a formula shows its source.
+   */
+  math?: () => Promise<{
+    renderToString(
+      tex: string,
+      options?: { displayMode?: boolean; throwOnError?: boolean },
+    ): string;
+  }>;
+  /**
    * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
    * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
    * to keep, as fractions of its width and height. Writes the copy beside the original, in the
