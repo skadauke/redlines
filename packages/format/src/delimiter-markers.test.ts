@@ -108,6 +108,14 @@ describe("a delimiter beside another person's pending italic (#1136, the review 
     }
   });
 
+  it('a pasted `</sub>*` just before its closing `_` is the known gap: written as the fine form, which reads otherwise (#1136)', () => {
+    const after = typedAt(29, '</sub>*');
+    expect(bodyOf(after)).toBe(
+      'x ca<!--fmt k3x9 +italic-->_f<!--ins m2bd--></sub>*<!--/m2bd-->_<!--/k3x9-->',
+    );
+    expect(readsAsNewest(after)).toBe(false);
+  });
+
   it('beside the word it is written as before, which reads alike', () => {
     for (const [at, insert] of [
       [1, '*'],
