@@ -45,6 +45,7 @@ import type { Atom, Block, Fmt, Leaf } from './blocks.ts';
 import { alignsOf, blockWas, completeChanges, oldFormat, opsOf } from './changes.ts';
 import { drawnSize, loadImage } from './images.ts';
 import type { ImageSource, LoadedImage } from './images.ts';
+import { breakInsertedLiteralNewlines } from './literal-breaks.ts';
 import { movesOf, patchMoves } from './moves.ts';
 import type { MoveHalf, MoveRevision } from './moves.ts';
 
@@ -328,7 +329,8 @@ export interface ExportOptions {
 }
 
 /** A Redlines file as the bytes of a .docx. */
-export async function exportDocx(text: string, options: ExportOptions = {}): Promise<Uint8Array> {
+export async function exportDocx(source: string, options: ExportOptions = {}): Promise<Uint8Array> {
+  const text = breakInsertedLiteralNewlines(source);
   const parsed = parse(text);
   const ledger: Ledger = parsed.ledger;
   const author = authorsOf(ledger);
