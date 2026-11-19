@@ -199,8 +199,7 @@ export const LIVE_LINE_STYLE = `
   white-space: normal;
 }
 .rl-ask-answers .rl-ask-allow { border-color: var(--rl-ink-2); font-weight: 700; }
-.rl-ask-answers button:hover { background: var(--rl-pressed); }
-.rl-ask-answers button:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: 2px; }
+.rl-ask-answers button:hover, .rl-ask-answers button:focus-visible { background: color-mix(in srgb, var(--rl-pressed) 55%, transparent); outline: none; }
 
 /*
  * Failed or stopped: the dot is hollow. Show log follows the message, in its words; the cross that

@@ -204,7 +204,8 @@ The window, on the desktop:
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
   its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
-  which other apps declare), R Markdown, Quarto and the text and code files by their extensions, so Finder's Open With offers
+  which other apps declare), Quarto by a type of its own (`md.redlines.quarto`, exported for `.qmd`),
+  R Markdown and the text and code files by their extensions, so Finder's Open With offers
   Redlines for each, and for no other kind of text. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
   Redlines. R Markdown, Quarto, text and code files it never takes, even where nothing else owns them:
@@ -524,6 +525,44 @@ Redlines covers everything in the Markdown Guide's
   which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
+- **Quarto outputs, read-only under each chunk** (#1174): Redlines never runs code, and a reviewer
+  still sees what a reader sees, from what Quarto left with the document. For a `.qmd`, beside the
+  document and in the folders above it up to the project's, it looks, in this order, for the
+  project's freeze file (`_freeze/<path of the document from the project's folder, with no
+  extension>/execute-results/<format>.json`, whose `result.markdown` is the executed document as
+  pandoc Markdown and whose `hash` is the MD5 of the file that was run), the Markdown file that
+  `keep-md` leaves (`<name>.md`) and the notebook that `keep-ipynb` leaves (`<name>.ipynb`), through
+  the same reader as the includes, so only inside the project the window may read. The first
+  file that reads and is Quarto's is the one used; a file whose format is not understood is
+  no file, since Quarto's own formats are not promised to stay.
+  - **Matching.** The executable chunks of the document (a fence whose info is an engine in braces:
+    `{r}`, `{python}`, `{julia}`; not `{ojs}`, `{mermaid}` or `{dot}`, nor a plain code block) are
+    paired in order with the cells of the file, by the chunk's label (`#| label:`) or else by its
+    code text with the `#|` lines and trailing blanks left out. A cell is given to one chunk only.
+    A chunk with no match, such as one edited since it ran or one never run, has no output drawn.
+  - **Drawn.** Under the chunk's closing fence, a block set apart by a rule at its left, in the grays
+    of the page: a small label, "Output from the last run", and the output as the file has it: text
+    in a code block, a table as a table, a figure as a picture (a freeze file's pictures are in
+    `_freeze/<document>/figure-<format>/`, which the picture's `<name>_files/` path is mapped to;
+    a notebook's are in the cell). It cannot be edited, is not a part of the file and is never
+    saved, copied as text of the document or exported: Word export draws the chunk, as before.
+    HTML widgets and anything but Markdown, text and pictures are left out.
+  - **Stale, for each chunk.** An output is stale when its chunk's code is not the code of the saved
+    cell it came from, compared with the `#|` lines and trailing blanks left out: the label then
+    says "Output from the last run, stale" (its hint: the chunk's code has changed since it ran), in
+    the page's italic gray. Every other output says "Output from the last run". It is the chunk's own
+    code that decides, not the document's: Redlines' marks and comments live in the file, so a
+    comment or a tracked change anywhere would change the file's hash and make every output stale.
+    A chunk matched by its code is the same code by definition; only a chunk matched by its label and
+    edited since can be stale (a chunk with no label whose code changed has no match, and no output).
+    A freeze file's `hash` is not compared; it is read and kept as a note.
+  - **Nothing.** No file, no match, a file that can't be read, a Markdown file (`.md`), or the Plain
+    view: nothing is drawn, no message, and no space is kept.
+  - **Read again** when the window is looked at again (a render that happened meanwhile shows up),
+    not on each keystroke.
+  - Not done: reading the rendered HTML, Word or PDF of a document, `<name>_files/` of a live render
+    and `.quarto/` (the research found nothing documented to rely on); showing outputs in the
+    included files.
 - **Heading attributes:** in `.qmd` and `.Rmd`, the `{#sec-intro}` after a heading's text is a small gray chip
   (the interface's small size, never the heading's), with its source shown while the caret is in it.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
@@ -1103,9 +1142,11 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   cells: every cell in the rows and columns between, both included. It is the ordinary selection and
   keeps no state of its own, so a drag that enters a second cell, a ⇧-press, ⇧ with an arrow (text
   in the cell first, then cells, then a cell at a time, growing or shrinking), and Undo making one
-  all work. The cells are drawn in the system's selection color with the text highlight hidden;
-  Both looks of Redlines draw them the same. Esc puts the caret in the cell where the selection
-  ended; Tab goes on from there; ↩ does nothing. ⌘A is the cell's text, then the whole table,
+  all work. A drag that leaves the table goes on selecting the text outside it, over another table
+  too, and scrolls the document at the window's edge as in any text (#1159). The cells are drawn in
+  the system's selection color with the text highlight hidden; both looks of Redlines draw them the
+  same. Esc puts the caret in the cell where the selection ended; Tab goes on from there; ↩ does
+  nothing. ⌘A is the cell's text, then the whole table,
   then the document. Select Cell, Row (⌃L), Column and Table are in the Table menu. A selected
   rectangle is not dragged anywhere (cells move by copy and paste). ⌫ and ⌦ clear every selected
   cell as one change (tracked, a deletion in each, in one group and one step to undo, the cells
@@ -1482,6 +1523,50 @@ app's login and there is no first run. Changing your name or email later never r
 a new email under the same name becomes an alias in the ledger
 ([format §5.3](format.md#53-people)).
 
+#### 5.11a The first-launch onboarding (#1206)
+
+The first time the app starts it shows an onboarding of about five minutes in four screens, in two
+windows. The first three are the **Welcome mode of the Preferences window**: the first window asks
+for it (through the page's storage, as it asks Preferences for a pane) and opens Preferences, which
+shows a sheet over its panes, in the alert's look (§3.1), with the step's place above the title
+("1 of 4"), **Continue** as the default button and **Skip** beside it. Preferences is where it runs
+because it holds the app's install commands, which the window that draws documents is never granted.
+The fourth is the **tour**, which the document window runs when Preferences says the first three
+are done.
+
+1. **You.** Your name and handle, filled in from git where it can (the same fields as Preferences ›
+   General). Continue saves them as Preferences would.
+2. **Your agent.** The agents found on this Mac, and which one answers an Ask that names none
+   (Preferences › Agents › Default agent). With none found it says so and points to Preferences ›
+   Agents.
+3. **Set up this Mac.** Three rows, each with a checkbox and a line on what it does: the Redlines
+   skill for the agents found (what Preferences › Agents installs, for Claude Code and Codex), the
+   Quick Look preview (the app's extension: the row opens System Settings, where macOS turns it
+   on), and the command line (`redlines` in `/usr/local/bin`, as Preferences › General installs
+   it). Nothing is installed before **Install and Continue**; a row left unchecked is skipped, and
+   a row that fails says why and where Preferences can try it another way. Each install is the
+   app's own command: the onboarding writes nothing itself.
+4. **A short tour,** in the document window, which comes forward. It opens a "Welcome to Redlines"
+   document in the first window, if nothing else is open in it, and points, one card at a time
+   with **Next**, at the Redlines pen (Track Changes) and the views button (Clean, Redlines, Plain),
+   and then says how to reach the command palette (⇧⌘P, which has no button, so its card hangs
+   under the title). The last card says **Done**.
+
+**Skip and resume.** Skip on a screen goes on to the next; **Skip Setup**, a link under the
+buttons, ends the Welcome mode from any screen, and the tour with it (Preferences tells the
+document window "skipped", and no tour starts). A step's answer is kept when it is
+made. The app notes that the onboarding began, and that it finished when Preferences' three screens do
+(`redlines.onboarding` in the page's storage); quitting or closing Preferences in the middle starts
+it again at the first screen at the next launch,
+with the answers so far filled in. An app that already has settings from an earlier build is not
+on a first launch and never shows it. Only the first window of a launch shows it, never a window
+opened for a document or for text.
+
+**Afterwards, in Preferences.** Name and handle: General. Default agent and the skill: Agents.
+The command line and Quick Look: General. The tour has no place there; a dev build (no
+`redlines_release`, as for the dev log in §5.11) has Help › Replay Onboarding, which opens the
+same Welcome mode and then runs the tour, at any time.
+
 ### 5.12 Feature list
 
 **Must (v1):**
@@ -1504,6 +1589,7 @@ a new email under the same name becomes an alias in the ledger
 - captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's, Obsidian's and Quarto's are built); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (citations are drawn as chips);
+  citations are drawn as chips; when the front matter names a bibliography (`bibliography:`, a BibTeX or CSL JSON file beside the document) a chip says what the style prints, Chicago author-date by default, `(Knuth 1984)`, and APA's or numbers when `csl:` names one of those (`packages/citations`, loaded only by the app, #1171); the Word export writes the same text. Other CSL styles are drawn as the default, and nothing prints a list of references;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
   step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
@@ -2806,13 +2892,14 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     (its array methods came with 13.0). System Settings lists it with the other Quick Look
     extensions, on, and turns it off; Preferences › General › Quick Look previews of Markdown
     files has a button that opens that list (§5.1).
-  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
-    no type for R Markdown and Quarto: a file of either gets a type made from its extension
-    (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the
-    extension from the app that declares it. Where another app declares them, the file has that
-    app's type, and Quick Look matches an extension's types exactly, never by what a type conforms
-    to, so Redlines' extension isn't asked: those files preview in that app's extension, or as
-    plain text. Where two extensions claim one type, macOS chooses one, and the settings pane
+  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. Quarto files
+    have a type of Redlines' own, `md.redlines.quarto`, which the app exports for `.qmd` (it
+    conforms to Markdown and plain text), so that Quick Look previews them and Finder opens them
+    with Redlines (#1177). macOS has no type for R Markdown: its files get a type made from the
+    extension (`dyn.…`), which the extension lists, with none declared by Redlines. Quick Look
+    matches an extension's types exactly, never by what a type conforms to: where another app
+    also claims `.qmd` or `.Rmd` and macOS gives the file that app's type, Redlines' extension
+    isn't asked, and the file previews in that app's extension, or as plain text, which is accepted. Where two extensions claim one type, macOS chooses one, and the settings pane
     turns either off: that is the one extension per type that Quick Look has.
   - **Large files.** The first 4 MB are read, and the first 300,000 characters of the document are
     drawn, to its last paragraph under that, with a line that says so. The count of what waits is

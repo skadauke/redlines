@@ -296,6 +296,16 @@ describe('the menu model', () => {
       '---',
       ['Show Agent Logs', undefined],
     ]);
+    // The dev build also replays the first-launch onboarding (#1206); a release build has no such row.
+    const replay = vi.fn();
+    const again = appMenuModel(
+      { ...commands(), writeToLog, revealDevLog: vi.fn(), replayOnboarding: replay },
+      registryOf(),
+    );
+    expect(readsAll(again, 'Help')).toContainEqual(['Replay Onboarding', undefined]);
+    actionRow(again, 'Help', 'Replay Onboarding').action();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(readsAll(release, 'Help').flat().join()).not.toMatch(/Onboarding/);
     actionRow(dev, 'Help', 'Write to Log…').action();
     expect(writeToLog).toHaveBeenCalledOnce();
   });

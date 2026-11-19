@@ -10,11 +10,14 @@
     `.md` files have and Redlines can be made the default app for (Preferences › General), and
     public.markdown, which other apps declare (Word does, as a type that conforms to nothing), so
     that Open With offers Redlines for a file typed that way too (#347).
-  - R Markdown and Quarto, by their extensions, which macOS has no type for, and the Plain-only
-    documents (text, data and config, web and source code, by their extensions, the table in
-    src/file-names.ts), each at the rank of an alternative: Redlines is offered for those files and
-    takes none of them, even where no other app owns them. Plain text's own type would offer
-    Redlines for every kind of text that is plain text to macOS, so the extensions are listed.
+  - Quarto, by a type of Redlines' own, md.redlines.quarto, which the app exports for `.qmd`
+    (conforming to Markdown and plain text), so that Quick Look previews a Quarto file with the
+    app's extension and Finder opens it with Redlines (#1177). R Markdown, which macOS has no type
+    for, and the Plain-only documents (text, data and config, web and source code, by their
+    extensions, the table in src/file-names.ts), each at the rank of an alternative: Redlines is
+    offered for those files and takes none of them, even where no other app owns them. Plain text's
+    own type would offer Redlines for every kind of text that is plain text to macOS, so the
+    extensions are listed. Where another app also claims `.qmd`, macOS says which type a file has.
 
   The import says what Markdown is, for a macOS that doesn't know it. public.markdown is for
   others to declare, so the bundle only claims it, and imports no more than the one type.
@@ -63,9 +66,9 @@
       <string>Editor</string>
       <key>LSHandlerRank</key>
       <string>Alternate</string>
-      <key>CFBundleTypeExtensions</key>
+      <key>LSItemContentTypes</key>
       <array>
-        <string>qmd</string>
+        <string>md.redlines.quarto</string>
       </array>
     </dict>
     <dict>
@@ -185,6 +188,27 @@
         <key>public.mime-type</key>
         <array>
           <string>text/markdown</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>md.redlines.quarto</string>
+      <key>UTTypeDescription</key>
+      <string>Quarto Document</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>net.daringfireball.markdown</string>
+        <string>public.plain-text</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>qmd</string>
         </array>
       </dict>
     </dict>

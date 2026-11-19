@@ -47,7 +47,7 @@ import { alignsOf, blockWas, completeChanges, oldFormat, opsOf } from './changes
 import { drawnSize, loadImage } from './images.ts';
 import type { ImageSource, LoadedImage } from './images.ts';
 import { movesOf, patchMoves } from './moves.ts';
-import { isQuarto, quartoToMarkdown } from './quarto.ts';
+import { isQuarto, quartoToMarkdown, readBibliography } from './quarto.ts';
 import { openClean } from './open-clean.ts';
 import type { MoveHalf, MoveRevision } from './moves.ts';
 
@@ -340,13 +340,20 @@ export async function exportDocx(source: string, given: ExportOptions = {}): Pro
   // Quarto's own syntax is written as Word's terms (quarto.ts). The text is then no longer the
   // file's, so a round trip's carriers, which hold the file's text and its blocks, are left out.
   const quarto = isQuarto(source);
-  const text = quarto ? quartoToMarkdown(source) : source;
+  const { citations, unread } = quarto ? await readBibliography(source, given) : { unread: [] };
+  const text = quarto ? quartoToMarkdown(source, citations) : source;
   const options: ExportOptions = quarto ? { ...given, carriers: false } : given;
   const parsed = parse(text);
   const ledger: Ledger = parsed.ledger;
   const author = authorsOf(ledger);
   const ids = new WordIds();
   const report = options.report ?? [];
+  for (const path of unread) {
+    report.push({
+      kind: 'bibliography',
+      message: `The bibliography ${path} couldn’t be read, so the citations that name it are written as typed.`,
+    });
+  }
   if (quarto) {
     report.push({
       kind: 'quarto',
