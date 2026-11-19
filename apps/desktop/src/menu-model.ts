@@ -35,8 +35,9 @@ export interface MenuCommands {
   /** Opens the About Redlines window, or brings it forward. */
   openAbout(): void;
   /**
-   * Shows a view of the View menu. Redlines is shown in the look that was shown last, and does
-   * nothing when it is shown already (`Editor.showView`).
+   * Shows a view of the View menu. Redlines is shown in the look that was shown last, as the full
+   * markup when the simple look shows, and does nothing when the full markup shows already
+   * (`Editor.showView`).
    */
   setView(view: MenuView): void;
   /**
@@ -86,6 +87,12 @@ export interface MenuCommands {
   reportProblem(): void;
   /** Help › Reveal Log: the crash log in Finder. */
   revealCrashLog(): void;
+  /**
+   * Help › Write to Log… and Reveal Dev Log, in dev builds only (#1205): a release build has no dev
+   * log, and leaves these out, so that its Help menu has neither row.
+   */
+  writeToLog?(): void;
+  revealDevLog?(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
@@ -393,11 +400,6 @@ export function appMenuModel(
           action: () => commands.revealInFinder(),
           enabled: (state) => state.hasFile,
         },
-        {
-          text: 'Open in Another Window',
-          action: () => commands.openAnotherWindow(),
-          enabled: (state) => state.hasFile,
-        },
         SEPARATOR,
         // Closing asks about unsaved edits through the window's close request.
         { item: 'CloseWindow', text: 'Close' },
@@ -541,6 +543,13 @@ export function appMenuModel(
             action: () => commands.toggleWordCount(),
             textFor: (state) => (state.showWordCount ? 'Hide Word Count' : 'Show Word Count'),
           },
+          SEPARATOR,
+          // Word's name and place for the second window of one document.
+          {
+            text: 'New Window',
+            action: () => commands.openAnotherWindow(),
+            enabled: (state) => state.hasFile,
+          },
         ],
         [
           // The Mac's own, which says Exit Full Screen while the window is. Always the last row.
@@ -603,6 +612,13 @@ export function appMenuModel(
       rows: [
         { text: 'Report a Problem…', action: () => commands.reportProblem() },
         { text: 'Reveal Log', action: () => commands.revealCrashLog() },
+        ...(commands.writeToLog && commands.revealDevLog
+          ? [
+              SEPARATOR,
+              { text: 'Write to Log…', action: () => commands.writeToLog?.() },
+              { text: 'Reveal Dev Log', action: () => commands.revealDevLog?.() },
+            ]
+          : []),
         SEPARATOR,
         { text: 'Show Agent Logs', action: () => commands.showAgentLogs() },
       ],

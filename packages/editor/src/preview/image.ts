@@ -248,21 +248,16 @@ class ImageWidget extends WidgetType {
     frame.className = 'rl-image-frame';
     wrap.append(frame);
     frame.append(img);
-    // A handle stands outside the picture, unless that is outside the text column (a column-wide
-    // image): there it would lie in the margin, under a note, so it stands inside that edge instead.
-    const placeHandles = () => {
-      // Not while a drag holds a handle: it stays where the pointer took it.
-      if (frame.closest('.rl-image-resizing')) return;
-      const line = wrap.closest('.cm-line')?.getBoundingClientRect();
-      const box = frame.getBoundingClientRect();
-      if (!line || box.width === 0) return;
-      frame.classList.toggle('rl-handle-in-left', box.left - HANDLE_WIDTH < line.left);
-      frame.classList.toggle('rl-handle-in-right', box.right + HANDLE_WIDTH > line.right);
-    };
-    // On entering, and as the pointer moves over the image, so that a width or window that changed
-    // since is seen (a toggle that changes nothing costs nothing).
-    frame.addEventListener('pointerenter', placeHandles);
-    frame.addEventListener('pointermove', placeHandles);
+    // Where the handles stand is known before the image is first drawn, and again when it loads or
+    // its look changes: never only when the pointer moves, which showed them in the margin for a
+    // moment (#1195).
+    placeHandles(view, wrap, frame);
+    img.addEventListener('load', () => placeHandles(view, wrap, frame));
+    // As the pointer moves over the image, so that a width or window that changed since is seen (a
+    // toggle that changes nothing costs nothing).
+    const place = () => writeHandles(frame, readHandles(wrap, frame));
+    frame.addEventListener('pointerenter', place);
+    frame.addEventListener('pointermove', place);
     for (const side of ['left', 'right'] as const) {
       // The edge on the side an aligned image is anchored to stays where it is, so a handle there
       // would widen the image without the edge following the pointer (#633): there is none.
@@ -280,7 +275,36 @@ class ImageWidget extends WidgetType {
       });
       frame.append(handle);
     }
+    shown.set(wrap, this);
     return wrap;
+  }
+
+  /**
+   * A change of the selection alone (a click on the image, or the caret leaving it) changes the
+   * outline and keeps the handles where they are: the picture isn't drawn again, so that nothing
+   * flashes or moves (#1195).
+   */
+  override updateDOM(dom: HTMLElement, view: EditorView): boolean {
+    const before = shown.get(dom);
+    if (!before || !before.sameButSelection(this)) return false;
+    dom.classList.toggle('rl-image-selected', this.selected);
+    shown.set(dom, this);
+    const frame = dom.querySelector<HTMLElement>('.rl-image-frame');
+    if (frame) placeHandles(view, dom, frame);
+    return true;
+  }
+
+  private sameButSelection(other: ImageWidget): boolean {
+    return new ImageWidget(
+      this.alt,
+      this.url,
+      this.own,
+      this.width,
+      this.align,
+      this.path,
+      other.selected,
+      this.linked,
+    ).eq(other);
   }
 
   /**
@@ -319,6 +343,43 @@ class ImageWidget extends WidgetType {
   override ignoreEvent(event: Event): boolean {
     return event.target instanceof Element && event.target.closest('.rl-image-handle') !== null;
   }
+}
+
+/** The widget each drawn image shows, for `updateDOM` to tell what changed. */
+const shown = new WeakMap<HTMLElement, ImageWidget>();
+
+/**
+ * A handle stands outside the picture, unless that is outside the text column (a column-wide
+ * image): there it would lie in the margin, under a note, so it stands inside that edge instead.
+ */
+function placeHandles(view: EditorView, wrap: HTMLElement, frame: HTMLElement): void {
+  // The layout is read together for every picture drawn at once, and the classes written after.
+  view.requestMeasure({
+    read: () => readHandles(wrap, frame),
+    write: (inside) => writeHandles(frame, inside),
+  });
+}
+
+/** Whether each handle stands inside its edge; null when nothing is to change. */
+function readHandles(
+  wrap: HTMLElement,
+  frame: HTMLElement,
+): { left: boolean; right: boolean } | null {
+  // Not while a drag holds a handle: it stays where the pointer took it.
+  if (frame.closest('.rl-image-resizing')) return null;
+  const line = wrap.closest('.cm-line')?.getBoundingClientRect();
+  const box = frame.getBoundingClientRect();
+  if (!line || box.width === 0) return null;
+  return {
+    left: box.left - HANDLE_WIDTH < line.left,
+    right: box.right + HANDLE_WIDTH > line.right,
+  };
+}
+
+function writeHandles(frame: HTMLElement, inside: { left: boolean; right: boolean } | null): void {
+  if (!inside) return;
+  frame.classList.toggle('rl-handle-in-left', inside.left);
+  frame.classList.toggle('rl-handle-in-right', inside.right);
 }
 
 /** The drags that are going on, by the image they resize, which a widget that goes ends. */

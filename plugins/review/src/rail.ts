@@ -487,6 +487,15 @@ export function railCompact(at: {
     (at.compact ? COMPACT_MARGIN : 0);
   return at.width < keeps;
 }
+/**
+ * Whether the editor, `width` px wide, is too narrow for the column at `textScale` with the rail and
+ * the margins beside it: the rail would then take width from the column, and from what is as wide as
+ * the column, a picture. They grow with the text size above 100%, and the column with all of it.
+ */
+export function railSqueezes(at: { width: number; column: number; textScale: number }): boolean {
+  const noteScale = Math.max(1, at.textScale);
+  return at.width < at.column * at.textScale + RAIL_SPACE * noteScale + 2 * (MARGIN * noteScale);
+}
 /** How far a note is raised from the top of its anchor's text, so that their first lines align. */
 const NOTE_LIFT = 5;
 /** A dot's size, the least space between two dots, and how far right of the text they sit. */
@@ -1623,6 +1632,13 @@ class Rail {
     return true;
   }
 
+  /** Shows a thread's note with its reply box open and the keyboard in it. */
+  replyTo(id: string): boolean {
+    if (!this.showThread(id)) return false;
+    this.views.get(id)?.openReply();
+    return true;
+  }
+
   /**
    * Posts a reply to a thread as you (format §4). Returns the thread and the reply's id: the reply
    * of the thread that wasn't there before.
@@ -2025,7 +2041,7 @@ class NoteView {
     this.box?.setDraft(text);
   }
 
-  private openReply(): void {
+  openReply(): void {
     const { rail } = this;
     this.openReplyBox();
     // A note shown from its dot stays while the reply is written.
@@ -2094,6 +2110,8 @@ export interface RailControl {
   destroy(): void;
   refreshThread(thread: string): void;
   showThread(thread: string): boolean;
+  /** Shows a thread's note with its reply box open, as its Reply action does. */
+  replyTo(thread: string): boolean;
   showsResolved(): boolean;
   setShowResolved(show: boolean): void;
   /** Puts away the note shown from its dot, but not one being written. */
@@ -2138,6 +2156,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     destroy: () => stopReady?.(),
     refreshThread: (thread) => current()?.refreshThread(thread),
     showThread: (thread) => current()?.showThread(thread) ?? false,
+    replyTo: (thread) => current()?.replyTo(thread) ?? false,
     showsResolved: () => choices.showResolved,
     closePopover: () => current()?.closePopover(),
     hold(held) {

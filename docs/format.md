@@ -1185,7 +1185,7 @@ at the outer edge of a whole inline construct. A marker never goes:
    a digit or punctuation and an emoji shortcode; or inside `{{< >}}`, a cross-reference or a citation in the text (`@fig-x`, `@sec-x`, `@smith2020`), a
    citation bracket (`[@a; @b]`, `[-@a]`), the brackets and attributes of a span (`[x]{.mark}`: a marker never stands between them) or `(\#fig:x)`. Four of these are pandoc's alone and
    are held in a file of the pandoc dialect only (§9.1): `^x^`, `~x~`, the `:::` line, and the
-   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. Text typed in front of a word that makes a key with it (`@fig-x` before `42`) takes the rest of the key into the tracked change, so that no marker stands in the key; with Track Changes off, where that can't be done, the edit says so (#1074). A decision that would bring a letter or a digit in front of the marker that starts such a key (a deletion rejected, a replacement's old text given back) is made with that insertion, so that in no order of decisions does a marker stand before a key with a word against it (#1088). GitHub shows a
+   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. Text typed in front of a word that makes a key with it (`@fig-x` before `42`) takes the rest of the key into the tracked change, so that no marker stands in the key; with Track Changes off, where that can't be done, the person is asked whether to accept the other person's change first (§3.4, an alert comes before a refusal) and the text is typed after it, and where nothing can ask (an agent, the command line) the edit says so, in words that name the ways round (#1074, #1204). A decision that would bring a letter or a digit in front of the marker that starts such a key (a deletion rejected, a replacement's old text given back) is made with that insertion, so that in no order of decisions does a marker stand before a key with a word against it (#1088). GitHub shows a
    shortcode as its emoji only at the start of a text or after white space, and as written after
    anything else: a letter or a digit (`a:tent:`), punctuation (`(:tent:`, `.:tent:`) or another
    shortcode. Redlines draws the same (#388), and a marker never changes which: between that
@@ -1689,6 +1689,14 @@ would be an insertion whose closer stands on it, a line that is no blank line to
 doesn't know the markers, and the item would be tight in the file and loose in the newest view.
 As one split the blank line is a line of the file as it is, and rejecting the split takes the blank
 line and the item away with it, the item above tight again.
+
+The same holds at the top level for a `-` item (#443): Return or Shift-Return at the start of the
+first item of a `- ` list right under a line of text, with Track Changes on, is one split of the
+same form (`Fruit:<!--split k3x9-->\n\n- \n- apples`). Written as two changes, the blank line
+and the new item, an order of decisions that keeps the item and rejects the blank line would put
+an empty `-` right under the text, which Markdown reads as the text's underline. A bullet of `+`
+or `*`, and a number, read as text there, and keep the two changes. Backspace right after the key
+takes it back whole.
 
 **Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
 other backslash escapes, or two spaces or more, at the end of a line, with its line break and the

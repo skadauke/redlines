@@ -18,6 +18,7 @@ import {
   anchorPaste,
   anchorReview,
   anchorTable,
+  colorsOf,
   docFileText,
   intentOf,
   loadFile,
@@ -47,7 +48,7 @@ import { ensureStyle, peersShown, presenceExtension, showPeers } from './presenc
 import type { PeerView } from './presence.ts';
 import type { Remote } from '@redlines/collab';
 
-export { FLAG_MS, PALETTE, peersShown, STYLE, STYLE_ID } from './presence.ts';
+export { FLAG_MS, peersShown, STYLE, STYLE_ID } from './presence.ts';
 export type { PeerView } from './presence.ts';
 
 export type { SyncState } from '@redlines/collab';
@@ -166,6 +167,8 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
   const placePeers = () => {
     const views: PeerView[] = [];
     const shownNow = peersShown(view);
+    // A person is in their author color of this document: the color their changes are drawn in.
+    const colors = colorsOf(view.state);
     for (const peer of lastPeers) {
       const state = peer.state as { v?: unknown; h?: unknown; a?: unknown };
       if (
@@ -194,7 +197,7 @@ export function syncEditor(editor: Editor, options: SyncOptions): SyncBinding {
       views.push({
         clientID: peer.clientID,
         name: peer.name,
-        color: peer.color ?? 'p1',
+        color: colors.get(peer.handle) ?? 0,
         ...placed,
         stamp,
       });

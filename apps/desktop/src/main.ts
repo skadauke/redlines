@@ -78,7 +78,8 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
-import { requestPane } from './preferences/pane-request.ts';
+import { requestPane, type RequestedPane } from './preferences/pane-request.ts';
+import { menuPaletteCommands } from './menu-palette.ts';
 import { fillPrintPage, plainPageHtml, printPage } from './print.ts';
 import { exportToWord } from './word-export.ts';
 import { openWord } from './word-import.ts';
@@ -103,6 +104,8 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createDevLog, tauriDevLogLink } from './dev-log.ts';
+import { askDevNote } from './ui/dev-note.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
 import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
@@ -176,6 +179,17 @@ const app = element('.rl-app');
 const main = element('.rl-main');
 const scroller = element('.rl-scroller');
 const notice = createNotice(main);
+// The dev log, in a build that isn't a release (dev-log.ts, #1205): what the person is told, and
+// what the editor refuses, is kept in it, and so are errors and agent runs below.
+const devLog = await createDevLog(isTauri ? tauriDevLogLink() : null);
+if (devLog.enabled) {
+  const flash = notice.flash.bind(notice);
+  notice.flash = (text) => {
+    devLog.log('alert', text);
+    flash(text);
+  };
+  devLog.watchKeys(document);
+}
 const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
@@ -227,7 +241,9 @@ function sessionStatus(): string | undefined {
   if (!session) return undefined;
   if (sessionState === 'offline') return 'Offline: your edits are kept';
   if (sessionState === 'ended') return 'No longer in the session';
-  return sessionPeers > 0 ? `In ${sessionPeers + 1} windows` : undefined;
+  // Which window this is, as Word numbers the windows of one document ("Window 2").
+  if (sessionPeers === 0) return undefined;
+  return session.number === null ? `In ${sessionPeers + 1} windows` : `Window ${session.number}`;
 }
 
 /** Joins the session of the document at `path`, as its leader when there is none yet. */
@@ -252,6 +268,11 @@ async function beginSession(path: string, follow = false): Promise<void> {
     onPeers: (peers) => {
       sessionPeers = peers.length;
       render();
+    },
+    tracking: () => editor.getUiState().tracking,
+    onTracking: (on) => {
+      if (editor.getUiState().kind === 'plain-only' || on === editor.getUiState().tracking) return;
+      setTrackingHere(on);
     },
     notice: (message) => notice.flash(message),
   });
@@ -423,7 +444,10 @@ const untrackedAnswers = createUntrackedAnswers();
 const editor = createEditor(element('#editor'), {
   doc: '',
   commandKeys: shortcutBook.commandKeys,
-  onError: (error) => crashes?.caught(error),
+  onError: (error) => {
+    devLog.log('error', error instanceof Error ? error.message : String(error));
+    crashes?.caught(error);
+  },
   author,
   // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
   askUntracked: createUntrackedSheet({
@@ -519,7 +543,10 @@ const editor = createEditor(element('#editor'), {
     runsSawChange();
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
-  onNotice: (message) => notice.flash(message),
+  onNotice: (message) => {
+    devLog.log('refusal', message);
+    notice.flash(message);
+  },
   // Image files pasted into the document, or dropped on it where the page gets the drop itself (a
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
@@ -771,6 +798,9 @@ const review = createReview(editor, {
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
 const toolbar = createToolbar(editor, {
   container: main,
+  // A right-click on a change, a comment or a highlight, and ⇧⌘P there, stack its review card above
+  // the bar, as one widget (#1190).
+  bubbleAt: (at) => review.bubbleAt(at),
   // The palette (type with the toolbar open) searches the app's own commands and settings beside
   // the registry's; a setting is a live control in its line (toolbar-commands.ts).
   appCommands: () => toolbarCommands(),
@@ -778,6 +808,8 @@ const toolbar = createToolbar(editor, {
   askAbout: () => void editor.commands.run('ask.start'),
   // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
+  // A bar at the pointer has the place's card in itself: hovering shows no other over the page.
+  onFloating: (floating) => review.holdCards(floating),
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
   // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
@@ -1035,6 +1067,18 @@ const runs = createRuns({
   onEnded: () => void sidebar.refresh(),
 });
 runsSawChange = () => runs.documentChanged();
+// Each change of an agent run's line is a line of the dev log: which agent, and how it stands.
+if (devLog.enabled) {
+  runs.subscribe((thread) => {
+    const line = runs.line(thread);
+    devLog.log(
+      'agent',
+      line === null
+        ? `thread ${thread} line cleared`
+        : `thread ${thread} ${line.agentName} ${line.kind}${line.kind === 'failed' ? `: ${line.message}` : ''}`,
+    );
+  });
+}
 // Each thread's live line, drawn again in its note whenever it changes. A failure the person
 // can't see, or a question waiting where nobody sees it, in a thread scrolled away, is also told of
 // in the lower-right corner.
@@ -1201,8 +1245,13 @@ async function readImageForAgent(src: string): Promise<{ mimeType: string; data:
  * agent itself; it asks for the pane, and Preferences shows it.
  */
 function openAgentPreferences(): void {
+  openPreferencesPane('agents');
+}
+
+/** Opens Preferences on `pane` (the palette's lines for the panes, and the Agents pane above). */
+function openPreferencesPane(pane: RequestedPane): void {
   if (!isTauri) return notice.flash('Preferences are in the app.');
-  requestPane('agents');
+  requestPane(pane);
   invoke('open_preferences').catch((error: unknown) => {
     console.error('Could not open Preferences', error);
     notice.flash('Couldn’t open Preferences.');
@@ -1235,6 +1284,13 @@ const toggleTracking = () => {
   // A text or code file has no Track Changes: its menu item and key are disabled; this says why.
   if (editor.getUiState().kind === 'plain-only') return notice.flash(PLAIN_ONLY_TRACKING);
   const on = !editor.getUiState().tracking;
+  setTrackingHere(on);
+  // Track Changes belongs to the document: every other window of it follows.
+  void session?.shareTracking(on);
+};
+
+/** Turns Track Changes on or off in this window, and says so (design §5.4). */
+const setTrackingHere = (on: boolean) => {
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
   editor.setTracking(on);
   // The notice that a file asking for tracking opened with has done its work: the choice is made.
@@ -1280,6 +1336,15 @@ const acceptAllAndStopTracking = () => {
 const changeSettings = (change: Partial<Settings>) => {
   settings = keepWindowOwn(settings, updateSettings(change), change);
 };
+
+/** The panes of the Preferences window, by name, for the palette. */
+const PREFERENCE_PANES: readonly (readonly [RequestedPane, string])[] = [
+  ['general', 'General'],
+  ['editor', 'Editor'],
+  ['appearance', 'Appearance'],
+  ['agents', 'Agents'],
+  ['shortcuts', 'Shortcuts'],
+];
 
 /**
  * What the toolbar's palette offers besides the registry's commands: the app's own commands and
@@ -1379,6 +1444,22 @@ function toolbarCommands(): AppCommand[] {
       run: () => commands.checkForUpdates(),
       available: () => updateNotifications !== undefined,
     },
+    // Each pane of Preferences, to go to it by name (the Preferences window has its own search).
+    ...PREFERENCE_PANES.map(([pane, label]): AppCommand => ({
+      id: `app.preferences.${pane}`,
+      title: `Open ${label} Preferences`,
+      synonyms: ['settings', 'options', 'preferences', label.toLowerCase()],
+      run: () => openPreferencesPane(pane),
+    })),
+    // Every other row of the menu bar (About Redlines, New, Open, the exports, zoom, …).
+    ...menuPaletteCommands(
+      menuModel,
+      () => menuState,
+      ({ row }) => {
+        const key = row.id ? shortcutBook.keyOf(row.id) : null;
+        return key ? displayKey(key) : undefined;
+      },
+    ),
   ];
 }
 
@@ -1661,6 +1742,26 @@ const commands: MenuCommands = {
     if (crashes) void crashes.revealLog();
     else notice.flash('The log is in the app.');
   },
+  // Dev builds only: a release build has no dev log, and its Help menu has neither row.
+  ...(devLog.enabled
+    ? {
+        writeToLog: () => {
+          void askDevNote({ container: app, restoreFocus: () => editor.focus() }).then((note) => {
+            if (note === null) return;
+            const { from, to } = editor.view.state.selection.main;
+            void devLog
+              .writeNote(note, {
+                text: editor.getDoc(),
+                selection: { from, to },
+                view: editor.getUiState().view,
+                tracking: editor.getUiState().tracking,
+              })
+              .then(() => notice.flash('Written to the dev log.'));
+          });
+        },
+        revealDevLog: () => devLog.reveal(),
+      }
+    : {}),
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. Of the
@@ -2022,6 +2123,16 @@ if (
   (import.meta.env['VITE_SYNC_CHECK'] || new URLSearchParams(location.search).has('sync-check'))
 ) {
   void import('./sync-check.ts').then(({ runSyncCheck }) => runSyncCheck());
+}
+
+// Debug only (sheet-check.ts): the sheet of every interface element, for the look sweep.
+if (
+  import.meta.env.DEV &&
+  (import.meta.env['VITE_SHEET_CHECK'] || new URLSearchParams(location.search).has('sheet-check'))
+) {
+  void import('./sheet-check.ts').then(({ runSheetCheck }) =>
+    runSheetCheck(editor, { notify: (options) => notifications.show(options) }),
+  );
 }
 
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.
