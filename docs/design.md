@@ -539,12 +539,15 @@ Redlines covers everything in the Markdown Guide's
     a notebook's are in the cell). It cannot be edited, is not a part of the file and is never
     saved, copied as text of the document or exported: Word export draws the chunk, as before.
     HTML widgets and anything but Markdown, text and pictures are left out.
-  - **Stale.** When the freeze file's `hash` is not the MD5 of the document as it reads now, the
-    label says "Output from the last run, stale" (and its hint says the document has changed since
-    it ran). Every edit, a change or a comment included, makes the hash differ, so the label is
-    what a reviewer will mostly see; the chunks that still match by code keep their output, since
-    the code is what the output answers to. A `keep-md` or `keep-ipynb` file has no hash and is not
-    labeled stale.
+  - **Stale, for each chunk.** An output is stale when its chunk's code is not the code of the saved
+    cell it came from, compared with the `#|` lines and trailing blanks left out: the label then
+    says "Output from the last run, stale" (its hint: the chunk's code has changed since it ran), in
+    the page's italic gray. Every other output says "Output from the last run". It is the chunk's own
+    code that decides, not the document's: Redlines' marks and comments live in the file, so a
+    comment or a tracked change anywhere would change the file's hash and make every output stale.
+    A chunk matched by its code is the same code by definition; only a chunk matched by its label and
+    edited since can be stale (a chunk with no label whose code changed has no match, and no output).
+    A freeze file's `hash` is not compared; it is read and kept as a note.
   - **Nothing.** No file, no match, a file that can't be read, a Markdown file (`.md`), or the Plain
     view: nothing is drawn, no message, and no space is kept.
   - **Read again** when the window is looked at again (a render that happened meanwhile shows up),

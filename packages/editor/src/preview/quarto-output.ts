@@ -4,8 +4,8 @@
 // whose `result.markdown` is the executed document as pandoc Markdown), the file `keep-md` keeps, or
 // the notebook `keep-ipynb` keeps. Each executable chunk of the .qmd is paired, in order and by its
 // code text (or its label), with a cell of that file, and the cell's output is drawn read-only under
-// the chunk, labeled as output from the last run, and as stale when the file's hash is not the
-// document's. A chunk with no match, and a document with no file, show nothing. A file that can't be
+// the chunk, labeled as output from the last run, and as stale when the chunk's code is not the code
+// its cell ran. A chunk with no match, and a document with no file, show nothing. A file that can't be
 // read is no file: the formats are Quarto's own, and may change.
 
 import {
@@ -45,7 +45,7 @@ export interface Cell {
 export interface Outputs {
   /** Which file they came from: `freeze`, `keep-md` or `keep-ipynb`. */
   source: 'freeze' | 'keep-md' | 'keep-ipynb';
-  /** The MD5 of the document that was run (freeze files only), or null. */
+  /** The MD5 of the file that was run (freeze files only), kept as a note: it is not compared. */
   hash: string | null;
   cells: Cell[];
 }
@@ -231,12 +231,21 @@ export function cellsOfNotebook(json: string): Cell[] | null {
   }
 }
 
+/** A chunk's cell, and whether the chunk's code is no longer the code that cell ran. */
+export interface Match {
+  cell: Cell;
+  stale: boolean;
+}
+
 /**
  * Pairs each chunk with a cell, in order: the next cell after the last one paired whose label is the
  * chunk's, or else whose code is the chunk's. Only a match is a pair, and a chunk that has none has
- * no output. Returns the cell of each chunk, or null.
+ * no output. A pair is stale when the chunk's code is not the code its cell ran (a chunk found by
+ * its label and edited since), compared with no `#|` lines and no trailing blanks: it is the chunk's
+ * own code that decides, not the document's, whose marks and comments change the file and not the
+ * code. (A freeze file's `hash` is the MD5 of the whole file that was run, and is not used.)
  */
-export function matchCells(chunks: readonly Chunk[], cells: readonly Cell[]): (Cell | null)[] {
+export function matchCells(chunks: readonly Chunk[], cells: readonly Cell[]): (Match | null)[] {
   let next = 0;
   return chunks.map((chunk) => {
     for (let i = next; i < cells.length; i++) {
@@ -246,7 +255,7 @@ export function matchCells(chunks: readonly Chunk[], cells: readonly Cell[]): (C
       const byCode = cell.code !== null && cell.code === chunk.code;
       if (byLabel || byCode) {
         next = i + 1;
-        return cell;
+        return { cell, stale: cell.code !== null && cell.code !== chunk.code };
       }
     }
     return null;
@@ -307,66 +316,6 @@ export async function findOutputs(
   return null;
 }
 
-/** MD5 of a string's UTF-8 bytes, as 32 hex digits: the hash Quarto keeps in a freeze file. */
-export function md5(text: string): string {
-  const bytes = new TextEncoder().encode(text);
-  const words: number[] = [];
-  for (let i = 0; i < bytes.length; i++) {
-    words[i >> 2] = (words[i >> 2] ?? 0) | ((bytes[i] ?? 0) << ((i % 4) * 8));
-  }
-  const bits = bytes.length * 8;
-  words[bits >> 5] = (words[bits >> 5] ?? 0) | (0x80 << (bits % 32));
-  words[(((bits + 64) >>> 9) << 4) + 14] = bits;
-  const K = Array.from(
-    { length: 64 },
-    (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32) | 0,
-  );
-  const S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
-  let a0 = 0x67452301;
-  let b0 = 0xefcdab89 | 0;
-  let c0 = 0x98badcfe | 0;
-  let d0 = 0x10325476;
-  const rotl = (x: number, c: number) => (x << c) | (x >>> (32 - c));
-  for (let i = 0; i < words.length; i += 16) {
-    let a = a0;
-    let b = b0;
-    let c = c0;
-    let d = d0;
-    for (let j = 0; j < 64; j++) {
-      let f: number;
-      let g: number;
-      if (j < 16) {
-        f = (b & c) | (~b & d);
-        g = j;
-      } else if (j < 32) {
-        f = (d & b) | (~d & c);
-        g = (5 * j + 1) % 16;
-      } else if (j < 48) {
-        f = b ^ c ^ d;
-        g = (3 * j + 5) % 16;
-      } else {
-        f = c ^ (b | ~d);
-        g = (7 * j) % 16;
-      }
-      const next = d;
-      d = c;
-      c = b;
-      const sum = (a + f + (K[j] ?? 0) + (words[i + g] ?? 0)) | 0;
-      b = (b + rotl(sum, S[(j >> 4) * 4 + (j % 4)] ?? 0)) | 0;
-      a = next;
-    }
-    a0 = (a0 + a) | 0;
-    b0 = (b0 + b) | 0;
-    c0 = (c0 + c) | 0;
-    d0 = (d0 + d) | 0;
-  }
-  const hex = (n: number) =>
-    Array.from({ length: 4 }, (_, i) =>
-      ((n >>> (i * 8)) & 0xff).toString(16).padStart(2, '0'),
-    ).join('');
-  return hex(a0) + hex(b0) + hex(c0) + hex(d0);
-}
-
 /** The output's Markdown with a freeze file's figures pointed at `_freeze/<doc>/figure-<format>/`. */
 export function withFigures(output: string, dir: string): string {
   if (dir === '.') return output;
@@ -383,14 +332,6 @@ const loaded = StateField.define<(Outputs & { dir: string }) | null>({
     return value;
   },
 });
-
-/** The MD5 of each document text that was asked for, so that a keystroke hashes it once. */
-const hashed = new WeakMap<Text, string>();
-const hashOf = (doc: Text): string => {
-  let value = hashed.get(doc);
-  if (value === undefined) hashed.set(doc, (value = md5(doc.toString())));
-  return value;
-};
 
 class OutputWidget extends WidgetType {
   readonly cell: Cell;
@@ -431,7 +372,7 @@ class OutputWidget extends WidgetType {
     const label = document.createElement('div');
     label.className = 'rl-output-label';
     label.textContent = this.stale ? 'Output from the last run, stale' : 'Output from the last run';
-    if (this.stale) label.title = 'The document has changed since this ran';
+    if (this.stale) label.title = 'The chunk’s code has changed since it ran';
     const body = document.createElement('div');
     body.className = 'rl-output-body';
     const options = this.resolve ? { resolveImage: this.resolve } : {};
@@ -455,12 +396,12 @@ export function outputDecorations(state: EditorState): DecorationSet {
   const ledger = state.field(parsedField, false)?.ledgerRange;
   const chunks = executableChunks(doc).filter((chunk) => !ledger || chunk.end < ledger.from);
   const matched = matchCells(chunks, found.cells);
-  const stale = found.hash !== null && found.hash !== hashOf(doc);
   const resolve = state.facet(imageResolver);
   const ranges: Range<Decoration>[] = [];
   chunks.forEach((chunk, i) => {
-    const cell = matched[i];
-    if (!cell || cell.output.trim() === '') return;
+    const match = matched[i];
+    if (!match || match.cell.output.trim() === '') return;
+    const { cell, stale } = match;
     ranges.push(
       Decoration.widget({
         widget: new OutputWidget(cell, found.dir, stale, resolve),

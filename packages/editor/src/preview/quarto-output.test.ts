@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The outputs that come with a Quarto file, under the chunks that made them (docs/research/quarto.md):
 // read from the freeze file, the `keep-md` file or the `keep-ipynb` notebook, paired with the chunks
-// in order and by code, labeled as from the last run, stale when the hash differs, and nothing where
+// in order and by code, labeled as from the last run, stale when the chunk's code is not the code its cell ran, and nothing where
 // there is no file or no match.
 
 import { Text } from '@codemirror/state';
@@ -15,7 +15,6 @@ import {
   executableChunks,
   findOutputs,
   matchCells,
-  md5,
   normalCode,
   outputFiles,
   parseFrozen,
@@ -214,38 +213,38 @@ describe('matching chunks to cells', () => {
 
   it('pairs in order, by label or by code, and leaves a chunk with no match without a cell', () => {
     const matched = matchCells(chunks, cells);
-    expect(matched[0]).toBe(cells[0]);
-    expect(matched[1]).toBe(cells[1]);
+    expect(matched[0]).toEqual({ cell: cells[0], stale: false });
+    expect(matched[1]).toEqual({ cell: cells[1], stale: false });
     expect(matched[2]).toBeNull();
   });
 
   it('pairs nothing when the code has changed, as a stale file’s chunk is', () => {
     const edited = chunks.map((chunk, i) => (i === 0 ? { ...chunk, code: 'x <- 1:4' } : chunk));
     expect(matchCells(edited, cells)[0]).toBeNull();
-    expect(matchCells(edited, cells)[1]).toBe(cells[1]);
+    expect(matchCells(edited, cells)[1]).toEqual({ cell: cells[1], stale: false });
+  });
+
+  it('says stale for a chunk found by its label whose code is no longer the cell’s', () => {
+    const edited = chunks.map((chunk, i) =>
+      i === 1 ? { ...chunk, code: 'plot(x, col = 2)' } : chunk,
+    );
+    expect(matchCells(edited, cells)[1]).toEqual({ cell: cells[1], stale: true });
+    // Trailing blanks and `#|` lines are no change of the code.
+    const spaced = chunks.map((chunk, i) =>
+      i === 1 ? { ...chunk, code: normalCode('#| echo: true\nplot(x)  \n') } : chunk,
+    );
+    expect(matchCells(spaced, cells)[1]?.stale).toBe(false);
   });
 
   it('never gives one cell to two chunks', () => {
     const twice = [chunks[0]!, chunks[0]!];
     const matched = matchCells(twice, cells);
-    expect(matched[0]).toBe(cells[0]);
+    expect(matched[0]?.cell).toBe(cells[0]);
     expect(matched[1]).toBeNull();
   });
 
   it('compares code without its `#|` lines or trailing blanks', () => {
     expect(normalCode('#| echo: false\nx  \n\n')).toBe('x');
-  });
-});
-
-describe('md5', () => {
-  it('is the hash Quarto keeps of the document', () => {
-    expect(md5('')).toBe('d41d8cd98f00b204e9800998ecf8427e');
-    expect(md5('abc')).toBe('900150983cd24fb0d6963f7d28e17f72');
-    expect(md5('The quick brown fox jumps over the lazy dog')).toBe(
-      '9e107d9d372bb6826bd81d3542a419d6',
-    );
-    // More than one block.
-    expect(md5('a'.repeat(100))).toBe('36a92cc94a9e0fa21f625f8bfb007adf');
   });
 });
 
@@ -322,11 +321,12 @@ describe('under the chunks of an editor', () => {
     return [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-output')];
   }
 
-  const frozen = (hash: string) => JSON.stringify({ hash, result: { markdown: FROZEN } });
+  const frozen = () =>
+    JSON.stringify({ hash: 'a hash, kept as a note', result: { markdown: FROZEN } });
   const FILE = '_freeze/study/execute-results/html.json';
 
   it('shows the output of each chunk that has one, labeled as from the last run', async () => {
-    const blocks = await show(QMD, { [FILE]: frozen(md5(QMD)) });
+    const blocks = await show(QMD, { [FILE]: frozen() });
     expect(blocks).toHaveLength(2);
     expect(blocks[0]?.querySelector('.rl-output-label')?.textContent).toBe(
       'Output from the last run',
@@ -339,18 +339,26 @@ describe('under the chunks of an editor', () => {
     expect(blocks[0]?.classList.contains('rl-output-stale')).toBe(false);
   });
 
-  it('says stale when the file’s hash is not the document’s', async () => {
-    const blocks = await show(QMD, { [FILE]: frozen('0'.repeat(32)) });
+  it('says stale for a chunk whose code is not the code its output came from, and not for the others', async () => {
+    // The labeled chunk is edited since it ran; the other is as it was. The document has marks and
+    // comments in it, which are none of the code, and make no output stale.
+    const edited =
+      QMD.replace('plot(x)', 'plot(x, col = 2)') + '\n<!-- a comment kept in the file -->\n';
+    const blocks = await show(edited, { [FILE]: frozen() });
     expect(blocks).toHaveLength(2);
     expect(blocks[0]?.querySelector('.rl-output-label')?.textContent).toBe(
+      'Output from the last run',
+    );
+    expect(blocks[0]?.classList.contains('rl-output-stale')).toBe(false);
+    expect(blocks[1]?.querySelector('.rl-output-label')?.textContent).toBe(
       'Output from the last run, stale',
     );
-    expect(blocks[0]?.classList.contains('rl-output-stale')).toBe(true);
+    expect(blocks[1]?.classList.contains('rl-output-stale')).toBe(true);
   });
 
   it('shows nothing where there is no file, no match, no host path, or the file is a Markdown one', async () => {
     expect(await show(QMD, {})).toHaveLength(0);
-    expect(await show(QMD.replace('sum(x)', 'mean(x)'), { [FILE]: frozen('x') })).toHaveLength(1);
-    expect(await show(QMD, { [FILE]: frozen('x') }, 'gfm')).toHaveLength(0);
+    expect(await show(QMD.replace('sum(x)', 'mean(x)'), { [FILE]: frozen() })).toHaveLength(1);
+    expect(await show(QMD, { [FILE]: frozen() }, 'gfm')).toHaveLength(0);
   });
 });

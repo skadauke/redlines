@@ -1,9 +1,8 @@
 // The outputs that come with a Quarto file, under the chunks that made them: read from the project's
-// freeze file, read-only, labeled as from the last run and as stale once the document has changed.
+// freeze file, read-only, labeled as from the last run, and as stale for a chunk whose code has changed since it ran.
 // The page has a folder in memory (`window.__redlinesFiles`) and a stand-in for picture files
 // (`window.__redlinesImages`); nothing runs.
 
-import { createHash } from 'node:crypto';
 import type { Page } from '@playwright/test';
 import { expect, test } from '../src/journey.ts';
 
@@ -74,10 +73,8 @@ const FROZEN = [
   '',
 ].join('\n');
 
-const md5 = (text: string) => createHash('md5').update(text).digest('hex');
-
 /** Puts the freeze file and its figure where the project keeps them. */
-async function freeze(page: Page, hash: string) {
+async function freeze(page: Page) {
   await page.evaluate(
     async ({ json }) => {
       window.__redlinesFiles!.write('_freeze/study/execute-results/html.json', json);
@@ -102,7 +99,7 @@ async function freeze(page: Page, hash: string) {
       const blob = await new Promise<Blob>((done) => canvas.toBlob((b) => done(b!), 'image/png'));
       window.__redlinesImages!.replace('_freeze/study/figure-html/fig-plot-output-1.png', blob);
     },
-    { json: JSON.stringify({ hash, result: { markdown: FROZEN } }) },
+    { json: JSON.stringify({ hash: 'kept as a note', result: { markdown: FROZEN } }) },
   );
   // The editor reads again when the window is looked at again.
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -111,7 +108,7 @@ async function freeze(page: Page, hash: string) {
 test.describe('the outputs that come with a Quarto file @views', () => {
   test('are shown under their chunks, from the last run', async ({ start }) => {
     const j = await start({ doc: DOC, file: 'study.qmd', tracking: false, view: 'clean' });
-    await freeze(j.page, md5(DOC));
+    await freeze(j.page);
     const blocks = j.page.locator('.rl-output');
     await expect(blocks).toHaveCount(2);
     await expect(blocks.first().locator('.rl-output-label')).toHaveText('Output from the last run');
@@ -130,11 +127,16 @@ test.describe('the outputs that come with a Quarto file @views', () => {
     await j.shot('quarto-outputs');
   });
 
-  test('say stale once the document is not the one that was run', async ({ start }) => {
-    const j = await start({ doc: DOC, file: 'study.qmd', tracking: false, view: 'clean' });
-    await freeze(j.page, md5(DOC + 'a change'));
-    const label = j.page.locator('.rl-output .rl-output-label').first();
-    await expect(label).toHaveText('Output from the last run, stale');
+  test('say stale for the chunk whose code has changed since it ran, and only for that one', async ({
+    start,
+  }) => {
+    const edited = DOC.replace('plot(x)', 'plot(x, col = 2)');
+    const j = await start({ doc: edited, file: 'study.qmd', tracking: false, view: 'clean' });
+    await freeze(j.page);
+    const labels = j.page.locator('.rl-output .rl-output-label');
+    await expect(labels).toHaveCount(2);
+    await expect(labels.first()).toHaveText('Output from the last run');
+    await expect(labels.nth(1)).toHaveText('Output from the last run, stale');
     await j.shot('quarto-outputs-stale');
   });
 
