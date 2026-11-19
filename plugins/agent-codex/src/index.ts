@@ -96,12 +96,15 @@ export interface CodexSetup {
 }
 
 /**
- * The models a run can be told to use (#530). Codex has no command that lists them, so these are
- * the ones it is documented to take; a run with none uses Codex's own default.
+ * The models a run can be told to use (#530). `codex debug models` lists them (Codex 0.166.0); these are
+ * the newest of each family, Sol, Astra, Terra and Luna (#1194), and a run with none uses Codex's
+ * own default.
  */
 export const CODEX_MODELS: readonly AgentModel[] = [
-  { id: 'gpt-5-codex', name: 'GPT-5 Codex' },
-  { id: 'gpt-5', name: 'GPT-5' },
+  { id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' },
+  { id: 'gpt-6.2-astra', name: 'GPT-6.2 Astra' },
+  { id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra' },
+  { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
 ];
 
 /**

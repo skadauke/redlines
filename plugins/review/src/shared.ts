@@ -293,11 +293,25 @@ export function describeChange(parsed: Parsed, change: MarkRange): string {
   return describePictureChange(old, added) ?? `Replaced ${quote(old)} with ${quote(added)}`;
 }
 
+/**
+ * `Moved block` for the suggestion of a move of blocks (format §3.14): an insertion and a deletion
+ * that name each other in `move`, and no row or column; null for any other.
+ */
+export function blockMoved(changes: readonly MarkRange[]): string | null {
+  const plain = (change: MarkRange) =>
+    change.entry.move !== undefined && !isRowInsertion(change) && !isColInsertion(change);
+  const insertion = changes.find((change) => change.kind === 'ins' && plain(change));
+  const deletion = changes.find((change) => change.kind === 'del' && plain(change));
+  return insertion && deletion && !rowsDone(changes) ? 'Moved block' : null;
+}
+
 /** What the changes of one suggestion did: `Inserted 2 rows` for rows inserted together, else each
  * change's words. */
 export function describeChanges(parsed: Parsed, changes: readonly MarkRange[]): string {
   const rows = changes.length > 1 ? rowsDone(changes) : null;
   if (rows !== null) return rows;
+  const moved = blockMoved(changes);
+  if (moved !== null) return moved;
   return changes.map((change) => describeChange(parsed, change)).join(' · ');
 }
 

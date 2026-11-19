@@ -21,6 +21,10 @@ use crate::project::PLAIN_ONLY;
 /// (#347). It is not Redlines' to declare, so the bundle only claims it.
 const PUBLIC_MARKDOWN: &str = "public.markdown";
 
+/// The type that Redlines declares for Quarto's `.qmd` files (#1177): its own identifier, under the
+/// app's, which the Quick Look extension lists (`QUARTO_TYPE` in `scripts/build-quicklook`).
+const QUARTO: &str = "md.redlines.quarto";
+
 /// The parts of an Info.plist that say which documents an app opens.
 #[derive(Debug, Deserialize)]
 struct Declared {
@@ -115,7 +119,7 @@ fn expected() -> Vec<Document> {
             &[],
         ),
         editor("R Markdown Document", "Alternate", &[], &["Rmd"]),
-        editor("Quarto Document", "Alternate", &[], &["qmd"]),
+        editor("Quarto Document", "Alternate", &[QUARTO], &[]),
     ]
     .into_iter()
     .chain(
@@ -124,6 +128,18 @@ fn expected() -> Vec<Document> {
         }),
     )
     .collect()
+}
+
+/// What the bundle exports: Quarto's type, which conforms to Markdown and to plain text.
+fn quarto_type() -> Type {
+    Type {
+        identifier: QUARTO.to_owned(),
+        conforms_to: vec![MARKDOWN.to_owned(), "public.plain-text".to_owned()],
+        tags: Tags {
+            extensions: vec!["qmd".to_owned()],
+            mime_types: vec![],
+        },
+    }
 }
 
 /// What the bundle imports: what Markdown is, for a macOS that doesn't say. The app owns no type,
@@ -144,7 +160,7 @@ fn the_bundle_declares_markdown_r_markdown_quarto_and_plain_text_for_editing() {
     let declared: Declared = read(&source());
     assert_eq!(declared.documents, expected());
     assert_eq!(declared.imported, [markdown_type()]);
-    assert_eq!(declared.exported, []);
+    assert_eq!(declared.exported, [quarto_type()]);
 }
 
 #[test]
@@ -164,6 +180,7 @@ fn every_document_the_app_opens_is_declared_and_no_other_file() {
             let imported = declared
                 .imported
                 .iter()
+                .chain(&declared.exported)
                 .find(|each| &each.identifier == name)
                 .unwrap_or_else(|| panic!("{name} is claimed but not imported"));
             offered.extend(
@@ -226,6 +243,25 @@ fn the_quick_look_preview_is_built_for_the_markdown_types_the_bundle_claims() {
 }
 
 #[test]
+fn the_quick_look_preview_lists_the_type_that_the_bundle_exports_for_quarto() {
+    let script = include_str!("../../scripts/build-quicklook");
+    let line = script
+        .lines()
+        .find(|line| line.starts_with("QUARTO_TYPE = "))
+        .expect("scripts/build-quicklook names QUARTO_TYPE");
+    assert_eq!(line.split('"').nth(1), Some(QUARTO));
+    // R Markdown keeps the type that macOS makes from its extension; `.qmd` has Redlines' own.
+    let none = script
+        .lines()
+        .find(|line| line.starts_with("EXTENSIONS_WITH_NO_TYPE = "))
+        .expect("scripts/build-quicklook lists EXTENSIONS_WITH_NO_TYPE");
+    assert_eq!(
+        none.split('"').skip(1).step_by(2).collect::<Vec<_>>(),
+        ["rmd"]
+    );
+}
+
+#[test]
 fn macos_is_told_why_when_it_asks_to_let_redlines_read_a_folder_it_protects() {
     // The question macOS puts when an agent Redlines started reads Desktop, Documents, Downloads,
     // a cloud folder or a volume, which it asks of Redlines, says why in these words.
@@ -263,6 +299,7 @@ fn the_file_holds_only_what_tauri_adds_to_its_own() {
         [
             "CFBundleDocumentTypes",
             "UTImportedTypeDeclarations",
+            "UTExportedTypeDeclarations",
             "NSDesktopFolderUsageDescription",
             "NSDocumentsFolderUsageDescription",
             "NSDownloadsFolderUsageDescription",
@@ -295,7 +332,7 @@ fn the_built_app_declares_them_and_keeps_what_tauri_writes() {
     let declared: Declared = read(&info);
     assert_eq!(declared.documents, expected());
     assert_eq!(declared.imported, [markdown_type()]);
-    assert_eq!(declared.exported, []);
+    assert_eq!(declared.exported, [quarto_type()]);
     // Merged into Tauri's own, not in place of it: this app, with its program.
     let keys: plist::Dictionary = read(&info);
     let config: serde_json::Value = serde_json::from_slice(

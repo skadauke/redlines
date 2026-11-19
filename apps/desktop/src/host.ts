@@ -684,6 +684,8 @@ export interface DevImages {
 declare global {
   interface Window {
     __redlinesImages?: DevImages;
+    /** The development page's folder in memory: puts a file beside the document (a journey's). */
+    __redlinesFiles?: { write(path: string, text: string): void };
   }
 }
 
@@ -709,6 +711,8 @@ function createBrowserHost(): Host {
       }
     : null;
   if (dev) window.__redlinesImages = dev;
+  if (import.meta.env.DEV)
+    window.__redlinesFiles = { write: (path, text) => void files.set(path, text) };
   const read = (path: string) => {
     const text = files.get(path);
     return text === undefined

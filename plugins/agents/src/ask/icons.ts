@@ -7,6 +7,8 @@ const ICONS = {
   /** Open in New Window: a window, and an arrow leaving it. */
   window:
     '<path d="M7.5 3.5h-3a1.6 1.6 0 0 0-1.6 1.6v6.4a1.6 1.6 0 0 0 1.6 1.6h6.4a1.6 1.6 0 0 0 1.6-1.6v-3"/><path d="M9.6 2.5h3.9v3.9M13.5 2.5L8 8"/>',
+  /** Open in Chat: the sidebar's column, with a message in it. */
+  chat: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.8"/><path d="M6.2 2.5v11M8.4 6h2.6M8.4 8.6h1.8"/>',
   /** Copy: two sheets. */
   copy: '<rect x="5.6" y="5.6" width="8" height="8" rx="1.6"/><path d="M10.4 5.6V4.1a1.6 1.6 0 0 0-1.6-1.6H4.1A1.6 1.6 0 0 0 2.5 4.1v4.7a1.6 1.6 0 0 0 1.6 1.6h1.5"/>',
 } as const;

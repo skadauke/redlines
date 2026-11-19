@@ -56,7 +56,29 @@ export interface SidebarOptions {
   onResize?(width: number): void;
   /** The edge was dragged shut: close the sidebar, as ⌃⌘S does. */
   onClose?(): void;
+  /**
+   * The chat panel (#1194): with it the sidebar has a second view, Chat, beside Files, switched by
+   * a control at its head. Without it the sidebar has only the file list, as it did.
+   */
+  chat?: HTMLElement;
+  /** The view changed, from the control or from `setView`. */
+  onView?(view: SidebarView): void;
+  /**
+   * The foot (#1194): the person's name, a settings button and a report-a-bug button. Without it
+   * the sidebar has no foot.
+   */
+  foot?: {
+    /** The name to show, as the app knows the person. */
+    name(): string;
+    /** Opens Preferences. */
+    settings(): void;
+    /** Opens the problem report. */
+    report(): void;
+  };
 }
+
+/** What the sidebar lists: the project's files, or the document's chat. */
+export type SidebarView = 'files' | 'chat';
 
 /** A saved document, and the project it is in. */
 export interface SidebarDocument {
@@ -66,6 +88,11 @@ export interface SidebarDocument {
 
 export interface Sidebar {
   setOpen(open: boolean): void;
+  /** Shows the file list or the chat (ignored without a chat panel). */
+  setView(view: SidebarView): void;
+  readonly view: SidebarView;
+  /** Draws the foot's name again, after Preferences changed it. */
+  refreshFoot(): void;
   /** The width to draw, in CSS px (a stored one is made right). */
   setWidth(width: number): void;
   /**
@@ -123,7 +150,104 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   label.className = 'rl-sidebar-label';
   const list = document.createElement('ul');
   list.className = 'rl-sidebar-list';
-  aside.append(head, label, list);
+  aside.append(head);
+  const tabs = document.createElement('div');
+  const filesTab = document.createElement('button');
+  const chatTab = document.createElement('button');
+  let view: SidebarView = 'files';
+  if (options.chat) {
+    tabs.className = 'rl-sidebar-tabs';
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Sidebar');
+    for (const [button, name, which] of [
+      [filesTab, 'Files', 'files'],
+      [chatTab, 'Chat', 'chat'],
+    ] as const) {
+      button.type = 'button';
+      button.className = 'rl-sidebar-tab';
+      button.setAttribute('role', 'tab');
+      button.id = `rl-sidebar-tab-${which}`;
+      button.setAttribute('aria-controls', `rl-sidebar-panel-${which}`);
+      button.textContent = name;
+      button.addEventListener('click', () => show(which));
+      tabs.append(button);
+    }
+    tabs.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      show(view === 'files' ? 'chat' : 'files', true);
+    });
+    aside.append(tabs);
+  }
+  aside.append(label, list);
+  if (options.chat) {
+    // Each tab names the panel it shows, and each panel the tab that shows it.
+    list.id = 'rl-sidebar-panel-files';
+    list.setAttribute('role', 'tabpanel');
+    list.setAttribute('aria-labelledby', 'rl-sidebar-tab-files');
+    options.chat.id = 'rl-sidebar-panel-chat';
+    options.chat.setAttribute('role', 'tabpanel');
+    options.chat.setAttribute('aria-labelledby', 'rl-sidebar-tab-chat');
+    options.chat.hidden = true;
+    aside.append(options.chat);
+  }
+  const foot = document.createElement('div');
+  const footName = document.createElement('button');
+  if (options.foot) {
+    foot.className = 'rl-sidebar-foot';
+    footName.type = 'button';
+    footName.className = 'rl-sidebar-foot-name';
+    footName.title = 'Your name, in Preferences';
+    footName.addEventListener('click', () => options.foot?.settings());
+    const settings = document.createElement('button');
+    settings.type = 'button';
+    settings.className = 'rl-sidebar-foot-button';
+    settings.title = 'Preferences';
+    settings.setAttribute('aria-label', 'Preferences');
+    settings.append(icon('general', 16));
+    settings.addEventListener('click', () => options.foot?.settings());
+    const report = document.createElement('button');
+    report.type = 'button';
+    report.className = 'rl-sidebar-foot-button';
+    report.title = 'Report a problem';
+    report.setAttribute('aria-label', 'Report a problem');
+    report.append(icon('bug', 16));
+    report.addEventListener('click', () => options.foot?.report());
+    foot.append(footName, settings, report);
+    aside.append(foot);
+  }
+  const drawFoot = () => {
+    if (!options.foot) return;
+    const name = options.foot.name();
+    const initial = document.createElement('span');
+    initial.className = 'rl-sidebar-foot-initial';
+    initial.textContent = [...name.trim()][0]?.toUpperCase() ?? '';
+    initial.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.className = 'rl-sidebar-foot-text';
+    text.textContent = name;
+    footName.replaceChildren(initial, text);
+    footName.setAttribute('aria-label', `${name}: Preferences`);
+  };
+  /** Shows a view: the file list under its label, or the chat. */
+  function show(next: SidebarView, focus = false): void {
+    if (!options.chat) return;
+    view = next;
+    label.hidden = list.hidden = next !== 'files';
+    options.chat.hidden = next !== 'chat';
+    for (const [button, which] of [
+      [filesTab, 'files'],
+      [chatTab, 'chat'],
+    ] as const) {
+      const on = which === next;
+      button.setAttribute('aria-selected', String(on));
+      button.tabIndex = on ? 0 : -1;
+      if (on && focus) button.focus();
+    }
+    options.onView?.(next);
+  }
+  show('files');
+  drawFoot();
   const resize = createSidebarResize({
     aside,
     app: container,
@@ -371,6 +495,13 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     setWidth(width) {
       resize.setWidth(width);
     },
+    setView(next) {
+      if (next !== view) show(next);
+    },
+    get view() {
+      return view;
+    },
+    refreshFoot: drawFoot,
     setOpen(next) {
       if (next === open) return;
       open = next;

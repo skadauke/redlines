@@ -11,6 +11,7 @@ import { Untrackable } from './widen.ts';
 import { expectEveryOrderRead, expectSound } from './oracle.ts';
 import { parse } from './parse.ts';
 import { ada, bo, bodyOf, context, file, problemsOf, thread } from './test-helpers.ts';
+import { trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** A deterministic random source of its own, for ids. */
@@ -247,5 +248,91 @@ describe('a block taken from between a line of text and a list (#586, block-move
     );
     expect(viewOf(out)).toContain('para\n- item one');
     expectEveryOrderRead('html block down', out);
+  });
+});
+
+describe('a move of blocks is written as a move (§3.14, #1201)', () => {
+  const BASE = file('One.\n\nTwo.\n\nThree.\n\nFour.');
+
+  it('links the insertion and the deletion with `move`, both ways, in one group', () => {
+    const after = moved(BASE, 'Two.', false);
+    const marks = parse(after).marks;
+    const insertion = marks.find((mark) => mark.kind === 'ins');
+    const deletion = marks.find((mark) => mark.kind === 'del');
+    expect(insertion?.entry.move).toBe(deletion?.id);
+    expect(deletion?.entry.move).toBe(insertion?.id);
+    expect(insertion?.entry.group).toBe(deletion?.entry.group);
+    expect(insertion?.entry.group).toBeDefined();
+  });
+
+  it('reads alike in every order of decisions, and accepts or rejects whole', () => {
+    for (const [at, up] of [
+      ['Two.', false],
+      ['Three.', true],
+      ['One.', false],
+    ] as const) {
+      const after = moved(BASE, at, up);
+      expectEveryOrderRead(`move ${at}`, after);
+    }
+  });
+
+  it('is a move in a list and in a quote too', () => {
+    for (const doc of ['- a\n- b\n- c', '> a\n>\n> b\n>\n> c']) {
+      const after = moved(file(doc), 'b', true);
+      const marks = parse(after).marks;
+      expect(
+        marks
+          .filter((mark) => mark.kind !== 'split')
+          .every((mark) => mark.entry.move !== undefined),
+      ).toBe(true);
+      expectEveryOrderRead('move in a container', after);
+    }
+  });
+});
+
+describe('a link whose partner is gone (§3.14, #1201 review)', () => {
+  const BASE = file('One.\n\nTwo.\n\nThree.\n\nFour.');
+  const dangling = (text: string) => {
+    const parsed = parse(text);
+    return parsed.marks.filter(
+      (mark) =>
+        mark.entry.move !== undefined &&
+        !parsed.marks.some((other) => other.id === mark.entry.move),
+    );
+  };
+
+  it('moving the same block again leaves no link to the first insertion', () => {
+    const once = moved(BASE, 'Two.', false);
+    expect(dangling(once)).toEqual([]);
+    const twice = moved(once, 'Two.', false);
+    expect(dangling(twice)).toEqual([]);
+    expectEveryOrderRead('moved twice', twice);
+  });
+
+  it('deleting the moved block at its new place leaves the old deletion with no link', () => {
+    const once = moved(BASE, 'Two.', false);
+    const view = newestView(once).text;
+    const at = view.lastIndexOf('Two.');
+    const done = trackedEdits(
+      once,
+      [{ from: at, to: at + 4, insert: '' }],
+      context(ada, ['k3x9', 'm4yz', 'p5qr']),
+    );
+    const after = applyChanges(once, done.changes);
+    expect(dangling(after)).toEqual([]);
+    expectEveryOrderRead('moved then deleted', after);
+  });
+
+  it('a deletion typed beside the old place stays a deletion of its own', () => {
+    const once = moved(BASE, 'Two.', false);
+    const view = newestView(once).text;
+    const at = view.indexOf('One.') + 'One.'.length;
+    const done = trackedEdits(
+      once,
+      [{ from: at - 1, to: at, insert: '' }],
+      context(ada, ['k3x9', 'm4yz', 'p5qr']),
+    );
+    const after = applyChanges(once, done.changes);
+    expect(parse(after).marks.filter((mark) => mark.kind === 'del').length).toBe(2);
   });
 });

@@ -33,6 +33,9 @@ import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
 import { startsFilter } from './filter-key.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
+import { runWelcome, type InstallResult } from '../onboarding.ts';
+import { noteFinished } from '../onboarding-state.ts';
+import { reportWelcome, takeWelcomeRequest, watchWelcomeRequests } from '../welcome-request.ts';
 import { devGuided } from './dev-openclaw.ts';
 import { createSetupRegistry } from './setup-registry.ts';
 import { forgetShortcutsFilter } from './shortcuts-pane.ts';
@@ -54,6 +57,7 @@ import '@redlines/themes/tokens.css';
 import '../zoom.css';
 import './preferences.css';
 import './openclaw-sheet.css';
+import '../ui/welcome-sheet.css';
 import '../ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
@@ -479,3 +483,68 @@ if (isTauri) {
   await document.fonts.ready;
   await getCurrentWindow().show();
 }
+
+/**
+ * The Welcome mode (#1206, design §5.11a): the first three screens of the first-launch onboarding,
+ * over this window, asked for by the document window through the page's storage (welcome-request.ts).
+ * It is here because this window holds the app's install commands; the document window has none.
+ * Its end is left for the document window, which then runs the tour.
+ */
+let welcoming = false;
+async function startWelcome(): Promise<void> {
+  if (welcoming) return;
+  welcoming = true;
+  try {
+    const pretend = async (line: string): Promise<InstallResult> => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return { ok: true, line };
+    };
+    const installs = isTauri
+      ? (await import('../onboarding-tauri.ts')).tauriInstalls
+      : {
+          skills: () => pretend('Installed for Claude Code and Codex.'),
+          quickLook: () => pretend('System Settings is open: turn on Redlines under Quick Look.'),
+          commandLine: () => pretend('Installed: type redlines in Terminal.'),
+        };
+    const found = async () => {
+      const states = await Promise.all(
+        providers.map(async (provider) => {
+          const state = await (!isTauri && import.meta.env.DEV
+            ? import('./dev-detect.ts').then(({ devDetect }) => devDetect(provider.id))
+            : provider.detect());
+          return { provider, state };
+        }),
+      );
+      return states
+        .filter(({ state }) => state.found)
+        .map(({ provider }) => ({
+          id: provider.id,
+          name: provider.id === 'claude' ? 'Claude Code' : provider.name,
+        }));
+    };
+    const ended = await runWelcome({
+      container: document.body,
+      identity: settings.identity ?? git ?? { name: '', handle: '' },
+      saveIdentity: (name, handle) => {
+        settings = updateSettings({ identity: { name, handle } });
+      },
+      agents: found,
+      defaultAgent: settings.defaultAgent,
+      saveDefaultAgent: (id) => {
+        settings = updateSettings({ defaultAgent: id });
+      },
+      quickLook: hasQuickLook || !isTauri,
+      install: installs,
+      restoreFocus: () => {},
+    });
+    // The onboarding is done with its questions, and the document window runs the tour.
+    noteFinished(localStorage);
+    reportWelcome(ended);
+  } finally {
+    welcoming = false;
+  }
+}
+if (takeWelcomeRequest() || (import.meta.env.DEV && location.search.includes('welcome'))) {
+  void startWelcome();
+}
+watchWelcomeRequests(() => void startWelcome());
