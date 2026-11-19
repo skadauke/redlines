@@ -4,6 +4,7 @@
 
 import type {
   GatewayProbe,
+  InstallState,
   NewOpenClawConnection,
   OpenClawConnection,
   TailscaleStatus,
@@ -11,13 +12,20 @@ import type {
 import { invoke } from '@tauri-apps/api/core';
 
 /**
- * This Mac's Tailscale (agents/tailscale.rs): looking changes nothing; the app and the download
- * page only open.
+ * This Mac's Tailscale: looking (agents/tailscale.rs) changes nothing. The rest changes it, and
+ * is each a button of the setup window, pressed by the person (agents/tailscale_setup.rs):
+ * installing it (the package from Tailscale, checked for its signature and Apple's notarization,
+ * installed with the system's own administrator prompt, never a password field of ours; or the App
+ * Store page), opening its app, restarting its app, and starting its sign-in.
  */
 export const tailscale = {
   status: () => invoke<TailscaleStatus>('tailscale_status'),
   openApp: () => invoke<void>('tailscale_open_app'),
-  download: () => invoke<void>('tailscale_download'),
+  install: () => invoke<void>('tailscale_install'),
+  installState: () => invoke<InstallState>('tailscale_install_state'),
+  openAppStore: () => invoke<void>('tailscale_open_app_store'),
+  restartApp: () => invoke<void>('tailscale_restart_app'),
+  signIn: (url: string | null) => invoke<void>('tailscale_sign_in', { url }),
 };
 
 /**

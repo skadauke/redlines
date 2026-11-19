@@ -1,11 +1,11 @@
 //! Whether this Mac is on a Tailscale network, and which other computers it can see: the first
 //! screen of connecting an OpenClaw agent on another computer (docs/research/openclaw-connection.md).
 //!
-//! Redlines only *looks*. It finds Tailscale's command, runs `status --json` (one fixed line, with
+//! This file only *looks*. It finds Tailscale's command, runs `status --json` (one fixed line, with
 //! `TAILSCALE_BE_CLI=1` so that the app's own window doesn't open), and turns the answer into one
-//! state and a list of computers. It never starts, stops, signs in or changes Tailscale: the person
-//! does that in Tailscale's own app, and Redlines notices. The sign-in address Tailscale gives is
-//! passed on as it is, to be opened by the person, and nothing is ever kept.
+//! state and a list of computers. Changing Tailscale (installing it, restarting its app, starting
+//! its sign-in) is `tailscale_setup.rs`, only from the OpenClaw setup window and only when the
+//! person asks. The sign-in address Tailscale gives is passed on as it is, and nothing is kept.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -27,10 +27,8 @@ const PLACES: &[&str] = &[
     "/opt/homebrew/bin/tailscale",
 ];
 
-/// The app, for `open`, and the page to download it from. Both are fixed: no page text reaches
-/// either.
+/// The app, for `open`. It is fixed: no page text reaches it.
 const APP: &str = "/Applications/Tailscale.app";
-const DOWNLOAD: &str = "https://tailscale.com/download/mac";
 
 /// The one thing this Mac's Tailscale is, for the screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +86,8 @@ pub struct Status {
     pub blocked: bool,
     /// What Tailscale's health check said, for Details.
     pub health: Vec<String>,
+    /// Where in System Settings macOS asks to allow Tailscale's network extension (this Mac's).
+    pub allow_in: String,
 }
 
 impl Status {
@@ -102,6 +102,7 @@ impl Status {
             peers: Vec::new(),
             blocked: false,
             health: Vec::new(),
+            allow_in: String::new(),
         }
     }
 }
@@ -188,7 +189,7 @@ fn says_unreachable(line: &str) -> bool {
 }
 
 /// Whether an address is a secure page of Tailscale's own, the only kind a sign-in button opens.
-fn is_tailscale_address(url: &str) -> bool {
+pub(super) fn is_tailscale_address(url: &str) -> bool {
     url.strip_prefix("https://")
         .and_then(|rest| rest.split(['/', '?', '#']).next())
         .is_some_and(|host| host == "tailscale.com" || host.ends_with(".tailscale.com"))
@@ -263,6 +264,7 @@ pub fn parse_status(json: &str, program: Option<String>) -> Option<Status> {
         peers,
         blocked,
         health,
+        allow_in: String::new(),
     })
 }
 
@@ -359,7 +361,7 @@ fn run_status(program: &Path, timeout: Duration) -> Ran {
     }
 }
 
-fn places() -> Vec<PathBuf> {
+pub(super) fn places() -> Vec<PathBuf> {
     let mut places: Vec<PathBuf> = PLACES.iter().map(PathBuf::from).collect();
     if let Some(home) = std::env::var_os("HOME") {
         places.insert(
@@ -370,16 +372,56 @@ fn places() -> Vec<PathBuf> {
     places
 }
 
+/// Where Tailscale's app may be: in Applications, or in the person's own.
+pub(super) fn app_places() -> Vec<PathBuf> {
+    let mut apps = vec![PathBuf::from(APP)];
+    if let Some(home) = std::env::var_os("HOME") {
+        apps.push(Path::new(&home).join("Applications/Tailscale.app"));
+    }
+    apps
+}
+
+/// Whether Tailscale's app is installed in either place.
+pub(super) fn app_installed_here() -> bool {
+    app_places().iter().any(|app| app.is_dir())
+}
+
+/// Where, in System Settings, macOS asks the person to allow Tailscale's network extension: the
+/// pane moved in macOS 15.
+pub fn allow_location(major: u32) -> &'static str {
+    if major >= 15 {
+        "System Settings › General › Login Items & Extensions › Network Extensions"
+    } else {
+        "System Settings › Privacy & Security, where it says Tailscale was blocked"
+    }
+}
+
+fn macos_major() -> u32 {
+    Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .and_then(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .split('.')
+                .next()
+                .and_then(|major| major.parse().ok())
+        })
+        .unwrap_or(15)
+}
+
 /// What this Mac's Tailscale is, for the screen. Changes nothing.
 #[tauri::command(async)]
 pub fn tailscale_status() -> Status {
-    check(&places(), Path::new(APP), |program| {
+    let mut status = check(&places(), Path::new(APP), |program| {
         run_status(program, STATUS_TIMEOUT)
-    })
+    });
+    status.allow_in = allow_location(macos_major()).to_string();
+    status
 }
 
-/// Opens Tailscale's app, so that the person can turn it on or sign in. It never starts or stops
-/// Tailscale itself.
+/// Opens Tailscale's app, so that it can start, or the person can turn it on.
 #[tauri::command(async)]
 pub fn tailscale_open_app() -> Result<(), String> {
     let status = Command::new("open")
@@ -390,20 +432,6 @@ pub fn tailscale_open_app() -> Result<(), String> {
         Ok(())
     } else {
         Err("Couldn’t open Tailscale. Open it from Applications.".to_string())
-    }
-}
-
-/// Opens Tailscale's download page in the browser.
-#[tauri::command(async)]
-pub fn tailscale_download() -> Result<(), String> {
-    let status = Command::new("open")
-        .arg(DOWNLOAD)
-        .status()
-        .map_err(|error| format!("Couldn’t open the page: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Couldn’t open the page. Go to tailscale.com/download.".to_string())
     }
 }
 

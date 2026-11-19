@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "openclaw-setup",
-  "description": "What the OpenClaw setup window may use: Tauri's core defaults, which let it hear that it is being closed; showing itself once its page is styled, being dragged by its title bar, and closing itself when the setup is done or cancelled (and destroying itself once what the setup began is undone). It has no file permissions at all. The app's own commands are granted one by one (build.rs lists them all), those its code calls and no others, as src/command-permissions.node.test.ts checks: looking at this Mac's Tailscale (read only: whether it is installed, signed in and sees other computers), opening its app or its download page, whether a Gateway answers at an address (the probe sends nothing), this Mac's name, and adding, removing and connecting an OpenClaw connection (adding one is a question of the system's, the window gives only the connection's name and the setup code the person pasted, and no secret is ever returned). Preferences is granted none of the Tailscale commands, the probe or the adding of a connection.",
+  "description": "What the OpenClaw setup window may use: Tauri's core defaults, which let it hear that it is being closed; showing itself once its page is styled, being dragged by its title bar, and closing itself when the setup is done or cancelled (and destroying itself once what the setup began is undone). It has no file permissions at all. The app's own commands are granted one by one (build.rs lists them all), those its code calls and no others, as src/command-permissions.node.test.ts checks: looking at this Mac's Tailscale (read only: whether it is installed, signed in and sees other computers), installing it (the package from Tailscale, checked for Tailscale’s signature and Apple’s notarization before the system’s own administrator prompt installs it, or the App Store page for a person who is not an administrator), opening its app, restarting its app, starting its sign-in, whether a Gateway answers at an address (the probe sends nothing), this Mac's name, and adding, removing and connecting an OpenClaw connection (adding one is a question of the system's, the window gives only the connection's name and the setup code the person pasted, and no secret is ever returned). Preferences is granted none of the Tailscale commands, the probe or the adding of a connection.",
   "windows": ["openclaw-setup"],
   "permissions": [
     "core:default",
@@ -19,8 +19,12 @@
     "allow-openclaw-node-stop",
     "allow-openclaw-this-mac",
     "allow-openclaw-use-token",
-    "allow-tailscale-download",
+    "allow-tailscale-install",
+    "allow-tailscale-install-state",
     "allow-tailscale-open-app",
+    "allow-tailscale-open-app-store",
+    "allow-tailscale-restart-app",
+    "allow-tailscale-sign-in",
     "allow-tailscale-status"
   ]
 }

@@ -562,9 +562,13 @@ pub fn run() {
             agents::openclaw_node_stop,
             agents::openclaw_this_mac,
             agents::openclaw_use_token,
-            agents::tailscale::tailscale_download,
             agents::tailscale::tailscale_open_app,
-            agents::tailscale::tailscale_status
+            agents::tailscale::tailscale_status,
+            agents::tailscale_setup::tailscale_install,
+            agents::tailscale_setup::tailscale_install_state,
+            agents::tailscale_setup::tailscale_open_app_store,
+            agents::tailscale_setup::tailscale_restart_app,
+            agents::tailscale_setup::tailscale_sign_in
         ])
         .on_page_load(|webview, payload| {
             // A window's page that loads again, as a reload does, watches what it needs itself.

@@ -76,6 +76,65 @@ test.describe('the OpenClaw setup window @views', () => {
     await shot('setup-window-failures');
   });
 
+  // Tailscale on this Mac: each check turns green or acts, in plain words (the page's scripted
+  // answers; the wait screens take what was done as a query, macSetupFor in dev-openclaw.ts).
+  test('Tailscale on this Mac: every check and what it offers', async ({ start }) => {
+    const j = await start({ doc: 'Hello\n', tracking: false });
+    const page = await j.page.context().newPage();
+    await page.setViewportSize({ width: 780, height: 720 });
+    await page.emulateMedia({ colorScheme: j.options.scheme });
+    const shot = (name: string) => writeShot(page, j.info, shotName(name, j.options));
+    const sheet = page.locator('.rl-oc-sheet');
+    const states: [string, string, RegExp, string[]][] = [
+      [
+        'missing',
+        'ts=missing',
+        /checks that Tailscale signed it and Apple notarized it/,
+        ['Install Tailscale', 'Get it from the App Store instead'],
+      ],
+      ['installing', 'ts=missing&mac=installing', /Downloading Tailscale 1.80.2/, []],
+      [
+        'app-store',
+        'ts=missing&mac=app-store',
+        /aren’t an administrator/,
+        ['Open the App Store again'],
+      ],
+      [
+        'install-failed',
+        'ts=missing&mac=install-failed',
+        /isn’t signed by Tailscale/,
+        ['Try again'],
+      ],
+      ['off', 'ts=off', /turned off or not started/, ['Open Tailscale']],
+      ['waiting', 'ts=off&mac=waiting', /Waiting for Tailscale to start/, []],
+      ['allow', 'ts=off&mac=allow', /Network Extensions/, ['Open Tailscale', 'Restart Tailscale']],
+      ['sign-in', 'ts=signed-out', /Sign in with the same account/, ['Sign in to Tailscale']],
+      [
+        'signing-in',
+        'ts=signed-out&mac=signing-in',
+        /finish signing in/,
+        ['Open the sign-in page again'],
+      ],
+      [
+        'hung',
+        'ts=signed-out&mac=hung',
+        /still doesn’t start/,
+        ['Restart Tailscale', 'Sign in to Tailscale'],
+      ],
+      ['ready', 'ts=ready', /Can see 3 other computers/, []],
+    ];
+    for (const [name, query, words, buttons] of states) {
+      await page.goto(`/openclaw-setup.html?oc=mac&${query}`);
+      await expect(sheet, name).toContainText(words);
+      for (const label of buttons) {
+        await expect(sheet.getByRole('button', { name: label }), `${name}: ${label}`).toBeVisible();
+      }
+      // There is no Download button anywhere.
+      await expect(sheet.getByRole('button', { name: /Download/ })).toHaveCount(0);
+      await shot(`setup-tailscale-${name}`);
+    }
+  });
+
   test('Preferences › Agents has the card and a button for the setup, and no sheet', async ({
     start,
   }) => {

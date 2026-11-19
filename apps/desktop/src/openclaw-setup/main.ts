@@ -10,7 +10,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { copyText } from '../copy-text.ts';
 import { currentIdentity } from '../identity.ts';
 import { openClawConnections, openClawNode } from '../openclaw-commands.ts';
-import { devGuided, failureGallery } from '../preferences/dev-openclaw.ts';
+import { devGuided, failureGallery, macSetupFor } from '../preferences/dev-openclaw.ts';
 import { loadSettings } from '../settings.ts';
 import { followTheme } from '../window-theme.ts';
 import { gateway, openClawSetup, tailscale } from './commands.ts';
@@ -53,9 +53,11 @@ async function appDeps(): Promise<SheetDeps> {
     tailscale: {
       status: tailscale.status,
       openApp: tailscale.openApp,
-      download: tailscale.download,
-      // Tailscale's own app opens its sign-in page, so no address passes through this window.
-      signIn: tailscale.openApp,
+      install: tailscale.install,
+      installState: tailscale.installState,
+      openAppStore: tailscale.openAppStore,
+      restartApp: tailscale.restartApp,
+      signIn: tailscale.signIn,
     },
     probe: gateway.probe,
     copy: copyText,
@@ -92,6 +94,7 @@ async function run(): Promise<void> {
       ? {
           start: {
             step: screen as SheetStep,
+            macSetup: macSetupFor(query),
             ...(query.get('where') === 'this-mac' ? { where: 'this-mac' as const } : {}),
             ...(screen === 'computer' || screen === 'prompt'
               ? { computer: 'studio-mini.yak-bebop.ts.net' }

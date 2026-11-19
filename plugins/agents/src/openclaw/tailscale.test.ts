@@ -20,6 +20,7 @@ const base: TailscaleStatus = {
   peers: [peer('mini', 'macOS', true), peer('old', 'windows', false), peer('srv', 'linux', true)],
   blocked: false,
   health: [],
+  allow_in: 'System Settings',
 };
 const of = (change: Partial<TailscaleStatus>) => tailscaleView({ ...base, ...change });
 
@@ -36,11 +37,11 @@ describe('tailscaleView', () => {
     expect(one.checks[2].detail).toBe('1 is on now');
   });
 
-  it('a Mac with no Tailscale offers its download, and the others wait', () => {
+  it('a Mac with no Tailscale offers to install it, and the others wait', () => {
     const view = of({ state: 'missing', peers: [], program: null });
     expect(view.ready).toBe(false);
     expect(view.failure).toBe('tailscale-missing');
-    expect(view.action).toBe('download');
+    expect(view.action).toBe('install');
     expect(view.checks.map((check) => check.mark)).toEqual(['no', 'wait', 'wait']);
   });
 

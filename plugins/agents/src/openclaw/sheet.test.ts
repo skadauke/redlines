@@ -4,6 +4,7 @@ import { FAILURE_IDS } from './failures.ts';
 import type { GatewayProbe } from './gateway.ts';
 import type { NodeStatus } from './node.ts';
 import { openSheet, type Sheet, type SheetDeps, type SheetOptions } from './sheet.ts';
+import type { InstallState } from './mac-setup.ts';
 import type { TailscaleStatus } from './tailscale.ts';
 
 const peer = (name: string, online: boolean) => ({
@@ -25,6 +26,7 @@ const READY: TailscaleStatus = {
   peers: [peer('studio-mini', true), peer('old-laptop', false)],
   blocked: false,
   health: [],
+  allow_in: 'System Settings › General › Login Items & Extensions › Network Extensions',
 };
 
 const CODE = 'setup-code-1234567890';
@@ -40,6 +42,9 @@ interface World {
   removed: string[];
   addFails: { current: string | null };
   opened: string[];
+  /** What `installState` says. */
+  install: { current: InstallState };
+  signedIn: (string | null)[];
 }
 
 function world(): World {
@@ -59,6 +64,8 @@ function world(): World {
     removed: [],
     addFails: { current: null },
     opened: [],
+    install: { current: { phase: 'idle', step: '' } },
+    signedIn: [],
     deps: undefined as unknown as SheetDeps,
   };
   w.deps = {
@@ -71,11 +78,23 @@ function world(): World {
         w.opened.push('app');
         return Promise.resolve();
       },
-      download: () => {
-        w.opened.push('download');
+      install: () => {
+        w.opened.push('install');
         return Promise.resolve();
       },
-      signIn: () => Promise.resolve(),
+      installState: () => Promise.resolve(w.install.current),
+      openAppStore: () => {
+        w.opened.push('app-store');
+        return Promise.resolve();
+      },
+      restartApp: () => {
+        w.opened.push('restart');
+        return Promise.resolve();
+      },
+      signIn: (url) => {
+        w.signedIn.push(url);
+        return Promise.resolve();
+      },
     },
     probe: () => Promise.resolve(w.probe.current),
     copy: (text) => {
@@ -96,7 +115,8 @@ function world(): World {
       status: () => Promise.resolve(w.node.current),
       stop: () => Promise.resolve(),
     },
-    poll: { tailscale: 15, node: 15 },
+    poll: { tailscale: 15, node: 15, install: 15 },
+    macTimes: { extension: 60, signIn: 60 },
   };
   return w;
 }
@@ -165,7 +185,7 @@ describe('the setup sheet', () => {
     expect(root.isConnected).toBe(false);
   });
 
-  it('a Mac with no Tailscale says so, offers the download, and goes on by itself when it is there', async () => {
+  it('a Mac with no Tailscale offers to install it, and goes on by itself when it is there', async () => {
     const w = world();
     w.tailscale.current = { ...READY, state: 'missing', peers: [], program: null };
     const root = open(w);
@@ -173,12 +193,18 @@ describe('the setup sheet', () => {
     click(root, 'Continue');
     await tick();
     expect(step(root)).toBe('mac');
-    expect(root.querySelector('[data-failure="tailscale-missing"]')).not.toBeNull();
+    expect(text(root)).toContain('Tailscale is not on this Mac');
+    expect(text(root)).toContain('checks that Tailscale signed it and Apple notarized it');
+    expect(text(root)).toContain('Redlines never sees the password');
     const next = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Continue');
     expect(next?.disabled).toBe(true);
-    click(root, 'Download Tailscale');
-    expect(w.opened).toEqual(['download']);
-    // The person installs it and signs in; Redlines notices by itself.
+    // Nothing is downloaded: there is no Download button, and nothing ran before the click.
+    expect(() => click(root, /Download/)).toThrow();
+    expect(w.opened).toEqual([]);
+    click(root, 'Install Tailscale');
+    await tick();
+    expect(w.opened).toEqual(['install']);
+    // The person signs in; Redlines notices by itself.
     w.tailscale.current = READY;
     await tick(80);
     expect(text(root)).toContain('This Mac is on your Tailscale network');
@@ -193,9 +219,128 @@ describe('the setup sheet', () => {
     w.tailscale.current = { ...READY, state: 'off', peers: [] };
     const root = open(w, { start: { step: 'mac' } });
     await tick();
-    expect(root.querySelector('[data-failure="tailscale-off"]')).not.toBeNull();
+    expect(text(root)).toContain('Tailscale is turned off on this Mac');
+    expect(w.opened).toEqual([]);
     click(root, 'Open Tailscale');
     expect(w.opened).toEqual(['app']);
+  });
+
+  describe('Tailscale on this Mac, done by the setup when the person asks', () => {
+    const missing: TailscaleStatus = { ...READY, state: 'missing', peers: [], program: null };
+    const signedOut: TailscaleStatus = { ...READY, state: 'signed-out', peers: [], account: null };
+
+    it('installs, says each step, restarts the app once that opened too early, and signs in', async () => {
+      const w = world();
+      w.tailscale.current = missing;
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Install Tailscale');
+      w.install.current = {
+        phase: 'working',
+        step: 'Downloading Tailscale 1.80.2 (about 29 MB) from pkgs.tailscale.com…',
+      };
+      await tick();
+      expect(text(root)).toContain('Downloading Tailscale 1.80.2');
+      expect(() => click(root, 'Install Tailscale')).toThrow();
+      w.install.current = { phase: 'done', step: 'Tailscale is installed.' };
+      // The installer opened the app, which answers but is signed out: it is restarted, once.
+      w.tailscale.current = signedOut;
+      await tick(80);
+      expect(w.opened).toEqual(['install', 'restart']);
+      await tick(80);
+      expect(w.opened).toEqual(['install', 'restart']);
+      expect(text(root)).toContain('Sign in with the same account as your other computer');
+      expect(w.signedIn).toEqual([]);
+      click(root, 'Sign in to Tailscale');
+      expect(w.signedIn).toEqual([null]);
+    });
+
+    it('sends a person who is not an administrator to the App Store, and waits for it', async () => {
+      const w = world();
+      w.tailscale.current = missing;
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Install Tailscale');
+      w.install.current = {
+        phase: 'app-store',
+        step: 'You aren’t an administrator of this Mac. The App Store is open on Tailscale.',
+      };
+      await tick();
+      expect(text(root)).toContain('The App Store is open on Tailscale');
+      expect(text(root)).toContain('Waiting for Tailscale to arrive');
+      click(root, 'Open the App Store again');
+      expect(w.opened).toContain('app-store');
+      // Installed from the App Store, it is turned off until opened: not a fresh install here.
+      w.tailscale.current = { ...READY, state: 'off', peers: [] };
+      await tick(80);
+      expect(w.opened).not.toContain('restart');
+      expect(text(root)).toContain('Open Tailscale');
+    });
+
+    it('says plainly why an install stopped, and offers to try again or the App Store', async () => {
+      const w = world();
+      w.tailscale.current = missing;
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Install Tailscale');
+      w.install.current = {
+        phase: 'failed',
+        step: 'The download isn’t signed by Tailscale, so it wasn’t installed.',
+      };
+      await tick();
+      expect(text(root)).toContain('isn’t signed by Tailscale, so it wasn’t installed');
+      click(root, 'Get it from the App Store instead');
+      expect(w.opened).toContain('app-store');
+      click(root, 'Try again');
+      await tick();
+      expect(w.opened.filter((one) => one === 'install')).toHaveLength(2);
+    });
+
+    it('says where to allow the network extension when Tailscale, opened, still does not answer', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, state: 'off', peers: [] };
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Open Tailscale');
+      await tick(20);
+      expect(text(root)).toContain('Waiting for Tailscale to start');
+      await tick(100);
+      expect(text(root)).toContain('Login Items & Extensions › Network Extensions');
+      click(root, 'Restart Tailscale');
+      await tick();
+      expect(w.opened).toEqual(['app', 'restart']);
+    });
+
+    it('starts the sign-in with the page Tailscale gave, and restarts the app when none comes', async () => {
+      const w = world();
+      w.tailscale.current = { ...signedOut, auth_url: 'https://login.tailscale.com/a/1' };
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Sign in to Tailscale');
+      expect(w.signedIn).toEqual(['https://login.tailscale.com/a/1']);
+      await tick();
+      expect(text(root)).toContain('Waiting for you to finish signing in');
+      expect(w.opened).toEqual([]);
+
+      // Another Mac's app, which Log in does nothing in: no page ever comes.
+      const hung = world();
+      hung.tailscale.current = signedOut;
+      const second = open(hung, { start: { step: 'mac' } });
+      await tick();
+      click(second, 'Sign in to Tailscale');
+      expect(hung.signedIn).toEqual([null]);
+      await tick(150);
+      // Restarted by itself, once; then it says what to do and offers the button.
+      expect(hung.opened).toEqual(['restart']);
+      await tick(150);
+      expect(hung.opened).toEqual(['restart']);
+      click(second, 'Sign in to Tailscale');
+      await tick(150);
+      expect(text(second)).toContain('The sign-in still doesn’t start');
+      click(second, 'Restart Tailscale');
+      await tick();
+      expect(hung.opened).toEqual(['restart', 'restart']);
+    });
   });
 
   it('lists the computers, dims the ones that are off, and finds the Gateway on the one picked', async () => {

@@ -8,6 +8,8 @@
 //   oc     start | mac | computer | prompt | approve | test | failures (every failure card), or
 //          card, on preferences.html: the agent's card in Preferences › Agents
 //   ts     missing | off | signed-out | no-peers | blocked | ready (the default)
+//   mac    what the setup has done about Tailscale, for the waits: installing | app-store |
+//          install-failed | waiting | allow | signing-in | hung | still-hung
 //   probe  found (default) | silent | none
 //   node   connecting | pairing (default) | connected | code-used | not-approved | tools | newer
 //   test   1: the test screen can run (otherwise the app's own, which can't yet)
@@ -17,6 +19,7 @@ import {
   failure,
   type GuidedDeps,
   type SheetDeps,
+  type MacSetup,
   type NodeStatus,
   type OpenClawConnection,
   type TailscaleStatus,
@@ -46,6 +49,7 @@ function tailscaleFor(kind: string): TailscaleStatus {
     ],
     blocked: false,
     health: [],
+    allow_in: 'System Settings › General › Login Items & Extensions › Network Extensions',
   };
   switch (kind) {
     case 'missing':
@@ -101,6 +105,47 @@ function nodeFor(kind: string): NodeStatus {
   }
 }
 
+/**
+ * What the setup has already done about Tailscale on this Mac, for a look at the screens that
+ * depend on a wait (`?mac=`): times in the past, so that the wait is over.
+ */
+export function macSetupFor(query: URLSearchParams): Partial<MacSetup> {
+  const past = Date.now() - 60_000;
+  switch (query.get('mac')) {
+    case 'installing':
+      return {
+        install: {
+          phase: 'working',
+          step: 'Downloading Tailscale 1.80.2 (about 29 MB) from pkgs.tailscale.com…',
+        },
+      };
+    case 'app-store':
+      return {
+        install: {
+          phase: 'app-store',
+          step: 'You aren’t an administrator of this Mac, so Redlines can’t install Tailscale’s package. The App Store is open on Tailscale: install it there, and Redlines notices.',
+        },
+      };
+    case 'install-failed':
+      return {
+        install: {
+          phase: 'failed',
+          step: 'The download isn’t signed by Tailscale, so it wasn’t installed.',
+        },
+      };
+    case 'waiting':
+      return { openedAt: Date.now() };
+    case 'allow':
+      return { openedAt: past };
+    case 'signing-in':
+      return { signInAt: Date.now() };
+    case 'hung':
+      return { signInAt: past, restarts: 1 };
+    default:
+      return {};
+  }
+}
+
 /** The scripted answers for `query`, as the sheet and the card ask for them. */
 export function devGuided(query: URLSearchParams): GuidedDeps & SheetDeps {
   const ts = query.get('ts') ?? 'ready';
@@ -131,9 +176,18 @@ export function devGuided(query: URLSearchParams): GuidedDeps & SheetDeps {
     taken: () => ['claude-ada', 'codex-ada', ...list.map((one) => one.handle)],
     thisMac: () => Promise.resolve('Ada’s MacBook'),
     tailscale: {
-      status: () => Promise.resolve(tailscaleFor(ts)),
+      // A sign-in that hangs is one for which Tailscale gave no page.
+      status: () =>
+        Promise.resolve({
+          ...tailscaleFor(ts),
+          ...(query.get('mac') === 'hung' ? { auth_url: null } : {}),
+        }),
       openApp: () => Promise.resolve(),
-      download: () => Promise.resolve(),
+      install: () => Promise.resolve(),
+      installState: () =>
+        Promise.resolve(macSetupFor(query).install ?? { phase: 'idle', step: '' }),
+      openAppStore: () => Promise.resolve(),
+      restartApp: () => Promise.resolve(),
       signIn: () => Promise.resolve(),
     },
     probe: (address) => {

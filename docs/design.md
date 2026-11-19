@@ -2292,7 +2292,15 @@ its own, larger than Preferences and resizable, which Preferences › Agents and
 last row, while no OpenClaw agent is connected) open
 ([research note](research/openclaw-connection.md), screens 1 to 7, and a gray card for every
 failure): whether this Mac has Tailscale installed, is signed in and sees other computers
-(`tailscale status --json`, read only: Redlines never starts, stops or changes Tailscale); which
+(`tailscale status --json`, read only), and, where something is missing, does most of the setting up itself,
+only from that window and only when the person presses the button: it downloads Tailscale's
+package from pkgs.tailscale.com, checks that Tailscale signed it (Apple team W5364U7YZB) and Apple
+notarized it, refuses in plain words if either fails, and installs it with macOS's own
+administrator prompt (never a password field of Redlines'; the App Store page for a person who is
+not an administrator); opens the app and waits for its network extension, saying where in System
+Settings to allow it; starts the sign-in and opens its page; and restarts Tailscale's app once
+after a fresh install, and when the sign-in hangs (the app started before its extension and never
+connected to it). Which
 computer, found by opening its WebSocket and reading its greeting (nothing is sent); a prompt to
 send the person's agent, which holds no secret and asks for the private road only (Tailscale
 Serve, auth on, one command, the tools for one agent); a secure field for the setup code the agent
