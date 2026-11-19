@@ -120,6 +120,8 @@ interface Window {
   /** What it was told the file holds. */
   told: string[];
   notices: string[];
+  /** What other windows told it about Track Changes. */
+  heardTracking: boolean[];
 }
 
 async function windowOn(app: FakeApp, label: string, doc: string): Promise<Window> {
@@ -127,6 +129,7 @@ async function windowOn(app: FakeApp, label: string, doc: string): Promise<Windo
   const saved: string[] = [];
   const told: string[] = [];
   const notices: string[] = [];
+  const heardTracking: boolean[] = [];
   let disk: string | null = doc === '' ? null : doc;
   const session = await joinSession(app.ports(label), editor, {
     path: PATH,
@@ -140,9 +143,14 @@ async function windowOn(app: FakeApp, label: string, doc: string): Promise<Windo
       return text;
     },
     notice: (message) => notices.push(message),
+    onTracking: (on) => {
+      heardTracking.push(on);
+      editor.setTracking(on, { inFile: false });
+    },
+    tracking: () => editor.getUiState().tracking,
     saveDelayMs: 20,
   });
-  return { label, editor, session, saved, told, notices };
+  return { label, editor, session, saved, told, notices, heardTracking };
 }
 
 function type(editor: Editor, after: string, text: string): void {
@@ -184,6 +192,60 @@ describe('a document in two windows', () => {
     expect(parse(text).warnings).toEqual([]);
     expect(text).toContain('ONE');
     expect(text).toContain('TWO');
+  });
+
+  it('turns Track Changes on and off in every window of the document (#1166)', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    const two = await windowOn(app, 'doc-2', '');
+    await settle(one, two);
+    const on: boolean[] = [];
+    const shared = (w: Window, value: boolean) => {
+      w.editor.setTracking(value, { inFile: false });
+      return w.session.shareTracking(value);
+    };
+    expect(two.editor.getUiState().tracking).toBe(false);
+    await shared(one, true);
+    await wait(20);
+    on.push(one.editor.getUiState().tracking, two.editor.getUiState().tracking);
+    await shared(two, false);
+    await wait(20);
+    on.push(one.editor.getUiState().tracking, two.editor.getUiState().tracking);
+    expect(on).toEqual([true, true, false, false]);
+    expect(two.heardTracking).toEqual([true]);
+    expect(one.heardTracking).toEqual([false]);
+  });
+
+  it('turns Track Changes on and off in every window of the document (#1166)', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    const two = await windowOn(app, 'doc-2', '');
+    await settle(one, two);
+    const tracking = () => [one, two].map((w) => w.editor.getUiState().tracking);
+    const turn = async (w: Window, on: boolean) => {
+      w.editor.setTracking(on, { inFile: false });
+      await w.session.shareTracking(on);
+      await wait(20);
+    };
+    expect(tracking()).toEqual([false, false]);
+    await turn(one, true);
+    expect(tracking()).toEqual([true, true]);
+    await turn(two, false);
+    expect(tracking()).toEqual([false, false]);
+    expect(two.heardTracking).toEqual([true]);
+    expect(one.heardTracking).toEqual([false]);
+  });
+
+  it('gives a window that joins the leader’s Track Changes setting (#1166)', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    one.editor.setTracking(true, { inFile: false });
+    const two = await windowOn(app, 'doc-2', '');
+    await settle(one, two);
+    for (const w of [one, two]) w.editor.view.dispatch({ selection: { anchor: 2 } });
+    await wait(400);
+    expect(two.editor.getUiState().tracking).toBe(true);
+    expect(two.heardTracking).toEqual([true]);
   });
 
   it('keeps a file with CRLF line breaks as it is, in both windows, with no edit taken back (#1057)', async () => {

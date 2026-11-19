@@ -1924,7 +1924,7 @@ own). The text below is the design they follow.
 
 ### 7.1a One document in several windows
 
-File › Open in Another Window shows the document in a second window of the app, and the two are
+View › New Window (Word's name and place) shows the document in a second window of the app, and the two are
 one session on one Mac, with no network, no account and no invitation.
 
 - **One window leads.** It runs the authority (the TypeScript in `packages/collab`) and is the
@@ -1946,6 +1946,10 @@ one session on one Mac, with no network, no account and no invitation.
   position in the confirmed text at a version, and every window places it again among its own text, so it stays among the same words
   while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
   windows", or that edits are kept while the session can't be reached.
+- **Track Changes is the document's.** Turning it on or off in one window turns it on or off in
+  every window of the document, with the toggle and the "Track Changes on" notice in each. A window
+  that joins takes the leader's setting. The window says it to the others as an event between
+  windows (`session-tracking`), never through the text.
 - **Undo is each window's own.** A step knows whose it is, and a change that came from another window
   is never undone by this one (§5.13): a tracked step is taken back by rejecting its own marks, and
   an untracked step that the other window changed since is left alone, with the name of the window
