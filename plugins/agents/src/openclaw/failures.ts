@@ -139,7 +139,7 @@ export function failure(id: FailureId, subject: Subject = {}): Failure {
       return {
         id,
         title: 'The Gateway doesn’t accept that token',
-        body: 'It may have been changed or turned off. Ask your agent for a new setup code.',
+        body: 'It may have been changed, turned off or replaced when this Mac was approved again. Ask your agent for a new setup code, which starts over. If that fails too, it can remove this Mac first (openclaw devices remove).',
         step: 'Step 3',
         action: 'copy-code-request',
         label: 'Copy the request for a new code',
