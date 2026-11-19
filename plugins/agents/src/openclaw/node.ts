@@ -6,7 +6,7 @@ import type { FailureId } from './failures.ts';
 /** What `openclaw_node_status` returns; nothing (null) when no connection runs. */
 export type NodeStatus =
   | { state: 'connecting' }
-  | { state: 'pairing'; request_id: string | null; code: string }
+  | { state: 'pairing'; request_id: string | null; code: string; again?: boolean }
   | { state: 'connected'; tools: number }
   | { state: 'reconnecting'; detail: string }
   | { state: 'stopped' }

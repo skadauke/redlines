@@ -5,6 +5,8 @@ import {
   imagesLoaded,
   fitTableColumns,
   keepHeadingsWithNext,
+  splitLongCode,
+  SHORT_CODE_LINES,
   PRINT_ID,
   plainPageHtml,
   printContainer,
@@ -108,11 +110,51 @@ describe('keepHeadingsWithNext', () => {
     expect(root.querySelectorAll('tr')).toHaveLength(3);
   });
 
-  it('leaves a heading followed by a heading, a code block or nothing as it is', () => {
-    expect(page('<h1>A</h1><h2>B</h2>').innerHTML).toBe('<h1>A</h1><h2>B</h2>');
+  it('leaves a heading at the end, or before a list or a long code block, as it is', () => {
     expect(page('<p>a</p><h2>B</h2>').innerHTML).toBe('<p>a</p><h2>B</h2>');
+    expect(page('<h2>B</h2><ul><li>x</li></ul>').innerHTML).toBe('<h2>B</h2><ul><li>x</li></ul>');
     // A long block would leave a gap in a box.
-    expect(page('<h2>B</h2><pre>x</pre>').innerHTML).toBe('<h2>B</h2><pre>x</pre>');
+    expect(page('<h2>B</h2><pre class="rl-long">x</pre>').innerHTML).toBe(
+      '<h2>B</h2><pre class="rl-long">x</pre>',
+    );
+  });
+
+  it('keeps a heading with a short code block or a picture whole', () => {
+    expect(page('<h2>B</h2><pre>x</pre>').innerHTML).toBe(
+      '<div class="rl-keep"><h2>B</h2><pre>x</pre></div>',
+    );
+    expect(page('<h2>B</h2><p><img src="a.png"></p>').innerHTML).toBe(
+      '<div class="rl-keep"><h2>B</h2><p><img src="a.png"></p></div>',
+    );
+  });
+
+  it('keeps a chain of headings with what follows the last', () => {
+    const root = page('<h1>A</h1><h2>B</h2><h3>C</h3><p>text</p><p>more</p>');
+    const outer = root.querySelector('.rl-keep');
+    expect(outer?.firstElementChild?.tagName).toBe('H1');
+    expect(outer?.querySelectorAll('h1, h2, h3, p')).toHaveLength(4);
+    expect(root.children).toHaveLength(2);
+  });
+});
+
+describe('splitLongCode', () => {
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i}`).join('\n');
+  const pre = (n: number) => {
+    const root = document.createElement('div');
+    root.innerHTML = `<pre><code>${lines(n)}\n</code></pre>`;
+    splitLongCode(root);
+    return root.querySelector('pre')!;
+  };
+
+  it('marks a block of more than the short length, and no other', () => {
+    expect(pre(SHORT_CODE_LINES).classList.contains('rl-long')).toBe(false);
+    expect(pre(SHORT_CODE_LINES + 1).classList.contains('rl-long')).toBe(true);
+  });
+
+  it('is done before a page is filled, so that a heading is not boxed with a long block', async () => {
+    const release = await fillPrintPage(`<h2>H</h2><pre>${lines(60)}</pre>`);
+    expect(printContainer().querySelector('.rl-keep')).toBeNull();
+    release();
   });
 });
 
