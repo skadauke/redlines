@@ -1077,7 +1077,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   cells: every cell in the rows and columns between, both included. It is the ordinary selection and
   keeps no state of its own, so a drag that enters a second cell, a ⇧-press, ⇧ with an arrow (text
   in the cell first, then cells, then a cell at a time, growing or shrinking), and Undo making one
-  all work. The cells are drawn in the system's selection color with the text highlight hidden;
+  all work. A drag that leaves the table goes on selecting the text outside it, and scrolls the
+  document at the window's edge as in any text (#1159). The cells are drawn in the system's selection color with the text highlight hidden;
   Both looks of Redlines draw them the same. Esc puts the caret in the cell where the selection
   ended; Tab goes on from there; ↩ does nothing. ⌘A is the cell's text, then the whole table,
   then the document. Select Cell, Row (⌃L), Column and Table are in the Table menu. A selected
