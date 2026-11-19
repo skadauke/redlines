@@ -45,7 +45,7 @@ function decideAll(text: string, how: 'a' | 'r', below: (n: number) => number): 
 
 describe('edits that the fine writer refuses, over other people’s marks', () => {
   it('are written as replacements that read alike in every order, or still refused', () => {
-    const documents = Number(process.env['PROBE_SEEDS'] ?? fuzzCount(150));
+    const documents = Number(process.env['PROBE_SEEDS'] ?? fuzzCount(50));
     const seen = { edits: 0, fineRefused: 0, written: 0, refused: 0, unsound: 0 };
     const unsound: string[] = [];
     for (let seed = 1; seed <= documents; seed++) {

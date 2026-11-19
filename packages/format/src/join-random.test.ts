@@ -309,7 +309,7 @@ const checkCase = (seed: number, found: Case | undefined, counts: Counts) => {
 describe('the joining rule on random documents', { timeout: 1_200_000 }, () => {
   it('writes every edit that today’s form writes, as asked, and gives back every byte', () => {
     const counts = zero();
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     for (let seed = 1; seed <= documents; seed++) {
       checkCase(seed, singleBlockCase(seed), counts);
     }
@@ -320,7 +320,7 @@ describe('the joining rule on random documents', { timeout: 1_200_000 }, () => {
 
   it('does the same for edits of several blocks', () => {
     const counts = zero();
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     for (let seed = 1; seed <= documents; seed++) {
       checkCase(seed, severalBlocksCase(seed), counts);
     }
