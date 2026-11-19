@@ -282,11 +282,14 @@ fn token_file_problem(path: &str) -> Option<String> {
 /// system that doesn't tell them apart gives the name it holds) and the system's own links
 /// (`/tmp`, `/var` and `/etc` are in `/private`), which are no one's doing.
 fn same_place(path: &str, real: &Path) -> bool {
-    let given = ["/tmp", "/var", "/etc"]
+    let real = real.to_string_lossy().to_lowercase();
+    let path = path.to_lowercase();
+    // Where the system keeps them, on a Mac (and plainly there on other systems).
+    let system = ["/tmp", "/var", "/etc"]
         .iter()
-        .find(|link| path == **link || path.starts_with(&format!("{link}/")))
-        .map_or_else(|| path.to_owned(), |_| format!("/private{path}"));
-    real.to_string_lossy().to_lowercase() == given.to_lowercase()
+        .any(|link| path == *link || path.starts_with(&format!("{link}/")))
+        .then(|| format!("/private{path}"));
+    real == path || system.is_some_and(|private| real == private)
 }
 
 /// What is wrong with the token file on a stored bridge's line, if anything: the same words as
