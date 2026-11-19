@@ -713,6 +713,17 @@ const attachAgentPicker = (field: HTMLTextAreaElement, agentsOnly = false) => {
     // The default agent comes first in the list (#528).
     agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
     agentsOnly,
+    // For someone with no OpenClaw agent yet: a last row that opens its setup, a window of its own.
+    ...(isTauri
+      ? {
+          connectOpenClaw: () => {
+            void invoke('open_openclaw_setup').catch((error: unknown) => {
+              console.error('Could not open the OpenClaw setup', error);
+              notice.flash('Couldn’t open the OpenClaw setup.');
+            });
+          },
+        }
+      : {}),
   });
 };
 
