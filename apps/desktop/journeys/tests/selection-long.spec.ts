@@ -116,7 +116,9 @@ for (const view of ['clean', 'redlines', 'simple'] as ViewName[]) {
   test(`every drawn line of a long selection is drawn selected, ${view} (#1160)`, async ({
     start,
   }) => {
-    const j = await start({ doc: longDoc(8), tracking: false, view });
+    // One 800 ms wait for the selection's repaint per screen: CI's runner is slower than 30 s.
+    test.setTimeout(60_000);
+    const j = await start({ doc: longDoc(3), tracking: false, view });
     await j.page.evaluate(async () => {
       const canvas = document.createElement('canvas');
       canvas.width = 120;

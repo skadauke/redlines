@@ -800,7 +800,7 @@ body.rl-image-dragging * {
   height: 22px;
   border-radius: 50%;
   background: var(--rl-rule);
-  color: var(--rl-ink-2);
+  color: var(--rl-ink);
   font-size: var(--rl-size-ui-small);
   font-weight: 700;
 }

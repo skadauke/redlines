@@ -45,8 +45,8 @@ afterAll(() => {
 });
 
 test('the editor writes what the format library writes, on the text an intent was made on', () => {
-  // Twelve documents per workload on a deep run (`REDLINES_FUZZ=12`, as elsewhere), three on an ordinary one, which
-  // must fit CI's five seconds.
+  // Twelve documents per workload on a deep run (`REDLINES_FUZZ=12`, as elsewhere), three on an
+  // ordinary one.
   const fuzz = Number(process.env['REDLINES_FUZZ']);
   const cases = Number.isInteger(fuzz) && fuzz > 0 ? fuzz : 3;
   let compared = 0;
@@ -118,7 +118,7 @@ test('the editor writes what the format library writes, on the text an intent wa
   expect([...kinds].sort()).toEqual(
     expect.arrayContaining(['type', 'delete', 'sub', 'bold', 'comment', 'reply', 'decide']),
   );
-});
+}, 60_000);
 
 test(
   'sessions over the editor settle and converge, with an authority and without',

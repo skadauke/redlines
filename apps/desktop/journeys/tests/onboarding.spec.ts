@@ -21,8 +21,13 @@ async function open(page: Page, url: string): Promise<void> {
 
 test('the Welcome mode of Preferences: you, your agent, and set up this Mac', async ({ page }) => {
   const look = test.info().project.name;
-  const shot = (name: string) =>
-    expect(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
+  // Each screen is reached with the keyboard: after a mouse click WebKit draws the focus ring of the
+  // select (or leaves it out) as its timing falls, and the pointer is left over whichever button
+  // the next card puts there (hovered, or not). The pointer is also moved to an empty place.
+  const shot = async (name: string) => {
+    await page.mouse.move(2, 790);
+    await expect.soft(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
+  };
   await open(page, '/preferences.html?welcome');
   const sheet = page.locator('.rl-onb');
   await expect(sheet).toBeVisible();
@@ -31,22 +36,22 @@ test('the Welcome mode of Preferences: you, your agent, and set up this Mac', as
   await expect(sheet).toContainText('Who are you?');
   await expect(sheet.getByLabel('Handle')).not.toHaveValue('');
   await shot('1-you');
-  await sheet.getByRole('button', { name: 'Continue' }).click();
+  await sheet.getByRole('button', { name: 'Continue' }).press('Enter');
 
   // 2. Your agent.
   await expect(sheet).toContainText('Your agent');
   await expect(sheet.locator('select')).toBeVisible();
   await shot('2-agent');
-  await sheet.getByRole('button', { name: 'Continue' }).click();
+  await sheet.getByRole('button', { name: 'Continue' }).press('Enter');
 
   // 3. Set up this Mac: the three rows, then what each install said.
   await expect(sheet).toContainText('Set up this Mac');
   await expect(sheet.locator('.rl-onb-install')).toHaveCount(3);
   await shot('3-setup');
-  await sheet.getByRole('button', { name: 'Install and Continue' }).click();
+  await sheet.getByRole('button', { name: 'Install and Continue' }).press('Enter');
   await expect(sheet.locator('.rl-onb-install-result').nth(2)).toContainText('Installed');
   await shot('3-setup-done');
-  await sheet.getByRole('button', { name: 'Continue' }).click();
+  await sheet.getByRole('button', { name: 'Continue' }).press('Enter');
   await expect(page.locator('.rl-sheet-backdrop')).toHaveCount(0);
   // It tells the document window, which then runs the tour, and is done for good.
   expect(await page.evaluate(() => localStorage.getItem('redlines.onboarding'))).toBe('done');
@@ -69,7 +74,7 @@ test('Skip Setup ends the Welcome mode from the first screen, and says it was sk
 test('the tour: the pen, the views button and the command palette', async ({ page }) => {
   const look = test.info().project.name;
   const shot = (name: string) =>
-    expect(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
+    expect.soft(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
   await open(page, '/?onboarding');
   const card = page.locator('.rl-tour-card');
   await expect(card).toContainText('The Redlines pen');
