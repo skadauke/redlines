@@ -204,7 +204,8 @@ The window, on the desktop:
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
   its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
-  which other apps declare), R Markdown, Quarto and the text and code files by their extensions, so Finder's Open With offers
+  which other apps declare), Quarto by a type of its own (`md.redlines.quarto`, exported for `.qmd`),
+  R Markdown and the text and code files by their extensions, so Finder's Open With offers
   Redlines for each, and for no other kind of text. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
   Redlines. R Markdown, Quarto, text and code files it never takes, even where nothing else owns them:
@@ -2883,13 +2884,14 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     (its array methods came with 13.0). System Settings lists it with the other Quick Look
     extensions, on, and turns it off; Preferences › General › Quick Look previews of Markdown
     files has a button that opens that list (§5.1).
-  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
-    no type for R Markdown and Quarto: a file of either gets a type made from its extension
-    (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the
-    extension from the app that declares it. Where another app declares them, the file has that
-    app's type, and Quick Look matches an extension's types exactly, never by what a type conforms
-    to, so Redlines' extension isn't asked: those files preview in that app's extension, or as
-    plain text. Where two extensions claim one type, macOS chooses one, and the settings pane
+  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. Quarto files
+    have a type of Redlines' own, `md.redlines.quarto`, which the app exports for `.qmd` (it
+    conforms to Markdown and plain text), so that Quick Look previews them and Finder opens them
+    with Redlines (#1177). macOS has no type for R Markdown: its files get a type made from the
+    extension (`dyn.…`), which the extension lists, with none declared by Redlines. Quick Look
+    matches an extension's types exactly, never by what a type conforms to: where another app
+    also claims `.qmd` or `.Rmd` and macOS gives the file that app's type, Redlines' extension
+    isn't asked, and the file previews in that app's extension, or as plain text, which is accepted. Where two extensions claim one type, macOS chooses one, and the settings pane
     turns either off: that is the one extension per type that Quick Look has.
   - **Large files.** The first 4 MB are read, and the first 300,000 characters of the document are
     drawn, to its last paragraph under that, with a line that says so. The count of what waits is
