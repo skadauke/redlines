@@ -34,7 +34,7 @@ const isRecordOf = (value: unknown): value is Record<string, unknown> =>
 
 function turnOf(value: unknown): AskTurn | null {
   if (!isRecordOf(value)) return null;
-  const { question, answer, agent, web, at, model } = value;
+  const { question, answer, agent, web, at, model, ended } = value;
   if (typeof question !== 'string' || typeof answer !== 'string' || !isRecordOf(agent)) return null;
   if (typeof agent['id'] !== 'string' || typeof agent['name'] !== 'string') return null;
   return {
@@ -44,20 +44,20 @@ function turnOf(value: unknown): AskTurn | null {
     ...(web === true ? { web: true as const } : {}),
     ...(typeof at === 'number' && Number.isFinite(at) ? { at } : {}),
     ...(typeof model === 'string' ? { model } : {}),
+    ...(ended === 'stopped' || ended === 'failed' ? { ended } : {}),
   };
 }
 
-/** The record in `text`; an empty one for text that is not one, so that a bad file never stops a chat. */
-export function parseRecord(text: string | null): ChatRecord {
-  if (text === null) return { ...EMPTY_RECORD, turns: [] };
+/** The record in `text`, or null for text that is not one. */
+export function readRecord(text: string): ChatRecord | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { ...EMPTY_RECORD, turns: [] };
+    return null;
   }
   if (!isRecordOf(parsed) || parsed['version'] !== 1 || !Array.isArray(parsed['turns'])) {
-    return { ...EMPTY_RECORD, turns: [] };
+    return null;
   }
   const turns = (parsed['turns'] as unknown[])
     .map(turnOf)
@@ -70,6 +70,11 @@ export function parseRecord(text: string | null): ChatRecord {
     ...(typeof model === 'string' ? { model } : {}),
     turns,
   };
+}
+
+/** The record in `text`; an empty one for none or for text that is not one. */
+export function parseRecord(text: string | null): ChatRecord {
+  return (text === null ? null : readRecord(text)) ?? { ...EMPTY_RECORD, turns: [] };
 }
 
 export function recordText(record: ChatRecord): string {

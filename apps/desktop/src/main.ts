@@ -2052,6 +2052,8 @@ watchSettings((changed) => {
   if (next.handle !== author.handle || next.name !== author.name) {
     setAuthor(next);
     editor.setAuthor({ ...author });
+    // The sidebar's foot shows the name.
+    sidebar.refreshFoot();
   }
   updates?.setAutomatic(settings.checkForUpdates);
   // Another window may have opened a file.

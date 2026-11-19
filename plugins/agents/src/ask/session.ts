@@ -75,6 +75,11 @@ export interface AskTurn {
   at?: number;
   /** The model that wrote it, as the agent lists it, when one was asked for. */
   model?: string;
+  /**
+   * For a chat's message that got no answer (#1194): it was stopped, or the agent failed, and
+   * `answer` is the failure's one line. It is kept in the history and never sent to an agent.
+   */
+  ended?: 'stopped' | 'failed';
 }
 
 /** The agent that answers the next question, and the models it can be told to run (#507). */
@@ -115,6 +120,11 @@ export interface AskSession {
    * undefined is the default agent. The model goes back to Preferences' choice for that agent.
    */
   setAgent(agent: string | undefined): void;
+  /**
+   * Adds a turn that was answered elsewhere, such as an Ask's in the document's chat, so that the
+   * next message goes to the agent with it. It is not reported to `onTurn`.
+   */
+  addTurn(turn: AskTurn): void;
   /** The answer to the first-run question: read the folder, just this document, or not at all. */
   answerConsent(answer: AgentScope | 'no'): void;
   /** Stops the run, and leaves the question unanswered. */
@@ -161,7 +171,9 @@ const EARLIER_ANSWERS =
  * answers are an agent's, which read a document that may say anything, so each is quoted with > on
  * every line, as the selected text is (`quoteBlock`), and said to be data.
  */
-export function askText(question: string, turns: readonly AskTurn[]): string {
+export function askText(question: string, all: readonly AskTurn[]): string {
+  // A message that got no answer has nothing to be quoted as.
+  const turns = all.filter((turn) => turn.ended === undefined);
   const asked = question.trim() === '' ? EXPLAIN : question.trim();
   if (turns.length === 0) return asked;
   const earlier = turns
@@ -476,7 +488,12 @@ export function createAskSession(
       return answer(line);
     };
     const request: AgentRequest = {
-      prompt: askText(asked, about.chat === true ? state.turns.slice(-CHAT_CONTEXT) : state.turns),
+      prompt: askText(
+        asked,
+        about.chat === true
+          ? state.turns.filter((turn) => turn.ended === undefined).slice(-CHAT_CONTEXT)
+          : state.turns,
+      ),
       systemPrompt:
         about.chat === true
           ? chatPrompt({
@@ -531,12 +548,13 @@ export function createAskSession(
               ? { model: modelFor(agent) }
               : {}),
           };
-          finish(mine, { turns: [...state.turns, turn], line: null });
+          // Told first, so that what listens to the state knows this message was answered.
           try {
             deps.onTurn?.(turn);
           } catch (error) {
             console.error('An Ask turn listener failed', error);
           }
+          finish(mine, { turns: [...state.turns, turn], line: null });
           return;
         }
       }
@@ -591,6 +609,10 @@ export function createAskSession(
       picked = { model };
       const agent = lastAgent;
       if (agent) set({ choice: choiceOf(agent) });
+    },
+    addTurn(turn) {
+      if (closed) return;
+      set({ turns: [...state.turns, turn] });
     },
     setAgent(id) {
       if (closed || id === chosen) return;

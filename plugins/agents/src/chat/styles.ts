@@ -27,6 +27,7 @@ export const CHAT_STYLE = `
 .rl-chat-md a { color: inherit; text-decoration: underline; text-decoration-color: var(--rl-ink-3); text-underline-offset: 2px; }
 .rl-chat-h { margin: 10px 0 4px; font-weight: 700; }
 .rl-chat-md .rl-chat-h:first-child { margin-top: 0; }
+.rl-chat-ended { color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); }
 .rl-chat-hover { display: flex; gap: 2px; height: 22px; margin-top: 2px; opacity: 0; transition: opacity 120ms ease; }
 .rl-chat-theirs:hover .rl-chat-hover, .rl-chat-theirs:focus-within .rl-chat-hover { opacity: 1; }
 .rl-chat-act { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--rl-ink-2); cursor: default; }

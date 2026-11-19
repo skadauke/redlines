@@ -480,6 +480,19 @@ describe('the sidebar’s chat view and foot (#1194)', () => {
     expect(files.hidden).toBe(false);
   });
 
+  it('names each panel the tab shows, and each tab its panel', () => {
+    const { chat, tab, container } = withChat();
+    const files = container.querySelector<HTMLElement>('.rl-sidebar-list')!;
+    for (const [name, panel] of [
+      ['Files', files],
+      ['Chat', chat],
+    ] as const) {
+      expect(panel.getAttribute('role')).toBe('tabpanel');
+      expect(tab(name).getAttribute('aria-controls')).toBe(panel.id);
+      expect(panel.getAttribute('aria-labelledby')).toBe(tab(name).id);
+    }
+  });
+
   it('moves between the tabs with the arrow keys', () => {
     const { tab, sidebar } = withChat();
     tab('Files').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));

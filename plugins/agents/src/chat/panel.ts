@@ -188,7 +188,8 @@ export function createChatPanel(handlers: ChatHandlers): ChatPanel {
   });
   field.addEventListener('keydown', (event) => {
     // Return sends and Shift-Return starts a line; a Return that picks a composed character doesn't.
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    // (WebKit sends the Return that confirms a candidate after the composition has ended, as 229.)
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault();
       submit();
     }
@@ -214,6 +215,14 @@ export function createChatPanel(handlers: ChatHandlers): ChatPanel {
   function message(turn: AskTurn): HTMLElement[] {
     const mine = el('div', 'rl-chat-msg rl-chat-mine');
     mine.append(el('div', 'rl-chat-bubble', turn.question));
+    if (turn.ended !== undefined) {
+      const over = el(
+        'div',
+        'rl-chat-msg rl-chat-ended',
+        turn.ended === 'stopped' ? 'Stopped.' : `Couldn’t answer: ${turn.answer}`,
+      );
+      return [mine, over];
+    }
     const theirs = el('div', 'rl-chat-msg rl-chat-theirs');
     const name = turn.model ? `${turn.agent.name} · ${modelName(turn)}` : turn.agent.name;
     theirs.append(el('div', 'rl-chat-from', name));
