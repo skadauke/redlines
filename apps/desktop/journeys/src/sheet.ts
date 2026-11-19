@@ -724,6 +724,18 @@ export interface KnownDisagreement {
  */
 export const KNOWN: readonly KnownDisagreement[] = [
   {
+    issue: 1288,
+    family: 'cards',
+    props: ['borderTopLeftRadius'],
+    why: 'the change card and the callout’s popover are at 10 px, the other cards at 12 px',
+  },
+  {
+    issue: 1288,
+    family: 'card-radius',
+    props: ['borderTopLeftRadius'],
+    why: 'the same: the change card and the callout’s popover are at 10 px',
+  },
+  {
     issue: 1199,
     family: 'handles',
     props: ['borderTopLeftRadius', 'backgroundColor', 'boxShadow'],
