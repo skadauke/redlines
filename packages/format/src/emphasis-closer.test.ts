@@ -195,8 +195,10 @@ describe("another person's pending marks around the change (#81)", () => {
       '**Start<!--del k3x9 \\n\\n-->‸middle** End',
       'Start<!--del k3x9 \\n\\n-->middle ‸End',
       // A run typed before or after a word that holds his pending emphasis, across a letter (#265).
-      // Left out, each with a paste that holds an HTML tag: 'x ca<!--ins k3x9-->_f_<!--/k3x9-->é‸z' (#1135) and
-      // 'x ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->‸éz' (#1135).
+      // A paste that holds an HTML tag, beside his bold (#1135). Left out: 'x ca<!--ins k3x9-->_f_<!--/k3x9-->é‸z',
+      // whose own file reads his `_f_` as emphasis where its newest view does not (the marker is
+      // punctuation to the run), so that rejecting any change of the paste gives that file back.
+      'x ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->‸éz',
       'x ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->é‸z',
       'x ‸ca<!--fmt k3x9 +bold-->**f**<!--/k3x9-->é',
       'x ‸a<!--fmt k3x9 +italic-->*f*<!--/k3x9-->é y',

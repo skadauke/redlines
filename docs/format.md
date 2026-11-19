@@ -3253,6 +3253,12 @@ In a file with full history, such an edit is an `edit` event (§6.2).
   block on a line of its own (§3.3). Where the first part would end at the start of the block after
   the break of a split inside the mark, it ends in front of the split instead, and the split and its
   break belong to neither part: `Para one.<!--/k3x9--><!--split s3vb-->⏎⏎X<!--ins w8nn-->Para two.`
+- A delimiter (`*`, `_`, `~`) typed beside the marker of a comment or a highlight, which are no
+  changes to decide, goes where it is typed, and the marker is moved across the run where it stands
+  between the delimiter and its neighbour, so that micromark reads the file as it reads the newest
+  view (`foo*<!--hl k3x9-->bar<!--/k3x9-->` typed `*` at the end gives
+  `foo<!--hl k3x9-->*bar*<!--/k3x9-->`); the range of the comment or highlight takes the run in or
+  leaves it out (#1140).
 - Text typed next to a pending deletion goes where it is typed, before or after the deleted text,
   which the editor shows. Text is never typed between a split and its break: it goes in front of
   the split. Text typed further into the break, on the blank line of a paragraph break, would part

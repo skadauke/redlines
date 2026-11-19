@@ -5624,9 +5624,8 @@ function editsWidening(
           } catch {
             // no unit holds it: the fine write stays
           }
-          return whole && !readsOtherMicromark(text, whole.changes)
-            ? whole
-            : noUnderliningSplit(text, written);
+          if (whole && !readsOtherMicromark(text, whole.changes)) return whole;
+          return noUnderliningSplit(text, written);
         }
         return noUnderliningSplit(text, written);
       } catch (error) {
@@ -5662,13 +5661,15 @@ function delimiterOrdersDiffer(
   changes: readonly TextChange[],
 ): boolean {
   if (!atDelimiter(text, edits)) return false;
-  // A write that micromark reads otherwise than the newest view as it stands, or in some order of
-  // deciding its marks, or whose orders leave other texts (#1135, #1136).
-  if (readsOtherMicromark(text, changes)) return true;
   const after = applyChanges(text, changes);
   const first = Math.min(...changes.map((change) => change.from));
   const last = Math.max(...changes.map((change) => change.from + change.insert.length));
-  return ordersReadOtherwiseNear(after, first, last) || ordersDifferNear(after, first, last);
+  // A pasted run that holds an HTML tag beside a delimiter reads in more ways than the file shows
+  // it, in the orders of deciding the marks around it (#1135): each is read, not only compared.
+  const tagged = edits.some((edit) => /<\/?[a-z]/i.test(edit.insert) && /[*_~]/.test(edit.insert));
+  return (
+    (tagged && ordersReadOtherwiseNear(after, first, last)) || ordersDifferNear(after, first, last)
+  );
 }
 
 /**

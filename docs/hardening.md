@@ -266,10 +266,18 @@ its case; each is a bug. The list is what has been found, not a count of what is
   digits or markers is seen (#418). A deletion inside a blank line of a break, and a replacement
   inside the blank line of the break of the author's own pending split, are written as a
   substitution that keeps the break, so that every order of decisions reads as typed (#447, #419).
-- Delimiters beside another person's marks still read otherwise in some order of decisions in three
-  shapes, which the random suites leave out: a run pasted next to a tag or across a letter (#1135),
-  one typed at the seam of a paragraph made of their insertion (#1136), and, with Track Changes off,
-  one beside a comment or highlight marker (#1140), all three found while closing #265.
+- Delimiters beside another person's marks (#265, #1135, #1136, #1140). A delimiter beside a
+  comment's or a highlight's marker, with Track Changes off, is written with the marker moved across
+  the run, so that the delimiter stands against its word in the file as in the view; a run typed at
+  the seam of a paragraph made of their insertion, or a deletion's, is written as the replacement of
+  the paragraph where the fine form leaves other texts in some orders (`ordersDifferNear`); a run
+  pasted next to their bold with an HTML tag in it is replaced where its orders read otherwise. Left,
+  and each a limit of the oracle, not of the write: (1) a run pasted next to their insertion `_f_`
+  between letters (`x ca<ins _f_>é`), whose own file reads the underscores as emphasis where its
+  view does not, so that rejecting the paste gives that file back; (2) a `*` typed in front of a word
+  that ends in their italic (`x ‸ca<fmt +italic>_f_`), where the view spells the italic with `*` and
+  pairs it with the typed one, which no file with `_f_` reads alike: it is written as the fine form
+  reads, and the person is not told.
 - A comment over a backtick can make another person's table change undecidable (#376; left out of
   `table-align-random.test.ts`).
 - Return at the start of a nested first item, tracked, fails in four more shapes (#395).
