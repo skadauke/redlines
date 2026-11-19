@@ -34,6 +34,12 @@ isn't held*, and a gap is a bug.
    another person's mark ends at the unit's edge (the guard of #808 and #107, below). A key that
    does nothing and says nothing is a bug. `refusals.node.test.ts` holds it: every place in the sources that refuses an
    edit has a tier in `refusals.ts`, and a new one is a red test.
+   Typing a reference or a citation next to another person's insertion in a `.qmd`, with Track Changes
+   off, is one such case (#1204): the marker would cut the key in two, so the format can't write it as
+   it is and refuses with words that name the ways round; the editor, which can ask, turns that into the
+   question of accepting their change first, and types after the answer (an alert, before any refusal).
+   With Track Changes on it is written, the change taking the rest of the key in. The words are what
+   an agent or the command line, which can't ask, is told.
 3. **No line of a paragraph, heading, list item, quote, footnote or table row begins with a
    marker.** In CommonMark a line that starts with `<!--` starts an HTML block, which changes how
    the rest of the line reads, so a marker stays at the end of the previous line

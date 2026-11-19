@@ -23,7 +23,7 @@ export type FailureId =
 /** What the button does, which the sheet carries out. */
 export type FailureAction =
   | 'open-tailscale'
-  | 'download-tailscale'
+  | 'install-tailscale'
   | 'check-again'
   | 'copy-setup-prompt'
   | 'copy-code-request'
@@ -67,10 +67,10 @@ export function failure(id: FailureId, subject: Subject = {}): Failure {
       return {
         id,
         title: 'Tailscale is not on this Mac',
-        body: 'Redlines reaches your other computer over Tailscale, a private network between your own computers. Download the app, open it and sign in with the same account as your other computer. Redlines notices by itself.',
+        body: 'Redlines reaches your other computer over Tailscale, a private network between your own computers. Redlines can install it for you, then you sign in with the same account as your other computer. Redlines notices by itself.',
         step: 'Step 1',
-        action: 'download-tailscale',
-        label: 'Download Tailscale',
+        action: 'install-tailscale',
+        label: 'Install Tailscale',
       };
     case 'computer-not-answering':
       return {

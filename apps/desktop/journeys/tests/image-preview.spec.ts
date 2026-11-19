@@ -95,6 +95,53 @@ test.describe('images in Preview @blocks', () => {
     expect(pixel[2]! > pixel[0]!, 'the first image is the new, blue one').toBe(true);
   });
 
+  // #1196: it was sometimes the picture's, and sometimes selected the text under it, which showed its
+  // Markdown. Anywhere on the picture, every time, it opens the file and never selects the source.
+  test('a double-click anywhere on a picture, however often, opens it and selects no source', async ({
+    start,
+  }) => {
+    const j = await start({ tracking: false, view: 'redlines' });
+    await save(j.page, 'red.png', '#c0392b', 220);
+    await save(j.page, 'green.png', '#27ae60', 120);
+    await j.page.evaluate((doc) => window.__redlines!.editor.setDoc(doc), DOC);
+    await j.caretAtEnd();
+    await expect(j.page.locator('.rl-image img')).toHaveCount(2);
+    await expect.poll(async () => (await sources(j.page)).every(Boolean)).toBe(true);
+    const opened = () => j.page.evaluate(() => window.__redlinesImages!.opened.length);
+    const image = j.page.locator('.rl-image img').first();
+    const box = (await image.boundingBox())!;
+    const spots = [
+      { x: box.width / 2, y: box.height / 2 },
+      { x: 4, y: 4 },
+      { x: box.width - 4, y: box.height - 4 },
+      { x: box.width / 2, y: 3 },
+    ];
+    let count = 0;
+    for (const delay of [0, 120]) {
+      for (const at of spots) {
+        // The caret is away from the picture, or on it, as it is at the start of a double-click.
+        if (count % 2 === 0) await j.caretAtEnd();
+        await j.page.mouse.click(box.x + at.x, box.y + at.y, { clickCount: 2, delay });
+        count++;
+        await expect.poll(opened, `opened by the double-click ${count}`).toBe(count);
+        const picked = await j.selectedText();
+        expect(
+          ['', '![A red square](red.png)'].includes(picked),
+          `it selects no part of the source (${JSON.stringify(picked)})`,
+        ).toBe(true);
+        expect(
+          await j.page.locator('.cm-content').innerText(),
+          'the source stays hidden',
+        ).not.toContain('red.png');
+      }
+    }
+    // An image in a line of text is the same.
+    await j.page.locator('.rl-image img').nth(1).dblclick();
+    await expect.poll(opened).toBe(count + 1);
+    expect(await j.selectedText()).toBe('![A green one](green.png)');
+    await j.shot('image-double-clicked-anywhere');
+  });
+
   test('a double-click on a remote image does nothing', async ({ start }) => {
     const j = await start({ tracking: false, view: 'redlines' });
     await j.page.evaluate(

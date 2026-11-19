@@ -4,6 +4,7 @@ import { FAILURE_IDS } from './failures.ts';
 import type { GatewayProbe } from './gateway.ts';
 import type { NodeStatus } from './node.ts';
 import { openSheet, type Sheet, type SheetDeps, type SheetOptions } from './sheet.ts';
+import type { InstallState } from './mac-setup.ts';
 import type { TailscaleStatus } from './tailscale.ts';
 
 const peer = (name: string, online: boolean) => ({
@@ -25,6 +26,8 @@ const READY: TailscaleStatus = {
   peers: [peer('studio-mini', true), peer('old-laptop', false)],
   blocked: false,
   health: [],
+  allow_in: 'System Settings › General › Login Items & Extensions › Network Extensions',
+  https: true,
 };
 
 const CODE = 'setup-code-1234567890';
@@ -40,6 +43,9 @@ interface World {
   removed: string[];
   addFails: { current: string | null };
   opened: string[];
+  /** What `installState` says. */
+  install: { current: InstallState };
+  signedIn: (string | null)[];
 }
 
 function world(): World {
@@ -59,6 +65,8 @@ function world(): World {
     removed: [],
     addFails: { current: null },
     opened: [],
+    install: { current: { phase: 'idle', step: '' } },
+    signedIn: [],
     deps: undefined as unknown as SheetDeps,
   };
   w.deps = {
@@ -71,11 +79,27 @@ function world(): World {
         w.opened.push('app');
         return Promise.resolve();
       },
-      download: () => {
-        w.opened.push('download');
+      openHttpsSettings: () => {
+        w.opened.push('https-page');
         return Promise.resolve();
       },
-      signIn: () => Promise.resolve(),
+      install: () => {
+        w.opened.push('install');
+        return Promise.resolve();
+      },
+      installState: () => Promise.resolve(w.install.current),
+      openAppStore: () => {
+        w.opened.push('app-store');
+        return Promise.resolve();
+      },
+      restartApp: () => {
+        w.opened.push('restart');
+        return Promise.resolve();
+      },
+      signIn: (url) => {
+        w.signedIn.push(url);
+        return Promise.resolve();
+      },
     },
     probe: () => Promise.resolve(w.probe.current),
     copy: (text) => {
@@ -96,7 +120,8 @@ function world(): World {
       status: () => Promise.resolve(w.node.current),
       stop: () => Promise.resolve(),
     },
-    poll: { tailscale: 15, node: 15 },
+    poll: { tailscale: 15, node: 15, install: 15 },
+    macTimes: { extension: 60, signIn: 60 },
   };
   return w;
 }
@@ -165,7 +190,7 @@ describe('the setup sheet', () => {
     expect(root.isConnected).toBe(false);
   });
 
-  it('a Mac with no Tailscale says so, offers the download, and goes on by itself when it is there', async () => {
+  it('a Mac with no Tailscale offers to install it, and goes on by itself when it is there', async () => {
     const w = world();
     w.tailscale.current = { ...READY, state: 'missing', peers: [], program: null };
     const root = open(w);
@@ -173,12 +198,18 @@ describe('the setup sheet', () => {
     click(root, 'Continue');
     await tick();
     expect(step(root)).toBe('mac');
-    expect(root.querySelector('[data-failure="tailscale-missing"]')).not.toBeNull();
+    expect(text(root)).toContain('Tailscale is not on this Mac');
+    expect(text(root)).toContain('checks that Tailscale signed it and Apple notarized it');
+    expect(text(root)).toContain('Redlines never sees the password');
     const next = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Continue');
     expect(next?.disabled).toBe(true);
-    click(root, 'Download Tailscale');
-    expect(w.opened).toEqual(['download']);
-    // The person installs it and signs in; Redlines notices by itself.
+    // Nothing is downloaded: there is no Download button, and nothing ran before the click.
+    expect(() => click(root, /Download/)).toThrow();
+    expect(w.opened).toEqual([]);
+    click(root, 'Install Tailscale');
+    await tick();
+    expect(w.opened).toEqual(['install']);
+    // The person signs in; Redlines notices by itself.
     w.tailscale.current = READY;
     await tick(80);
     expect(text(root)).toContain('This Mac is on your Tailscale network');
@@ -193,9 +224,246 @@ describe('the setup sheet', () => {
     w.tailscale.current = { ...READY, state: 'off', peers: [] };
     const root = open(w, { start: { step: 'mac' } });
     await tick();
-    expect(root.querySelector('[data-failure="tailscale-off"]')).not.toBeNull();
+    expect(text(root)).toContain('Tailscale is turned off on this Mac');
+    expect(w.opened).toEqual([]);
     click(root, 'Open Tailscale');
     expect(w.opened).toEqual(['app']);
+  });
+
+  describe('looking around when it opens, and the Gateways found', () => {
+    const mini = peer('studio-mini', true);
+    const phone = { ...peer('pixel', true), os: 'android' };
+    const asleep = peer('old-laptop', false);
+    const asked: string[] = [];
+    const onlyMini = (w: World) => {
+      asked.length = 0;
+      w.deps.probe = (address) => {
+        asked.push(address);
+        return Promise.resolve(
+          address.startsWith('studio-mini')
+            ? { kind: 'found', url: 'wss://studio-mini.yak-bebop.ts.net', host: address }
+            : { kind: 'no-gateway', url: `wss://${address}`, host: address, detail: 'refused' },
+        );
+      };
+    };
+
+    it('opens on the Gateways it found when everything passes, and Connect goes on to the agent', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, peers: [mini, phone, asleep, peer('home-server', true)] };
+      onlyMini(w);
+      const root = open(w, { discover: true });
+      expect(step(root)).toBe('looking');
+      expect(text(root)).toContain('Looking for your OpenClaw');
+      await tick(60);
+      expect(step(root)).toBe('gateways');
+      expect(text(root)).toContain('Found your OpenClaw');
+      expect(text(root)).toContain('studio-mini');
+      expect(text(root)).not.toContain('home-server');
+      // Only computers that are on, and not a phone, are asked, at their Tailscale names.
+      expect(asked.sort()).toEqual([
+        'home-server.yak-bebop.ts.net',
+        'studio-mini.yak-bebop.ts.net',
+      ]);
+      click(root, 'Connect');
+      await tick();
+      expect(step(root)).toBe('prompt');
+      expect(text(root)).toContain('studio-mini');
+      expect(w.connected).toEqual([]);
+    });
+
+    it('opens on the choice when no Gateway answers, Tailscale is not ready, or the network blocks it', async () => {
+      const none = world();
+      none.tailscale.current = { ...READY, peers: [mini] };
+      none.deps.probe = () =>
+        Promise.resolve({ kind: 'no-gateway', url: 'wss://x', host: 'x', detail: 'refused' });
+      let root = open(none, { discover: true });
+      await tick(60);
+      expect(step(root)).toBe('start');
+      sheet?.dispose();
+
+      const off = world();
+      off.tailscale.current = { ...READY, state: 'off', peers: [] };
+      onlyMini(off);
+      root = open(off, { discover: true });
+      await tick(60);
+      expect(step(root)).toBe('start');
+      expect(asked).toEqual([]);
+      sheet?.dispose();
+
+      const blocked = world();
+      blocked.tailscale.current = { ...READY, blocked: true, peers: [mini] };
+      onlyMini(blocked);
+      root = open(blocked, { discover: true });
+      await tick(60);
+      expect(step(root)).toBe('start');
+      expect(asked).toEqual([]);
+    });
+
+    it('lets the person set up by hand while it looks', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, peers: [mini] };
+      onlyMini(w);
+      const root = open(w, { discover: true });
+      click(root, 'Set up by hand');
+      expect(step(root)).toBe('start');
+      await tick(60);
+      expect(step(root)).toBe('start');
+    });
+
+    it('does not look unless asked to: a plain sheet opens on the choice', () => {
+      expect(step(open(world()))).toBe('start');
+    });
+
+    it('says when HTTPS certificates are off, and opens the admin page that turns them on', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, https: false };
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      expect(text(root)).toContain('HTTPS certificates are off for your network');
+      expect(text(root)).toContain('Tailscale Serve needs them');
+      // It does not stop the person.
+      const next = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Continue');
+      expect(next?.disabled).toBe(false);
+      click(root, 'Open the DNS page');
+      expect(w.opened).toEqual(['https-page']);
+      w.tailscale.current = READY;
+      await tick(60);
+      expect(text(root)).toContain('HTTPS certificates are on for your network');
+    });
+
+    it('where no Gateway answers and certificates are off, says Serve needs them, beside the prompt', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, https: false, peers: [mini] };
+      w.probe.current = { kind: 'no-gateway', url: 'wss://x', host: 'x', detail: 'refused' };
+      const root = open(w, {
+        start: { step: 'computer', tailscale: { ...READY, https: false, peers: [mini] } },
+      });
+      click(root, /studio-mini/);
+      await tick();
+      expect(root.querySelector('[data-failure="no-gateway"]')).not.toBeNull();
+      expect(text(root)).toContain('Tailscale Serve needs them');
+      expect(text(root)).toContain('Copy a prompt for your agent');
+      click(root, 'Open the DNS page');
+      expect(w.opened).toEqual(['https-page']);
+    });
+  });
+
+  describe('Tailscale on this Mac, done by the setup when the person asks', () => {
+    const missing: TailscaleStatus = { ...READY, state: 'missing', peers: [], program: null };
+    const signedOut: TailscaleStatus = { ...READY, state: 'signed-out', peers: [], account: null };
+
+    it('installs, says each step, restarts the app once that opened too early, and signs in', async () => {
+      const w = world();
+      w.tailscale.current = missing;
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Install Tailscale');
+      w.install.current = {
+        phase: 'working',
+        step: 'Downloading Tailscale 1.80.2 (about 29 MB) from pkgs.tailscale.com…',
+      };
+      await tick();
+      expect(text(root)).toContain('Downloading Tailscale 1.80.2');
+      expect(() => click(root, 'Install Tailscale')).toThrow();
+      w.install.current = { phase: 'done', step: 'Tailscale is installed.' };
+      // The installer opened the app, which answers but is signed out: it is restarted, once.
+      w.tailscale.current = signedOut;
+      await tick(80);
+      expect(w.opened).toEqual(['install', 'restart']);
+      await tick(80);
+      expect(w.opened).toEqual(['install', 'restart']);
+      expect(text(root)).toContain('Sign in with the same account as your other computer');
+      expect(w.signedIn).toEqual([]);
+      click(root, 'Sign in to Tailscale');
+      expect(w.signedIn).toEqual([null]);
+    });
+
+    it('sends a person who is not an administrator to the App Store, and waits for it', async () => {
+      const w = world();
+      w.tailscale.current = missing;
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Install Tailscale');
+      w.install.current = {
+        phase: 'app-store',
+        step: 'You aren’t an administrator of this Mac. The App Store is open on Tailscale.',
+      };
+      await tick();
+      expect(text(root)).toContain('The App Store is open on Tailscale');
+      expect(text(root)).toContain('Waiting for Tailscale to arrive');
+      click(root, 'Open the App Store again');
+      expect(w.opened).toContain('app-store');
+      // Installed from the App Store, it is turned off until opened: not a fresh install here.
+      w.tailscale.current = { ...READY, state: 'off', peers: [] };
+      await tick(80);
+      expect(w.opened).not.toContain('restart');
+      expect(text(root)).toContain('Open Tailscale');
+    });
+
+    it('says plainly why an install stopped, and offers to try again or the App Store', async () => {
+      const w = world();
+      w.tailscale.current = missing;
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Install Tailscale');
+      w.install.current = {
+        phase: 'failed',
+        step: 'The download isn’t signed by Tailscale, so it wasn’t installed.',
+      };
+      await tick();
+      expect(text(root)).toContain('isn’t signed by Tailscale, so it wasn’t installed');
+      click(root, 'Get it from the App Store instead');
+      expect(w.opened).toContain('app-store');
+      click(root, 'Try again');
+      await tick();
+      expect(w.opened.filter((one) => one === 'install')).toHaveLength(2);
+    });
+
+    it('says where to allow the network extension when Tailscale, opened, still does not answer', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, state: 'off', peers: [] };
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Open Tailscale');
+      await tick(20);
+      expect(text(root)).toContain('Waiting for Tailscale to start');
+      await tick(100);
+      expect(text(root)).toContain('Login Items & Extensions › Network Extensions');
+      click(root, 'Restart Tailscale');
+      await tick();
+      expect(w.opened).toEqual(['app', 'restart']);
+    });
+
+    it('starts the sign-in with the page Tailscale gave, and restarts the app when none comes', async () => {
+      const w = world();
+      w.tailscale.current = { ...signedOut, auth_url: 'https://login.tailscale.com/a/1' };
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      click(root, 'Sign in to Tailscale');
+      expect(w.signedIn).toEqual(['https://login.tailscale.com/a/1']);
+      await tick();
+      expect(text(root)).toContain('Waiting for you to finish signing in');
+      expect(w.opened).toEqual([]);
+
+      // Another Mac's app, which Log in does nothing in: no page ever comes.
+      const hung = world();
+      hung.tailscale.current = signedOut;
+      const second = open(hung, { start: { step: 'mac' } });
+      await tick();
+      click(second, 'Sign in to Tailscale');
+      expect(hung.signedIn).toEqual([null]);
+      await tick(150);
+      // Restarted by itself, once; then it says what to do and offers the button.
+      expect(hung.opened).toEqual(['restart']);
+      await tick(150);
+      expect(hung.opened).toEqual(['restart']);
+      click(second, 'Sign in to Tailscale');
+      await tick(150);
+      expect(text(second)).toContain('The sign-in still doesn’t start');
+      click(second, 'Restart Tailscale');
+      await tick();
+      expect(hung.opened).toEqual(['restart', 'restart']);
+    });
   });
 
   it('lists the computers, dims the ones that are off, and finds the Gateway on the one picked', async () => {

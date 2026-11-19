@@ -268,26 +268,55 @@ describe('sidebar', () => {
     expect(button('images').getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('drags an image into a document by its path, and never opens it', async () => {
-    const { sidebar, button, openFile, allowDocument } = setUp();
+  it('drags an image into a document with the pointer, by its path, and never opens it (#1198)', async () => {
+    const over = vi.fn();
+    const drop = vi.fn();
+    const leave = vi.fn();
+    const { sidebar, button, openFile, allowDocument } = setUp(repoTree(), {
+      imageDrag: { over, drop, leave },
+    });
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
     button('images').click();
     await vi.waitFor(() => expect(button('logo.png')).toBeTruthy());
     const logo = button('logo.png');
-    expect(logo.draggable).toBe(true);
     expect(logo.title).toMatch(/drag/i);
-    const data = new DataTransfer();
-    const event = new Event('dragstart', { bubbles: true });
-    Object.defineProperty(event, 'dataTransfer', { value: data });
-    logo.dispatchEvent(event);
-    expect(data.getData('application/x-redlines-project-image')).toBe('/repo/docs/images/logo.png');
+    // No HTML drag: the app's web view delivers none to the page.
+    expect(logo.draggable).toBeFalsy();
+    const pointer = (type: string, x: number, y: number, target: EventTarget = window) =>
+      target.dispatchEvent(
+        new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 }),
+      );
+    // A press that moves a pixel is no drag.
+    pointer('pointerdown', 10, 10, logo);
+    pointer('pointermove', 11, 10);
+    expect(over).not.toHaveBeenCalled();
+    expect(document.querySelector('.rl-sidebar-drag')).toBeNull();
+    pointer('pointerup', 11, 10);
+    expect(drop).not.toHaveBeenCalled();
+    // A drag shows a label, tells the document where it is, and drops there.
+    pointer('pointerdown', 10, 10, logo);
+    pointer('pointermove', 60, 40);
+    expect(document.querySelector('.rl-sidebar-drag')?.textContent).toBe('logo.png');
+    expect(over).toHaveBeenLastCalledWith({ x: 60, y: 40 });
+    pointer('pointerup', 300, 200);
+    expect(drop).toHaveBeenCalledWith({ x: 300, y: 200 }, '/repo/docs/images/logo.png');
+    expect(document.querySelector('.rl-sidebar-drag')).toBeNull();
+    // Escape gives a drag up.
+    pointer('pointerdown', 10, 10, logo);
+    pointer('pointermove', 60, 40);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(leave).toHaveBeenCalled();
+    pointer('pointerup', 300, 200);
+    expect(drop).toHaveBeenCalledTimes(1);
     logo.click();
     expect(allowDocument).not.toHaveBeenCalled();
     expect(openFile).not.toHaveBeenCalled();
     // A document is no drag.
-    expect(button('design.md').draggable).toBeFalsy();
+    pointer('pointerdown', 10, 10, button('design.md'));
+    pointer('pointermove', 60, 40);
+    expect(document.querySelector('.rl-sidebar-drag')).toBeNull();
   });
 
   it('opens Markdown here and a new window with ⌘-click', async () => {

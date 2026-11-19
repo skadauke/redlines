@@ -1,0 +1,83 @@
+/*
+ * The OpenClaw setup window (openclaw-setup.html). The steps are the sheet's (preferences/
+ * openclaw-sheet.css, which draws them for the small Preferences window too); here they have the
+ * whole window: no frame of their own, a column of readable width that grows with the window and
+ * scrolls when it is short, and text with room to breathe.
+ */
+
+.rl-ocw-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 52px;
+  border-bottom: 1px solid var(--rl-rule);
+}
+
+.rl-ocw-title {
+  margin: 0;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui);
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.rl-ocw-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The sheet fills the column: its frame is the window's. */
+.rl-ocw-scroll > .rl-oc-sheet {
+  box-sizing: border-box;
+  max-width: 680px;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rl-ocw-scroll .rl-oc-body {
+  gap: 12px;
+  padding: 28px 32px 28px;
+  min-height: calc(100vh - 52px);
+  box-sizing: border-box;
+  font-size: var(--rl-size-ui);
+  line-height: 20px;
+}
+
+.rl-ocw-scroll .rl-oc-body h1 {
+  margin-bottom: 4px;
+  font-size: 24px;
+  line-height: 30px;
+}
+
+.rl-ocw-scroll .rl-oc-body h2 {
+  font-size: var(--rl-size-ui);
+}
+
+.rl-ocw-scroll .rl-oc-row {
+  padding: 14px 16px;
+}
+
+.rl-ocw-scroll .rl-oc-small,
+.rl-ocw-scroll .rl-oc-note,
+.rl-ocw-scroll .rl-oc-fail p {
+  line-height: 18px;
+}
+
+.rl-ocw-scroll .rl-oc-fail {
+  padding: 16px 18px;
+}
+
+.rl-ocw-scroll .rl-oc-pre {
+  max-height: 260px;
+}
+
+/* A failure of the window itself (it can't be set up outside the app). */
+.rl-ocw-problem {
+  padding: 28px 32px;
+  color: var(--rl-ink-2);
+}

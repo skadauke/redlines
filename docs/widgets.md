@@ -61,6 +61,14 @@ strips at the table's edge and the select-table square are one widget, on `--rl-
 `--rl-ink`. A handle's pill is `--rl-rule` with a `--rl-ink-2` border, and `--rl-pressed` with an `--rl-ink`
 border under the pointer. A grip's menu is a menu as above (12 px radius, 32 px rows), and the row dragged is a card.
 
+## The drop marker
+
+Wherever something is dragged to a place between blocks (selected blocks, a table, a picture from the
+sidebar or Finder, the rows of a table), the place is marked by one 3 px line in `--rl-drop`, a faint
+blue, the one color that is neither a person's nor the pen's, in both themes. Where blocks are dragged
+(`blocks/drag.ts`) a little room also opens there, 24 px at the theme's own text size, which grows in
+0.14 s and appears at once when the system asks for reduced motion; the line stands in the middle of it.
+
 ## Buttons
 
 An icon button is `--rl-ink-2` on no ground, `--rl-ink` and `--rl-rule` under the pointer and when

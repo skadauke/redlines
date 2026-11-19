@@ -20,6 +20,11 @@ const WINDOWS = [
   { capability: 'preferences', entry: 'preferences/main.ts', windows: ['preferences'] },
   { capability: 'install', entry: 'install/main.ts', windows: ['install'] },
   { capability: 'about', entry: 'about/main.ts', windows: ['about'] },
+  {
+    capability: 'openclaw-setup',
+    entry: 'openclaw-setup/main.ts',
+    windows: ['openclaw-setup'],
+  },
 ];
 
 const snake = (kebab: string) => kebab.replaceAll('-', '_');

@@ -25,7 +25,7 @@ and plans the work. The findings of the earlier note stand.
 - **Tailscale is the road the Mac dials out on.** The Gateway stays on loopback and OpenClaw's own
   `gateway.tailscale.mode: serve` puts it on the tailnet as `wss://<name>.<tailnet>.ts.net`, with
   Gateway auth still on. Redlines checks that Tailscale is installed, signed in and can see the
-  computer, in plain words, and never changes Tailscale.
+  computer, in plain words (since Epic #1155 it also installs, opens and restarts Tailscale for the person, from the setup window and only when asked).
 - **Setup is one prompt and one code.** Redlines writes a prompt (with Copy) that asks the person's
   agent to set up its side and to answer with a **setup code** (what OpenClaw's own iPhone app
   takes). The person pastes the code into a secure field once. Redlines exchanges it, keeps what it
