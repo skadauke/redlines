@@ -89,8 +89,9 @@ describe('the targets of a document', () => {
 
 describe('what a document says of its targets', () => {
   it('numbers sections only where the file asks, and reads setext headings', () => {
+    // Without the setting a section is named by its title, not numbered.
     const plain = editorAt('# One {#sec-one}\n\nSee @sec-one.\n', 0);
-    expect(targetsOf(plain.view.state.doc).size).toBe(0);
+    expect(targetsOf(plain.view.state.doc).get('sec-one')?.text).toBe('One');
     const text =
       '---\nnumber-sections: true\n---\n\nOne {#sec-one}\n===\n\nTwo {#sec-two}\n---\n\n# Three {#sec-three}\n';
     const setext = editorAt(text, 0);
@@ -107,6 +108,91 @@ describe('what a document says of its targets', () => {
     const found = targetsOf(editor.view.state.doc);
     expect([...found.keys()]).toEqual(['fig-real']);
     expect(chips(editor)).toEqual([['@fig-real', 'Figure 1']]);
+  });
+});
+
+describe('the extent of a target', () => {
+  it('is the whole figure, table with its caption, equation, chunk and section', () => {
+    const doc = editorAt(DOC, 0).view.state.doc;
+    const targets = targetsOf(doc);
+    const slice = (label: string) => {
+      const target = targets.get(label)!;
+      return doc.sliceString(target.pos, target.end);
+    };
+    expect(slice('fig-plot')).toBe('![A plot](plot.png){#fig-plot}');
+    expect(slice('tbl-data')).toBe('| a | b |\n| - | - |\n| 1 | 2 |\n\n: Data {#tbl-data}');
+    expect(slice('eq-sum')).toBe('$$ x = 1 $$ {#eq-sum}');
+    expect(slice('fig-second')).toBe('```{r}\n#| label: fig-second\nplot(1)\n```');
+    // A section runs to the heading of its level or above: Method (level 2) ends before "Skipped".
+    expect(slice('sec-method').startsWith('## Method {#sec-method}')).toBe(true);
+    expect(slice('sec-method')).not.toContain('Skipped');
+    expect(slice('sec-intro')).toContain('## Method');
+    expect(slice('sec-intro')).not.toContain('# Skipped');
+  });
+
+  it('is the table below a caption that comes first', () => {
+    const doc = editorAt('Intro\n\n: Data {#tbl-data}\n\n| a |\n| - |\n| 1 |\n\nEnd\n', 0).view
+      .state.doc;
+    const target = targetsOf(doc).get('tbl-data')!;
+    expect(doc.sliceString(target.pos, target.end)).toBe(
+      ': Data {#tbl-data}\n\n| a |\n| - |\n| 1 |',
+    );
+  });
+});
+
+describe('references as links', () => {
+  const link = (editor: Editor, text: string) =>
+    [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-xref')].find(
+      (el) => el.textContent === text,
+    )!;
+  const press = (el: HTMLElement, init: MouseEventInit = {}) =>
+    el.dispatchEvent(
+      new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true, ...init }),
+    );
+
+  it('are text with a dotted underline, not a chip', () => {
+    const editor = editorAt(DOC, DOC.length);
+    const el = link(editor, 'Figure 1');
+    expect(el.getAttribute('role')).toBe('link');
+    expect(el.classList.contains('rl-xref')).toBe(true);
+    // A section with no number (the file doesn't number sections) shows its title.
+    const plain = editorAt('# One {#sec-one}\n\nSee @sec-one.\n', 0);
+    expect(link(plain, 'One')).toBeTruthy();
+  });
+
+  it('put the caret there on a click, which shows the source', () => {
+    const editor = editorAt(DOC, DOC.length);
+    const token = DOC.indexOf('@tbl-data');
+    press(link(editor, 'Table 1'));
+    expect(editor.view.state.selection.main.head).toBe(token + '@tbl-data'.length);
+    expect(editor.view.dom.querySelector('.rl-xref')?.textContent).not.toBe('Table 1');
+    expect(chips(editor).map(([text]) => text)).not.toContain('@tbl-data');
+  });
+
+  it('go to the target on a ⌘-click, with the whole target to show', () => {
+    const editor = editorAt(DOC, DOC.length);
+    const doc = editor.view.state.doc;
+    const effects: unknown[] = [];
+    const seen = editor.view.state;
+    press(link(editor, 'Table 1'), { metaKey: true });
+    const target = targetsOf(doc).get('tbl-data')!;
+    // (A table moves the caret into its first cell.)
+    expect(editor.view.state.selection.main.head).toBeGreaterThanOrEqual(target.pos);
+    expect(editor.view.state.selection.main.head).toBeLessThan(target.pos + 4);
+    expect(seen).not.toBe(editor.view.state);
+    expect(effects).toEqual([]);
+    // Ctrl does the same, for systems that have no ⌘.
+    editor.view.dispatch({ selection: { anchor: DOC.length } });
+    press(link(editor, 'Figure 1'), { ctrlKey: true });
+    expect(editor.view.state.selection.main.head).toBe(targetsOf(doc).get('fig-plot')!.pos);
+  });
+
+  it('leave a right-click and a Shift-click to the editor', () => {
+    const editor = editorAt(DOC, DOC.length);
+    press(link(editor, 'Figure 1'), { shiftKey: true });
+    expect(editor.view.state.selection.main.head).toBe(DOC.length);
+    press(link(editor, 'Figure 1'), { button: 2 });
+    expect(editor.view.state.selection.main.head).toBe(DOC.length);
   });
 });
 

@@ -402,7 +402,12 @@ function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted 
     author: ada,
     notice: (message) => refusals.push(message),
   });
-  editor.view.dispatch({ selection: { anchor: expanded.anchor, head: expanded.head } });
+  // The caret is an offset of the file's text, where a CRLF is two characters; the document has one
+  // LF there (#1233: a CRLF script put the caret a character per line break too far).
+  const inDocument = (at: number) => at - (expanded.text.slice(0, at).match(/\r\n/g)?.length ?? 0);
+  editor.view.dispatch({
+    selection: { anchor: inDocument(expanded.anchor), head: inDocument(expanded.head) },
+  });
   return {
     editor,
     refusals,
@@ -630,7 +635,7 @@ export function runScript(
   } = {},
 ): ScriptResult {
   const expanded = expandDoc(script);
-  const seen = new Set<string>([expanded.text]);
+  const seen = new Set<string>([expanded.text.replaceAll('\r\n', '\n')]);
   const mounted = mount(script, expanded, seen);
   const { editor } = mounted;
   try {
@@ -680,7 +685,12 @@ export function runScript(
       fileTextFailures,
       openItem: openBlock(editor.view.state)?.item === true,
     };
-    if (!options.light) result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
+    if (!options.light)
+      result.historyFailures = undoAllTheWay(
+        editor.view,
+        seen,
+        expanded.text.replaceAll('\r\n', '\n'),
+      );
     if (!options.light && script.keys.length === 1 && script.keys[0] === 'Enter') {
       const again = mount(script, expanded);
       try {

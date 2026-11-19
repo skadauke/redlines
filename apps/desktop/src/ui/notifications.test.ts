@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createNotifications, PASSING_MS } from './notifications.ts';
+import {
+  createNotifications,
+  PASSING_MS,
+  READING_BASE_MS,
+  stayMs,
+  WORD_MS,
+} from './notifications.ts';
 
 function setup() {
   // A stand-in for the editor, which has the keyboard while a notification comes and goes.
@@ -164,6 +170,36 @@ describe('notifications', () => {
     expect(texts()).toHaveLength(0);
   });
 
+  it('stay as long as their words take to read, at 200 a minute', () => {
+    const { notifications, texts } = setup();
+    // 60 words: 2 s and 18 s.
+    const text = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
+    const stay = READING_BASE_MS + 60 * WORD_MS;
+    expect(stay).toBe(20_000);
+    notifications.show({ text, timeout: PASSING_MS });
+    vi.advanceTimersByTime(stay - 1);
+    expect(texts()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(texts()).toHaveLength(0);
+  });
+
+  it('wait the whole time again once the pointer has been on them', () => {
+    const { notifications, cards, texts } = setup();
+    const text = Array.from({ length: 30 }, (_, i) => `word${i}`).join(' ');
+    const stay = stayMs(text, PASSING_MS);
+    notifications.show({ text, timeout: PASSING_MS });
+    const card = cards()[0];
+    vi.advanceTimersByTime(stay - 1000);
+    card?.dispatchEvent(new PointerEvent('pointerenter'));
+    vi.advanceTimersByTime(stay * 2);
+    expect(texts()).toHaveLength(1);
+    card?.dispatchEvent(new PointerEvent('pointerleave'));
+    vi.advanceTimersByTime(stay - 1);
+    expect(texts()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(texts()).toHaveLength(0);
+  });
+
   it('close with Esc when they have the keyboard, and give it back', () => {
     const { editor, notifications, cards, texts } = setup();
     const onDismiss = vi.fn();
@@ -220,5 +256,18 @@ describe('a second action', () => {
     button(cards()[0], 'Reveal Log').click();
     expect(second).toHaveBeenCalledOnce();
     expect(first).not.toHaveBeenCalled();
+  });
+});
+
+describe('stayMs', () => {
+  it('is a base time and the words at 200 a minute, and never less than the caller asked', () => {
+    expect(stayMs('', 0)).toBe(READING_BASE_MS);
+    expect(stayMs('one two  three\nfour', 0)).toBe(READING_BASE_MS + 4 * WORD_MS);
+    // 200 words a minute is 300 ms a word.
+    expect(WORD_MS * 200).toBe(60_000);
+    // A short text stays as long as it was asked to.
+    expect(stayMs('Redlines is up to date.', PASSING_MS)).toBe(PASSING_MS);
+    // A long one stays for its reading, longer than it was asked to.
+    expect(stayMs('word '.repeat(100), PASSING_MS)).toBe(READING_BASE_MS + 100 * WORD_MS);
   });
 });

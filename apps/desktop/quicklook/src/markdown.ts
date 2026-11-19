@@ -208,11 +208,12 @@ function classOfItems(html: string): string {
 }
 
 /** micromark's HTML of Markdown `source`, with nothing changed: where its images are. */
-function rawHtml(source: string): string {
+function rawHtml(source: string, pandoc = false): string {
   const html = new Html();
   const divs = markDivs(source);
   const drawn = micromark(divs.text, {
-    extensions: [gfm()],
+    // One tilde is a subscript in Pandoc (quarto.ts) and a strikethrough in GitHub's Markdown.
+    extensions: [gfm({ singleTilde: !pandoc })],
     htmlExtensions: [gfmHtml(), extension(html)],
   });
   return divs.finish(drawn + html.end());
@@ -225,8 +226,12 @@ export function markdownImages(source: string): string[] {
 
 /** The HTML of Markdown `source`, to go inside the page's document. Each image is its alt text,
  * except those in `images`, which the host loaded: those are the pictures. */
-export function markdownToHtml(source: string, images: LoadedImages = new Map()): string {
-  return classOfItems(rawHtml(source))
+export function markdownToHtml(
+  source: string,
+  images: LoadedImages = new Map(),
+  pandoc = false,
+): string {
+  return classOfItems(rawHtml(source, pandoc))
     .replace(IMAGE, (_, src: string, alt: string, width?: string, height?: string) => {
       const path = localImagePath(src);
       const name = path === null ? undefined : images.get(path);

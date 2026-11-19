@@ -22,6 +22,8 @@ const OPEN_DIV = /^(:{3,})\s*(\{[^}]*\}|[\w-]+)\s*$/;
 const CLOSE_DIV = /^:{3,}\s*$/;
 const ATTRIBUTES = /\s*\{[#.][^{}]*\}\s*$/;
 const ID = /\{[^{}]*#((?:sec|fig|tbl|eq|lst)-[\w:.-]*\w)[^{}]*\}/;
+/** `$x^2$`, as pandoc reads it: no space inside the dollars, no digit after the closing one. */
+const INLINE_MATH = /(?<![\\$])\$(?![\s$])((?:\\.|[^$\\\n])*?)(?<![\s\\])\$(?![\d$])/g;
 const CALLOUT = /\.callout-(note|tip|warning|important|caution)\b/;
 const REFERENCE = /(?<![\w@/.\\])@((?:sec|fig|tbl|eq|lst)-[\w:.-]*\w)/g;
 
@@ -108,6 +110,7 @@ export function quartoToMarkdown(text: string): string {
   const prose = (line: string) =>
     outsideSpans(line, (plain) =>
       plain
+        .replace(INLINE_MATH, (_all, tex: string) => `\`${tex}\``)
         .replace(REFERENCE, (_all, id: string) => label(id))
         .replace(/(?<![\\^])\^([^\s^]+)\^/g, '<sup>$1</sup>')
         .replace(/(?<![\\~])~([^\s~]+)~(?!~)/g, '<sub>$1</sub>'),
