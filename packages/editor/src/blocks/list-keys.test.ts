@@ -228,6 +228,46 @@ describe('Return in a list item', () => {
         off: { file: 'Beta⏎⏎+ ⏎+ delta', caret: 'Beta⏎⏎+ ⏎+ ‸delta' },
         on: { file: 'Beta⏎⏎+ <split>⏎+ delta', caret: 'Beta⏎⏎+ <split>⏎+ ‸delta' },
       },
+      // #443: with Track Changes on, a `-` item written apart from the blank line above it would
+      // read as the text's underline once the blank line is rejected; the two are one split.
+      {
+        name: 'at the start of the first `-` item, right under a line of text (#443)',
+        doc: 'Fruit:⏎- ‸apples⏎- cherries',
+        off: { file: 'Fruit:⏎⏎- ⏎- apples⏎- cherries', caret: 'Fruit:⏎⏎- ⏎- ‸apples⏎- cherries' },
+        on: { caret: 'Fruit:<split>⏎⏎- ⏎- ‸apples⏎- cherries' },
+      },
+      {
+        name: 'the same with Shift-Return (#443)',
+        doc: 'Fruit:⏎- ‸apples⏎- cherries',
+        keys: ['Shift-Enter'],
+        off: { file: 'Fruit:⏎⏎- ⏎- apples⏎- cherries', caret: 'Fruit:⏎⏎- ⏎- ‸apples⏎- cherries' },
+        on: { caret: 'Fruit:<split>⏎⏎- ⏎- ‸apples⏎- cherries' },
+      },
+      {
+        name: 'the same, taken back by Backspace (#443)',
+        doc: 'Fruit:⏎- ‸apples⏎- cherries',
+        keys: ['Shift-Enter', 'Backspace'],
+        ...same({ caret: 'Fruit:⏎- ‸apples⏎- cherries' }),
+      },
+      {
+        name: 'the same, a task item (#443)',
+        doc: 'Fruit:⏎- [ ] ‸apples',
+        off: { caret: 'Fruit:⏎⏎- [ ] ⏎- [ ] ‸apples' },
+        on: { caret: 'Fruit:<split>⏎⏎- [ ] ⏎- [ ] ‸apples' },
+      },
+      {
+        name: 'the same, then text typed in the item above (#443)',
+        doc: 'Fruit:⏎- ‸apples',
+        keys: ['Shift-Enter', 'ArrowLeft', { type: 'X' }],
+        off: { file: 'Fruit:⏎⏎- X⏎- apples' },
+        on: { newest: 'Fruit:⏎⏎- X⏎- apples' },
+      },
+      {
+        name: 'the same, in a quote (#443)',
+        doc: '> Fruit:⏎> - ‸apples',
+        off: { caret: '> Fruit:⏎>⏎> - ⏎> - ‸apples' },
+        on: { caret: '> Fruit:<split>⏎>⏎> - ⏎> - ‸apples' },
+      },
       {
         name: 'at the start of the first item, right under a line of text in a quote',
         doc: '> Beta⏎> + ‸delta',
