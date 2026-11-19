@@ -1,0 +1,83 @@
+---
+title: "Build 21 Quarto document"
+format: html
+---
+
+# Introduction {#sec-intro}
+
+This file is built for the Build 21 Test Drive. It is a Quarto document, with a callout of each kind, references, a citation, an include and two code chunks. Ada and Bo have left changes in it.
+
+::: {.callout-note}
+## A note
+
+A note says something the reader should know.
+:::
+
+::: {.callout-tip}
+## A <!--ins zjh9-->useful <!--/zjh9-->tip
+
+A tip says something that helps.
+:::
+
+::: {.callout-warning}
+## A warning
+
+A warning says something to watch for.
+:::
+
+::: {.callout-important title="Important"}
+An important callout, with its title in the fence.
+:::
+
+::: {.callout-caution collapse="true"}
+## A folded caution
+
+A caution that starts folded.
+:::
+
+# Methods {#sec-methods}
+
+The method is in @sec-intro and the result in @fig-sketch, @tbl-owners and @eq-mass. It follows the work of Knuth [@knuth1984] and, with a page, Lamport [@lamport1994, p. 4; @knuth1984]. As @knuth1984 shows, the text and the program are one.
+
+![A pencil sketch of the red caret](sketch.png){#fig-sketch}
+
+| Milestone | Owner |
+|-----------|-------|
+| Review    | Ada   |
+| Beta      | Bo    |
+
+: Who owns what {#tbl-owners}
+
+$$ E = mc^2 $$ {#eq-mass}
+
+{{< include _method.qmd >}}
+
+```{r}
+#| label: fig-plot
+x <- c(1, 2, 3)
+mean(x)
+```
+
+```{python}
+#| label: calc
+total = sum([1, 2, 3])
+print(total)
+```
+
+The count is <!--ins n97r-->42 <!--/n97r-->17 here.
+
+A last paragraph, with water as H~2~O and a square as x^2^.
+
+<!-- redlines
+# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.
+version: 1
+tracking: everyone
+view: simple
+people:
+  ada: {name: Ada}
+  bo: {name: Bo}
+  cy: {name: Cy}
+marks:
+  zjh9: {by: bo, at: 2026-11-18T02:59Z}
+  n97r: {by: ada, at: 2026-11-18T02:59Z}
+-->
