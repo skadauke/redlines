@@ -1142,7 +1142,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
   new column, in its row. Delete Table (no default key) follows Delete Column in the menu and
   deletes the whole table the caret or the selection is in. A column's handle is the same pill, turned
-  (16 × 5 px, growing to 22 × 8), just above the column at the table's top edge; a click selects the column (⇧ extends)
+  (22 × 6 px, growing to 28 × 9), drawn as the picture's resize handles are: white, with a dark hairline and a soft shadow, in both themes, just above the column at the table's top edge; a click selects the column (⇧ extends)
   when it is released, and a right-click selects it and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
   alignments with the caret's column checked, Clear Contents); a drag moves the columns, and the
   others selected with them, to any boundary, the last included, with a vertical drop line and the
@@ -1159,9 +1159,13 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   or the strip; **Add row** is a strip as wide as the table, 4 px below it, while the pointer is
   over the bottom row or the strip. A click adds a column (or a row) at the end: the same insertion
   as the + between columns and rows and the Table menu, so with Track Changes on it is the tracked
-  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it,
-  selects the whole table, as Select Table does; it stands aside while a + is where it would be. Each
-  has a hint after the title bar's delay.
+  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it, drawn
+  as the handles are and with a move icon (four arrows), selects the whole table, as Select Table
+  does, and a drag from it moves the whole table: a line shows between blocks where it will land,
+  letting go moves it there as one step (tracked as a move with Track Changes on), and Escape lets it
+  go. It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
+  A grip's menu is used from the keyboard: Down, Up and Tab choose an item, which looks as one under
+  the pointer, Return runs it and Escape closes the menu.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
   Word's keys align the paragraph) are in the Table menu and the column grip's menu, the caret's
   column checked, and align the columns the selection touches, one step to undo with the selection

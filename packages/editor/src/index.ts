@@ -1196,3 +1196,4 @@ function pasteIntoField(view: EditorView, text: string): boolean {
 }
 
 export { moveBlocks, moveBlocksReason, moveRunTo, runOfSelection } from './blocks/move.ts';
+export { dragBlockAt } from './blocks/drag.ts';

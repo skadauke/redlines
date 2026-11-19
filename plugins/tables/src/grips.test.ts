@@ -217,6 +217,45 @@ describe('row grips', () => {
     expect(menuItems(editor)).toEqual([]);
   });
 
+  it('is used from the keyboard: arrows choose, Return runs, Escape closes (#1248)', async () => {
+    const editor = mount();
+    move(editor, LEFT + 50, rowY(2));
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(2) });
+    const key = (k: string, init: KeyboardEventInit = {}) =>
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...init }));
+    const chosen = () => document.activeElement?.textContent;
+    expect(menuItems(editor).length).toBeGreaterThan(0);
+    expect(chosen(), 'nothing is chosen until a key').not.toBe('Insert Row Above');
+    key('ArrowDown');
+    expect(chosen()).toBe('Insert Row Above');
+    key('ArrowDown');
+    expect(chosen()).toBe('Insert Row Below');
+    key('ArrowUp');
+    expect(chosen()).toBe('Insert Row Above');
+    key('ArrowUp');
+    expect(chosen(), 'it wraps').toBe('Clear Contents');
+    key('Home');
+    expect(chosen()).toBe('Insert Row Above');
+    key('Tab');
+    expect(chosen(), 'Tab goes on, inside the menu').toBe('Insert Row Below');
+    key('Tab', { shiftKey: true });
+    expect(chosen()).toBe('Insert Row Above');
+    key('ArrowDown');
+    key('ArrowDown');
+    expect(chosen()).toBe('Delete Row');
+    key('Enter');
+    expect(editor.getDoc(), 'Return runs the chosen item').not.toContain('| 21 |');
+    expect(menuItems(editor)).toEqual([]);
+    // Escape closes it, and the document has the keys again.
+    move(editor, LEFT + 50, rowY(1));
+    mouse(grip(editor)!, 'contextmenu', { clientX: 60, clientY: rowY(1) });
+    key('ArrowDown');
+    key('Escape');
+    expect(menuItems(editor)).toEqual([]);
+    await Promise.resolve();
+    expect(document.activeElement, 'the document has the keys again').toBe(editor.view.contentDOM);
+  });
+
   it('disables Move Row Up at the first row and Move Row Down at the last, with the reason', () => {
     const editor = mount();
     const items = () => [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
@@ -732,12 +771,27 @@ describe('whole rows through the grip when the last selected row is shorter (#45
 });
 
 describe('the widgets share the look of the app (#672)', () => {
-  it('draws them on the card ground with the theme shadow, and the + strips and square in one rule', async () => {
+  it('draws them on the card ground with the theme shadow, and the + and the strips in one rule', async () => {
     const { GRIPS_STYLE } = await import('./grips.ts');
     expect(GRIPS_STYLE).not.toContain('--rl-page');
-    expect(GRIPS_STYLE).not.toMatch(/box-shadow:\s*0 /);
-    expect(GRIPS_STYLE).toMatch(
-      /\.rl-plus, \.rl-col-plus, \.rl-edge-add, \.rl-table-select \{\s*cursor: pointer;/,
-    );
+    // Only the handles, drawn as the picture's resize handles are (#1199), have a shadow of their own.
+    const own = GRIPS_STYLE.match(/box-shadow:\s*0 [^;]*;/g) ?? [];
+    expect(own).toHaveLength(2);
+    expect(new Set(own).size).toBe(1);
+    expect(GRIPS_STYLE).toMatch(/\.rl-plus, \.rl-col-plus, \.rl-edge-add \{\s*cursor: pointer;/);
+  });
+
+  it('draws the grips and the select-table handle as the picture handles: white, hairline, shadow (#1199)', async () => {
+    const { GRIPS_STYLE } = await import('./grips.ts');
+    const pill =
+      /\.rl-grip::before, \.rl-col-grip::before \{[^}]*background: #fff;[^}]*box-shadow: ([^;]*);/.exec(
+        GRIPS_STYLE,
+      );
+    const select =
+      /\.rl-table-select \{\s*cursor: grab;[^}]*background: #fff;[^}]*box-shadow: ([^;]*);/.exec(
+        GRIPS_STYLE,
+      );
+    expect(pill?.[1], 'the pill').toBeDefined();
+    expect(select?.[1], 'the select-table handle has the pill’s shadow').toBe(pill?.[1]);
   });
 });

@@ -22,6 +22,7 @@ import {
   deleteCols,
   deleteRows,
   deleteTable,
+  dragBlockAt,
   insertCols,
   insertColsAt,
   insertRows,
@@ -71,7 +72,7 @@ const GRIP_GAP = 2;
 const EDGE_SIZE = 20;
 const EDGE_GAP = 4;
 const EDGE_REACH = EDGE_GAP + EDGE_SIZE + 4;
-const CORNER_SIZE = 16;
+const CORNER_SIZE = 20;
 
 export const GRIPS_STYLE = `
 .rl-grips { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: visible; }
@@ -84,26 +85,31 @@ export const GRIPS_STYLE = `
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
   user-select: none; font-size: var(--rl-size-ui); line-height: 1;
 }
-/* The + between rows and columns, the strips at the table's edge and the select-table square are one
+/* The + between rows and columns and the strips at the table's edge are one
    widget: the card's ground, a rule, the ink's gray, and under the pointer the pressed ground (docs/widgets.md). */
-.rl-plus, .rl-col-plus, .rl-edge-add, .rl-table-select {
+.rl-plus, .rl-col-plus, .rl-edge-add {
   cursor: pointer; border: 1px solid var(--rl-rule); border-radius: 6px;
   background: var(--rl-card); color: var(--rl-ink-2);
 }
-.rl-plus:hover, .rl-col-plus:hover, .rl-edge-add:hover, .rl-table-select:hover {
+.rl-plus:hover, .rl-col-plus:hover, .rl-edge-add:hover {
   background: var(--rl-pressed); color: var(--rl-ink); border-color: var(--rl-ink-3);
 }
 .rl-edge-add:hover { background: color-mix(in srgb, var(--rl-pressed) 60%, var(--rl-card)); }
 .rl-edge-col { width: ${EDGE_SIZE}px; }
 .rl-table-select { width: ${CORNER_SIZE}px; height: ${CORNER_SIZE}px; }
-.rl-table-select::before {
-  content: ''; box-sizing: border-box; width: 8px; height: 8px; border: 1.5px solid currentColor; border-radius: 2px;
-  background: linear-gradient(currentColor, currentColor) center / 1.5px 100% no-repeat,
-    linear-gradient(currentColor, currentColor) center / 100% 1.5px no-repeat;
+/* The select-table handle is the grips' white with the same hairline and shadow, and a move icon: a
+   drag from it moves the whole table. */
+.rl-table-select {
+  cursor: grab; border: 0; border-radius: 4px; background: #fff; color: rgba(0, 0, 0, 0.7);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.35);
 }
-/* A handle is a small pill at the table's edge: the element is its reach (wider than the pill, so it
-   is easy to hit), the pill is its ::before, which grows when the pointer is over it to say it can be
-   dragged. A row's and a column's are the same pill, turned. */
+.rl-table-select:hover { background: #f0f0f0; color: #000; border-color: transparent; }
+.rl-table-select:active { cursor: grabbing; }
+.rl-table-select svg { width: 14px; height: 14px; pointer-events: none; }
+/* A handle is a small pill at the table's edge, drawn as the picture's resize handle is: white with a
+   dark hairline and a soft shadow, on any ground. The element is its reach (wider than the pill, so it
+   is easy to hit), the pill is its ::before. A row's and a column's are the same pill, turned; the
+   cursor says it can be dragged. */
 .rl-grip, .rl-col-grip {
   position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
   cursor: grab; user-select: none;
@@ -111,14 +117,15 @@ export const GRIPS_STYLE = `
 .rl-grip { width: ${GRIP_REACH}px; height: ${GRIP_SPAN}px; }
 .rl-col-grip { width: ${GRIP_SPAN}px; height: ${GRIP_REACH}px; }
 .rl-grip::before, .rl-col-grip::before {
-  content: ''; box-sizing: border-box; border-radius: 999px; border: 1px solid var(--rl-ink-2);
-  background: var(--rl-rule); transition: width 0.1s, height 0.1s, background-color 0.1s;
+  content: ''; box-sizing: border-box; border-radius: 3px; background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: width 0.1s, height 0.1s;
 }
-.rl-grip::before { width: 5px; height: 16px; }
-.rl-col-grip::before { width: 16px; height: 5px; }
-.rl-grip:hover::before, .rl-col-grip:hover::before { background: var(--rl-pressed); border-color: var(--rl-ink); }
-.rl-grip:hover::before { width: 8px; height: 22px; }
-.rl-col-grip:hover::before { width: 22px; height: 8px; }
+.rl-grip::before { width: 6px; height: 22px; }
+.rl-col-grip::before { width: 22px; height: 6px; }
+/* It grows a little under the pointer, to say it can be dragged (#519). */
+.rl-grip:hover::before { width: 9px; height: 28px; }
+.rl-col-grip:hover::before { width: 28px; height: 9px; }
 .rl-grip:active, .rl-col-grip:active { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) { .rl-grip::before, .rl-col-grip::before { transition: none; } }
 .rl-plus-line, .rl-col-plus-line { position: absolute; height: 1px; background: var(--rl-ink-3); pointer-events: none; }
@@ -147,11 +154,29 @@ export const GRIPS_STYLE = `
   position: relative; display: flex; align-items: center; height: 32px; padding: 0 10px 0 28px; border-radius: 7px;
   cursor: default; white-space: nowrap;
 }
-.rl-grip-item:hover { background: color-mix(in srgb, var(--rl-pressed) 55%, transparent); }
+.rl-grip-item:hover, .rl-grip-item:focus { background: color-mix(in srgb, var(--rl-pressed) 55%, transparent); }
+.rl-grip-item:focus { outline: none; }
 .rl-grip-item[aria-disabled="true"] { color: var(--rl-ink-3); }
 .rl-grip-item[aria-disabled="true"]:hover { background: none; }
 .rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 10px; font-size: var(--rl-size-ui); }
 `;
+
+/** The select-table handle's icon: four arrows, for a table that moves. */
+function moveIcon(): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', 'M8 2v12M2 8h12M6 4l2-2 2 2M6 12l2 2 2-2M4 6L2 8l2 2M12 6l2 2-2 2');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.4');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.append(path);
+  return svg;
+}
 
 /** The title bar's hint delay, which the app passes in (`TOOLTIP_MS`). */
 const DEFAULT_TOOLTIP_MS = 400;
@@ -380,6 +405,7 @@ class Grips {
     if (event.target !== this.view.scrollDOM && !this.drag) this.hide();
   };
   private readonly onKey = (event: KeyboardEvent) => {
+    if (this.menu && this.menuKey(event)) return;
     if (event.key === 'Escape' && (this.drag || this.menu)) {
       event.preventDefault();
       event.stopPropagation();
@@ -615,7 +641,8 @@ class Grips {
       el = document.createElement('div');
       if (which === 'selectAll') {
         el.className = 'rl-table-select';
-        this.hint(el, 'Select the table');
+        el.append(moveIcon());
+        this.hint(el, 'Select the table, or drag it');
       } else {
         el.className = `rl-edge-add ${which === 'addCol' ? 'rl-edge-col' : 'rl-edge-row'}`;
         el.textContent = '+';
@@ -637,6 +664,8 @@ class Grips {
             { row: table.rows.length - 1, col: table.columns - 1 },
           );
           if (selection) this.view.dispatch({ selection, userEvent: 'select' });
+          // A drag from the handle moves the whole table, as blocks are moved (#1199).
+          dragBlockAt(this.view, { from: table.from, to: table.to }, event, () => {});
         }
         this.hide();
       });
@@ -1127,6 +1156,8 @@ class Grips {
     for (const [title, run, checked, why] of items) {
       const item = document.createElement('div');
       item.className = 'rl-grip-item';
+      // Reached with the keys (`menuKey`), not with Tab from the page.
+      item.tabIndex = -1;
       // An item that says what the selection has is a check mark: the role says it to assistive technology.
       item.setAttribute('role', checked === undefined ? 'menuitem' : 'menuitemradio');
       if (checked !== undefined) item.setAttribute('aria-checked', String(checked));
@@ -1155,9 +1186,70 @@ class Grips {
     this.menu = menu;
   }
 
+  /**
+   * The keys of an open menu (#1248), as a menu's are: Down and Up (and Tab, Shift-Tab) move among
+   * the items that aren't disabled, Home and End go to the first and last, Return or Space runs the
+   * one chosen, and Escape closes the menu (`onKey`). The chosen item has the focus and looks as one
+   * under the pointer does. True when the key was the menu's.
+   */
+  private menuKey(event: KeyboardEvent): boolean {
+    const menu = this.menu;
+    if (!menu || event.metaKey || event.ctrlKey || event.altKey) return false;
+    const items = [...menu.querySelectorAll<HTMLElement>('.rl-grip-item')].filter(
+      (item) => item.getAttribute('aria-disabled') !== 'true',
+    );
+    const chosen = items.indexOf(document.activeElement as HTMLElement);
+    let next: number;
+    switch (event.key) {
+      case 'ArrowDown':
+        next = chosen < 0 ? 0 : (chosen + 1) % items.length;
+        break;
+      case 'ArrowUp':
+        next = chosen < 0 ? items.length - 1 : (chosen - 1 + items.length) % items.length;
+        break;
+      case 'Tab':
+        next = event.shiftKey
+          ? chosen <= 0
+            ? items.length - 1
+            : chosen - 1
+          : chosen < 0 || chosen === items.length - 1
+            ? 0
+            : chosen + 1;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = items.length - 1;
+        break;
+      case 'Enter':
+      case ' ': {
+        const item = items[chosen];
+        if (!item) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        item.dispatchEvent(
+          new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }),
+        );
+        return true;
+      }
+      default:
+        return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    items[next]?.focus();
+    return true;
+  }
+
   closeMenu(): void {
-    this.menu?.remove();
+    const menu = this.menu;
+    // The keys had the focus: it goes back to the document.
+    const focused = menu?.contains(document.activeElement) ?? false;
+    menu?.remove();
     this.menu = null;
+    // After the command the item ran, which may be changing the document right now.
+    if (focused) queueMicrotask(() => this.view.focus());
   }
 }
 
