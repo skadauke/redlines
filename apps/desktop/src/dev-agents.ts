@@ -52,6 +52,15 @@ export function createDevAgents(
       yield { type: 'status', text: 'Reading the document' };
       // A moment, so that the live line can be seen.
       await new Promise((resolve) => setTimeout(resolve, 900));
+      if (request.systemPrompt.includes('continuing conversation')) {
+        // A turn in the document's chat (#1194): Markdown, as an agent writes it.
+        const sentence = firstSentence(seen.text.replace(/^ +\d+\t/gm, ''));
+        yield {
+          type: 'done',
+          finalText: `Here is what I found in the document. This is a scripted answer, for development.\n\n## What it says\n\n- It opens with “${sentence}”\n- It has **tracked changes** and comments, which I can read but not change\n\nWant me to look at one of the open comments next? Use \`@\` to name another agent.`,
+        };
+        return;
+      }
       const cited = firstSentence(seen.text.replace(/^ +\d+\t/gm, ''));
       yield {
         type: 'done',
@@ -63,8 +72,21 @@ export function createDevAgents(
     yield { type: 'done' };
   };
   // The handle Preferences gave it, read at every look, as the app's agents are.
-  return createMacAgents([fakeProvider({ relay, script, seesImages: true })], relay, {
-    handles: () => loadSettings().agentHandles,
-    ...web,
-  });
+  // `?models` lists Claude's models, so that the chat's picker shows its submenu; without it the
+  // agent lists none, and Ask's bubble has no model list, as its checks expect.
+  const models = new URLSearchParams(location.search).has('models')
+    ? [
+        { id: 'opus', name: 'Opus' },
+        { id: 'sonnet', name: 'Sonnet' },
+        { id: 'haiku', name: 'Haiku' },
+      ]
+    : undefined;
+  return createMacAgents(
+    [fakeProvider({ relay, script, seesImages: true, ...(models ? { models } : {}) })],
+    relay,
+    {
+      handles: () => loadSettings().agentHandles,
+      ...web,
+    },
+  );
 }

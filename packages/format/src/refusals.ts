@@ -999,6 +999,30 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'no fine form reads alike in every order: written as a replacement of its unit (format §3.12)',
   ],
   [
+    'plugins/agents/src/chat/index.ts',
+    'This chat’s history couldn’t be read, so the cha',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
+  ],
+  [
+    'plugins/agents/src/chat/index.ts',
+    'Copied the answer.',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
+  ],
+  [
+    'plugins/agents/src/chat/index.ts',
+    'Couldn’t copy the answer.',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
+  ],
+  [
+    'plugins/agents/src/chat/index.ts',
+    'Couldn’t keep the chat’s history.',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
+  ],
+  [
     'plugins/agents/src/ask/index.ts',
     'Copied the answer.',
     'info',

@@ -30,6 +30,12 @@ export interface IncludeHost {
   read(path: string): Promise<string | null>;
   /** Opens the included file, as a document of its own. */
   open(path: string): void;
+  /**
+   * The path of the open document, as the host has it, for what Quarto leaves beside a document and
+   * above it (`_freeze/`, `keep-md`, `keep-ipynb`; read through `read`, which stays inside the
+   * project). Without it, no outputs are shown.
+   */
+  documentPath?(): string | null;
 }
 
 /** The dialect of a Markdown file (format §9.1): GitHub's, or pandoc's in `.qmd` and `.Rmd`. */
@@ -349,6 +355,13 @@ export interface EditorOptions {
    * read. Default: none, and the block names the file and does no more.
    */
   includes?: IncludeHost;
+  /**
+   * Loads the formatter of citations (`import('@redlines/citations')`), which draws `[@smith2020]`
+   * as "(Smith 2020)" from the bibliography that a Quarto document's front matter names, read
+   * through `includes`. It is the host's to import, so that a page that doesn't (the website's
+   * embed) never holds it. Default: none, and a citation shows its keys.
+   */
+  citations?: () => Promise<typeof import('@redlines/citations')>;
   /**
    * Loads the engine that draws math (`$x^2$`, `$$ E = mc^2 $$`): TeX in, MathML out (Temml's
    * `renderToString`). It is the host's to import, so that a page that doesn't (the website's

@@ -20,6 +20,7 @@
     "@redlines/agents": "workspace:*",
     "@redlines/code": "workspace:*",
     "@redlines/collab": "workspace:*",
+    "@redlines/citations": "workspace:*",
     "@redlines/editor": "workspace:*",
     "@redlines/emoji": "workspace:*",
     "@redlines/find": "workspace:*",

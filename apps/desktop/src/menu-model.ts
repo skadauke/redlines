@@ -46,6 +46,8 @@ export interface MenuCommands {
    */
   switchLook(): void;
   toggleSidebar(): void;
+  /** Opens the sidebar at the document's chat, or closes it when it is showing the chat. */
+  showChat(): void;
   /** Shows the word count in the window's corner, or hides it (Preferences' switch). */
   toggleWordCount(): void;
   toggleTracking(): void;
@@ -110,6 +112,8 @@ export interface MenuState {
   /** The editor's `EditorUiState.canAcceptAll`: a change in the selection, or in the document. */
   canAcceptAll: boolean;
   sidebarOpen: boolean;
+  /** What the sidebar shows (#1194); the file list when it says nothing. */
+  sidebarView?: 'files' | 'chat';
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
   /** Whether the word count is shown in the window's corner. */
@@ -538,7 +542,15 @@ export function appMenuModel(
             text: 'Show Files',
             accelerator: 'Ctrl+Cmd+S',
             action: () => commands.toggleSidebar(),
-            textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
+            textFor: (state) =>
+              state.sidebarOpen && state.sidebarView !== 'chat' ? 'Hide Files' : 'Show Files',
+          },
+          {
+            text: 'Show Chat',
+            accelerator: 'Ctrl+Cmd+C',
+            action: () => commands.showChat(),
+            textFor: (state) =>
+              state.sidebarOpen && state.sidebarView === 'chat' ? 'Hide Chat' : 'Show Chat',
           },
           {
             text: 'Show Word Count',
