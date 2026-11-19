@@ -15,6 +15,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | Path                    | What it is                                                                |
 | ----------------------- | ------------------------------------------------------------------------- |
 | `packages/format`       | `@redlines/format`: types, ids and payload handling for the file format   |
+| `packages/citations`    | `@redlines/citations`: a Quarto document's citations, printed from its bibliography (BibTeX or CSL JSON) |
 | `packages/collab`       | `@redlines/collab`: the session authority for multiuser editing, its hub, window client and transports (live between windows of the app) |
 | `packages/editor`       | `@redlines/editor`: the editor core                                       |
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
@@ -118,7 +119,7 @@ repo root.
   (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`).
   `VITE_SYNC_CHECK=1` (one document in two windows side by side, joined to one authority, typed
   into through the browser's own input path, `src/sync-check.ts`; `/?sync-check` on a dev page does
-  the same, and `journeys/tests/sync.spec.ts` runs it) is the same too. `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
+  the same, and `journeys/tests/sync.spec.ts` runs it) is the same too. `VITE_SHEET_CHECK=1` (the sheet of every interface element, #1208: the page the journey `journeys/tests/sheet.spec.ts` takes through the states, `src/sheet-check.ts`; `/?sheet-check` on a dev page does the same) is the same. `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
   the same, and `VITE_ZOOM_CHECK=1` (the column and the rail at every text size, and the window
   zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
   (`src/print-check.ts`) shows that the printed page holds the document and no mark (and, in `pnpm tauri dev` with `REDLINES_EXPORT_PDF=<path>`, writes the PDF there with no panel). They read nothing in a
