@@ -55,9 +55,8 @@ test.describe('tables @tables', () => {
     await j.hover('1');
     const grip = j.page.locator('.rl-grip').first();
     const menu = j.page.locator('.rl-grip-menu');
-    // The menu opens on a right-click once #519 is fixed, and on a left-click until then.
+    // The menu opens on a right-click (#519).
     await grip.click({ button: 'right' });
-    if (!(await menu.isVisible())) await grip.click();
     await expect(menu, 'the menu opens').toBeVisible();
     await j.shot('row-grip-menu');
     expect(await isOpaque(menu), 'the menu is opaque').toBe(true);
