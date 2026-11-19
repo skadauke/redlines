@@ -194,6 +194,8 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   // was found, or an OpenClaw agent. Each card reports what it found, and the list is drawn again.
   const found = new Map<string, boolean>();
   let openclawChoices: DefaultChoice[] = [];
+  /** The ids of the OpenClaw agents, from the host's list (`deps.openclaw.list`). */
+  let openclawIds = new Set<string>();
   const defaultRow = defaultAgentRow({
     chosen: () => deps.settings().defaultAgent,
     save: (id) => deps.update({ defaultAgent: id }),
@@ -234,6 +236,9 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   if (deps.openclaw) {
     const openclaw = deps.openclaw;
     const listed = (agents: readonly { id: string; name: string }[]) => {
+      // The host's own list of OpenClaw agents is what says which agents they are.
+      openclawIds = new Set(agents.map(({ id }) => id));
+      drawRemembered();
       openclawChoices = agents.map(({ id, name }) => ({
         id,
         name: displayName(name.toLowerCase()),
@@ -411,9 +416,10 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
       const item = el('div', 'rl-pref-item');
       item.dataset['key'] = key;
       const what = el('div', 'rl-pref-item-text');
-      // An agent that isn't Claude or Codex is an OpenClaw agent, which has no toolbox: allowing
-      // it in a folder is allowing it to be sent the document and the thread, not to read.
-      const sent = !names.has(agent) && answer === 'folder';
+      // An OpenClaw agent has no toolbox: allowing it in a folder is allowing it to be sent the
+      // document and the thread, not to read. Another agent that isn't Claude or Codex (Gemini
+      // and the others) reads as the others do.
+      const sent = openclawIds.has(agent) && answer === 'folder';
       what.append(
         el('span', undefined, `${shownName(agent)} · ${sent ? ANSWER_SENT : ANSWERS[answer]}`),
         el('span', 'rl-pref-note', folder),

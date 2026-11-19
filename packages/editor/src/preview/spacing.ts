@@ -253,7 +253,9 @@ export function spacings(
       const apartBoxes = boxIn(leaf) !== boxIn(above) || boxIn(leaf) === null;
       const tintedStart = TINTED.has(leaf.name) || startsCallout(state, leaf);
       const apart = apartBoxes && tintedStart && (tinted(above) || above.name === 'Table');
-      const clip = apartBoxes && leaf.name === 'Table' && tinted(above);
+      // Front matter has no last-line rule: the space stays where it was for a table under it.
+      const clip =
+        apartBoxes && leaf.name === 'Table' && tinted(above) && above.name !== 'FrontMatter';
       const below = !apart && !clip && boxed(leaf) && !boxed(above);
       // Under a table, a table has no line to take the space: a spacer stands between them.
       const spacer = above.name === 'Table' && leaf.name === 'Table';

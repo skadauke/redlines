@@ -125,7 +125,7 @@ describe('dropping selected blocks', () => {
   }
 });
 
-describe('a table dragged with Track Changes on (#1271)', () => {
+describe('a table dragged with Track Changes on (#1271, #1279)', () => {
   const TABLE_DOC = 'One.\n\n| A |\n| - |\n| 1 |\n\nThree.\n\nFour.\n\nFive.';
   const from = TABLE_DOC.indexOf('| A |');
   const to = TABLE_DOC.indexOf('| 1 |') + 5;
@@ -134,25 +134,18 @@ describe('a table dragged with Track Changes on (#1271)', () => {
     extent: () => ({ top: 1000, bottom: 1010 }),
   };
 
-  it('goes only to the gaps beside it, one block up or down', () => {
-    const { view } = mount(TABLE_DOC, [from, to], true);
-    const drag = new BlockDrag(view, runOfSelection(view.state)!, far);
-    expect(runOfSelection(view.state)?.kind).toBe('table');
-    // Gaps: 0 above One., 3 below Three., 5 below Five.; the pointer far down is nearest to 5.
-    drag.move(900);
-    expect(drag.gap?.index, 'one block down, not to the far end').toBe(3);
-    drag.move(-900);
-    expect(drag.gap?.index, 'one block up').toBe(0);
-    drag.cancel();
-  });
-
-  it('goes anywhere with Track Changes off', () => {
-    const { view } = mount(TABLE_DOC, [from, to], false);
-    const drag = new BlockDrag(view, runOfSelection(view.state)!, far);
-    drag.move(900);
-    expect(drag.gap?.index).toBe(5);
-    drag.cancel();
-  });
+  for (const tracking of [true, false]) {
+    it(`goes to any gap, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      const { view } = mount(TABLE_DOC, [from, to], tracking);
+      const drag = new BlockDrag(view, runOfSelection(view.state)!, far);
+      expect(runOfSelection(view.state)?.kind).toBe('table');
+      drag.move(900);
+      expect(drag.gap?.index, 'the far end').toBe(5);
+      drag.move(-900);
+      expect(drag.gap?.index, 'the top').toBe(0);
+      drag.cancel();
+    });
+  }
 });
 
 describe('the room that opens at the drop place (#1200)', () => {

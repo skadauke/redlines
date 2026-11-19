@@ -110,7 +110,7 @@ function notedMove(
       const cells = readTables(current, parse(current))[0]?.rows[at]?.cells.slice(0, columns) ?? [];
       // (a comment on the first cell of the header of a table with no leading pipe starts on a line
       // of its own above the table: another rule's case, drawn in the column suites)
-      const one = at === 0 && !lead && cell === 0 ? 1 : cell;
+      const one = cell;
       const here = cells[one];
       const next = cells[one + 1];
       if (!here || (kind === 'across' && !next)) return null;
@@ -160,7 +160,13 @@ function notedMove(
       const lines = bodyOf(commented)
         .replace(/[\r\n]+$/, '')
         .split(eol);
-      const at = row === 0 ? 0 : row + 1;
+      // (a comment that starts the header of a table with no pipe at its start has its opener on a
+      // line of its own above the table, and a blank line after it)
+      const start = Math.max(
+        0,
+        lines.findIndex((line) => line.includes('|') && !line.startsWith('<!--')),
+      );
+      const at = start + (row === 0 ? 0 : row + 1);
       const moved = lines[at] ?? '';
       lines[at] = /^\|/.test(moved) ? moved : `| ${moved}`;
       expect(bodyOf(applyChanges(text, rejectAll(text))).replace(/[\r\n]+$/, ''), label).toBe(
@@ -423,7 +429,6 @@ describe('rows, random', () => {
           if (cell.textTo - cell.textFrom < 1) continue;
           // (a comment on the first cell of the header of a table with no leading pipe starts on a
           // line of its own above the table: another rule's case, drawn in the column suites)
-          if (kind === 'comment' && !lead && target.header) continue;
           const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom));
           over = { from, to: Math.min(cell.textTo, from + 1 + Math.floor(random() * 3)), kind };
         } else {

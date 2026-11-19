@@ -59,8 +59,17 @@ export function blockGaps(state: EditorState): BlockGap[] {
     return [{ pos: ledger?.from ?? 0, before: '', after: tail, above: null, below: null }];
   }
   const gaps: BlockGap[] = [];
+  /** Whether a block starts a paragraph of its own: at the top, or after a blank line. */
+  const apart = (pos: number) => {
+    const line = state.doc.lineAt(pos);
+    return line.number === 1 || state.doc.line(line.number - 1).text.trim() === '';
+  };
   blocks.forEach((block, index) => {
     if (index === 0 && block.name === 'FrontMatter') return;
+    // A block that follows with no blank line between is part of the one above, though the parse
+    // may split them (a quote or list under a paragraph, the rest of a paragraph a change's marker
+    // made an HTML block of): the image would join it, or cut it in two.
+    if (index > 0 && !apart(block.from)) return;
     gaps.push({
       pos: block.from,
       before: '',
@@ -70,11 +79,13 @@ export function blockGaps(state: EditorState): BlockGap[] {
     });
   });
   const last = blocks.length - 1;
-  gaps.push(
-    ledger
-      ? { pos: ledger.from, before: '', after: '\n\n', above: last, below: null }
-      : { pos: blocks[last]!.to, before: '\n\n', after: '', above: last, below: null },
-  );
+  if (ledger) {
+    if (apart(ledger.from)) {
+      gaps.push({ pos: ledger.from, before: '', after: '\n\n', above: last, below: null });
+    }
+  } else {
+    gaps.push({ pos: blocks[last]!.to, before: '\n\n', after: '', above: last, below: null });
+  }
   return gaps;
 }
 

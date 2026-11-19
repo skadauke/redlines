@@ -395,7 +395,16 @@ pub fn acp_start(
         );
     }
     let launch = acp_runs::spec_for(&app.state::<AcpAgents>(), &agent, &cwd, log)?;
-    let environment = programs.environment_for(Path::new(&launch.spec.program));
+    // The token file is looked at again: it may have been swapped since the agent was added.
+    if launch.bridge.is_some()
+        && let Some(problem) = acp::bridge_token_problem(&launch.spec.args)
+    {
+        return Err(problem);
+    }
+    let environment = for_bridge(
+        programs.environment_for(Path::new(&launch.spec.program)),
+        launch.bridge.is_some(),
+    );
     app.state::<AcpRuns>().start(
         &app.state::<Runs>(),
         owner,
@@ -410,6 +419,21 @@ pub fn acp_start(
             let _ = on_line.send(message);
         },
     )
+}
+
+/// What OpenClaw's bridge is told for a clean stream, which its docs give for this: no banner and
+/// no notes on its output, so that the last line of its error stream (the run's failure line) is
+/// what failed and not a note. The held command can't carry environment variables, so the host
+/// adds them, for a bridge and for nothing else.
+fn for_bridge(
+    mut environment: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    bridge: bool,
+) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    if bridge {
+        environment.push(("OPENCLAW_HIDE_BANNER".into(), "1".into()));
+        environment.push(("OPENCLAW_SUPPRESS_NOTES".into(), "1".into()));
+    }
+    environment
 }
 
 /// Sends a JSON-RPC message to an Agent Client Protocol agent the calling window started, if
@@ -674,6 +698,23 @@ mod tests {
     use super::log::RunInfo;
     use super::test_support::TempFolder;
     use super::*;
+
+    /// OpenClaw's bridge is run with a clean stream, so that its last line of stderr is the
+    /// failure and not a banner or a note; no other agent is given those.
+    #[test]
+    fn a_bridge_is_run_with_no_banner_and_no_notes_and_no_other_agent_is() {
+        let base: Vec<(OsString, OsString)> = vec![("PATH".into(), "/usr/bin".into())];
+        let bridged = for_bridge(base.clone(), true);
+        for name in ["OPENCLAW_HIDE_BANNER", "OPENCLAW_SUPPRESS_NOTES"] {
+            assert!(
+                bridged
+                    .iter()
+                    .any(|(key, value)| key == name && value == "1"),
+                "{name}"
+            );
+        }
+        assert_eq!(for_bridge(base.clone(), false), base);
+    }
 
     /// Programs with `claude` in a known place, as a script that runs `target`. Not a link: a
     /// multicall binary (uutils' coreutils, on Ubuntu 26.04) picks its utility by the name it was

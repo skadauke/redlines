@@ -2,6 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { exists, readFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createHost,
@@ -720,6 +721,8 @@ describe('adding images in the app', () => {
   it('sends the data of a pasted image to the app, under a name made of the time', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 10, 12, 15, 30, 12));
+    // A pasted picture asks for Word's package first (#1182); there is none on this pasteboard.
+    vi.mocked(invoke).mockResolvedValueOnce(new ArrayBuffer(0));
     vi.mocked(invoke).mockResolvedValueOnce({
       paths: ['images/image-2026-11-12-153012.png'],
       refused: [],
@@ -731,7 +734,8 @@ describe('adding images in the app', () => {
     });
     expect(added).toEqual({ paths: ['images/image-2026-11-12-153012.png'], refused: [] });
     // The bytes are the body, and the rest is in headers, as percent codes.
-    const [command, body, options] = vi.mocked(invoke).mock.calls[0] ?? [];
+    expect(vi.mocked(invoke).mock.calls[0]?.[0]).toBe('read_office_picture');
+    const [command, body, options] = vi.mocked(invoke).mock.calls[1] ?? [];
     expect(command).toBe('add_pasted_image');
     expect(new TextDecoder().decode(body as Uint8Array)).toBe('PNGDATA');
     expect(options).toEqual({
@@ -741,6 +745,43 @@ describe('adding images in the app', () => {
         'x-redlines-name': 'image-2026-11-12-153012.png',
       },
     });
+  });
+
+  it('sends the original of a picture copied in Word, from its package, in its own format (#1182)', async () => {
+    const header = (width: number, height: number, extra = 0) => {
+      const bytes = new Uint8Array(24 + extra);
+      bytes.set([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52,
+      ]);
+      new DataView(bytes.buffer).setUint32(16, width);
+      new DataView(bytes.buffer).setUint32(20, height);
+      return bytes;
+    };
+    const original = header(1102, 1502, 500);
+    const pack = zipSync({ 'clipboard/media/image1.png': original });
+    vi.mocked(invoke).mockResolvedValueOnce(pack.buffer.slice(0));
+    vi.mocked(invoke).mockResolvedValueOnce({ paths: ['images/image-1.png'], refused: [] });
+    const pasted = new File([header(266, 362)], 'image.png', {
+      type: 'image/png',
+    });
+    await createHost().addImages('/docs/plan.md', 'images', {
+      kind: 'files',
+      files: [pasted],
+      pasted: true,
+    });
+    const [command, body] = vi.mocked(invoke).mock.calls[1] ?? [];
+    expect(command).toBe('add_pasted_image');
+    expect((body as Uint8Array).length).toBe(original.length);
+  });
+
+  it('sends a dropped file as it is, and never asks for Word’s package', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ paths: ['images/a.png'], refused: [] });
+    await createHost().addImages('/docs/plan.md', 'images', {
+      kind: 'files',
+      files: [image('a.png', 'image/png')],
+      pasted: false,
+    });
+    expect(vi.mocked(invoke).mock.calls.map((call) => call[0])).toEqual(['add_pasted_image']);
   });
 
   it('keeps the name of a file dropped, and writes a name with spaces and accents as codes', async () => {
@@ -792,6 +833,7 @@ describe('adding images in the app', () => {
   });
 
   it('tells of an image the app couldn’t take as it tells of any other it refuses', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(new ArrayBuffer(0));
     vi.mocked(invoke).mockRejectedValueOnce(
       'The folder for images leads outside the project’s folder.',
     );

@@ -1007,12 +1007,32 @@ describe('the Agents pane', () => {
     expect(said('codex|/Users/me/d')).toContain('Codex · Not allowed');
   });
 
-  it('says of an agent that isn’t Claude or Codex, which has no toolbox, that it may be sent the document', () => {
+  it('says of an OpenClaw agent, which has no toolbox, that it may be sent the document, and of no other agent', async () => {
     const { deps, container } = setup(
       {},
-      { consent: { 'moby|/Users/me/a': 'folder', 'moby|/Users/me/b': 'no' } },
+      {
+        consent: {
+          'moby|/Users/me/a': 'folder',
+          'moby|/Users/me/b': 'no',
+          'gemini|/Users/me/a': 'folder',
+        },
+      },
     );
+    deps.openclaw = {
+      list: () =>
+        Promise.resolve([
+          { id: 'moby', name: 'Moby', url: 'wss://gateway.example.org', tokenFile: '/Users/me/.t' },
+        ]),
+      add: () => Promise.reject(new Error('Not here.')),
+      remove: () => Promise.resolve([]),
+    };
     renderAgentsPane(container, deps);
+    await settle();
+    // Gemini is another agent the person added: it is shown as the others are, not as OpenClaw's.
+    expect(
+      row(container, 'Remembered answers').querySelector('[data-key="gemini|/Users/me/a"]')
+        ?.textContent,
+    ).not.toContain('May be sent the document');
     const said = (key: string) =>
       row(container, 'Remembered answers').querySelector(`[data-key="${key}"]`)?.textContent;
     expect(said('moby|/Users/me/a')).toContain(
