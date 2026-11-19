@@ -73,6 +73,10 @@ jobs:
       - name: Build the demos' bundle and hold it to its size budget
         working-directory: .
         run: pnpm --filter @redlines/website-embed size
+        env:
+          # A pull request into an Epic's branch may take the JavaScript past its budget by the
+          # Epic's allowance, with a warning, as ci.yml's check does.
+          REDLINES_SIZE: ${{ startsWith(github.base_ref, 'epic/') && 'epic' || '' }}
 
       - name: Test the embed
         working-directory: .
