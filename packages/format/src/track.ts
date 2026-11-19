@@ -1181,7 +1181,11 @@ const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
  * a line, with nothing after the text on its last line; anywhere else the text is written as it was.
  */
 function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
-  if (where.rest.trim() !== '' || wholeTopDiv(tokens, linePrefix, where)) return;
+  // What follows the typed text is on the line of its last text, unless the text ends with a break
+  // (a div typed whole at the start of a paragraph, with the blank line after it, #1169).
+  const endsInBreak = tokens.length > 0 && 'brk' in tokens[tokens.length - 1]!;
+  if (where.rest.trim() !== '' && !endsInBreak) return;
+  if (wholeTopDiv(tokens, linePrefix, where) || where.rest.trim() !== '') return;
   // Typed text that ends in a bare fence line and is no div at the top level (a div closed
   // wherever it opened, as in a quote or after text on its line): the closer stands alone on the
   // line after it (#1088).
@@ -1207,7 +1211,9 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
     return atLineStart && DIV_FENCE_TYPED.test(token.text.split('\n')[0]?.replace(/\r$/, '') ?? '');
   });
   if (first < 0) return false;
-  const rest = tokens.slice(first);
+  // The breaks after the last text stay behind the div, after its closer, as for a code block.
+  const lastText = tokens.findLastIndex((token) => 'text' in token);
+  const rest = tokens.slice(first, lastText + 1);
   if (rest.some((token) => 'brk' in token && token.prefix !== '')) return false;
   if (rest.some((token) => 'text' in token && token.fence === true)) return false;
   const text = rest.map((token) => ('text' in token ? token.text : token.brk)).join('');

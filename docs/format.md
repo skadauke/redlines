@@ -4459,7 +4459,8 @@ Agents edit the newest view, and the library turns their edits into tracked chan
   (`dialectOfName`: `qmd` and `rmd` are pandoc's, every other name GitHub's) in the edit's context
   (`EditContext.dialect`, `UntrackedContext.dialect`), and it is GitHub's when left out. Rules that
   only pandoc has are held in a pandoc file alone: no marker on a `:::` fence line, in an `@fig-x`
-  or `[@a; @b]` token, or in `^x^`, and a typed div is one insertion (rule 9, §9.4). The same text
+  or `[@a; @b]` token, or in `^x^`, and a typed div is one insertion (rule 9, §9.4), at the start of a paragraph too (a callout
+  typed whole before text, with its blank line, has its closer alone after the closing fence, #1169). The same text
   in a `.md` file is text, which takes marks as any other. The library reads the file's text in both
   alike, so the views, decisions and the ledger don't depend on the dialect.
 - Emoji are the character itself in every file type. Shortcodes (`:tent:`) don't render in pandoc,
