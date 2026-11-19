@@ -930,7 +930,10 @@ mode has no counterpart in the desktop app.
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
     to dots. The rail grows with the text size above 100%, and so does the width at which it
-    shrinks. During a pinch the rail keeps its state until the fingers lift.
+    shrinks. During a pinch the rail keeps its state until the fingers lift. Where the window has
+    room, the notes and margins grow with the fingers; from the frame in which they would take the
+    column's width (and a picture's, which is as wide as the column) they keep the size they had,
+    and take the new one when the fingers lift.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
@@ -1934,11 +1937,13 @@ one session on one Mac, with no network, no account and no invitation.
 - **Save is once, after a pause.** The leader saves when the log has been quiet for a second and
   its own edits are confirmed. Save in another window asks the leader. A window closes without a
   question when the authority has everything it made; the leader that closes writes the file first.
-- **Each window is a person to the others.** It has a name ("Ada (window 2)") and a color of its own,
-  chosen by the authority and the same in every window, which follow the window through a
-  handover. The others show its caret with its name on a flag that fades after five seconds, and
-  its selection tinted, in that color. A caret is sent as a position in the confirmed text at a
-  version, and every window places it again among its own text, so it stays among the same words
+- **Each window is a person to the others.** It has a name ("Ada (window 2)"); its color is its
+  person's author color in the document (§5.5), the color their changes are drawn in, the same in
+  every window of that person and never one that another person has in that document (a person
+  the document doesn't know yet is gray). The others show its caret with its name on a flag that
+  fades after five seconds, and its selection tinted, in that color; while a selection lasts, its
+  caret and flag stay (#1168), so that it is clear who marked what. A caret is sent as a
+  position in the confirmed text at a version, and every window places it again among its own text, so it stays among the same words
   while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
   windows", or that edits are kept while the session can't be reached.
 - **Undo is each window's own.** A step knows whose it is, and a change that came from another window
