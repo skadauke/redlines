@@ -1,0 +1,14 @@
+## The included method
+
+This part lives in a file of its own, with its own changes. It is read, and shown here as it stands.
+
+We measured <!--sub j8wg three-->five<!--/j8wg--> runs and took their mean.
+
+<!-- redlines
+# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.
+version: 1
+people:
+  ada: {name: Ada}
+marks:
+  j8wg: {by: ada, at: 2026-11-18T02:59Z}
+-->
