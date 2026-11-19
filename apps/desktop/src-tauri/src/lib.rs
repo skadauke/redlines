@@ -335,6 +335,32 @@ fn open_about(app: AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Opens the window that sets up an OpenClaw connection, or brings it forward: there is only ever
+/// one. It is a window of its own, larger than Preferences and resizable, made hidden from the
+/// config; it shows itself once its page is styled (`src/openclaw-setup/main.ts`). Preferences ›
+/// Agents and the @ picker open it. It takes no zoom, as About takes none. It runs off the main
+/// thread, as a command that makes a window should, one call at a time.
+#[tauri::command(async)]
+fn open_openclaw_setup(app: AppHandle) -> tauri::Result<()> {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let _turn = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(window) = app.get_webview_window(windows::OPENCLAW_SETUP_WINDOW) {
+        window.show()?;
+        return window.set_focus();
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == windows::OPENCLAW_SETUP_WINDOW)
+        .ok_or(tauri::Error::WindowNotFound)?;
+    tauri::WebviewWindowBuilder::from_config(&app, config)?.build()?;
+    Ok(())
+}
+
 /// Starts the app. The desktop binary calls this from `main`; mobile builds start here directly.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -447,6 +473,7 @@ pub fn run() {
             edit_menu::paste_in_field,
             open_preferences,
             open_about,
+            open_openclaw_setup,
             dock_icon::app_icon_mark,
             dock_icon::show_app_icon_mark,
             zoom::set_zoom,
@@ -544,9 +571,14 @@ pub fn run() {
             agents::openclaw_node_stop,
             agents::openclaw_this_mac,
             agents::openclaw_use_token,
-            agents::tailscale::tailscale_download,
             agents::tailscale::tailscale_open_app,
-            agents::tailscale::tailscale_status
+            agents::tailscale::tailscale_open_https_settings,
+            agents::tailscale::tailscale_status,
+            agents::tailscale_setup::tailscale_install,
+            agents::tailscale_setup::tailscale_install_state,
+            agents::tailscale_setup::tailscale_open_app_store,
+            agents::tailscale_setup::tailscale_restart_app,
+            agents::tailscale_setup::tailscale_sign_in
         ])
         .on_page_load(|webview, payload| {
             // A window's page that loads again, as a reload does, watches what it needs itself.

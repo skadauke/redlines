@@ -58,6 +58,7 @@ export type {
   AltWriter,
 } from './alt-text/index.ts';
 export { tailscaleView } from './openclaw/tailscale.ts';
+export type { InstallState, MacSetup } from './openclaw/mac-setup.ts';
 export type {
   Check as TailscaleCheck,
   TailscaleAction,

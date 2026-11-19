@@ -1698,6 +1698,14 @@ an empty `-` right under the text, which Markdown reads as the text's underline.
 or `*`, and a number, read as text there, and keep the two changes. Backspace right after the key
 takes it back whole.
 
+**Tab under the empty item a Return just left (#1202).** Where the author's own Return made an empty
+item whose split's break holds a blank line before the next item, Tab on that next item would put
+it under an empty item that Markdown ends at the blank line: the file would read it as no child,
+the newest view as one. The blank line is part of the author's own pending break, so the Tab takes
+it with it and the item stands directly under the empty one (`+ <!--split k3x9-->\n  + alpha`). If
+the split is not the author's own, or the line above is no empty item, the key still says why it
+does nothing.
+
 **Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
 other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
 prefix of the next line) by a paragraph break, as Return on either side of it does, is written
@@ -4534,8 +4542,11 @@ A file changes only when its content does.
   of it is a deletion, and text typed next to it stands outside it). A div typed with Track Changes
   on, from its opening fence to the end of the typed text, is one insertion with no `split`
   marker inside; its closer stands alone on the line after the closing fence, as after a code
-  fence (§3.3). This holds at the top level of the file; in a quote or a list item the typed
-  fence lines keep the old form (not built).
+  fence (§3.3). This holds at the top level of the file and in a quote (also one in a list item or in
+  another quote), the closer standing alone on the line after the closing fence behind the quote's
+  prefix (`> :::` then `> <!--/k3x9-->`), as in a fenced code block (#1234). In a list item the typed
+  fence lines keep the old form (not built): the closer alone on a line is an HTML block after the
+  div's text, and in a tight item that renders a line break that the newest view does not have.
 - knitr runs code it finds inside HTML comments, in payloads and in the ledger alike, so both
   escape every backtick (§2.5). This was verified with knitr 1.51.
 - No Redlines comment starts with `#`, which Jupytext's cell markers and Quarto's editing comments

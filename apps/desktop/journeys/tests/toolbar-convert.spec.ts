@@ -30,7 +30,7 @@ test.describe('the List menu @lists', () => {
     start,
   }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
-    await j.page.locator('.rl-wrench-button').click();
+    await j.dockToolbar();
     await j.caretAfter('Title');
     await expect(top(j, 'List')).toHaveCount(0);
     await j.shot('heading-no-list-menu');
@@ -53,7 +53,7 @@ test.describe('the List menu @lists', () => {
 
   test('turns two paragraphs into checkboxes, bullets, numbers and back', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
-    await j.page.locator('.rl-wrench-button').click();
+    await j.dockToolbar();
     await select(j, 'First paragraph.', 'Second paragraph.');
     await top(j, 'List').click();
     const menu = toolbar(j).locator('.rl-toolbar-menu:not([hidden])');
@@ -87,7 +87,7 @@ test.describe('the List menu @lists', () => {
     start,
   }) => {
     const j = await start({ doc: DOC, tracking: true, view: 'redlines' });
-    await j.page.locator('.rl-wrench-button').click();
+    await j.dockToolbar();
     await select(j, 'First paragraph.', 'Second paragraph.');
     await convert(j, 'Bullets');
     // Two tracked changes, one for each paragraph that became an item.

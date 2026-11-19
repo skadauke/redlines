@@ -19,9 +19,24 @@ import {
   setupPrompt,
   toolsPrompt,
 } from './prompt.ts';
-import { tailscaleView, type TailscaleStatus } from './tailscale.ts';
+import {
+  MAC_TIMES,
+  NEW_MAC_SETUP,
+  macPlan,
+  type InstallState,
+  type MacButtonId,
+  type MacSetup,
+  type MacTimes,
+} from './mac-setup.ts';
+import {
+  httpsCheck,
+  tailscaleView,
+  type TailscalePeer,
+  type TailscaleStatus,
+} from './tailscale.ts';
 
-export type Step = 'start' | 'mac' | 'computer' | 'prompt' | 'approve' | 'test';
+export type Step =
+  'looking' | 'gateways' | 'start' | 'mac' | 'computer' | 'prompt' | 'approve' | 'test';
 
 /** What the sheet asks of the app. Every call may reject, with a sentence to show. */
 export interface SheetDeps {
@@ -34,9 +49,25 @@ export interface SheetDeps {
   tailscale: {
     status(): Promise<TailscaleStatus>;
     openApp(): Promise<void>;
-    download(): Promise<void>;
-    /** Opens Tailscale's sign-in page, an address Tailscale gave. */
-    signIn(url: string): Promise<void>;
+    /** Opens the admin page where HTTPS certificates are turned on. */
+    openHttpsSettings(): Promise<void>;
+    /**
+     * Starts installing Tailscale (the package from Tailscale, checked for its signature and
+     * Apple's notarization, installed with the system's own administrator prompt; the App Store
+     * page for a person who isn't an administrator). It returns at once: `installState` says how
+     * it goes. Only a button calls it.
+     */
+    install(): Promise<void>;
+    installState(): Promise<InstallState>;
+    /** Opens Tailscale's page in the App Store. */
+    openAppStore(): Promise<void>;
+    /** Quits Tailscale's app and opens it again. */
+    restartApp(): Promise<void>;
+    /**
+     * Opens the page for signing in: the address Tailscale gave, or, when it gave none, one that
+     * `tailscale login` makes.
+     */
+    signIn(url: string | null): Promise<void>;
   };
   probe(address: string, suffix: string | null): Promise<GatewayProbe>;
   /** Copies text to the clipboard. */
@@ -63,7 +94,9 @@ export interface SheetDeps {
     run(handle: string): Promise<{ answered: boolean; usedTools: boolean; line: string }>;
   };
   /** Waits, in milliseconds; the tests make them short. */
-  poll?: { tailscale?: number; node?: number };
+  poll?: { tailscale?: number; node?: number; install?: number };
+  /** How long the setup waits before it says what is probably wrong with Tailscale; tests shorten them. */
+  macTimes?: Partial<MacTimes>;
 }
 
 export interface SheetOptions {
@@ -71,6 +104,13 @@ export interface SheetOptions {
   alive(): boolean;
   /** The sheet is finished or was cancelled. */
   onClose(): void;
+  /**
+   * Opens on a look around, not on the choice: Tailscale and the other computers are checked, each
+   * one that is on is asked whether it answers as an OpenClaw Gateway (the probe sends nothing),
+   * and when some do, the sheet opens straight on them, each with Connect. Otherwise it opens on
+   * the choice as it always did.
+   */
+  discover?: boolean;
   /** A connection was made or removed: the list is drawn again. */
   onChanged(): void;
   /** For screenshots and tests: the screen to open at, and what it knows. */
@@ -78,6 +118,8 @@ export interface SheetOptions {
     step: Step;
     where?: 'this-mac' | 'other';
     tailscale?: TailscaleStatus;
+    /** What was done about Tailscale already (for looking at the waits). */
+    macSetup?: Partial<MacSetup>;
     computer?: string;
     url?: string;
     agent?: string;
@@ -186,9 +228,12 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
   root.append(body);
 
   const begin = options.start;
-  let step: Step = begin?.step ?? 'start';
+  let step: Step = begin?.step ?? (options.discover ? 'looking' : 'start');
+  /** The computers that answered as a Gateway when the sheet looked around, by their address. */
+  let gateways: { peer: TailscalePeer; probe: GatewayProbe & { kind: 'found' } }[] = [];
   let where: Where = begin?.where ?? 'other';
   let tailscale: TailscaleStatus | null = begin?.tailscale ?? null;
+  let setup: MacSetup = { ...NEW_MAC_SETUP, ...begin?.macSetup };
   let checkedAt = 0;
   let picked: string | null = begin?.computer ?? null;
   let typed = '';
@@ -324,9 +369,8 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
       case 'open-tailscale':
         await deps.tailscale.openApp().catch(() => {});
         return;
-      case 'download-tailscale':
-        await deps.tailscale.download().catch(() => {});
-        return;
+      case 'install-tailscale':
+        return startInstall();
       case 'check-again':
         if (step === 'mac') return void checkTailscale();
         return void lookAt(picked ?? typed);
@@ -346,6 +390,105 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
       case 'reconnect':
         return void reconnect();
     }
+  }
+
+  // ---- Look around, and the Gateways found
+
+  /** The computers worth asking: on now, and not a phone or a TV, a few of them. */
+  const askable = (peers: readonly TailscalePeer[]) =>
+    peers
+      .filter((peer) => peer.online && !['iOS', 'android', 'tvOS'].includes(peer.os))
+      .slice(0, 8);
+
+  /**
+   * Asks each computer that is on whether it answers as an OpenClaw Gateway, at its Tailscale
+   * address (Tailscale Serve gives a Gateway one, on port 443). The probe opens the WebSocket,
+   * reads the greeting and closes: nothing secret is sent or needed.
+   */
+  async function askAround(peers: readonly TailscalePeer[]): Promise<void> {
+    const results = await Promise.all(
+      askable(peers).map(async (peer) => ({
+        peer,
+        probe: await deps.probe(peer.dns_name, null).catch((): null => null),
+      })),
+    );
+    gateways = results.flatMap(({ peer, probe: found }) =>
+      found?.kind === 'found' ? [{ peer, probe: found }] : [],
+    );
+  }
+
+  /** The first look, when the sheet opens: all must pass at once for it to open on the Gateways. */
+  async function lookAround(): Promise<void> {
+    const status = await deps.tailscale.status().catch((): null => null);
+    if (!live() || step !== 'looking') return;
+    if (status) {
+      tailscale = status;
+      checkedAt = Date.now();
+      if (status.state === 'ready' && !status.blocked) await askAround(status.peers);
+    }
+    // The person went on by hand while it looked: that is where they are.
+    if (!live() || step !== 'looking') return;
+    step = gateways.length > 0 ? 'gateways' : 'start';
+    draw();
+  }
+
+  function drawLooking(): HTMLElement[] {
+    return [
+      el('h1', undefined, 'Looking for your OpenClaw…'),
+      el(
+        'p',
+        'rl-oc-sub',
+        'Checking Tailscale on this Mac and asking your other computers that are on whether OpenClaw answers there. Nothing is sent to them.',
+      ),
+      foot(
+        'This takes a few seconds.',
+        button('Set up by hand', () => go('start')),
+      ),
+    ];
+  }
+
+  /** Connect: the setup goes on from the computer, as if it had been picked and found. */
+  function connectTo(found: (typeof gateways)[number]): void {
+    where = 'other';
+    picked = found.peer.dns_name;
+    typed = '';
+    probe = found.probe;
+    url = found.probe.url;
+    computer = shortName(found.probe.host);
+    go('prompt');
+  }
+
+  function drawGateways(): HTMLElement[] {
+    const nodes: HTMLElement[] = [
+      el('h1', undefined, gateways.length === 1 ? 'Found your OpenClaw' : 'Found your OpenClaws'),
+      el(
+        'p',
+        'rl-oc-sub',
+        'Tailscale is on, and these computers answer as an OpenClaw Gateway over it. Redlines only said hello; nothing was sent to them.',
+      ),
+    ];
+    const list = el('div', 'rl-oc-list');
+    for (const found of gateways) {
+      list.append(
+        row({
+          dot: 'on',
+          title: found.peer.name,
+          detail: [found.peer.dns_name, found.peer.os].filter(Boolean).join(' · '),
+          action: button('Connect', () => connectTo(found), {
+            primary: true,
+            ariaLabel: `Connect to ${found.peer.name}`,
+          }),
+        }),
+      );
+    }
+    nodes.push(list);
+    nodes.push(
+      foot(
+        link('Set up another computer', () => go('start')),
+        button('Cancel', close),
+      ),
+    );
+    return nodes;
   }
 
   // ---- Start
@@ -413,10 +556,106 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         if (!live()) return;
         tailscale = status;
         checkedAt = Date.now();
-        if (step === 'mac' || step === 'computer') draw();
+        // The app that a fresh install opened too early, or one whose sign-in hangs, is restarted
+        // once by the setup itself.
+        if (step === 'mac' && macPlan(status, setup, Date.now(), times).autoRestart) {
+          restartTailscale();
+        } else if (step === 'mac' || step === 'computer') {
+          draw();
+        }
       },
       () => {},
     );
+  }
+
+  const times: MacTimes = { ...MAC_TIMES, ...deps.macTimes };
+
+  const wordsOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+  function setMac(change: Partial<MacSetup>): void {
+    setup = { ...setup, ...change };
+    if (live() && step === 'mac') draw();
+  }
+
+  /** Installs Tailscale, as the person asked: the app does it, and this follows how it goes. */
+  function startInstall(): void {
+    const fresh = tailscale?.state === 'missing';
+    setMac({
+      install: { phase: 'working', step: 'Looking at this Mac…' },
+      problem: null,
+      installedHere: false,
+    });
+    deps.tailscale.install().then(
+      () => followInstall(fresh),
+      (error: unknown) => setMac({ install: { phase: 'failed', step: wordsOf(error) } }),
+    );
+  }
+
+  function followInstall(fresh: boolean): void {
+    if (!live()) return;
+    void deps.tailscale.installState().then(
+      (state) => {
+        if (!live()) return;
+        if (state.phase === 'working' || state.phase === 'idle') {
+          setMac({ install: { phase: 'working', step: state.step || setup.install.step } });
+          later(() => followInstall(fresh), deps.poll?.install ?? 1000);
+          return;
+        }
+        // The installer opens Tailscale's app by itself: the wait for it starts now.
+        if (state.phase === 'done') {
+          setMac({ install: state, installedHere: fresh, openedAt: Date.now() });
+          checkTailscale();
+        } else {
+          setMac({ install: state });
+        }
+      },
+      () => later(() => followInstall(fresh), deps.poll?.install ?? 1000),
+    );
+  }
+
+  let restarting = false;
+
+  /** Quits Tailscale's app and opens it again; the setup then waits and looks again. */
+  function restartTailscale(): void {
+    if (restarting) return;
+    restarting = true;
+    setMac({ restarts: setup.restarts + 1, signInAt: null, openedAt: Date.now(), problem: null });
+    deps.tailscale.restartApp().then(
+      () => {
+        restarting = false;
+        checkTailscale();
+      },
+      (error: unknown) => {
+        restarting = false;
+        setMac({ problem: wordsOf(error) });
+      },
+    );
+  }
+
+  function macButton(id: MacButtonId): void {
+    switch (id) {
+      case 'install':
+        return startInstall();
+      case 'app-store':
+        void deps.tailscale
+          .openAppStore()
+          .catch((error: unknown) => setMac({ problem: wordsOf(error) }));
+        return;
+      case 'open':
+        setMac({ openedAt: Date.now(), problem: null });
+        void deps.tailscale
+          .openApp()
+          .catch((error: unknown) => setMac({ problem: wordsOf(error) }));
+        return;
+      case 'sign-in':
+        setMac({ signInAt: Date.now(), problem: null });
+        void deps.tailscale
+          .signIn(tailscale?.auth_url ?? null)
+          .catch((error: unknown) => setMac({ problem: wordsOf(error) }));
+        return;
+      case 'restart':
+        return restartTailscale();
+    }
   }
 
   function pollTailscale(): void {
@@ -459,26 +698,75 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         }),
       );
     }
-    if (view.failure) {
+    const https = httpsCheck(tailscale);
+    if (https) {
+      nodes.push(
+        row({
+          mark: https.mark,
+          title: https.title,
+          ...(https.detail ? { detail: https.detail } : {}),
+        }),
+      );
+      if (https.mark === 'no') {
+        nodes.push(
+          el(
+            'div',
+            'rl-oc-note',
+            'Turn on HTTPS Certificates in Tailscale’s admin page, under DNS. Redlines notices by itself.',
+          ),
+        );
+        nodes.push(
+          button('Open the DNS page', () => {
+            void deps.tailscale.openHttpsSettings().catch(() => {});
+          }),
+        );
+      }
+    }
+    const plan = macPlan(tailscale, setup, Date.now(), times);
+    const planned =
+      plan.waiting !== null ||
+      plan.notes.length > 0 ||
+      plan.buttons.length > 0 ||
+      setup.problem !== null;
+    if (planned && (view.failure === 'tailscale-missing' || view.failure === 'tailscale-off')) {
+      // What the setup does about it, in place of the card: its words and its buttons.
+    } else if (view.failure) {
       nodes.push(card(view.failure));
+    }
+    if (planned) {
+      if (plan.waiting) {
+        nodes.push(row({ mark: 'wait', title: plan.waiting }));
+      }
+      for (const text of plan.notes) nodes.push(el('div', 'rl-oc-note', text));
+      if (setup.problem) nodes.push(el('div', 'rl-oc-note', setup.problem));
+      if (plan.buttons.length > 0) {
+        const buttons = el('div', 'rl-oc-inline');
+        for (const one of plan.buttons) {
+          buttons.append(
+            button(one.label, () => macButton(one.id), { primary: one.primary === true }),
+          );
+        }
+        nodes.push(buttons);
+      }
+    } else if (view.failure) {
+      // The card above says it.
     } else if (view.action) {
       const status = tailscale;
       const label = {
-        download: 'Download Tailscale',
+        install: 'Install Tailscale',
         open: 'Open Tailscale',
         'sign-in': 'Sign in to Tailscale',
         again: 'Check again',
       }[view.action];
       const run = () => {
-        if (view.action === 'sign-in' && status.auth_url)
-          void deps.tailscale.signIn(status.auth_url).catch(() => {});
+        if (view.action === 'sign-in') void deps.tailscale.signIn(status.auth_url).catch(() => {});
         else if (view.action === 'open') void deps.tailscale.openApp().catch(() => {});
-        else if (view.action === 'download') void deps.tailscale.download().catch(() => {});
+        else if (view.action === 'install') startInstall();
         else checkTailscale();
       };
       nodes.push(button(label, run, { primary: true }));
     }
-    if (view.note && !view.failure) nodes.push(el('div', 'rl-oc-note', view.note));
+    if (view.note && !view.failure && !planned) nodes.push(el('div', 'rl-oc-note', view.note));
     const hint = el('span');
     hint.append(checkedAt ? 'Checked just now · ' : '', link('Check again', checkTailscale));
     const manual = link('Enter an address instead', () => {
@@ -538,7 +826,9 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
           peer.dns_name,
           peer.os,
           peer.online
-            ? 'on now'
+            ? gateways.some((found) => found.peer.dns_name === peer.dns_name)
+              ? 'on now · OpenClaw found'
+              : 'on now'
             : peer.last_seen
               ? `last seen ${peer.last_seen.slice(0, 10)}`
               : 'off',
@@ -616,6 +906,21 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         status.append(note);
       } else if (view.failure) {
         status.append(card(view.failure, view.detail));
+        // Serve gives a Gateway its https:// address, and needs the network's certificates.
+        if (view.failure === 'no-gateway' && tailscale?.https === false) {
+          status.append(
+            el(
+              'div',
+              'rl-oc-note',
+              'HTTPS certificates are off for your Tailscale network, and Tailscale Serve needs them. Turn them on in the admin page, under DNS, then check again.',
+            ),
+          );
+          status.append(
+            button('Open the DNS page', () => {
+              void deps.tailscale.openHttpsSettings().catch(() => {});
+            }),
+          );
+        }
       } else {
         status.append(el('div', 'rl-oc-note', `${view.title} ${view.line}`));
       }
@@ -1090,6 +1395,12 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
       : null;
     let content: HTMLElement[];
     switch (step) {
+      case 'looking':
+        content = drawLooking();
+        break;
+      case 'gateways':
+        content = drawGateways();
+        break;
       case 'start':
         content = drawStart();
         break;
@@ -1128,6 +1439,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
   function enter(): void {
     if (lastEntered === step) return;
     lastEntered = step;
+    if (step === 'looking') void lookAround();
     if (step === 'mac') pollTailscale();
     if (step === 'computer' && tailscale === null) checkTailscale();
     if (step === 'approve') pollNode();

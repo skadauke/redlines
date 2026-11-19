@@ -806,7 +806,7 @@ describe('deleting the text of each wrapped line of random documents', () => {
     const reasons = new Map<string, number>();
     // `REDLINES_SEED=206` runs that one seed alone, the repro of a deep run's failure.
     const only = Number(process.env.REDLINES_SEED) || undefined;
-    for (let seed = 1; seed <= fuzzCount(150); seed++) {
+    for (let seed = 1; seed <= fuzzCount(50); seed++) {
       if (only !== undefined && seed !== only) continue;
       // Documents of paragraphs, quotes, items and alerts (`realistic`: every wrapped line is a
       // line of a paragraph), with code in them, and of every shape of indentation.

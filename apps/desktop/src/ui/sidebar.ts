@@ -4,7 +4,6 @@
 // ignores, and reads a folder only when it is opened. Documents come first and open in this window,
 // or in a new one with ⌘-click or while a run is live. Hidden by default.
 
-import { PROJECT_IMAGE_TYPE } from '@redlines/editor';
 import { documentKind } from '../file-names.ts';
 import {
   basename,
@@ -42,6 +41,17 @@ export interface SidebarOptions {
   showPlainOnly?: () => boolean;
   /** Tells the person what went wrong, in one line. */
   notice(message: string): void;
+  /**
+   * Where an image dragged out of the sidebar goes (#681, #1198): the pointer is over the page at
+   * the client point (`over`), is let go there (`drop`, with the image's path), or leaves (`leave`).
+   * The row is dragged with the pointer, not as an HTML drag, which the app's web view never
+   * delivers to the page. Default: none, and the rows can't be dragged.
+   */
+  imageDrag?: {
+    over(at: { x: number; y: number }): void;
+    drop(at: { x: number; y: number }, path: string): void;
+    leave(): void;
+  };
   /** The edge was dragged: keep the width (#680). */
   onResize?(width: number): void;
   /** The edge was dragged shut: close the sidebar, as ⌃⌘S does. */
@@ -373,13 +383,11 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     if (entry.path === current) button.setAttribute('aria-current', 'page');
     if (!entry.isDir && !isDocument(entry.name)) {
       // An image is not opened: it is dragged into the document, which links it by its path (#681).
-      button.draggable = true;
       button.classList.add('rl-sidebar-image');
-      button.title = 'Drag into the document to insert it';
-      button.addEventListener('dragstart', (event) => {
-        event.dataTransfer?.setData(PROJECT_IMAGE_TYPE, entry.path);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
-      });
+      if (options.imageDrag) {
+        button.title = 'Drag into the document to insert it';
+        button.addEventListener('pointerdown', (event) => beginImageDrag(event, button, entry));
+      }
     } else {
       button.addEventListener('click', (event) => {
         if (entry.isDir) toggle(entry.path);
@@ -388,6 +396,68 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     }
     item.append(button);
     return item;
+  };
+
+  /** Ends the image drag that is going on, if any. */
+  let endDrag: (() => void) | null = null;
+
+  /**
+   * A press on an image row, and the pointer's drag from it (#1198): past a few pixels a label
+   * follows the pointer, the document shows where the image would go, and letting go there writes
+   * the link. A press that goes nowhere does nothing, and Escape gives the drag up.
+   */
+  const beginImageDrag = (press: PointerEvent, button: HTMLElement, entry: FileEntry) => {
+    const target = options.imageDrag;
+    if (!target || press.button !== 0 || endDrag) return;
+    const start = { x: press.clientX, y: press.clientY };
+    let label: HTMLElement | null = null;
+    const at = (event: PointerEvent) => ({ x: event.clientX, y: event.clientY });
+    const move = (event: PointerEvent) => {
+      if (!label) {
+        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) return;
+        label = document.createElement('div');
+        label.className = 'rl-sidebar-drag';
+        label.textContent = entry.name;
+        label.setAttribute('aria-hidden', 'true');
+        document.body.append(label);
+        document.body.classList.add('rl-image-dragging');
+      }
+      label.style.left = `${event.clientX + 12}px`;
+      label.style.top = `${event.clientY + 12}px`;
+      target.over(at(event));
+    };
+    const finish = (event: PointerEvent | null) => {
+      const dragged = label !== null;
+      cleanup();
+      if (!dragged) return;
+      if (event) target.drop(at(event), entry.path);
+      else target.leave();
+    };
+    const up = (event: PointerEvent) => finish(event);
+    const cancel = () => finish(null);
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cancel();
+    };
+    // A click after a drag is no click: the row does nothing either way.
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', key, true);
+      label?.remove();
+      label = null;
+      document.body.classList.remove('rl-image-dragging');
+      endDrag = null;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', key, true);
+    endDrag = () => {
+      cleanup();
+      target.leave();
+    };
+    button.focus();
   };
 
   const toggle = (folder: string) => {
@@ -461,6 +531,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     },
     destroy() {
       epoch++;
+      endDrag?.();
       resize.destroy();
       aside.remove();
     },
