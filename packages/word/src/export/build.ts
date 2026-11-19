@@ -46,6 +46,7 @@ import { alignsOf, blockWas, completeChanges, oldFormat, opsOf } from './changes
 import { drawnSize, loadImage } from './images.ts';
 import type { ImageSource, LoadedImage } from './images.ts';
 import { movesOf, patchMoves } from './moves.ts';
+import { openClean } from './open-clean.ts';
 import type { MoveHalf, MoveRevision } from './moves.ts';
 
 /** The children of one paragraph, and the deletion of its mark when a deleted break ends it. */
@@ -1146,14 +1147,13 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
   });
   const bytes = new Uint8Array(await Packer.toArrayBuffer(document));
   const parts = readParts(bytes);
+  openClean(parts);
   const xml = partText(parts, 'word/document.xml');
-  let changed = false;
   if (xml !== undefined) {
     const moved = moveRevisions.length > 0 ? patchMoves(xml, moveRevisions) : xml;
     const patched = completeChanges(moved);
     if (patched !== xml) {
       setPartText(parts, 'word/document.xml', patched);
-      changed = true;
     }
   }
   if (options.carriers === false) {
@@ -1168,7 +1168,7 @@ export async function exportDocx(text: string, options: ExportOptions = {}): Pro
             : `${notes} change notes are not in the Word file.`,
       });
     }
-    return changed ? writeParts(parts) : bytes;
+    return writeParts(parts);
   }
   const sourceBlocks: SourceBlock[] = blocks.map((block, i) => ({
     id: blockId(i),
