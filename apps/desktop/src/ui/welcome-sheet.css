@@ -1,0 +1,94 @@
+/*
+ * The sheet's base, for the Welcome mode of the Preferences window (preferences/main.ts, onboarding.ts):
+ * the document window's alert sheet (styles.css) drawn over a window that has no such stylesheet.
+ * The same card, in the theme's tokens.
+ */
+
+.rl-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--rl-page, Canvas) 40%, transparent);
+}
+
+.rl-sheet {
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 32px));
+  margin-top: 56px;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 10px;
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
+  font-size: var(--rl-size-ui);
+  line-height: 1.4;
+}
+
+.rl-sheet-title {
+  font-weight: 700;
+}
+
+.rl-sheet-detail {
+  margin-top: 4px;
+  color: var(--rl-ink-2);
+}
+
+.rl-sheet-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-sheet-field {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 7px;
+  background: var(--rl-card, Canvas);
+  color: var(--rl-ink);
+  font: inherit;
+  font-size: var(--rl-size-ui);
+}
+
+.rl-sheet-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.rl-sheet-button {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rl-ink);
+  font: inherit;
+  cursor: default;
+}
+
+.rl-sheet-button:hover {
+  background: var(--rl-pressed);
+}
+
+.rl-sheet-default {
+  background: var(--rl-pressed);
+  font-weight: 700;
+}
+
+.rl-sheet-button:focus-visible,
+.rl-sheet-field:focus-visible,
+.rl-sheet-check input:focus-visible {
+  outline: 2px solid var(--rl-ink-2);
+  outline-offset: 1px;
+}

@@ -104,8 +104,9 @@ import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createDevLog, tauriDevLogLink } from './dev-log.ts';
-import { runOnboarding, type InstallResult } from './onboarding.ts';
-import { noteFinished, noteStarted, shouldOnboard } from './onboarding-state.ts';
+import { runTour } from './onboarding.ts';
+import { requestWelcome, watchWelcomeResult, type WelcomeResult } from './welcome-request.ts';
+import { noteStarted, shouldOnboard } from './onboarding-state.ts';
 import sampleDocument from './sample.md?raw';
 import { askDevNote } from './ui/dev-note.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
@@ -1593,47 +1594,41 @@ const updateNotifications =
         : Promise.resolve(false),
   });
 
+/** Whether the onboarding is under way, so that a second ask (Replay) doesn't start another. */
+let onboarding = false;
+
 /**
- * The first-launch onboarding (#1206, design §5.11a): its sheet and tour in this window. The page
- * of a browser, in development, runs it with installs that only say so.
+ * The first-launch onboarding (#1206, design §5.11a). Its first three screens are the Preferences
+ * window's Welcome mode, which holds the app's install commands (this window is granted none of
+ * them): it is asked for through the page's storage and opened, and says how it ended. This window
+ * then runs the tour.
  */
-async function runWelcomeSheet(): Promise<void> {
-  const pretend = async (line: string): Promise<InstallResult> => {
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    return { ok: true, line };
-  };
-  const installs = isTauri
-    ? (await import('./onboarding-tauri.ts')).tauriInstalls
-    : {
-        skills: () => pretend('Installed for Claude Code and Codex.'),
-        quickLook: () => pretend('System Settings is open: turn on Redlines under Quick Look.'),
-        commandLine: () => pretend('Installed: type redlines in Terminal.'),
-      };
-  const quickLook = isTauri
-    ? await (await import('./onboarding-tauri.ts')).quickLookAvailable()
-    : true;
-  noteStarted(localStorage);
-  const found = () =>
-    agents.list().then(
-      (list) => list.map(({ id, name }) => ({ id, name })),
-      () => [],
-    );
-  const ended = await runOnboarding({
+async function runOnboarding(): Promise<void> {
+  if (onboarding) return;
+  onboarding = true;
+  try {
+    noteStarted(localStorage);
+    const ended = new Promise<WelcomeResult>((resolve) => watchWelcomeResult(resolve));
+    requestWelcome();
+    await invoke('open_preferences');
+    if ((await ended) === 'finished') await runWelcomeTour();
+  } catch (error) {
+    console.error('Could not run the onboarding', error);
+  } finally {
+    onboarding = false;
+  }
+}
+
+/** The tour: the Welcome document in this untouched window, and a card for each of three buttons. */
+async function runWelcomeTour(): Promise<void> {
+  // The Preferences window is in front: the tour is in this one.
+  if (isTauri)
+    await getCurrentWindow()
+      .setFocus()
+      .catch(() => {});
+  await runTour({
     container: app,
-    identity: settings.identity ?? { name: gitAuthor.name, handle: gitAuthor.handle },
-    saveIdentity: (name, handle) => {
-      settings = updateSettings({ identity: { name, handle } });
-      setAuthor(authorFrom(settings, gitAuthor));
-      editor.setAuthor({ ...author });
-    },
-    agents: found,
-    defaultAgent: settings.defaultAgent,
-    saveDefaultAgent: (id) => {
-      settings = updateSettings({ defaultAgent: id });
-    },
-    quickLook,
-    install: installs,
-    // The first window is untouched and takes the document; a window that has one keeps it.
+    // An untouched first window takes the document; a window that has one keeps it.
     openWelcome: async () => {
       if (isTauri && controller.untouched) await controller.createWith(sampleDocument);
     },
@@ -1644,8 +1639,6 @@ async function runWelcomeSheet(): Promise<void> {
     },
     restoreFocus: () => editor.focus(),
   });
-  noteFinished(localStorage);
-  devLog.log('note', `onboarding ${ended}`);
 }
 
 const commands: MenuCommands = {
@@ -1790,7 +1783,7 @@ const commands: MenuCommands = {
           });
         },
         revealDevLog: () => devLog.reveal(),
-        replayOnboarding: () => void runWelcomeSheet(),
+        replayOnboarding: () => void runOnboarding(),
       }
     : {}),
 };
@@ -2053,7 +2046,7 @@ if (isTauri) {
   updates?.setAutomatic(settings.checkForUpdates);
   // The first launch: the first window, with nothing opened for it, begins the onboarding.
   if (firstLaunch && getCurrentWindow().label === 'main' && start.path === null && !start.text) {
-    void runWelcomeSheet();
+    void runOnboarding();
   }
 } else {
   installShortcuts(menuModel, shortcutBook);
@@ -2075,8 +2068,9 @@ if (isTauri) {
       });
     }
   }
-  // Debug only (the onboarding journey): `?onboarding` runs the sheet and tour in the plain page.
-  if (import.meta.env.DEV && query.has('onboarding')) void runWelcomeSheet();
+  // Debug only (the onboarding journey): `?onboarding` runs the tour in the plain page. Its first
+  // three screens are the Preferences page's Welcome mode (`/preferences.html?welcome`).
+  if (import.meta.env.DEV && query.has('onboarding')) void runWelcomeTour();
   // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {

@@ -3,7 +3,7 @@
 // document window imports these commands (src/command-permissions.node.test.ts).
 
 import { invoke } from '@tauri-apps/api/core';
-import type { InstallResult, OnboardingAgent, OnboardingDeps } from './onboarding.ts';
+import type { InstallResult, OnboardingAgent, WelcomeDeps } from './onboarding.ts';
 
 /** The agents the app writes the Redlines skill for (agents/skills.rs), by id. */
 const SKILL_AGENTS = ['claude', 'codex'];
@@ -13,7 +13,7 @@ type CommandLine =
   | { outcome: 'cancelled' }
   | { outcome: 'failed'; why: string };
 
-export const tauriInstalls: OnboardingDeps['install'] = {
+export const tauriInstalls: WelcomeDeps['install'] = {
   async skills(agents: readonly OnboardingAgent[]): Promise<InstallResult> {
     const ids = agents.map((agent) => agent.id).filter((id) => SKILL_AGENTS.includes(id));
     if (ids.length === 0) return { ok: false, line: 'No agent was found to install it for.' };

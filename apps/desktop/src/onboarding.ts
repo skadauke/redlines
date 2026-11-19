@@ -1,8 +1,10 @@
-// The first-launch onboarding (#1206, design §5.11a): a sheet of four screens in the first window.
-// You (name and handle), your agent, set up this Mac (three installs, each the app's own command and
-// each skippable), and a short tour of the Welcome to Redlines document that points at the pen, the
-// views button and the toolbar's command palette. It owns no storage and no command: everything it
-// does goes through `OnboardingDeps`, so the page, the app and the tests give it theirs.
+// The first-launch onboarding (#1206, design §5.11a), in two parts for two windows. The Welcome mode
+// of the Preferences window runs the first three screens, which need the app's install commands:
+// you (name and handle), your agent, and set up this Mac (three installs, each the app's own command
+// and each skippable). The document window then runs the tour, a short walk through the Welcome to
+// Redlines document that points at the pen, the views button and the toolbar's command palette.
+// Neither owns storage or a command: everything goes through `WelcomeDeps` and `TourDeps`, so the
+// windows and the tests give them theirs.
 
 import { deriveHandle, toHandle } from './handle.ts';
 import './ui/onboarding.css';
@@ -18,7 +20,7 @@ export interface InstallResult {
   line: string;
 }
 
-export interface OnboardingDeps {
+export interface WelcomeDeps {
   /** The window's element the sheet is attached to. */
   container: HTMLElement;
   /** What the fields start with: what Preferences hold, else git's. */
@@ -35,17 +37,23 @@ export interface OnboardingDeps {
     quickLook(): Promise<InstallResult>;
     commandLine(): Promise<InstallResult>;
   };
+  /** Gives the keyboard back to the window's own content. */
+  restoreFocus(): void;
+}
+
+export interface TourDeps {
+  /** The window's element the cards are attached to. */
+  container: HTMLElement;
   /** Opens the Welcome to Redlines document in this window. */
   openWelcome(): Promise<void>;
   /** What the tour points at, when it is drawn. */
   anchors: Record<'pen' | 'views' | 'palette', () => HTMLElement | null>;
   /** Gives the keyboard back to the editor. */
   restoreFocus(): void;
-  /** Called at each screen, for what the page notes (that it began). */
-  onStep?(step: number): void;
 }
 
-export type OnboardingEnd = 'finished' | 'skipped';
+/** How the Welcome mode ended: through its three screens, or skipped from any of them. */
+export type WelcomeEnd = 'finished' | 'skipped';
 
 const STEPS = 4;
 
@@ -85,8 +93,8 @@ const TOUR = [
   },
 ] as const;
 
-/** Runs the onboarding. Resolves when it ends, finished, or skipped from any screen. */
-export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
+/** Runs the first three screens. Resolves when they end, finished, or skipped from any screen. */
+export function runWelcome(deps: WelcomeDeps): Promise<WelcomeEnd> {
   return new Promise((resolve) => {
     const backdrop = el('div', 'rl-sheet-backdrop');
     const sheet = el('div', 'rl-sheet rl-onb');
@@ -95,16 +103,12 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
     sheet.setAttribute('aria-labelledby', 'rl-onb-title');
     backdrop.append(sheet);
     deps.container.append(backdrop);
-    let tourCard: HTMLElement | null = null;
-    let target: HTMLElement | null = null;
     let ended = false;
 
-    const end = (how: OnboardingEnd) => {
+    const end = (how: WelcomeEnd) => {
       if (ended) return;
       ended = true;
       backdrop.remove();
-      tourCard?.remove();
-      target?.classList.remove('rl-tour-target');
       deps.restoreFocus();
       resolve(how);
     };
@@ -118,7 +122,6 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
       buttons: HTMLButtonElement[],
       onSkip: () => void,
     ) => {
-      deps.onStep?.(step);
       const place = el('div', 'rl-onb-step', `${step} of ${STEPS}`);
       const heading = el('div', 'rl-sheet-title rl-onb-title', title);
       heading.id = 'rl-onb-title';
@@ -301,7 +304,7 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
       const skip = button('Skip');
       let busy = false;
       skip.addEventListener('click', () => {
-        if (!busy) void tour();
+        if (!busy) end('finished');
       });
       install.addEventListener('click', () => {
         if (busy) return;
@@ -324,7 +327,7 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
           // The results stay in view until the person goes on.
           install.textContent = 'Continue';
           install.disabled = false;
-          install.onclick = () => void tour();
+          install.onclick = () => end('finished');
           busy = false;
         })();
       });
@@ -334,7 +337,7 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
         'Each is optional, and nothing is installed until you choose Install and Continue.',
         [list],
         [skip, install],
-        () => !busy && void tour(),
+        () => !busy && end('finished'),
       );
     };
 
@@ -343,60 +346,68 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
       line: error instanceof Error ? error.message : String(error),
     });
 
-    // 4. The tour: the Welcome document, and a card for each of the three things.
-    const tour = async () => {
-      deps.onStep?.(4);
-      backdrop.classList.add('rl-onb-clear');
-      sheet.replaceChildren();
-      sheet.hidden = true;
-      await deps.openWelcome().catch(() => {});
-      if (ended) return;
-      let at = 0;
-      const show = () => {
-        target?.classList.remove('rl-tour-target');
-        tourCard?.remove();
-        const item = TOUR[at]!;
-        const anchor = deps.anchors[item.key]();
-        target = anchor;
-        anchor?.classList.add('rl-tour-target');
-        const card = el('div', 'rl-tour-card');
-        card.setAttribute('role', 'dialog');
-        card.setAttribute('aria-label', item.title);
-        const place = el('div', 'rl-onb-step', `4 of ${STEPS}, ${at + 1} of ${TOUR.length}`);
-        const title = el('div', 'rl-sheet-title', item.title);
-        const text = el('div', 'rl-sheet-detail', item.text);
-        const buttons = el('div', 'rl-sheet-buttons');
-        const last = at === TOUR.length - 1;
-        const skip = button('Skip Tour');
-        const next = button(last ? 'Done' : 'Next', true);
-        skip.addEventListener('click', () => end('finished'));
-        next.addEventListener('click', () => {
-          if (last) end('finished');
-          else {
-            at += 1;
-            show();
-          }
-        });
-        buttons.append(...(last ? [next] : [skip, next]));
-        card.append(place, title, text, buttons);
-        deps.container.append(card);
-        tourCard = card;
-        // Under the anchor, the card's arrow over its middle.
-        const rect = anchor?.getBoundingClientRect();
-        const width = card.offsetWidth || 300;
-        const middle = rect ? rect.left + rect.width / 2 : window.innerWidth - 60;
-        const left = Math.max(12, Math.min(middle - width / 2, window.innerWidth - width - 12));
-        card.style.left = `${left}px`;
-        card.style.top = `${(rect?.bottom ?? 40) + 12}px`;
-        card.style.setProperty('--rl-tour-arrow', `${Math.round(middle - left)}px`);
-        next.focus();
-        card.onkeydown = (event) => {
-          if (event.key === 'Escape') end('finished');
-        };
-      };
-      show();
-    };
-
     you();
+  });
+}
+
+/**
+ * Runs the tour: opens the Welcome document, then one card at a time points at the pen, the views
+ * button and the command palette. Resolves when the last card is done or the tour is skipped.
+ */
+export async function runTour(deps: TourDeps): Promise<void> {
+  await deps.openWelcome().catch(() => {});
+  await new Promise<void>((resolve) => {
+    let card: HTMLElement | null = null;
+    let target: HTMLElement | null = null;
+    let at = 0;
+    const end = () => {
+      card?.remove();
+      target?.classList.remove('rl-tour-target');
+      deps.restoreFocus();
+      resolve();
+    };
+    const show = () => {
+      target?.classList.remove('rl-tour-target');
+      card?.remove();
+      const item = TOUR[at]!;
+      const anchor = deps.anchors[item.key]();
+      target = anchor;
+      anchor?.classList.add('rl-tour-target');
+      const cardEl = el('div', 'rl-tour-card');
+      cardEl.setAttribute('role', 'dialog');
+      cardEl.setAttribute('aria-label', item.title);
+      const place = el('div', 'rl-onb-step', `4 of ${STEPS}, ${at + 1} of ${TOUR.length}`);
+      const title = el('div', 'rl-sheet-title', item.title);
+      const text = el('div', 'rl-sheet-detail', item.text);
+      const buttons = el('div', 'rl-sheet-buttons');
+      const last = at === TOUR.length - 1;
+      const skip = button('Skip Tour');
+      const next = button(last ? 'Done' : 'Next', true);
+      skip.addEventListener('click', end);
+      next.addEventListener('click', () => {
+        if (last) end();
+        else {
+          at += 1;
+          show();
+        }
+      });
+      buttons.append(...(last ? [next] : [skip, next]));
+      cardEl.append(place, title, text, buttons);
+      deps.container.append(cardEl);
+      card = cardEl;
+      // Under the anchor, the card's arrow over its middle.
+      const rect = anchor?.getBoundingClientRect();
+      const width = cardEl.offsetWidth || 300;
+      const middle = rect ? rect.left + rect.width / 2 : window.innerWidth - 60;
+      const left = Math.max(12, Math.min(middle - width / 2, window.innerWidth - width - 12));
+      cardEl.style.left = `${left}px`;
+      cardEl.style.top = `${(rect?.bottom ?? 40) + 12}px`;
+      cardEl.style.setProperty('--rl-tour-arrow', `${Math.round(middle - left)}px`);
+      next.focus();
+      cardEl.onkeydown = (event) => {
+        if (event.key === 'Escape') end();
+      };
+    };
+    show();
   });
 }

@@ -1,12 +1,13 @@
-// The first-launch onboarding (#1206, design §5.11a) on the dev page, where `?onboarding` runs it
-// with installs that only say so: the four screens, and the three cards of the tour, each with a
-// picture in the look the run is in. It asserts what each screen offers and that the sheet ends.
+// The first-launch onboarding (#1206, design §5.11a), in its two windows on the dev page. The first
+// three screens are the Preferences window's Welcome mode (`/preferences.html?welcome`, where the
+// installs only say so); the tour is the document window's (`/?onboarding`). Each screen and card
+// has a picture in the look the run is in.
 
 import type { Page } from '@playwright/test';
 import { expect, test } from '../src/journey.ts';
 
 /** The page in the look of the run (what `start` does for the other journeys), with a quiet window. */
-async function open(page: Page): Promise<void> {
+async function open(page: Page, url: string): Promise<void> {
   const scheme = test.info().project.name.startsWith('dark') ? 'dark' : 'light';
   await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
   await page.addInitScript((appearance) => {
@@ -15,14 +16,14 @@ async function open(page: Page): Promise<void> {
       JSON.stringify({ appearance, textSize: 1, showWordCount: false }),
     );
   }, scheme);
-  await page.goto('/?onboarding');
+  await page.goto(url);
 }
 
-test('the onboarding: you, your agent, set up this Mac, and the tour', async ({ page }) => {
+test('the Welcome mode of Preferences: you, your agent, and set up this Mac', async ({ page }) => {
   const look = test.info().project.name;
   const shot = (name: string) =>
     expect(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
-  await open(page);
+  await open(page, '/preferences.html?welcome');
   const sheet = page.locator('.rl-onb');
   await expect(sheet).toBeVisible();
 
@@ -46,8 +47,30 @@ test('the onboarding: you, your agent, set up this Mac, and the tour', async ({ 
   await expect(sheet.locator('.rl-onb-install-result').nth(2)).toContainText('Installed');
   await shot('3-setup-done');
   await sheet.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.locator('.rl-sheet-backdrop')).toHaveCount(0);
+  // It tells the document window, which then runs the tour, and is done for good.
+  expect(await page.evaluate(() => localStorage.getItem('redlines.onboarding'))).toBe('done');
+  expect(await page.evaluate(() => localStorage.getItem('redlines.welcome-result'))).toContain(
+    'finished',
+  );
+});
 
-  // 4. The tour: the pen, the views button, the command palette.
+test('Skip Setup ends the Welcome mode from the first screen, and says it was skipped', async ({
+  page,
+}) => {
+  await open(page, '/preferences.html?welcome');
+  await page.locator('.rl-onb').getByRole('button', { name: 'Skip Setup' }).click();
+  await expect(page.locator('.rl-sheet-backdrop')).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('redlines.welcome-result'))).toContain(
+    'skipped',
+  );
+});
+
+test('the tour: the pen, the views button and the command palette', async ({ page }) => {
+  const look = test.info().project.name;
+  const shot = (name: string) =>
+    expect(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
+  await open(page, '/?onboarding');
   const card = page.locator('.rl-tour-card');
   await expect(card).toContainText('The Redlines pen');
   await expect(page.locator('[data-tour="pen"]')).toHaveClass(/rl-tour-target/);
@@ -61,12 +84,4 @@ test('the onboarding: you, your agent, set up this Mac, and the tour', async ({ 
   await card.getByRole('button', { name: 'Done' }).click();
   await expect(page.locator('.rl-tour-card')).toHaveCount(0);
   await expect(page.locator('.rl-tour-target')).toHaveCount(0);
-  await expect(page.locator('.rl-sheet-backdrop')).toHaveCount(0);
-});
-
-test('Skip Setup ends the onboarding from the first screen', async ({ page }) => {
-  await open(page);
-  await page.locator('.rl-onb').getByRole('button', { name: 'Skip Setup' }).click();
-  await expect(page.locator('.rl-sheet-backdrop')).toHaveCount(0);
-  await expect(page.locator('.rl-tour-card')).toHaveCount(0);
 });

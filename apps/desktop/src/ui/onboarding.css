@@ -93,12 +93,6 @@
   color: var(--rl-ink-2);
 }
 
-/* The tour leaves the page in view: no veil, and the sheet gone. */
-.rl-onb-clear {
-  pointer-events: none;
-  background: transparent;
-}
-
 .rl-tour-target {
   border-radius: 8px;
   outline: 2px solid var(--rl-ink-2);
