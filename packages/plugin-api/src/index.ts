@@ -453,3 +453,5 @@ export interface HostIdentity {
 export function definePlugin<T>(plugin: T): T {
   return plugin;
 }
+
+export { readingMs, WORD_MS, wordsIn } from './reading.ts';

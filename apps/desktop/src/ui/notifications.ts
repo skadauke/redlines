@@ -5,7 +5,10 @@
 // keyboard's way, Esc dismisses the one that has the keyboard, and the keyboard then goes back to
 // where it was.
 
+import { readingMs, WORD_MS } from '@redlines/plugin-api';
 import { icon } from './icons.ts';
+
+export { WORD_MS };
 
 /** How long a notification that passes by stays, unless the pointer or the keyboard is on it. */
 export const PASSING_MS = 4000;
@@ -13,17 +16,13 @@ export const PASSING_MS = 4000;
 /** The time a notification is up before its words: the eye finding it, and the hand a moment. */
 export const READING_BASE_MS = 2000;
 
-/** The time for each word, at a reading speed of 200 words a minute. */
-export const WORD_MS = 300;
-
 /**
  * How long a notification that passes by stays on screen: the time to read its text (a base time
  * and its words at 200 a minute), or `timeout`, whichever is longer, so that a short one stays as
  * long as its caller asked and a long one is not gone before it is read.
  */
 export function stayMs(text: string, timeout: number): number {
-  const words = text.split(/\s+/).filter(Boolean).length;
-  return Math.max(timeout, READING_BASE_MS + words * WORD_MS);
+  return Math.max(timeout, readingMs(text, READING_BASE_MS));
 }
 
 export interface NotificationAction {
