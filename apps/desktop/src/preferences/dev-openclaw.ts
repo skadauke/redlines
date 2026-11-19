@@ -1,11 +1,12 @@
-// What the OpenClaw setup sheet and the agent's card show in a plain page in development
-// (`pnpm dev`, preferences.html), where there is no app to ask: every answer is scripted from the
+// What the OpenClaw setup window and the agent's card show in a plain page in development
+// (`pnpm dev`, openclaw-setup.html and preferences.html), where there is no app to ask: every answer is scripted from the
 // address, so that each screen and each failure can be looked at, in light and dark, and the
 // journeys can be walked. Never in a release build, and never in the app.
 //
-//   preferences.html?oc=<screen>&ts=<tailscale>&probe=<gateway>&node=<connection>&dark
+//   openclaw-setup.html?oc=<screen>&ts=<tailscale>&probe=<gateway>&node=<connection>&dark
 //
-//   oc     start | mac | computer | prompt | approve | test | card (the agent's card, no sheet)
+//   oc     start | mac | computer | prompt | approve | test | failures (every failure card), or
+//          card, on preferences.html: the agent's card in Preferences › Agents
 //   ts     missing | off | signed-out | no-peers | blocked | ready (the default)
 //   probe  found (default) | silent | none
 //   node   connecting | pairing (default) | connected | code-used | not-approved | tools | newer
@@ -15,6 +16,7 @@ import {
   FAILURE_IDS,
   failure,
   type GuidedDeps,
+  type SheetDeps,
   type NodeStatus,
   type OpenClawConnection,
   type TailscaleStatus,
@@ -100,7 +102,7 @@ function nodeFor(kind: string): NodeStatus {
 }
 
 /** The scripted answers for `query`, as the sheet and the card ask for them. */
-export function devGuided(query: URLSearchParams): GuidedDeps {
+export function devGuided(query: URLSearchParams): GuidedDeps & SheetDeps {
   const ts = query.get('ts') ?? 'ready';
   const probe = query.get('probe') ?? 'found';
   const node = query.get('node') ?? 'pairing';
@@ -125,6 +127,7 @@ export function devGuided(query: URLSearchParams): GuidedDeps {
   const where = (handle: string) => list.find((one) => one.handle === handle);
   return {
     owner: 'ada',
+    openSetup: () => void window.open(`/openclaw-setup.html${location.search}`, '_blank'),
     taken: () => ['claude-ada', 'codex-ada', ...list.map((one) => one.handle)],
     thisMac: () => Promise.resolve('Ada’s MacBook'),
     tailscale: {

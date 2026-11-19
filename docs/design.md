@@ -2278,7 +2278,9 @@ copy only, never the plugin, and the Claude Code row says to keep one. Publishin
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks
-a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a sheet
+a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a window of
+its own, larger than Preferences and resizable, which Preferences › Agents and the @ picker (its
+last row, while no OpenClaw agent is connected) open
 ([research note](research/openclaw-connection.md), screens 1 to 7, and a gray card for every
 failure): whether this Mac has Tailscale installed, is signed in and sees other computers
 (`tailscale status --json`, read only: Redlines never starts, stops or changes Tailscale); which

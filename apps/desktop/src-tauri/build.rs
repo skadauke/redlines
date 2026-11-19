@@ -67,6 +67,7 @@ const COMMANDS: &[&str] = &[
     "open_default",
     "open_files_and_folders_settings",
     "open_link",
+    "open_openclaw_setup",
     "open_preferences",
     "open_quick_look_settings",
     "open_window",

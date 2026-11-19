@@ -40,6 +40,10 @@ pub(crate) const PREFERENCES_WINDOW: &str = "preferences";
 /// The label of the About Redlines window, which holds no document either.
 pub(crate) const ABOUT_WINDOW: &str = "about";
 
+/// The label of the window that sets up an OpenClaw connection (`src/openclaw-setup/main.ts`), which
+/// holds no document either.
+pub(crate) const OPENCLAW_SETUP_WINDOW: &str = "openclaw-setup";
+
 /// How the labels of the document windows opened after the main one begin: `doc-1`, `doc-2` and
 /// on (`Registry::next_label`).
 const DOCUMENT_LABEL: &str = "doc-";
@@ -50,10 +54,10 @@ pub(crate) fn is_document_window(label: &str) -> bool {
     label == MAIN_WINDOW || label.starts_with(DOCUMENT_LABEL)
 }
 
-/// The windows that hold no document and stay while the app runs: Preferences and About. The app
-/// quits when its last window is gone, so these close with the last document window, or they would
-/// keep it running behind a menu bar that can do nothing.
-const WITHOUT_DOCUMENT: [&str; 2] = [PREFERENCES_WINDOW, ABOUT_WINDOW];
+/// The windows that hold no document and stay while the app runs: Preferences, About and the
+/// OpenClaw setup. The app quits when its last window is gone, so these close with the last document
+/// window, or they would keep it running behind a menu bar that can do nothing.
+const WITHOUT_DOCUMENT: [&str; 3] = [PREFERENCES_WINDOW, ABOUT_WINDOW, OPENCLAW_SETUP_WINDOW];
 
 /// The windows to close now that the window `closed` is gone and no document window is left: those
 /// without a document, but for `closed` itself.
@@ -1013,6 +1017,7 @@ mod tests {
         for label in [
             PREFERENCES_WINDOW,
             ABOUT_WINDOW,
+            OPENCLAW_SETUP_WINDOW,
             question,
             "",
             "doc",
@@ -1028,21 +1033,29 @@ mod tests {
     }
 
     #[test]
-    fn preferences_and_about_close_with_the_last_document_window() {
+    fn the_windows_without_a_document_close_with_the_last_document_window() {
         // Tauri ends the app when its window map is empty, and a window left behind keeps it
         // running with a menu bar that can do nothing (a ⌘Q in a page that is gone).
         for last in [MAIN_WINDOW, "doc-3"] {
             let closing: Vec<_> = left_behind(last).collect();
-            assert_eq!(closing, [PREFERENCES_WINDOW, ABOUT_WINDOW], "{last}");
+            assert_eq!(
+                closing,
+                [PREFERENCES_WINDOW, ABOUT_WINDOW, OPENCLAW_SETUP_WINDOW],
+                "{last}"
+            );
         }
-        // One of them closing last has nothing more to close but the other.
+        // One of them closing last has nothing more to close but the others.
         assert_eq!(
             left_behind(PREFERENCES_WINDOW).collect::<Vec<_>>(),
-            [ABOUT_WINDOW]
+            [ABOUT_WINDOW, OPENCLAW_SETUP_WINDOW]
         );
         assert_eq!(
             left_behind(ABOUT_WINDOW).collect::<Vec<_>>(),
-            [PREFERENCES_WINDOW]
+            [PREFERENCES_WINDOW, OPENCLAW_SETUP_WINDOW]
+        );
+        assert_eq!(
+            left_behind(OPENCLAW_SETUP_WINDOW).collect::<Vec<_>>(),
+            [PREFERENCES_WINDOW, ABOUT_WINDOW]
         );
     }
 
@@ -1074,6 +1087,36 @@ mod tests {
         let capability: serde_json::Value =
             serde_json::from_str(include_str!("../capabilities/about.json")).unwrap();
         assert_eq!(capability["windows"], serde_json::json!([ABOUT_WINDOW]));
+    }
+
+    #[test]
+    fn the_openclaw_setup_window_is_a_resizable_window_that_opens_hidden_with_a_capability_of_its_own()
+     {
+        // `open_openclaw_setup` builds it from the config, hidden: its page shows it once it is
+        // styled (src/openclaw-setup/main.ts). Unlike Preferences and About it can be resized: the
+        // setup's text needs room.
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = config["app"]["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|window| window["label"] == OPENCLAW_SETUP_WINDOW)
+            .expect("the setup has a window in tauri.conf.json");
+        assert_eq!(window["url"], "openclaw-setup.html");
+        assert_eq!(window["visible"], false);
+        assert_eq!(window["resizable"], true);
+        assert_eq!(window["hiddenTitle"], true);
+        assert_eq!(window["titleBarStyle"], "Overlay");
+        assert!(window["width"].as_f64().unwrap() >= 700.0);
+        assert!(window["height"].as_f64().unwrap() >= 640.0);
+        assert!(window["minWidth"].as_f64().unwrap() >= 520.0);
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/openclaw-setup.json")).unwrap();
+        assert_eq!(
+            capability["windows"],
+            serde_json::json!([OPENCLAW_SETUP_WINDOW])
+        );
     }
 
     #[test]
