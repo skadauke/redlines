@@ -715,6 +715,123 @@ body.rl-image-dragging * {
   line-height: 1.4;
 }
 
+/*
+ * The sidebar's two views (#1194): Files and Chat, a small segmented control under the window
+ * buttons, and the foot, which holds the person's name, Preferences and the problem report. The
+ * foot is in both views, in the sidebar's own grays and the theme's interface sizes.
+ */
+.rl-sidebar-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  width: calc(var(--rl-sidebar-width, 240px) - 28px);
+  margin: 0 14px 6px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--rl-pressed);
+  box-sizing: border-box;
+}
+
+.rl-sidebar-tab {
+  flex: 1;
+  height: var(--rl-seg-h);
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rl-ink-2);
+  font: inherit;
+  font-size: var(--rl-size-ui-small);
+  cursor: default;
+}
+
+.rl-sidebar-tab[aria-selected='true'] {
+  background: var(--rl-seg-on);
+  color: var(--rl-ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.rl-sidebar-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--rl-ink-3);
+}
+
+.rl-sidebar-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  width: var(--rl-sidebar-width, 240px);
+  padding: 8px 10px;
+  border-top: 1px solid var(--rl-rule);
+  box-sizing: border-box;
+}
+
+.rl-sidebar-foot-name {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rl-ink);
+  font: inherit;
+  font-size: var(--rl-size-ui);
+  text-align: left;
+  cursor: default;
+}
+
+.rl-sidebar-foot-initial {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--rl-rule);
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  font-weight: 700;
+}
+
+.rl-sidebar-foot-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rl-sidebar-foot-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rl-ink-2);
+  cursor: default;
+}
+
+.rl-sidebar-foot-name:hover,
+.rl-sidebar-foot-button:hover {
+  background: var(--rl-pressed);
+  color: var(--rl-ink);
+}
+
+.rl-sidebar-foot-name:focus-visible,
+.rl-sidebar-foot-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--rl-ink-3);
+}
+
 /* Notices: one slim line under the title bar, over the page. */
 
 .rl-notice {

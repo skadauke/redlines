@@ -199,7 +199,11 @@ repo root.
   `website/public/embed/`, which git ignores; `size` builds it and holds it to
   `apps/website-embed/size-budget.json` (JS and CSS gzipped, fonts as served; CI runs it as the
   "Website embed size budget" step). Raise the budget deliberately, in a commit of its own, with
-  the reason in the file's note
+  the reason in the file's note. On an Epic's branch, and a pull request into one, CI sets
+  `REDLINES_SIZE=epic`, and both checks let the JavaScript go past its budget by the file's Epic
+  allowance (32 KB), with a warning, so that lanes landing in parallel don't fail it in turn or
+  wait for a raise; the pull request from the Epic to main is held to the budgets, which the
+  Epic's sweep sets to what the Epic measures
 
 ## CI (`.github/workflows/`)
 
@@ -220,7 +224,8 @@ repo root.
   (`apps/desktop/quicklook`, `scripts/build-quicklook`, and on main `packages/format`) and `ui` (the desktop's `src` and `journeys`,
   `plugins`, `packages/editor`, `packages/format`); a change to `.github/workflows/**`, or a diff
   that can't be made, sets all. Then:
-  - `check` always runs typecheck, lint, format:check and the two size budgets. **On a pull
+  - `check` always runs typecheck, lint, format:check and the two size budgets (with the Epic's
+    allowance on an Epic's branch and the pull requests into it, as above). **On a pull
     request** its tests are `vitest run --changed <base sha>`: the tests that import, through any
     chain, a file the PR changed (a package's dependents' among them), and all of them when a
     config or `package.json` changes, plus the tests that read the source files to hold every change

@@ -3650,6 +3650,22 @@ reads alike, like any deletion and insertion. Accepting both gives the blocks at
 rejecting both at the old. (Rows and columns of a table are moved by `move` links; they are not
 blocks of the document's own flow, §3.7.)
 
+Where the move is written as insertions and deletions (the fine form, not the widened substitution
+below), the ledger links them as it links the halves of a moved row: each insertion's entry names
+the first deletion of the group in `move`, and each deletion's names the first insertion. The link
+changes no reading and no decision: every order of deciding reads as it did, and the group still
+decides the marks together, so that a half of a move that has a group (unlike a half with none, §3.7)
+is decided like any mark. What it adds is that a reader can tell a move from an insertion and a
+deletion that happen to share text: Redlines names it `Moved block` on one card, and draws the new
+place with a double underline, as the new place of a moved row, after Word's marks for a move. A
+move written as a widened substitution is a replacement, and is drawn as one.
+
+A link whose partner is gone is ignored, and dropped when the ledger is next written: the block moved
+again, or deleted at its new place, leaves the first deletion's `move` naming a mark that no longer
+exists, as a deleted moved row does (§3.7). A deletion typed right next to the old place is a
+deletion of its own, as beside any other deletion with a link: it is no longer taken into the move's
+deletion.
+
 - **The unit.** A move takes a run of siblings under one parent, as `widen-units.ts` reads them: a
   paragraph, a heading, a code block, a table, a quote or a list at the top of the file, a block of
   a quote, an item of a list. A caret in a paragraph moves the paragraph; in an item, the item with
@@ -3657,6 +3673,11 @@ blocks of the document's own flow, §3.7.)
   covers a whole list, quote or item moves it, and one across several siblings moves them all. A
   block moves among its own siblings only: an item stays in its list, and a block in its quote.
   Nothing moves above the first sibling or below the last, and the command says so.
+  A fenced code block that nothing closes holds the rest of its container, so it has nowhere to go
+  as it is: the move writes its closing fence first (on the block's last line when that is empty,
+  and on a new line under it otherwise, in the opening fence's container syntax), tracked with
+  Track Changes on, and moves the closed block, in one step to undo (#1203). Where the closed block
+  would have nowhere to go either (it is the only block), nothing is written.
 - **The text.** The moved text is the newest view of the blocks, with the break that the siblings
   have between them. Another person's pending changes in the blocks are not carried: they stay in
   the deleted text at the old place, as in any deletion (§3.4), and the copy at the new place has the
