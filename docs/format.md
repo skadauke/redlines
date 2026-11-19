@@ -4569,7 +4569,9 @@ A file changes only when its content does.
   of it is a deletion, and text typed next to it stands outside it). A div typed with Track Changes
   on, from its opening fence to the end of the typed text, is one insertion with no `split`
   marker inside; its closer stands alone on the line after the closing fence, as after a code
-  fence (§3.3). This holds at the top level of the file and in a quote (also one in a list item or in
+  fence (§3.3). This holds at the top level of the file, at the start of a paragraph too (where the
+  typed text ends with its blank line and text follows: the breaks typed after the last text stay
+  behind the closer, as after a code fence, #1169), and in a quote (also one in a list item or in
   another quote), the closer standing alone on the line after the closing fence behind the quote's
   prefix (`> :::` then `> <!--/k3x9-->`), as in a fenced code block (#1234). In a list item the typed
   fence lines keep the old form (not built): the closer alone on a line is an HTML block after the

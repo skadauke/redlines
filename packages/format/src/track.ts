@@ -1181,7 +1181,11 @@ const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
  * a line, with nothing after the text on its last line; anywhere else the text is written as it was.
  */
 function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
-  if (where.rest.trim() !== '' || wholeTopDiv(tokens, linePrefix, where)) return;
+  // What follows the typed text is on the line of its last text, unless the text ends with a break
+  // (a div typed whole at the start of a paragraph, with the blank line after it, #1169).
+  const endsInBreak = tokens.length > 0 && 'brk' in tokens[tokens.length - 1]!;
+  if (where.rest.trim() !== '' && !endsInBreak) return;
+  if (wholeTopDiv(tokens, linePrefix, where) || where.rest.trim() !== '') return;
   // Typed text that ends in a bare fence line and is no div at the top level (a div closed
   // wherever it opened, as in a quote or after text on its line): the closer stands alone on the
   // line after it (#1088).
@@ -1212,14 +1216,17 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
     return atLineStart && DIV_FENCE_TYPED.test(token.text.split('\n')[0]?.replace(/\r$/, '') ?? '');
   });
   if (first < 0) return false;
-  const rest = tokens.slice(first);
+  // At the top level the breaks after the last text stay behind the div, after its closer, as for a
+  // code block (#1169); in a container they are part of what the lines are read by (#1234).
+  const lastText = tokens.findLastIndex((token) => 'text' in token);
+  const rest = linePrefix === '' ? tokens.slice(first, lastText + 1) : tokens.slice(first);
   if (rest.some((token) => 'text' in token && token.fence === true)) return false;
   // The container of the lines after the first: what each break leaves on its next line.
   const tails = rest.flatMap((token) =>
     'brk' in token ? [token.brk.slice(token.brk.lastIndexOf('\n') + 1)] : [],
   );
   const container = tails.at(-1) ?? linePrefix;
-  if (linePrefix === '' ? tails.some((tail) => tail !== '') : false) return false;
+  // (At the top level a break's tail may be a block's mark typed on the next line, as a heading's `## `.)
   if (linePrefix !== '') {
     if (tails.length === 0 || tails.some((tail) => tail !== container)) return false;
     if (continuationPrefix(container) !== container) return false;

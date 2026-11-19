@@ -122,14 +122,6 @@ export interface KnownCase {
  * is then a failure of this check, with no entry to hide behind.
  */
 export const KNOWN: readonly KnownCase[] = [
-  {
-    issue: 1169,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'marker',
-    text: /<!--/,
-    why: 'a callout whose title holds an insertion shows its marker',
-  },
   ...([['math', /\$\$/, 'the display formula']] as const).map(([rule, text, what]): KnownCase => ({
     issue: 1216,
     doc: ['Build 21.qmd', 'frontmatter.qmd'],

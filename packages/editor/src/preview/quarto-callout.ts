@@ -14,6 +14,7 @@ import {
 } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { dialectFacet } from '../dialect.ts';
+import { trackedText } from '../tracked/decorations.ts';
 import { viewModeField } from '../tracked/field.ts';
 import { calloutMenuEffect, calloutName, drawChevron, drawIcon } from './callout.ts';
 import { calloutsOf, divsOf, type QuartoCallout } from './divs.ts';
@@ -47,14 +48,47 @@ const turned = StateField.define<readonly number[]>({
   },
 });
 
+/** A stretch of a title as the tracked layer draws it: no marks, with its change's classes. */
+interface TitlePart {
+  text: string;
+  className: string;
+}
+
+/**
+ * The title from the body's first heading, as the tracked layer draws it: the heading's marks are
+ * hidden, an insertion has its author's color (and in Redlines its underline), and in Redlines a
+ * deletion is struck. Null when the title is no heading's, or no mark is in it.
+ */
+function headingTitle(
+  state: EditorState,
+  heading: { from: number; text: string },
+): TitlePart[] | null {
+  if (!heading.text.includes('<!--')) return null;
+  const found = /^#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*(?:\{[^}]*\})?$/d.exec(heading.text)
+    ?.indices?.[1];
+  if (!found) return null;
+  const from = heading.from + found[0];
+  const to = heading.from + found[1];
+  const pieces = trackedText(state, from, to)?.pieces(from, to);
+  if (!pieces) return null;
+  return pieces
+    .filter((piece) => piece.text !== '')
+    .map((piece) => ({
+      text: piece.text,
+      className: piece.layers.join(' '),
+    }));
+}
+
 class QuartoTitleWidget extends WidgetType {
   readonly callout: QuartoCallout;
   readonly folded: boolean;
+  readonly parts: TitlePart[] | null;
 
-  constructor(callout: QuartoCallout, folded: boolean) {
+  constructor(callout: QuartoCallout, folded: boolean, parts: TitlePart[] | null) {
     super();
     this.callout = callout;
     this.folded = folded;
+    this.parts = parts;
   }
 
   override eq(other: QuartoTitleWidget): boolean {
@@ -63,7 +97,8 @@ class QuartoTitleWidget extends WidgetType {
       other.callout.title === this.callout.title &&
       other.callout.collapse === this.callout.collapse &&
       other.callout.attributes['title'] === this.callout.attributes['title'] &&
-      other.folded === this.folded
+      other.folded === this.folded &&
+      JSON.stringify(other.parts) === JSON.stringify(this.parts)
     );
   }
 
@@ -77,7 +112,14 @@ class QuartoTitleWidget extends WidgetType {
     head.append(drawIcon(callout.type));
     const text = document.createElement('span');
     text.className = 'rl-callout-name';
-    text.textContent = name;
+    if (this.parts) {
+      for (const part of this.parts) {
+        const piece = document.createElement('span');
+        if (part.className) piece.className = part.className;
+        piece.textContent = part.text;
+        text.append(piece);
+      }
+    } else text.textContent = name;
     head.append(text);
     head.append(this.menuButton(view, head));
     if (callout.collapse !== null) {
@@ -247,7 +289,8 @@ export function quartoCalloutDecorations(state: EditorState): DecorationSet {
       if (n === visibleLast) mark(n, 'rl-callout-last');
     }
     if (!onOpen) {
-      const widget = new QuartoTitleWidget(callout, folded);
+      const parts = heading ? headingTitle(state, heading) : null;
+      const widget = new QuartoTitleWidget(callout, folded, parts);
       ranges.push(Decoration.replace({ widget }).range(first.from, first.to));
     }
     if (folded) {
