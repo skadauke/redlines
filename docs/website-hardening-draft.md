@@ -5,7 +5,7 @@ deployed when it is merged; so this stays here until it has been read. It is for
 adopters. [hardening.md](hardening.md) is the contributors' version, with the files and switches.
 Every number below is cited from a merged pull request's own checks and was not run again for this
 page; the numbers of #297 and #277 are from a reviewer's probes, whose scripts are not in the
-repository. The state of the issues is as of 17 November 2026. Where a sentence says *proved*, the
+repository. The state of the issues is as of 19 November 2026. Where a sentence says *proved*, the
 format's specification has a written argument; everywhere else it says *tested*. The only
 comparisons are with Word and Google Docs.
 
@@ -91,8 +91,9 @@ then:
   it, an insertion right after it), the edit is not written, because a heading typed after another
   person's split would read `## xbeta` in one order and `xbeta` in another (#107). The words are
   *"This would change how Bo Chen's insertion reads. Decide it first, or turn off Track Changes."*
-  Typing in code that holds another person's pending code change is refused (#285); a pull
-  request that writes it is open (#1016). Other refusals are kept where the file would be unreadable or forged.
+  Typing in code that holds another person's pending code change is written as a replacement of
+  the whole block (#285), except where that block holds or touches another person's pending mark:
+  there the edit is refused. Other refusals are kept where the file would be unreadable or forged.
 
 In the cases that remain, the way out is to decide the other person's change first, or to turn Track
 Changes off for the edit; the refusal says which.
@@ -126,14 +127,11 @@ We would rather say it than have you find it.
 
 - **Silent wrong writes, and changes that can't be decided, found so far.** In a few shapes Redlines
   still writes something that reads differently from what it shows, or leaves a change that can't be
-  decided. Each is an open issue, and the list is what has been found, not a count of what is there:
-  - a deletion inside a blank line of a quote between two paragraphs, in a few shapes (#447), and a
-    change in the break of your own pending line break there (#419);
+  decided. The list is what has been found, not a count of what is there:
   - a highlight that runs from the text above a table into its header row can make another person's
     pending column change impossible to decide (#396);
-  - five cases in one shape of pastes next to another person's marks (#276);
-  - Return at the start of a nested first item, in four more shapes (#395);
-  - pandoc's `~x~` and `^x^` in Quarto and R Markdown files, which a marker can stand inside (#370).
+  - pandoc's `~x~` and `^x^` in Quarto and R Markdown files, which a marker can stand inside: the
+    random tests draw no such document yet, and a probe holds the two (#370).
 - In a file with mixed line breaks, the editor writes a break whose line feed a tracked edit takes out
   as the file's own kind. The command line writes it as it was (#924).
 - A unit of more than eight blocks is not written as a replacement: the edit is asked about and made
