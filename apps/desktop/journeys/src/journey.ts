@@ -66,6 +66,7 @@ interface Hook {
       contentDOM: HTMLElement;
       viewport: { from: number; to: number };
       coordsAtPos(pos: number): { left: number; right: number; top: number; bottom: number } | null;
+      domAtPos(pos: number): { node: Node; offset: number };
       focus(): void;
       requestMeasure(): void;
       dispatch(spec: unknown): void;

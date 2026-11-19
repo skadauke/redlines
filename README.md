@@ -51,7 +51,7 @@ and when, and the comment threads, are in a block at the end of the file.
 ## What is in the Mac app
 
 - **Writing.** Open, Open Recent, Save, Rename, Print, Export as PDF and Reveal in Finder from the
-  File menu. Open in Another Window shows the same document in a second window, and the two edit it
+  File menu. View › New Window shows the same document in a second window, and the two edit it
   together, with no network and no account. Export to Word… writes a `.docx` with the tracked
   changes and comments, and Open .docx… reads one, Google Docs' too.
   Find and Replace (⌘F, ⌥⌘F) works on the text you see, and with Track Changes on a replacement is
