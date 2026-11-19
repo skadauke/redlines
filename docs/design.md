@@ -1455,6 +1455,41 @@ app's login and there is no first run. Changing your name or email later never r
 a new email under the same name becomes an alias in the ledger
 ([format §5.3](format.md#53-people)).
 
+#### 5.11a The first-launch onboarding (#1206)
+
+The first time the app starts it shows a sheet, in the first window, of about five minutes in four
+screens. The sheet is modal to the window, in the alert's look (§3.1), with the step's place above
+the title ("1 of 4"), **Continue** as the default button and **Skip** beside it.
+
+1. **You.** Your name and handle, filled in from git where it can (the same fields as Preferences ›
+   General). Continue saves them as Preferences would.
+2. **Your agent.** The agents found on this Mac, and which one answers an Ask that names none
+   (Preferences › Agents › Default agent). With none found it says so and points to Preferences ›
+   Agents.
+3. **Set up this Mac.** Three rows, each with a checkbox and a line on what it does: the Redlines
+   skill for the agents found (what Preferences › Agents installs, for Claude Code and Codex), the
+   Quick Look preview (the app's extension: the row opens System Settings, where macOS turns it
+   on), and the command line (`redlines` in `/usr/local/bin`, as Preferences › General installs
+   it). Nothing is installed before **Install and Continue**; a row left unchecked is skipped, and
+   a row that fails says why and where Preferences can try it another way. Each install is the
+   app's own command: the onboarding writes nothing itself.
+4. **A short tour.** It opens a "Welcome to Redlines" document and points, one card at a time
+   with **Next**, at the Redlines pen (Track Changes), the views button (Clean, Redlines, Plain)
+   and the toolbar button, which opens the command palette. The last card says **Done**.
+
+**Skip and resume.** Skip on a screen goes on to the next; **Skip Setup**, a link under the
+buttons, ends the sheet from any screen, and the tour with it. A step's answer is kept when it is
+made. The app notes that the onboarding began and that it finished (`redlines.onboarding` in the
+page's storage); quitting in the middle starts it again at the first screen at the next launch,
+with the answers so far filled in. An app that already has settings from an earlier build is not
+on a first launch and never shows it. Only the first window of a launch shows it, never a window
+opened for a document or for text.
+
+**Afterwards, in Preferences.** Name and handle: General. Default agent and the skill: Agents.
+The command line and Quick Look: General. The tour has no place there; a dev build (no
+`redlines_release`, as for the dev log in §5.11) has Help › Replay Onboarding, which runs it again
+at any time.
+
 ### 5.12 Feature list
 
 **Must (v1):**
