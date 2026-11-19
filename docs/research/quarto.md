@@ -285,7 +285,7 @@ one above them only where stated.
 
 | PR | What | Min |
 | --- | --- | --- |
-| Q11 | After #915 merges: an include is a block that holds a shortcode alone on its line; no mark holds it (§3 rule, with tests of widening); a comment on it is a block mark | 35 |
+| Q11 | An include is a block that holds a shortcode alone on its line; no mark holds it (§3 rule, with tests of widening); a comment on it is a block mark | 35 |
 | Q12 | The include block shows the file's name and the count of its pending changes (read from the file, read-only), opens it; a joined file (`--keep-md`) opens read-only with all its ledgers read as #915 reads them | 40 |
 
 **Phase 4: Word.**
@@ -303,8 +303,7 @@ one above them only where stated.
 | Q16 | Docs and the website: a page for Quarto users (`editor: source`, the extension, what Word gets) | 15 |
 | Q17 | `redlines` CLI and the agent skill: how an agent edits a `.qmd` (the newest view; never inside a chunk's fence line; no reference token), with the skill's text rebuilt | 20 |
 
-Dependencies: Q1 first; Q5 can start at once; Q2, Q3 and Q4 after Q1; Q7 after Q2; Q11 after #915
-merges; Q15 after Q4 and Q5. Phases 2 and 3 run in parallel once Q2 is in; Phases 4 and 5 last. About 9 hours of lane time, 3 to 4 elapsed.
+Dependencies: Q1 first; Q5 can start at once; Q2, Q3 and Q4 after Q1; Q7 after Q2; Q15 after Q4 and Q5. Phases 2 and 3 run in parallel once Q2 is in; Phases 4 and 5 last. About 9 hours of lane time, 3 to 4 elapsed.
 
 ## Decisions
 
