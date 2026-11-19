@@ -64,15 +64,34 @@ describe('the dev log (#1205)', () => {
     expect(kind).toBe('snapshot');
     expect(snapshot).toContain(`document ${await documentHash(STATE.text)}`);
     expect(snapshot).toContain('selection 2-5');
-    expect(snapshot).toContain('last keys char char Enter Cmd+Z');
+    expect(snapshot).toContain('last keys char char Return ⌘Z');
     expect(snapshot).not.toContain('Secret');
+  });
+
+  it('logs no letter of a word that is typed, by key or by code', async () => {
+    const { made, lines } = link(true);
+    const log = await createDevLog(made);
+    const stop = log.watchKeys(document);
+    for (const key of 'hunter2 ok!') {
+      const code = /[a-z]/i.test(key)
+        ? `Key${key.toUpperCase()}`
+        : key === ' '
+          ? 'Space'
+          : 'Digit2';
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, code }));
+    }
+    await log.writeNote('typed', STATE);
+    stop();
+    const keys = /last keys (.*)$/.exec(lines[1]![1])![1]!;
+    // 11 keys, and each is the word `char` and nothing else.
+    expect(keys.split(' ')).toEqual(Array<string>(11).fill('char'));
   });
 
   it('names a key, never the character typed, and keeps the last dozen', () => {
     expect(keyName({ key: 'a' })).toBe('char');
     expect(keyName({ key: 'A', shiftKey: true })).toBe('char');
     expect(keyName({ key: 'Backspace' })).toBe('Backspace');
-    expect(keyName({ key: 'k', ctrlKey: true, shiftKey: true })).toBe('Ctrl+Shift+K');
+    expect(keyName({ key: 'k', ctrlKey: true, shiftKey: true })).toBe('⌃⇧K');
     expect(KEYS_KEPT).toBe(12);
   });
 });

@@ -4,7 +4,7 @@
 // log: the app says so, and this does nothing and draws no command.
 //
 // Nothing here sends a document's text. Lines are messages the app wrote itself; a key is logged by
-// its name (`Enter`, `Cmd+Z`), a typed character as `char`; the snapshot has the document's hash
+// its name (`Return`, `⌘Z`), a typed character as `char`; the snapshot has the document's hash
 // (12 hexadecimal digits of its SHA-256), its length and the selection's offsets.
 
 import { invoke } from '@tauri-apps/api/core';
@@ -50,7 +50,7 @@ export interface DevLog {
   watchKeys(target: EventTarget): () => void;
 }
 
-/** A key as the log names it: never the character typed. */
+/** A key as the log names it: never the character typed (see the body). */
 export function keyName(event: {
   key: string;
   metaKey?: boolean;
@@ -58,17 +58,20 @@ export function keyName(event: {
   altKey?: boolean;
   shiftKey?: boolean;
 }): string {
+  // A run of names must never spell what was typed: a printable key (a letter, digit, punctuation,
+  // space, or what Option types) is `char`, whatever `key` or `code` says. Named are the keys that
+  // print nothing, and a chord with ⌘ or ⌃, which is a command and not text.
+  const printable = event.key.length === 1 || event.key === 'Dead' || event.key === 'Unidentified';
   const command = event.metaKey || event.ctrlKey;
-  const named = event.key.length > 1 || event.key === ' ';
-  if (!named && !command) return 'char';
-  const parts = [
-    event.metaKey ? 'Cmd' : '',
-    event.ctrlKey ? 'Ctrl' : '',
-    event.altKey ? 'Alt' : '',
-    event.shiftKey ? 'Shift' : '',
-    event.key === ' ' ? 'Space' : event.key.length === 1 ? event.key.toUpperCase() : event.key,
-  ];
-  return parts.filter(Boolean).join('+');
+  if (printable && !command) return 'char';
+  const name = printable
+    ? event.key === ' '
+      ? 'Space'
+      : event.key.toUpperCase()
+    : event.key === 'Enter'
+      ? 'Return'
+      : event.key;
+  return `${event.metaKey ? '⌘' : ''}${event.ctrlKey ? '⌃' : ''}${event.altKey ? '⌥' : ''}${event.shiftKey ? '⇧' : ''}${name}`;
 }
 
 /** The first 12 hexadecimal digits of the SHA-256 of `text`. */
