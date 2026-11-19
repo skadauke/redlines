@@ -226,6 +226,11 @@ The window, on the desktop:
   written to a crash log in the app's log folder, and a gray notification offers Report…, a
   filled-in GitHub issue for the person to read and send (the build, the system, the trace and the
   document's shape, never its text), and Reveal Log; Help has both (Report a Problem…, Reveal Log).
+  A build that isn't a release also keeps a dev log (`dev.log`, beside the crash log): a rolling line
+  for each refusal, alert, error, agent run and keystroke that took over 100 ms, never a document's
+  text or a secret, and Help › Write to Log… adds the person's note with a snapshot (the document's
+  hash, the selection, the last keys by name, never the letters). A release build has no dev log and
+  no such rows (`redlines_release`, as for the updater).
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits. A
