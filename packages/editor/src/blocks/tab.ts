@@ -212,10 +212,20 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
             if (!(error instanceof EditError)) throw error;
           }
           if (!again || worse(again.changes)) {
-            return { ...nothing(state), userEvent: 'indent', refusal: READS_OTHERWISE };
+            // Under the empty item that the author's own Return just left, with a blank line
+            // between (that split's break), the item can't go under it as it is: the file would
+            // end the empty item at the blank line. The blank line is theirs to take: it goes
+            // with the Tab, and the item stands right under the empty one (#1202).
+            const closed = closeBlankAbove(state, first.item.line, changes);
+            if (!closed || worse(closed)) {
+              return { ...nothing(state), userEvent: 'indent', refusal: READS_OTHERWISE };
+            }
+            changes = closed;
+            widened = false;
+          } else {
+            ({ changes, intent } = again);
+            widened = true;
           }
-          ({ changes, intent } = again);
-          widened = true;
         }
       }
     } catch (error) {
@@ -248,6 +258,36 @@ export function planTab(state: EditorState, outdent: boolean): KeyEdit | null {
     intent,
     ...kept,
   };
+}
+
+/**
+ * The Tab's changes with the blank line above the item taken out, where the line above that blank
+ * line is an empty item whose end is the break of a split of the author's own: the blank line is
+ * part of that break, so the author's own text goes, and no mark is written. Null elsewhere.
+ */
+function closeBlankAbove(
+  state: EditorState,
+  line: { number: number },
+  changes: readonly TextChange[],
+): TextChange[] | null {
+  const { doc } = state;
+  if (line.number < 3) return null;
+  const blank = doc.line(line.number - 1);
+  const empty = doc.line(line.number - 2);
+  if (!/^[ \t>]*$/.test(blank.text)) return null;
+  if (!/^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]*(?:<!--[^]*?-->)*[ \t]*$/.test(empty.text)) return null;
+  const me = state.facet(authorFacet)?.handle;
+  const own = state
+    .field(parsedField)
+    .marks.some(
+      (mark) =>
+        mark.kind === 'split' &&
+        mark.entry.by === me &&
+        mark.segments.some((g) => g.open.to === empty.to),
+    );
+  if (!own) return null;
+  const gone = { from: blank.from, to: doc.line(line.number).from, insert: '' };
+  return [gone, ...changes].sort((a, b) => a.from - b.from);
 }
 
 /**

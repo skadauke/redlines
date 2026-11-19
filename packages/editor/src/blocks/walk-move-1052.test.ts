@@ -74,25 +74,37 @@ describe('walk seed 150: ⌥↑ on the first row of a table, with a deletion in 
 
 describe('walk seed 159: ⌥↓, Return, then Tab on an item with a sublist', () => {
   // The item the move wrote is the author's own pending insertion, so Tab edits its text and writes
-  // no mark; under the empty item that Return left (its pending split on its line, a blank line
-  // between) the file would read the item as nested and the text as not. Tab says why it does
-  // nothing, and the item stays where it was.
-  const reason =
-    "This item can't go under the empty item above it: Markdown ends an empty item at a blank line, so the file would read it as nested and the text as not. Type in that item first.";
+  // no mark. Under the empty item that Return left (its pending split on its line, a blank line
+  // between) the file would read the item as nested and the text as not, so the blank line, which
+  // is part of that split's break, goes with the Tab and the item stands right under the empty one
+  // (#1202, which was a refusal).
   scriptRows([
     {
       name: 'the seed’s lists, cut to the items around it',
       doc: '1. delta plan⏎+ ‸alpha review⏎  - plan ship⏎⏎+ text alpha⏎  1) beta review⏎⏎  1) review plan⏎',
       keys: ['Alt-ArrowDown', 'Enter', 'Tab'],
       tc: true,
-      expect: { refusal: reason },
+      expect: {
+        caret:
+          '1. delta plan<del ⏎+ alpha review⏎  - plan ship>⏎⏎+ text alpha⏎  1) beta review⏎⏎  1) review plan<ins><split>⏎⏎+ <split>⏎  + ‸alpha review<split>⏎    - plan ship</ins>',
+      },
     },
     {
       name: 'cut to two items',
       doc: '+ ‸alpha review⏎  - plan ship⏎⏎+ text alpha⏎',
       keys: ['Alt-ArrowDown', 'Enter', 'Tab'],
       tc: true,
-      expect: { refusal: reason },
+      expect: {
+        caret:
+          '+ <del alpha review⏎  - plan ship⏎⏎+ >⏎  text alpha<ins><split>⏎⏎+ <split>⏎  + ‸alpha review<split>⏎    - plan ship</ins>',
+      },
+    },
+    {
+      name: 'a plain list, the item moved down, Return, Tab',
+      doc: '- ‸a⏎- b⏎',
+      keys: ['Alt-ArrowDown', 'Enter', 'Tab'],
+      tc: true,
+      expect: {},
     },
   ]);
 });
