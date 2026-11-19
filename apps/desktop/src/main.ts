@@ -13,6 +13,7 @@ import {
   createAltDescriber,
   createAltText,
   createAsk,
+  createChat,
   createLiveLines,
   createMacAgents,
   createRuns,
@@ -119,6 +120,7 @@ import { createNotifications } from './ui/notifications.ts';
 import { tooBroadNotice } from './project-notice.ts';
 import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
 import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
+import { browserChatStore, tauriChatStore } from './chat-store.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { installTitleHints } from './ui/title-hints.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
@@ -146,6 +148,18 @@ import './ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
 const host = createHost();
+
+/** Opens a web address in the default browser, which only the app can run (a tab opens its own). */
+function openAddress(address: string): void {
+  if (!isTauri) {
+    window.open(address, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  invoke('open_link', { url: address }).catch((error: unknown) => {
+    console.error('Could not open the link', error);
+    notice.flash('Couldn’t open the link.');
+  });
+}
 
 function element(selector: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(selector);
@@ -501,16 +515,7 @@ const editor = createEditor(element('#editor'), {
   }),
   // ⌘-click on a link opens its address (http, https or mailto: the editor lets no other through)
   // in the default browser or mail app, which only the app can run; a browser tab opens it itself.
-  openLink: (address) => {
-    if (!isTauri) {
-      window.open(address, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    invoke('open_link', { url: address }).catch((error: unknown) => {
-      console.error('Could not open the link', error);
-      notice.flash('Couldn’t open the link.');
-    });
-  },
+  openLink: (address) => openAddress(address),
   resolveImage: (src) => {
     const path = imageDocument;
     if (!path || imageFolder === null) return null;
@@ -918,6 +923,8 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
 
 /** The document the runs were last told of. */
 let shownGeneration = controller.generation;
+/** The document the chat was last pointed at. */
+let chatGeneration = -1;
 
 /**
  * Puts the keyboard in the document, unless it is in the editor already, as in a comment box that
@@ -962,6 +969,10 @@ function showDocument(state: DocumentState): void {
   doc = state;
   imageDocument = state.path;
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
+  if (moved || controller.generation !== chatGeneration) {
+    chatGeneration = controller.generation;
+    chat.follow(state.path, controller.generation, state.name);
+  }
   if (moved) void showInSidebar(state.path);
   if (moved) void showImages(state.path);
   // The next launch can reopen it (Preferences, General).
@@ -988,6 +999,32 @@ function reportWindow(): void {
   if (doc) windows?.reportDocument(doc.path, doc.dirty || doc.writing || draftsPending);
 }
 
+// The document's chat (#1194): a column in the sidebar's second view, kept per document in the
+// app's own data. It runs the agents as Ask does, and reads the same things; what it needs from
+// later in this file is looked up when it is used, so that it can be made here, for the sidebar.
+const chat = createChat({
+  agents,
+  author,
+  document: {
+    path: () => controller.state.path,
+    generation: () => controller.generation,
+    read: () => editor.getDoc(),
+  },
+  projectRoot: (path) => projectOf(path),
+  settings: {
+    defaultScope: () => agentSettings.defaultScope(),
+    consent: (agent, folder) => agentSettings.consent(agent, folder),
+    setConsent: (agent, folder, answer) => agentSettings.setConsent(agent, folder, answer),
+  },
+  defaultAgent: () => loadSettings().defaultAgent ?? undefined,
+  chosenModel: (agent) => loadSettings().agentModels[agent],
+  store: isTauri ? tauriChatStore() : browserChatStore(),
+  notice: (message) => notice.flash(message),
+  showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
+  openLink: (address) => openAddress(address),
+});
+
 /** Whether the client point is over the document's page, beside the sidebar and under the title bar. */
 function insidePage(at: { x: number; y: number }): boolean {
   const box = editor.view.dom.getBoundingClientRect();
@@ -996,6 +1033,21 @@ function insidePage(at: { x: number; y: number }): boolean {
 
 const sidebar = createSidebar(app, {
   host,
+  chat: chat.el,
+  onView: (view) => {
+    if (view === 'chat') chat.focus();
+  },
+  foot: {
+    name: () => author.name,
+    settings: () => {
+      if (isTauri) void invoke('open_preferences');
+      else notice.flash('Preferences are in the app.');
+    },
+    report: () => {
+      if (crashes) void crashes.reportProblem();
+      else notice.flash('Problem reports are in the app.');
+    },
+  },
   openFile: (path, { newWindow }) => {
     if (newWindow) void openInNewWindow(path);
     else {
@@ -1588,7 +1640,19 @@ const toggleWordCount = () => {
 };
 
 const toggleSidebar = () => {
-  changeSettings({ sidebarOpen: !settings.sidebarOpen });
+  // Showing the chat, the sidebar shows the files first, and closes at the next press.
+  if (settings.sidebarOpen && sidebar.view === 'chat') sidebar.setView('files');
+  else changeSettings({ sidebarOpen: !settings.sidebarOpen });
+  render();
+};
+
+/** Show Chat (⌃⌘C): the sidebar open at the document's chat; again, closed. */
+const showChat = () => {
+  if (settings.sidebarOpen && sidebar.view === 'chat') changeSettings({ sidebarOpen: false });
+  else {
+    sidebar.setView('chat');
+    if (!settings.sidebarOpen) changeSettings({ sidebarOpen: true });
+  }
   render();
 };
 
@@ -1835,6 +1899,7 @@ const commands: MenuCommands = {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleSidebar,
+  showChat,
   toggleWordCount,
   toggleTracking,
   acceptAllAndStopTracking,
@@ -2005,6 +2070,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     canAcceptAll: ui.canAcceptAll,
     sidebarOpen: settings.sidebarOpen,
+    sidebarView: sidebar.view,
     showResolved: settings.showResolved,
     showWordCount: settings.showWordCount,
     zoom: zoom?.level() ?? null,
@@ -2227,6 +2293,8 @@ watchSettings((changed) => {
   if (next.handle !== author.handle || next.name !== author.name) {
     setAuthor(next);
     editor.setAuthor({ ...author });
+    // The sidebar's foot shows the name.
+    sidebar.refreshFoot();
   }
   updates?.setAutomatic(settings.checkForUpdates);
   // Another window may have opened a file.

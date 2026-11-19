@@ -1321,6 +1321,7 @@ key the person chose beats a binding of the editor's or a plugin's own.
 | Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
 | Larger, smaller, actual text size | ⌃⌘=, ⌃⌘- and ⌃⌘0, or a pinch                                                               | a pinch                   |
 | Show or hide the file sidebar  | ⌃⌘S                                                                                           | —                         |
+| Show or hide the chat          | ⌃⌘C (the sidebar at its Chat view)                                                            | —                         |
 | Preferences                    | ⌘,                                                                                            | —                         |
 | With the review bar or rail in focus | J and K for next and previous, A to accept and go on, X to reject and go on, R to reply, E to resolve, U to undo | the same |
 
@@ -2608,10 +2609,10 @@ across turns, windows, restarts and days. It is attached to a document, or to no
 conversation, and a file is shared and stays clean (§8.5). One file per chat in the app's data
 folder (`chats/<id>.json`), with an index that maps a document's path to its chat's id, so that
 reading the index never reads the chats. A chat holds its messages (who wrote each, when, the
-words, the agent and model that wrote it, what it failed with), and what is needed to go on: the
-agent's own session, where it has one. Only the person's own words and the agent's final answers
-are kept: a run's status lines are drawn live and then dropped, and a failed turn keeps its one
-line.
+words, the agent and model that wrote it), and what is needed to go on: the agent's own session,
+where it has one (not in the first version). Only the person's own words and the agent's final
+answers are kept: a run's status lines are drawn live and then dropped, and a failed turn is
+shown on its line and not kept.
 
 - **A move or a rename in Redlines** carries the chat with it (the index is updated with the
   file). A file moved by another program is a path the index doesn't know: its chat stays where it
@@ -2721,15 +2722,18 @@ bubble does ("Claude", the capitalized handle, §8.6), with the model beside it 
   but the Luna models also ultra). Redlines should ask `codex debug models` for the list instead of
   holding one, and offer the newest of each family (Sol, Astra, Terra, Luna) with the efforts as a
   submenu, through `-m <id>` and `-c model_reasoning_effort=<effort>`; `AgentModel` gains an
-  optional list of `efforts`. 
+  optional list of `efforts`. The first version lists the models only: Codex's list in
+  `plugins/agent-codex` is now GPT-6.2 Sol, GPT-6.2 Astra, GPT-6.1 Terra and GPT-6 Luna, and the
+  efforts, and reading the list from `codex debug models`, are for a later change. An agent's models
+  open under its name in the menu, in place, as the sidebar is too narrow for a flyout.
 - **Ask's bubble uses the same menu,** replacing its model list: one picker, one place to learn.
 
 **The sidebar's foot.** A bar at the bottom of the sidebar, in both views, in the sidebar's own
 type (`--rl-size-ui`) and grays, with three things:
 
 - **The person's name** at the left, as the app knows it (the Git identity, §5.4), with the color
-  dot their changes have; a click opens a small menu with the name and the handle agents write
-  under, and Preferences.
+  dot their changes have; the first version draws an initial, and a click opens Preferences, where
+  the name is set.
 - **A settings button** (a gear), which opens Preferences at the pane the view is about: Agents from
   the Chat view, General from the Files view.
 - **A report-a-bug button,** which opens the same report as Help › Report a Problem…: what happened

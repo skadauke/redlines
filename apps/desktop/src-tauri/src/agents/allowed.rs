@@ -356,7 +356,7 @@ fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
 /// The models of `claudeArgs` and `codexArgs` (`CLAUDE_MODELS`, `CODEX_MODELS`), which only a model
 /// the provider lists may be passed as: nothing else follows `--model` or `-m`.
 const CLAUDE_MODELS: [&str; 3] = ["opus", "sonnet", "haiku"];
-const CODEX_MODELS: [&str; 2] = ["gpt-5-codex", "gpt-5"];
+const CODEX_MODELS: [&str; 4] = ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra", "gpt-6-luna"];
 
 /// No model, then each of `listed`.
 fn models<'a>(listed: &'a [&'a str]) -> impl Iterator<Item = Option<&'a str>> {
@@ -645,7 +645,7 @@ pub mod tests {
                 let models: &[&str] = if name.starts_with("claude") {
                     &["opus", "sonnet", "haiku"]
                 } else {
-                    &["gpt-5-codex", "gpt-5"]
+                    &["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra", "gpt-6-luna"]
                 };
                 for model in models {
                     let with = with_model(line, after, flag, model);

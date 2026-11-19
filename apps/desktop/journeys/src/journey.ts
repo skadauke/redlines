@@ -42,6 +42,8 @@ export interface StartOptions {
   textSize?: number;
   /** Shows the word count in the corner. Default: hidden, for a quiet window. */
   wordCount?: boolean;
+  /** The page's query, such as `?models` (the scripted agent lists models). */
+  query?: string;
 }
 
 export interface JourneyOptions {
@@ -505,7 +507,7 @@ async function openPage(page: Page, look: JourneyOptions, options: StartOptions)
   // destroys the context under a wait: a start is tried again.
   for (let attempt = 1; ; attempt++) {
     try {
-      await page.goto('/');
+      await page.goto(`/${options.query ?? ''}`);
       await page.waitForFunction(() => window.__redlines !== undefined, undefined, {
         timeout: 60_000,
       });
