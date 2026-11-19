@@ -124,10 +124,20 @@ const plugin = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations },
 );
 
+// Set as typeset text is: about three quarters of the size, raised a third of an em (lowered a fifth),
+// moved with `position` so that the line's height never changes, and no space beside the base.
 const theme = EditorView.baseTheme({
-  '.rl-sub, .rl-sup': { fontSize: '0.75em', lineHeight: '0' },
-  '.rl-sub': { verticalAlign: 'sub' },
-  '.rl-sup': { verticalAlign: 'super' },
+  '.rl-sub, .rl-sup': {
+    fontSize: '0.75em',
+    lineHeight: '0',
+    verticalAlign: 'baseline',
+    position: 'relative',
+    margin: '0',
+    padding: '0',
+  },
+  // (The offsets are in the script's own em, three quarters of the line's.)
+  '.rl-sup': { top: '-0.45em' },
+  '.rl-sub': { top: '0.27em' },
 });
 
 /** Subscript and superscript, drawn in a pandoc file. */
