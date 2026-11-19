@@ -135,6 +135,53 @@ test.describe('the OpenClaw setup window @views', () => {
     }
   });
 
+  // The all-green path: the window looks around first, and opens straight on the Gateways it found.
+  test('opens on the Gateways it found when everything passes, and on the choice when not', async ({
+    start,
+  }) => {
+    const j = await start({ doc: 'Hello\n', tracking: false });
+    const page = await j.page.context().newPage();
+    await page.setViewportSize({ width: 780, height: 720 });
+    await page.emulateMedia({ colorScheme: j.options.scheme });
+    const shot = (name: string) => writeShot(page, j.info, shotName(name, j.options));
+    const sheet = page.locator('.rl-oc-sheet');
+
+    await page.goto('/openclaw-setup.html?discover=1');
+    await expect(sheet.getByRole('heading', { name: 'Found your OpenClaws' })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Connect to studio-mini' })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Connect to home-server' })).toBeVisible();
+    // The computer that is off is not asked about.
+    await expect(sheet).not.toContainText('old-laptop');
+    await shot('setup-gateways-found');
+    await sheet.getByRole('button', { name: 'Connect to studio-mini' }).click();
+    await expect(sheet).toContainText('Step 3 of 5');
+    await expect(sheet).toContainText('studio-mini');
+    await shot('setup-gateways-connect');
+
+    // Nothing answers as OpenClaw: the choice, as ever.
+    await page.goto('/openclaw-setup.html?discover=1&probe=none');
+    await expect(sheet.getByRole('heading', { name: 'Add an OpenClaw agent' })).toBeVisible();
+    // Tailscale is off: the choice too.
+    await page.goto('/openclaw-setup.html?discover=1&ts=off');
+    await expect(sheet.getByRole('heading', { name: 'Add an OpenClaw agent' })).toBeVisible();
+
+    // The network's HTTPS certificates are off: said on the Mac's step, with the admin page.
+    await page.goto('/openclaw-setup.html?oc=mac&ts=no-https');
+    await expect(sheet).toContainText('HTTPS certificates are off for your network');
+    await expect(sheet.getByRole('button', { name: 'Open the DNS page' })).toBeVisible();
+    await shot('setup-https-off');
+    await page.goto('/openclaw-setup.html?oc=mac');
+    await expect(sheet).toContainText('HTTPS certificates are on for your network');
+    await shot('setup-https-on');
+
+    // No Gateway where Serve is off, and no certificates: the prompt for the agent, and the page.
+    await page.goto('/openclaw-setup.html?oc=computer&ts=no-https&probe=none');
+    await sheet.getByRole('radio', { name: 'studio-mini' }).click();
+    await expect(sheet).toContainText('Tailscale Serve needs them');
+    await expect(sheet.getByRole('button', { name: 'Copy a prompt for your agent' })).toBeVisible();
+    await shot('setup-no-gateway-no-https');
+  });
+
   test('Preferences › Agents has the card and a button for the setup, and no sheet', async ({
     start,
   }) => {
