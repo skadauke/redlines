@@ -1201,9 +1201,14 @@ function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
   }
 }
 
-/** The div at the top level that `wholeDivs` makes one piece: whether it did. */
+/**
+ * The div that `wholeDivs` makes one piece: whether it did. In a quote or a list item every line of
+ * the typed div goes on in the container of the one before (the prefix after each of its breaks is
+ * the same, and the container's own continuation), and the closer stands alone on the line after the
+ * closing fence, behind that prefix, as for a fenced code block (#1234); a div whose lines leave the
+ * container, or whose breaks are some other kind, is written as it was.
+ */
 function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boolean {
-  if (linePrefix !== '') return false;
   const first = tokens.findIndex((token, i) => {
     if (!('text' in token) || token.fence === true) return false;
     const before = tokens[i - 1];
@@ -1211,15 +1216,38 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
     return atLineStart && DIV_FENCE_TYPED.test(token.text.split('\n')[0]?.replace(/\r$/, '') ?? '');
   });
   if (first < 0) return false;
-  // The breaks after the last text stay behind the div, after its closer, as for a code block.
+  // At the top level the breaks after the last text stay behind the div, after its closer, as for a
+  // code block (#1169); in a container they are part of what the lines are read by (#1234).
   const lastText = tokens.findLastIndex((token) => 'text' in token);
-  const rest = tokens.slice(first, lastText + 1);
-  if (rest.some((token) => 'brk' in token && token.prefix !== '')) return false;
+  const rest = linePrefix === '' ? tokens.slice(first, lastText + 1) : tokens.slice(first);
   if (rest.some((token) => 'text' in token && token.fence === true)) return false;
+  // The container of the lines after the first: what each break leaves on its next line.
+  const tails = rest.flatMap((token) =>
+    'brk' in token ? [token.brk.slice(token.brk.lastIndexOf('\n') + 1)] : [],
+  );
+  const container = tails.at(-1) ?? linePrefix;
+  // (At the top level a break's tail may be a block's mark typed on the next line, as a heading's `## `.)
+  if (linePrefix !== '') {
+    if (tails.length === 0 || tails.some((tail) => tail !== container)) return false;
+    if (continuationPrefix(container) !== container) return false;
+    // In a list item (a tight one) the closer alone on its line is an HTML block after the div's
+    // paragraph text, which renders a line break that the view has not: only where the innermost
+    // container is a quote does the file read as the view, so an item keeps the old form.
+    if (!/>[ \t]*$/.test(container)) return false;
+    // A typed line that is not the container's would end the div there.
+    if (
+      rest.some(
+        (token) => 'brk' in token && token.prefix !== container && token.prefix !== linePrefix,
+      )
+    ) {
+      return false;
+    }
+  } else if (rest.some((token) => 'brk' in token && token.prefix !== '')) return false;
   const text = rest.map((token) => ('text' in token ? token.text : token.brk)).join('');
   // The break after the last line is the one that the closer stands behind (format §3.3).
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  tokens.splice(first, rest.length, { text: /\n$/.test(text) ? text : text + eol, fence: true });
+  const done = /\n[ \t>]*$/.test(text) && (linePrefix === '' ? /\n$/.test(text) : true);
+  tokens.splice(first, rest.length, { text: done ? text : text + eol + container, fence: true });
   return true;
 }
 
