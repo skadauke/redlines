@@ -231,57 +231,62 @@ function newWarning(start: Map<string, number>, text: string): string | null {
 }
 
 describe('a random walk of Undo and Redo', () => {
-  it('walks back and forth through texts the file had, in LF, CRLF and mixed files', async () => {
-    const seeds = fuzzCount(12);
-    for (let seed = 1; seed <= seeds; seed++) {
-      for (const [name, file] of FILES) {
-        const where = `seed ${seed}, ${name} file`;
-        const random = seeded(seed * 7919 + name.length);
-        const w = await openWindow(file);
-        windows.push(w);
-        const log: string[] = [];
-        for (let step = 0; step < 15; step++) await act(w, random, step, log);
-        const why = () => `${where}\n${log.join('\n')}`;
-        const texts = w.texts;
-        expect(texts[0], why()).toBe(file);
-        const start = warningsOf(file);
+  it(
+    'walks back and forth through texts the file had, in LF, CRLF and mixed files',
+    async () => {
+      const seeds = fuzzCount(12);
+      for (let seed = 1; seed <= seeds; seed++) {
+        for (const [name, file] of FILES) {
+          const where = `seed ${seed}, ${name} file`;
+          const random = seeded(seed * 7919 + name.length);
+          const w = await openWindow(file);
+          windows.push(w);
+          const log: string[] = [];
+          for (let step = 0; step < 15; step++) await act(w, random, step, log);
+          const why = () => `${where}\n${log.join('\n')}`;
+          const texts = w.texts;
+          expect(texts[0], why()).toBe(file);
+          const start = warningsOf(file);
 
-        const top = w.editor.getDoc();
-        let index = texts.lastIndexOf(top);
-        expect(index, why()).toBeGreaterThanOrEqual(0);
-        const back: string[] = [top];
-        for (let depth = undoDepth(w.editor.view.state); depth > 0;) {
-          const notices = w.notices.length;
-          w.undoKey();
-          // An undo that is refused, or takes no step, fails here, with the seed and the log.
-          const left = undoDepth(w.editor.view.state);
-          expect(
-            left,
-            `${why()}\nundo ${back.length} was refused: ${w.notices.slice(notices).join(' ')}`,
-          ).toBeLessThan(depth);
-          depth = left;
-          const now = w.editor.getDoc();
-          back.push(now);
-          if (now === back.at(-2)) continue;
-          const found = texts.lastIndexOf(now, index - 1);
-          expect(
-            found,
-            `${why()}\nundo ${back.length - 1} gave a text the file never had`,
-          ).toBeGreaterThanOrEqual(0);
-          expect(newWarning(start, now), why()).toBeNull();
-          index = found;
-        }
-        expect(w.editor.getDoc(), why()).toBe(file);
+          const top = w.editor.getDoc();
+          let index = texts.lastIndexOf(top);
+          expect(index, why()).toBeGreaterThanOrEqual(0);
+          const back: string[] = [top];
+          for (let depth = undoDepth(w.editor.view.state); depth > 0;) {
+            const notices = w.notices.length;
+            w.undoKey();
+            // An undo that is refused, or takes no step, fails here, with the seed and the log.
+            const left = undoDepth(w.editor.view.state);
+            expect(
+              left,
+              `${why()}\nundo ${back.length} was refused: ${w.notices.slice(notices).join(' ')}`,
+            ).toBeLessThan(depth);
+            depth = left;
+            const now = w.editor.getDoc();
+            back.push(now);
+            if (now === back.at(-2)) continue;
+            const found = texts.lastIndexOf(now, index - 1);
+            expect(
+              found,
+              `${why()}\nundo ${back.length - 1} gave a text the file never had`,
+            ).toBeGreaterThanOrEqual(0);
+            expect(newWarning(start, now), why()).toBeNull();
+            index = found;
+          }
+          expect(w.editor.getDoc(), why()).toBe(file);
 
-        for (let i = back.length - 2; i >= 0; i--) {
-          w.redoKey();
-          expect(w.editor.getDoc(), `${why()}\nredo ${back.length - 1 - i}`).toBe(back[i]);
+          for (let i = back.length - 2; i >= 0; i--) {
+            w.redoKey();
+            expect(w.editor.getDoc(), `${why()}\nredo ${back.length - 1 - i}`).toBe(back[i]);
+          }
+          expect(redoDepth(w.editor.view.state), why()).toBe(0);
+          await settle();
+          w.editor.destroy();
+          windows.splice(windows.indexOf(w), 1);
         }
-        expect(redoDepth(w.editor.view.state), why()).toBe(0);
-        await settle();
-        w.editor.destroy();
-        windows.splice(windows.indexOf(w), 1);
       }
-    }
-  }, 600_000);
+      // 600 s for the default seeds, and 30 s a seed beyond that (the depth run at 300 seeds timed out).
+    },
+    Math.max(600_000, fuzzCount(12) * 30_000),
+  );
 });
