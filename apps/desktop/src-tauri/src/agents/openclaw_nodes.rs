@@ -82,6 +82,13 @@ impl TokenStore for Tokens {
             .state::<Connections>()
             .secret(&self.handle, Kind::NodeToken)
     }
+
+    fn forget(&mut self) {
+        let _ = self
+            .app
+            .state::<Connections>()
+            .forget(&self.handle, Kind::NodeToken);
+    }
 }
 
 struct Entry {
@@ -156,8 +163,13 @@ impl Nodes {
                 Credential::SetupCode(token)
             }
             None => match store.secret(handle, Kind::NodeToken) {
-                Some(token) => Credential::Token(token),
-                None => return Err("There is no setup code or token to connect with.".to_owned()),
+                Some(token) => Credential::DeviceToken(token),
+                None => match store.secret(handle, Kind::SharedToken) {
+                    Some(token) => Credential::Token(token),
+                    None => {
+                        return Err("There is no setup code or token to connect with.".to_owned());
+                    }
+                },
             },
         };
         let seed = store.device_key(handle)?;
@@ -166,6 +178,10 @@ impl Nodes {
         // Gateway refused it to an operator once the node had used it), so a new code opens the
         // operator connection, keeps its token, and then the node starts with the same code.
         if let Credential::SetupCode(code) = &first {
+            // A new code starts a fresh pairing: the tokens an earlier one left (which the Gateway
+            // may have replaced, as an approval does) are forgotten, not tried before the code.
+            store.forget(handle, Kind::NodeToken)?;
+            store.forget(handle, Kind::OperatorToken)?;
             let operator = Config {
                 target: target(&connection.url, None)?,
                 identity: Identity::from_seed(seed.expose()).ok_or("The device key is damaged.")?,
@@ -244,7 +260,11 @@ pub fn chat_agents(app: &AppHandle) -> Vec<AcpAgent> {
 pub fn chat_for(app: &AppHandle, handle: &str) -> Option<(Bridge, Talk)> {
     let store = app.state::<Connections>();
     let connection = store.get(handle)?;
-    let token = store.secret(handle, Kind::OperatorToken)?;
+    // The device's own operator token, else the shared one the person typed.
+    let (token, device_token) = match store.secret(handle, Kind::OperatorToken) {
+        Some(token) => (token, true),
+        None => (store.secret(handle, Kind::SharedToken)?, false),
+    };
     let seed = store.device_key(handle).ok()?;
     let gateway = target(&connection.url, None).ok()?;
     let (owner, name) = (app.clone(), handle.to_owned());
@@ -257,9 +277,12 @@ pub fn chat_for(app: &AppHandle, handle: &str) -> Option<(Bridge, Talk)> {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
                 timing: Timing::default(),
             };
-            let credential = Credential::Token(
-                Secret::new(token.expose()).map_err(|_| "The token is damaged.")?,
-            );
+            let secret = Secret::new(token.expose()).map_err(|_| "The token is damaged.")?;
+            let credential = if device_token {
+                Credential::DeviceToken(secret)
+            } else {
+                Credential::Token(secret)
+            };
             let (mut socket, issued) =
                 connect_operator(&config, &credential, stop).map_err(|error| error.message())?;
             // A Gateway that rotates the device's token says so in the answer to connect.
@@ -384,6 +407,9 @@ mod tests {
                     .as_deref()
                     .and_then(|text| Secret::new(text).ok())
             }
+            fn forget(&mut self) {
+                *self.0.lock().unwrap() = None;
+            }
         }
         let (Ok(address), Ok(code)) = (
             std::env::var("REDLINES_LIVE_GATEWAY"),
@@ -499,7 +525,7 @@ mod tests {
         let open = |config: &Config| {
             connect_operator(
                 config,
-                &Credential::Token(Secret::new(token.expose()).unwrap()),
+                &Credential::DeviceToken(Secret::new(token.expose()).unwrap()),
                 &stop,
             )
             .unwrap()

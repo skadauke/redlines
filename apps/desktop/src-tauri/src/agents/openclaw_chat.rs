@@ -46,14 +46,22 @@ impl ChatError {
                  request in `openclaw devices list`."
                     .to_owned()
             }
+            ChatError::Refused(Refusal::ApproveAgain { .. }) => {
+                // OpenClaw has no way to hand a waiting client the token an approval makes: the
+                // approval replaces the device's token, and the one Redlines holds stops working.
+                "This Mac has to be approved again before it can chat. The Gateway’s owner approves \
+                 it in `openclaw devices list`, then `openclaw devices approve`. That replaces \
+                 this Mac’s chat token, so when it is done, connect again with a new setup code."
+                    .to_owned()
+            }
             ChatError::Refused(Refusal::CodeUsed) => {
                 "The Gateway doesn’t accept this Mac’s chat sign-in any more. Connect again with \
                  a new setup code."
                     .to_owned()
             }
             ChatError::Refused(Refusal::BadToken) => {
-                "The Gateway doesn’t accept this Mac’s chat token. Connect again with a new setup \
-                 code."
+                "The Gateway doesn’t accept this Mac’s chat token. It may have been replaced when \
+                 this Mac was approved again. Connect again with a new setup code."
                     .to_owned()
             }
             ChatError::Refused(Refusal::TooNew { .. }) => {
@@ -352,7 +360,17 @@ mod tests {
 
     /// Reads the operator's `connect` and checks it as a Gateway would: the signature over the
     /// nonce, the role, the scopes. Answers `hello-ok` with an operator token, or refuses.
-    fn accept(socket: &mut Ws, frames: &Frames, refuse: Option<(&str, &str)>) -> bool {
+    ///
+    /// A device the Gateway has paired is modeled by `paired`: the device family it pinned, and the
+    /// device token it holds. A claim of another family is a `metadata-upgrade` request, as in the
+    /// Gateway's `resolvePinnedClientMetadata`, and a device token that isn't the one held is
+    /// `AUTH_DEVICE_TOKEN_MISMATCH` (sent as `auth.token` it would be a shared-token mismatch).
+    fn accept(
+        socket: &mut Ws,
+        frames: &Frames,
+        refuse: Option<(&str, &str)>,
+        paired: Option<Paired>,
+    ) -> bool {
         say(
             socket,
             json!({"type": "event", "event": "connect.challenge", "payload": {"nonce": "n9"}}),
@@ -372,8 +390,9 @@ mod tests {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-        let credential = params["auth"]["token"]
+        let credential = params["auth"]["deviceToken"]
             .as_str()
+            .or_else(|| params["auth"]["token"].as_str())
             .or_else(|| params["auth"]["bootstrapToken"].as_str())
             .unwrap();
         let signed =
@@ -388,6 +407,44 @@ mod tests {
                 &Signature::from_bytes(&signature.try_into().unwrap()),
             )
             .expect("the operator's signature");
+        let refused = |socket: &mut Ws, code: &str, message: &str, details: Value| {
+            say(
+                socket,
+                json!({"type": "res", "id": "1", "ok": false,
+                    "error": {"code": code, "message": message, "details": details}}),
+            );
+        };
+        if let Some(paired) = paired {
+            let claimed = params["client"]["deviceFamily"]
+                .as_str()
+                .unwrap_or_default();
+            if !paired.family.is_empty() && !claimed.eq_ignore_ascii_case(paired.family) {
+                refused(
+                    socket,
+                    "NOT_PAIRED",
+                    "pairing required: device identity changed and must be re-approved",
+                    json!({"code": "PAIRING_REQUIRED", "reason": "metadata-upgrade",
+                        "requestId": "r-9", "requestedRole": "operator"}),
+                );
+                return false;
+            }
+            let has_code = params["auth"]["bootstrapToken"].is_string();
+            if !has_code && params["auth"]["deviceToken"].as_str() != Some(paired.token) {
+                let (message, code) = if params["auth"]["token"].is_string() {
+                    (
+                        "unauthorized: gateway token mismatch",
+                        "AUTH_TOKEN_MISMATCH",
+                    )
+                } else {
+                    (
+                        "unauthorized: device token mismatch",
+                        "AUTH_DEVICE_TOKEN_MISMATCH",
+                    )
+                };
+                refused(socket, "INVALID_REQUEST", message, json!({"code": code}));
+                return false;
+            }
+        }
         if let Some((code, message)) = refuse {
             say(
                 socket,
@@ -405,9 +462,26 @@ mod tests {
         true
     }
 
+    /// What a Gateway holds of a device it has paired: the family it pinned (empty for none), and
+    /// the operator token it knows.
+    #[derive(Clone, Copy)]
+    pub(crate) struct Paired {
+        pub(crate) family: &'static str,
+        pub(crate) token: &'static str,
+    }
+
     /// A Gateway that takes one operator connection and then runs `after` with it.
     pub(crate) fn fake(
         refuse: Option<(&'static str, &'static str)>,
+        after: impl FnOnce(&mut Ws, &Frames) + Send + 'static,
+    ) -> Fake {
+        fake_paired(refuse, None, after)
+    }
+
+    /// The same for a device the Gateway has paired.
+    pub(crate) fn fake_paired(
+        refuse: Option<(&'static str, &'static str)>,
+        paired: Option<Paired>,
         after: impl FnOnce(&mut Ws, &Frames) + Send + 'static,
     ) -> Fake {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -421,7 +495,7 @@ mod tests {
             let Ok(mut socket) = tungstenite::accept(stream) else {
                 return;
             };
-            if accept(&mut socket, &seen, refuse) {
+            if accept(&mut socket, &seen, refuse, paired) {
                 after(&mut socket, &seen);
             }
         });
@@ -666,6 +740,98 @@ mod tests {
         .err()
         .unwrap();
         assert_eq!(error, ChatError::Refused(Refusal::CodeUsed));
+    }
+
+    fn device_token(text: &str) -> Credential {
+        Credential::DeviceToken(Secret::new(text).unwrap())
+    }
+
+    /// The Gateway of #1154: it paired this Mac with the family `Mac`, and compares it on every
+    /// connect. A reconnect with the device's token that claims the same family gets no request.
+    #[test]
+    fn a_paired_device_that_claims_its_family_is_not_asked_to_be_approved_again() {
+        let paired = Paired {
+            family: "Mac",
+            token: "dt-1",
+        };
+        let gateway = fake_paired(None, Some(paired), |_, _| {});
+        let stop = AtomicBool::new(false);
+        let (_, issued) = connect_operator(&gateway.config, &device_token("dt-1"), &stop).unwrap();
+        assert!(issued.is_some());
+        let frames = gateway.finish();
+        assert_eq!(frames[0]["params"]["client"]["deviceFamily"], "Mac");
+        assert_eq!(frames[0]["params"]["client"]["platform"], "macos");
+        // The device's own token is `auth.deviceToken`, never `auth.token`.
+        assert_eq!(frames[0]["params"]["auth"], json!({"deviceToken": "dt-1"}));
+    }
+
+    /// A reconnect that the Gateway wants approved again is its own state, in words that say what
+    /// to do and what it costs, and not a bad token.
+    #[test]
+    fn a_reconnect_that_needs_approval_again_is_its_own_state() {
+        // The device was approved as something else, so this claim is a metadata upgrade.
+        let paired = Paired {
+            family: "iPad",
+            token: "dt-1",
+        };
+        let gateway = fake_paired(None, Some(paired), |_, _| {});
+        let stop = AtomicBool::new(false);
+        let error = connect_operator(&gateway.config, &device_token("dt-1"), &stop)
+            .err()
+            .unwrap();
+        assert_eq!(
+            error,
+            ChatError::Refused(Refusal::ApproveAgain {
+                request_id: Some("r-9".into())
+            })
+        );
+        let said = error.message();
+        assert!(said.contains("approved again"), "{said}");
+        assert!(said.contains("new setup code"), "{said}");
+        assert!(!said.contains("doesn’t accept"), "{said}");
+    }
+
+    /// What follows an approval (#1154) and what a new code does (#1161): the approval replaced
+    /// the token, the old one is refused as a device token that is stale (and not as a shared
+    /// token that is wrong), and a new setup code pairs this Mac again, whatever was kept.
+    #[test]
+    fn after_an_approval_replaced_the_token_a_new_code_pairs_again() {
+        let stale = Paired {
+            family: "Mac",
+            token: "dt-2",
+        };
+        let gateway = fake_paired(None, Some(stale), |_, _| {});
+        let stop = AtomicBool::new(false);
+        let error = connect_operator(&gateway.config, &device_token("dt-1"), &stop)
+            .err()
+            .unwrap();
+        assert_eq!(error, ChatError::Refused(Refusal::BadToken));
+        assert!(error.message().contains("new setup code"));
+        let frames = gateway.finish();
+        assert_eq!(frames[0]["params"]["auth"], json!({"deviceToken": "dt-1"}));
+
+        let gateway = fake_paired(None, Some(stale), |_, _| {});
+        let (_, issued) = connect_operator(
+            &gateway.config,
+            &Credential::SetupCode(Secret::new("code-2").unwrap()),
+            &stop,
+        )
+        .unwrap();
+        assert!(issued.is_some_and(|token| token.expose() == "op-token-1"));
+        let frames = gateway.finish();
+        assert_eq!(
+            frames[0]["params"]["auth"],
+            json!({"bootstrapToken": "code-2"})
+        );
+    }
+
+    #[test]
+    fn a_token_the_person_typed_is_still_a_shared_token() {
+        let gateway = fake(None, |_, _| {});
+        let stop = AtomicBool::new(false);
+        connect_operator(&gateway.config, &token("typed-1"), &stop).unwrap();
+        let frames = gateway.finish();
+        assert_eq!(frames[0]["params"]["auth"], json!({"token": "typed-1"}));
     }
 
     #[test]

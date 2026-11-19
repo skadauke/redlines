@@ -274,8 +274,9 @@ pub fn openclaw_connection_remove(app: AppHandle, handle: String) -> Result<Vec<
 }
 
 /// Keeps a token the person typed, for a Gateway where they can't make a setup code: for the
-/// connection's node and its operator both. It is written to files only this user can read and
-/// never shown or returned.
+/// connection's node and its operator both. It is a shared Gateway token, sent as `auth.token`;
+/// what the Gateway gives this device in return is kept apart and sent as `auth.deviceToken`.
+/// It is written to files only this user can read and never shown or returned.
 #[tauri::command(async)]
 pub fn openclaw_use_token(
     app: AppHandle,
@@ -284,8 +285,10 @@ pub fn openclaw_use_token(
 ) -> Result<Vec<View>, String> {
     let secret = Secret::new(&token)?;
     let store = app.state::<Connections>();
-    store.keep(&handle, Kind::NodeToken, &secret)?;
-    store.keep(&handle, Kind::OperatorToken, &secret)?;
+    // A typed token starts over too: what an earlier pairing left is not preferred to it.
+    store.forget(&handle, Kind::NodeToken)?;
+    store.forget(&handle, Kind::OperatorToken)?;
+    store.keep(&handle, Kind::SharedToken, &secret)?;
     let _ = app.emit(OPENCLAW_CHANGED, ());
     Ok(store.views())
 }

@@ -38,7 +38,9 @@ use super::openclaw_protocol::{self as protocol, COMMAND, Connect, Incoming, Ref
 
 /// What proves this connection to the Gateway.
 pub enum Credential {
-    /// A token: the device's own, from an earlier `hello-ok`, or one the person typed.
+    /// The token the Gateway gave this device in an earlier `hello-ok`: sent as `auth.deviceToken`.
+    DeviceToken(Secret),
+    /// A shared token the person typed: sent as `auth.token`.
     Token(Secret),
     /// A setup code, used once.
     SetupCode(Secret),
@@ -47,6 +49,7 @@ pub enum Credential {
 impl Credential {
     pub(super) fn kind(&self) -> &'static str {
         match self {
+            Credential::DeviceToken(_) => "deviceToken",
             Credential::Token(_) => "token",
             Credential::SetupCode(_) => "bootstrapToken",
         }
@@ -54,7 +57,9 @@ impl Credential {
 
     pub(super) fn secret(&self) -> &Secret {
         match self {
-            Credential::Token(secret) | Credential::SetupCode(secret) => secret,
+            Credential::DeviceToken(secret)
+            | Credential::Token(secret)
+            | Credential::SetupCode(secret) => secret,
         }
     }
 }
@@ -670,6 +675,9 @@ fn nap(stop: &AtomicBool, wait: Duration) {
 pub trait TokenStore: Send {
     fn keep(&mut self, token: Secret);
     fn get(&self) -> Option<Secret>;
+    /// Forgets the device's token: a new setup code starts a pairing from nothing, and a token
+    /// from before it is never preferred to the code.
+    fn forget(&mut self);
 }
 
 /// Starts the connection on a thread of its own, and keeps it up. `first` is what the first
@@ -685,6 +693,11 @@ pub fn start(
     let flag = Arc::clone(&stop);
     let thread = std::thread::spawn(move || {
         let timing = config.timing;
+        // A new setup code starts a fresh pairing, whatever this device held before: the token an
+        // old pairing left behind (one the Gateway has since replaced) is dropped, never sent.
+        if matches!(first, Credential::SetupCode(_)) {
+            tokens.forget();
+        }
         let mut first = Some(first);
         let mut wait = timing.backoff_start;
         let mut pairing_since: Option<Instant> = None;
@@ -692,7 +705,7 @@ pub fn start(
         loop {
             // The device's own token, once there is one; else what the person gave.
             let credential = match tokens.get() {
-                Some(token) => Credential::Token(token),
+                Some(token) => Credential::DeviceToken(token),
                 None => match first.take() {
                     Some(credential) => credential,
                     None => {
@@ -731,7 +744,9 @@ pub fn start(
                     wait = (wait * 2).min(timing.backoff_max);
                     first = Some(credential);
                 }
-                Ended::Refused(Refusal::PairingRequired { request_id }) => {
+                Ended::Refused(
+                    Refusal::PairingRequired { request_id } | Refusal::ApproveAgain { request_id },
+                ) => {
                     let since = *pairing_since.get_or_insert_with(Instant::now);
                     if since.elapsed() >= timing.pairing_window {
                         emit(Event::Status(Status::Failed(Failure::NotApproved)));
@@ -866,10 +881,12 @@ mod tests {
             .map(|b| format!("{b:02x}"))
             .collect();
         assert_eq!(device["id"], id.as_str());
-        let credential = params["auth"]["token"]
+        let credential = params["auth"]["deviceToken"]
             .as_str()
+            .or_else(|| params["auth"]["token"].as_str())
             .or_else(|| params["auth"]["bootstrapToken"].as_str())
             .unwrap();
+        assert_eq!(params["client"]["deviceFamily"], "Mac");
         let signed = protocol::signed_text(
             &id,
             "node",
@@ -948,6 +965,9 @@ mod tests {
                 .unwrap()
                 .as_deref()
                 .and_then(|text| Secret::new(text).ok())
+        }
+        fn forget(&mut self) {
+            *self.0.lock().unwrap() = None;
         }
     }
 
@@ -1187,6 +1207,78 @@ mod tests {
         }));
     }
 
+    /// #1154: a device-token reconnect that the Gateway wants approved again (`metadata-upgrade`)
+    /// is told apart from a first pairing in the Gateway's words, and the node waits for it as it
+    /// does for a pairing: it is told `wait_then_retry`.
+    #[test]
+    fn a_reconnect_that_needs_approval_again_waits_as_a_pairing_does() {
+        let gateway = fake(vec![
+            Box::new(|socket, frames| {
+                greet(socket, "a");
+                let params = take_connect(socket, frames, "a");
+                assert_eq!(params["auth"], json!({"deviceToken": TOKEN}));
+                refuse(
+                    socket,
+                    "NOT_PAIRED",
+                    "pairing required: device identity changed and must be re-approved",
+                    json!({"code": "PAIRING_REQUIRED", "reason": "metadata-upgrade",
+                        "requestId": "req-8", "recommendedNextStep": "wait_then_retry"}),
+                );
+            }),
+            Box::new(|socket, frames| {
+                greet(socket, "b");
+                take_connect(socket, frames, "b");
+                hello(socket, Some("dt-rotated"));
+                read_frame(socket, frames);
+                drain(socket, frames);
+            }),
+        ]);
+        let mut run = Run::start(
+            &gateway,
+            Credential::DeviceToken(secret(TOKEN)),
+            Some(TOKEN),
+        );
+        run.wait("connected", |event| {
+            matches!(event, Event::Status(Status::Connected { .. }))
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+        assert!(run.statuses().iter().any(
+            |status| matches!(status, Status::Pairing { request_id: Some(id), .. } if id == "req-8")
+        ));
+        assert_eq!(run.token.lock().unwrap().as_deref(), Some("dt-rotated"));
+    }
+
+    /// #1161: a new setup code starts a fresh pairing, whatever an old pairing left behind. The
+    /// stale device token is not sent in its place, and the token the code earns replaces it.
+    #[test]
+    fn a_new_setup_code_is_sent_whatever_token_an_old_pairing_left() {
+        let gateway = fake(vec![Box::new(|socket, frames| {
+            greet(socket, "n-fresh");
+            let params = take_connect(socket, frames, "n-fresh");
+            assert_eq!(params["auth"], json!({"bootstrapToken": CODE}));
+            hello(socket, Some("dt-new"));
+            read_frame(socket, frames);
+            drain(socket, frames);
+        })]);
+        let mut run = Run::start(
+            &gateway,
+            Credential::SetupCode(secret(CODE)),
+            Some("dt-stale"),
+        );
+        run.wait("connected", |event| {
+            matches!(event, Event::Status(Status::Connected { .. }))
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+        assert_eq!(run.token.lock().unwrap().as_deref(), Some("dt-new"));
+        assert!(
+            !run.statuses()
+                .iter()
+                .any(|s| matches!(s, Status::Failed(_)))
+        );
+    }
+
     #[test]
     fn a_mac_nobody_approves_gives_up_when_the_request_runs_out() {
         let handlers: Vec<Handler> = (0..40)
@@ -1387,8 +1479,8 @@ mod tests {
                 let params = take_connect(socket, frames, "b");
                 assert_eq!(
                     params["auth"],
-                    json!({"token": "dt-1"}),
-                    "the device's own token from now on"
+                    json!({"deviceToken": "dt-1"}),
+                    "the device's own token from now on, as a device token"
                 );
                 hello(socket, None);
                 read_frame(socket, frames);

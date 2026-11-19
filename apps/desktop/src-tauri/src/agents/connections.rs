@@ -8,6 +8,7 @@
 //!   <handle>/                       0700
 //!     node-token                    0600   what the Gateway gave this Mac as a node
 //!     operator-token                0600   and as an operator (replies, mentions)
+//!     shared-token                  0600   a Gateway token the person typed (sent as `auth.token`)
 //!     device-key                    0600   this connection's own key, made here, never sent
 //! ```
 //!
@@ -104,8 +105,13 @@ pub struct View {
 /// The secrets a connection keeps, each in a file of its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    /// The token the Gateway gave this device as a node.
     NodeToken,
+    /// And as an operator.
     OperatorToken,
+    /// A shared Gateway token the person typed, for both roles. It is sent as `auth.token`, and
+    /// the device's own tokens (the two above) as `auth.deviceToken`.
+    SharedToken,
     DeviceKey,
 }
 
@@ -114,6 +120,7 @@ impl Kind {
         match self {
             Kind::NodeToken => "node-token",
             Kind::OperatorToken => "operator-token",
+            Kind::SharedToken => "shared-token",
             Kind::DeviceKey => "device-key",
         }
     }
@@ -237,8 +244,8 @@ impl Connections {
             .map(|connection| {
                 let has = |kind| self.has(&connection.handle, kind);
                 View {
-                    node_token: has(Kind::NodeToken),
-                    operator_token: has(Kind::OperatorToken),
+                    node_token: has(Kind::NodeToken) || has(Kind::SharedToken),
+                    operator_token: has(Kind::OperatorToken) || has(Kind::SharedToken),
                     device_key: has(Kind::DeviceKey),
                     connection,
                 }
@@ -457,6 +464,19 @@ impl Connections {
             secret.expose().as_bytes(),
         )
         .map_err(failed)
+    }
+
+    /// Forgets a secret: the file is removed, and nothing is said if it was not there.
+    pub fn forget(&self, handle: &str, kind: Kind) -> Result<(), String> {
+        let _one_at_a_time = hold(&self.changing);
+        if !is_handle(handle) {
+            return Ok(());
+        }
+        match fs::remove_file(self.folder_of(handle).join(kind.file())) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(failed(error)),
+        }
     }
 
     /// Whether a secret is kept, and kept as it should be.
