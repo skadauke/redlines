@@ -99,6 +99,7 @@ import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
 import { tableMouse } from './table/mouse.ts';
+import { longSelection } from './long-selection.ts';
 import { tableReach } from './table/reach.ts';
 import { tableWidths } from './table/widths.ts';
 import { tableGhosts } from './table/ghosts.ts';
@@ -470,6 +471,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // After the stops, whose guard it runs ahead of.
     tableFill(),
     tableMouse(),
+    longSelection,
     tableReach(),
     tableWidths(),
     quartoRefs(),
