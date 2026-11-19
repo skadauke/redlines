@@ -1,5 +1,6 @@
 // What the other windows of a session show in this one: each one's caret, with a flag that names it
-// and fades after a few seconds, and its selection, tinted. Positions arrive as the sender kept
+// and fades after a few seconds, and its selection, tinted; while a selection lasts, its caret and
+// flag stay, so that it is clear who marked what (#1168). Positions arrive as the sender kept
 // them (in the confirmed text at a version) and are placed in what this window shows; between two
 // messages they move with the text, as any position does. Colors are the authority's, the same in
 // every window: `p1` to `p6`, which the style sheet draws.
@@ -70,6 +71,10 @@ ${COLORS.map(([token, color], i) => `  --rl-presence-${i + 1}: ${color}; /* ${to
   animation: rl-presence-flag ${FLAG_MS}ms ease-out;
   pointer-events: none;
 }
+.rl-presence-flag-stays {
+  opacity: 1;
+  animation: none;
+}
 @keyframes rl-presence-flag {
   0%,
   80% {
@@ -107,7 +112,12 @@ class Caret extends WidgetType {
     const a = this.#peer;
     const b = other.#peer;
     return (
-      a.clientID === b.clientID && a.name === b.name && a.color === b.color && a.stamp === b.stamp
+      a.clientID === b.clientID &&
+      a.name === b.name &&
+      a.color === b.color &&
+      a.stamp === b.stamp &&
+      a.head === b.head &&
+      (a.head === a.anchor) === (b.head === b.anchor)
     );
   }
   override toDOM(): HTMLElement {
@@ -116,10 +126,12 @@ class Caret extends WidgetType {
     caret.style.setProperty('--rl-presence-color', colorVar(this.#peer.color));
     caret.dataset['peer'] = this.#peer.clientID;
     caret.setAttribute('aria-hidden', 'true');
-    // Not for a window that moved long ago: the caret stays, the name has gone.
-    if (Date.now() - this.#peer.stamp < FLAG_MS) {
+    // Not for a window that moved long ago: the caret stays, the name has gone. With a selection
+    // the name stays too, for as long as the selection lasts.
+    const selecting = this.#peer.head !== this.#peer.anchor;
+    if (selecting || Date.now() - this.#peer.stamp < FLAG_MS) {
       const flag = document.createElement('span');
-      flag.className = 'rl-presence-flag';
+      flag.className = selecting ? 'rl-presence-flag rl-presence-flag-stays' : 'rl-presence-flag';
       flag.textContent = this.#peer.name;
       caret.append(flag);
     }

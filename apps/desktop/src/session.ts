@@ -260,7 +260,7 @@ export class PortLog implements DurableLog {
 /**
  * The number a window is known by in a session: the main window is the first, `doc-<n>` the one
  * after it. It comes from the label, so that the window that leads next gives every window the
- * same name and color as the one before it.
+ * same name as the one before it.
  */
 export function ordinalOf(label: string): number {
   const found = /(\d+)$/.exec(label);
@@ -269,8 +269,16 @@ export function ordinalOf(label: string): number {
 
 /**
  * Anyone in a session of this app's windows may be in it: they are the person's own. Each window is
- * named for its number, and has a color of its own that every window shows it in.
+ * named for its number, and every window of one person has the person's color, the same in every
+ * window (#1168): colors are few, and a second one for the same person would match someone else's.
  */
+/** The color a person is shown in, one of the palette's, from their handle: the same in every window. */
+export function colorOfPerson(handle: string): string {
+  let hash = 5381;
+  for (const char of handle) hash = (Math.imul(hash, 33) + char.codePointAt(0)!) >>> 0;
+  return PALETTE[hash % PALETTE.length]!;
+}
+
 function authenticateFor(person: { handle: string; name: string }) {
   return (credential: unknown): AuthResult => {
     if (typeof credential !== 'object' || credential === null || !('key' in credential)) {
@@ -281,7 +289,7 @@ function authenticateFor(person: { handle: string; name: string }) {
       handle: person.handle,
       name: `${person.name} (window ${n})`,
       role: 'owner',
-      color: PALETTE[(n - 1) % PALETTE.length]!,
+      color: colorOfPerson(person.handle),
     };
   };
 }

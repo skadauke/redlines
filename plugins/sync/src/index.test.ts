@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from '@redlines/formatting';
 import { createTables } from '@redlines/tables';
 import { peersShown, syncEditor, syncText } from './index.ts';
+import { FLAG_MS, showPeers } from './presence.ts';
 import type { SyncBinding } from './index.ts';
 
 const BASE = 'First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.\n';
@@ -315,6 +316,31 @@ describe('the other window’s caret', () => {
     bo.editor.view.dispatch({ selection: { anchor: 3 } });
     await until(() => peersShown(ada.editor.view).length === 1);
     expect(peersShown(ada.editor.view)[0]).toMatchObject({ name: 'Bo (window 2)', color: 'p2' });
+  });
+
+  it('keeps the caret and its name flag showing while a selection lasts, and lets a caret’s flag go (#1168)', async () => {
+    const { bo } = await session();
+    const peer = {
+      clientID: 'c1',
+      name: 'Ada (window 1)',
+      color: 'p1',
+      head: 8,
+      anchor: 8,
+      // It moved long ago.
+      stamp: Date.now() - FLAG_MS - 1000,
+    };
+    const flags = () => [...bo.editor.view.dom.querySelectorAll('.rl-presence-flag')];
+    showPeers(bo.editor.view, [peer]);
+    expect(bo.editor.view.dom.querySelectorAll('.rl-presence-caret')).toHaveLength(1);
+    expect(flags(), 'a caret alone has lost its flag by now').toHaveLength(0);
+    showPeers(bo.editor.view, [{ ...peer, anchor: 3 }]);
+    expect(bo.editor.view.dom.querySelectorAll('.rl-presence-selection').length).toBeGreaterThan(0);
+    expect(bo.editor.view.dom.querySelectorAll('.rl-presence-caret')).toHaveLength(1);
+    expect(flags().map((flag) => flag.textContent)).toEqual(['Ada (window 1)']);
+    expect(flags()[0]!.classList.contains('rl-presence-flag-stays')).toBe(true);
+    // The selection collapses: the flag, long past its time, goes.
+    showPeers(bo.editor.view, [{ ...peer, anchor: 8 }]);
+    expect(flags()).toHaveLength(0);
   });
 
   it('moves with the text when the person types before it', async () => {
