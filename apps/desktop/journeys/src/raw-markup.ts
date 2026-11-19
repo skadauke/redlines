@@ -130,14 +130,6 @@ export const KNOWN: readonly KnownCase[] = [
     text: /<!--/,
     why: 'a callout whose title holds an insertion shows its marker',
   },
-  {
-    issue: 1176,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'sub-sup-strike',
-    text: /~2~/,
-    why: 'H~2~O shows as source',
-  },
   ...([['math', /\$\$/, 'the display formula']] as const).map(([rule, text, what]): KnownCase => ({
     issue: 1216,
     doc: ['Build 21.qmd', 'frontmatter.qmd'],
