@@ -321,7 +321,14 @@ The window, on the desktop:
   title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
   puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
   in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
-  at the pointer, where it takes the place of the system's context menu. A docked toolbar stays
+  at the pointer, where it takes the place of the system's context menu. Both open the same bar: on
+  a change, a comment or a highlight, that place's review card (who, what, and Accept and Reject,
+  Resolve and Reply, or Remove) is stacked above the bar in the same card, under the spelling rows;
+  a click on a highlight opens its card alone, and ⇧⌘P at the caret or selection opens what a
+  right-click there opens. The card is the place's at the caret, which is the selection's head
+  (a right-click's is the point clicked), and the selection keeps its highlight while the bar is
+  open. With the keys, the card's first button is where the keyboard enters, and ← and → move
+  along its row. A docked toolbar stays
   while you write, scroll, resize the window or click in the text (Esc, with the keyboard in
   it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
   elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›

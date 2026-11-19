@@ -383,15 +383,22 @@ export function drawPanel(
       setOpen(index < 0 ? null : index);
     },
     openId: () => (open === null ? null : (boxes[open]?.id ?? null)),
-    entry: () =>
-      [...panel.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word')].find(
-        (word) => !word.disabled,
-      ) ?? tops[0],
+    // The first suggestion; else the review card's first button; else the bar's first.
+    entry: () => words()[0] ?? tops[0],
     key(event) {
       const active = panel.ownerDocument.activeElement;
       const list = words();
       const at = list.findIndex((word) => word === active);
       if (at >= 0) {
+        // The review card's buttons are a row: the side arrows move along it.
+        const row = list[at]?.closest('.rl-bubble-actions');
+        if (row && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+          const siblings = [...row.querySelectorAll<HTMLButtonElement>('.rl-bubble-action')];
+          const next =
+            siblings[siblings.indexOf(list[at]!) + (event.key === 'ArrowRight' ? 1 : -1)];
+          next?.focus();
+          return true;
+        }
         // The suggestions are a column above the bar.
         if (event.key === 'ArrowDown') {
           if (at + 1 < list.length) list[at + 1]?.focus();

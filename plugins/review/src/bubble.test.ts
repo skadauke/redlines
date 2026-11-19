@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { click, file, mount, PEOPLE, tick, thread, unmountAll } from './test-helpers.ts';
 
@@ -44,6 +45,27 @@ describe('the review card of a place, for the toolbar', () => {
     card.querySelector<HTMLButtonElement>('.rl-bubble-action')?.click();
     await tick();
     expect(decided).toEqual([{ id: 'k3x9', how: 'accept' }]);
+    expect(told).toBe(1);
+  });
+
+  it('says it is done though the toolbar redrew without the card at the decision', async () => {
+    const { review, editor } = mount(doc);
+    const card = review.bubbleAt({ pos: at(editor, 'new ') + 1 })!;
+    const panel = document.createElement('div');
+    panel.className = 'rl-toolbar';
+    panel.append(card);
+    document.body.append(panel);
+    // The toolbar draws again without its card when the text changes, as a decision changes it.
+    editor.addExtension(
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) card.remove();
+      }),
+    );
+    let told = 0;
+    panel.addEventListener('rl-bubble-done', () => told++);
+    card.querySelector<HTMLButtonElement>('.rl-bubble-action')?.click();
+    await tick();
+    expect(card.isConnected).toBe(false);
     expect(told).toBe(1);
   });
 
@@ -120,9 +142,9 @@ describe('a left click on a highlight', () => {
     editor.view.dispatch({ selection: { anchor: pos } });
     content.dispatchEvent(new MouseEvent('mouseup', init));
     await tick();
-    const card = editor.view.dom.querySelector('.rl-card');
-    expect(card?.querySelector('.rl-card-what')?.textContent).toBe('Highlighted');
-    expect(card?.querySelector('[aria-label="Remove Highlight"]')).not.toBeNull();
+    const card = editor.view.dom.querySelector('.rl-bubble-card');
+    expect(card?.querySelector('.rl-bubble-what')?.textContent).toBe('Highlighted');
+    expect(card?.textContent).toContain('Remove Highlight');
   });
 
   it('opens nothing on text with no highlight', async () => {
@@ -133,6 +155,6 @@ describe('a left click on a highlight', () => {
     editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length - 2 } });
     content.dispatchEvent(new MouseEvent('mouseup', init));
     await tick();
-    expect(editor.view.dom.querySelector('.rl-card')).toBeNull();
+    expect(editor.view.dom.querySelector('.rl-card, .rl-bubble-card')).toBeNull();
   });
 });

@@ -19,10 +19,9 @@ import {
 import { parsedField, viewModeField } from '@redlines/editor';
 import { isAlignMark, plainPayload, rejectReason } from '@redlines/format';
 import type { MarkRange, Range } from '@redlines/format';
-import { highlightsAt, toggleHighlight } from './highlight.ts';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
-import { highlightAt } from './bubble.ts';
+import { highlightAt, highlightBubble, installBubbleStyle } from './bubble.ts';
 import { startsNewComment } from './rail.ts';
 import {
   attempt,
@@ -261,29 +260,14 @@ class Card implements TooltipView {
     const { change } = found;
     const parsed = view.state.field(parsedField);
     const { author } = ctx;
-    // A highlight has a card too: who made it, and Remove.
+    // A highlight has a card too: the one the toolbar stacks (bubble.ts), on its own here.
     if (change.kind === 'hl') {
+      installBubbleStyle(view.dom.ownerDocument);
       this.by = change.entry.by;
       this.color = colorClass(view.state, this.by);
-      this.dom = element('div', `rl-card ${this.color}`);
+      this.dom = element('div', 'rl-bubble-card');
       this.dom.setAttribute('role', 'dialog');
-      this.dom.setAttribute('aria-label', 'Highlight');
-      const error = errorLine('rl-card-error');
-      const head = authorLine('rl-card', byline(parsed, change.entry.by, author), change.entry.at);
-      const buttons = element('div', 'rl-card-buttons');
-      // Remove acts on the highlight the selection is in (the command's own rule).
-      if (highlightsAt(view.state).some((mark) => mark.id === change.id)) {
-        buttons.append(
-          button(
-            'rl-card-button',
-            'Remove Highlight',
-            () => attempt(error, () => toggleHighlight(ctx)),
-            icon('reject'),
-          ),
-        );
-      }
-      head.append(buttons);
-      this.dom.append(head, element('div', 'rl-card-what', 'Highlighted'), error);
+      this.dom.append(highlightBubble(view, ctx, change));
       return;
     }
     // A suggestion of several marks is decided as one, from the card of any of them.

@@ -79,16 +79,53 @@ test.describe('the bar and the review card of a place @views', () => {
   }) => {
     const j = await start({ doc: DOC, view: 'redlines' });
     await j.click('highlight');
-    await expect(j.page.locator('.cm-tooltip .rl-card')).toContainText('Highlighted');
+    await expect(j.page.locator('.cm-tooltip .rl-bubble-card')).toContainText('Highlighted');
     await expect(toolbar(j)).toBeHidden();
     // Over the page beside the highlight, not off to one side of the window.
     const [card, word] = await Promise.all([
-      j.page.locator('.cm-tooltip').boundingBox(),
+      j.page.locator('.cm-tooltip:has(.rl-bubble-card)').boundingBox(),
       j.page.getByText('highlight', { exact: false }).first().boundingBox(),
     ]);
     expect(card!.y).toBeGreaterThan(0);
     expect(Math.abs(card!.x - word!.x)).toBeLessThan(400);
     await j.shot('left-click-highlight');
+  });
+
+  test('Accept in the card by the mouse decides the change and puts the bar away', async ({
+    start,
+  }) => {
+    const j = await start({ doc: DOC, view: 'redlines' });
+    await j.click('now', { button: 'right' });
+    await bubble(j).getByRole('button', { name: 'Accept' }).click();
+    await expect(toolbar(j)).toBeHidden();
+    expect(await j.page.evaluate(() => window.__redlines!.editor.getDoc())).not.toContain(
+      '<!--ins k3x9-->',
+    );
+  });
+
+  test('Reject in the card by the keys decides the change, and the keyboard is back in the text', async ({
+    start,
+  }) => {
+    const j = await start({ doc: DOC, view: 'redlines' });
+    await j.caretAfter('no');
+    await j.press('Meta+Shift+P');
+    // The keyboard enters at the card's first button, Accept; → goes to Reject.
+    await expect(bubble(j).getByRole('button', { name: 'Accept' })).toBeFocused();
+    await j.press('ArrowRight');
+    await expect(bubble(j).getByRole('button', { name: 'Reject' })).toBeFocused();
+    await j.press('Enter');
+    await expect(toolbar(j)).toBeHidden();
+    const doc = await j.page.evaluate(() => window.__redlines!.editor.getDoc());
+    expect(doc).not.toContain('<!--ins k3x9-->');
+    expect(doc).not.toContain('now');
+    await expect(j.page.locator('.cm-content')).toBeFocused();
+  });
+
+  test('Resolve in the card resolves the comment and puts the bar away', async ({ start }) => {
+    const j = await start({ doc: DOC, view: 'redlines' });
+    await j.click('April', { button: 'right' });
+    await bubble(j).getByRole('button', { name: 'Resolve' }).click();
+    await expect(toolbar(j)).toBeHidden();
   });
 
   test('the selection keeps its highlight while the bar is open', async ({ start }) => {

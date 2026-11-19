@@ -73,7 +73,9 @@ export interface ToolbarOptions {
   /**
    * The review card of a place: asked for each time the toolbar opens, at a right-click and at ⇧⌘P
    * alike, with the position the right-click or the caret is at and the element under the pointer
-   * (null from the keyboard). A card it returns is stacked in the toolbar's card, above the bar and
+   * (null from the keyboard). With a selection, ⇧⌘P's position is the selection's head, and a
+   * right-click's the point clicked (it keeps a selection it is inside): two changes that touch
+   * can show either card. A card it returns is stacked in the toolbar's card, above the bar and
    * under the spelling rows, and stays while the toolbar is open; a button of the card that has
    * done its work puts the toolbar away by sending a bubbling `rl-bubble-done` event from the card.
    * Return null where the place has none. Default: none.

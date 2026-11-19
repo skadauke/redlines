@@ -31,8 +31,8 @@ export interface BubbleHost {
 }
 
 /** Tells the toolbar that this card's work is done, so that it goes away. */
-function done(card: HTMLElement): void {
-  card.dispatchEvent(new CustomEvent('rl-bubble-done', { bubbles: true }));
+function done(root: HTMLElement): void {
+  root.dispatchEvent(new CustomEvent('rl-bubble-done', { bubbles: true }));
 }
 
 /** An action of the card: an icon and a word. The keyboard stays where it is, in the document. */
@@ -50,8 +50,11 @@ function action(
   button.addEventListener('mousedown', (event) => event.preventDefault());
   button.addEventListener('click', () => {
     if (button.getAttribute('aria-disabled') === 'true') return;
+    // The toolbar redraws without the card when the text changes (a decision does that), so the
+    // event is sent from what holds the card, found before the action runs.
+    const root = card.closest<HTMLElement>('.rl-toolbar') ?? card;
     // A refused action changes nothing, says why, and leaves the card.
-    if (attempt(error, run) && finish) done(card);
+    if (attempt(error, run) && finish) done(root);
   });
   return button;
 }
@@ -128,7 +131,7 @@ export function threadBubble(
   );
   const replyButton = actions.querySelector<HTMLButtonElement>('button:last-child');
   replyButton?.addEventListener('click', () => {
-    done(card);
+    done(card.closest<HTMLElement>('.rl-toolbar') ?? card);
     host.reply(thread.id);
   });
   card.append(actions, error);
@@ -193,6 +196,13 @@ function markAt(marks: readonly MarkRange[], kind: 'cmt' | 'hl', pos: number): M
 const STYLE_ID = 'rl-bubble-style';
 
 const STYLE = `
+/* A card on its own, over the page (a click on a highlight): the tooltip's chrome around it. */
+.rl-bubble-card {
+  border: 1px solid var(--rl-rule);
+  border-radius: 10px;
+  background-color: var(--rl-card);
+  box-shadow: var(--rl-shadow);
+}
 /* The review card of a place, in the toolbar's card (bubble.ts). */
 .rl-bubble {
   box-sizing: border-box;

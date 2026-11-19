@@ -1467,4 +1467,26 @@ describe('the review card of a place (#1190)', () => {
     toolbar.toggle();
     expect(floating).toEqual([true, false, false, false]);
   });
+
+  it('puts the keyboard at the card’s first button, and the side arrows move along its row', () => {
+    const el = document.createElement('div');
+    el.innerHTML =
+      '<div class="rl-bubble-actions"><button class="rl-bubble-action">Accept</button><button class="rl-bubble-action">Reject</button></div>';
+    const { toolbar } = mount('Hello wrold there', { bubbleAt: () => el });
+    toolbar.show();
+    const [accept, reject] = [...el.querySelectorAll('button')];
+    expect(document.activeElement).toBe(accept);
+    key(accept!, 'ArrowRight');
+    expect(document.activeElement).toBe(reject);
+    // The end of the row is the end: the toolbar stays open.
+    key(reject!, 'ArrowRight');
+    expect(document.activeElement).toBe(reject);
+    expect(toolbar.isOpen()).toBe(true);
+    key(reject!, 'ArrowLeft');
+    expect(document.activeElement).toBe(accept);
+    key(accept!, 'ArrowDown');
+    expect(document.activeElement).toBe(reject);
+    key(reject!, 'ArrowDown');
+    expect(document.activeElement).toBe(tops()[0]);
+  });
 });
