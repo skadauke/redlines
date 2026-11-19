@@ -1941,6 +1941,16 @@ marker, a line that is only syntax, a marker that would start a line). The rule 
 split: an edit is refused when it gives a split such a break that it did not have, so a file that
 has such a pair already, as an older one may, keeps it, and edits elsewhere are not refused for it.
 
+A line break pasted with text at once, at the end of the line above your own paragraph break at the
+top level (`new⏎` after `one<!--split k3x9-->⏎⏎two`), is typed behind the break, at the start of the
+next paragraph, which is the same text, three line breaks in a row, with no break right next to
+another (`one<!--ins m2bd-->new<!--/m2bd--><!--split k3x9-->⏎⏎<!--split n8fx-->⏎two`, #120). In a
+list item or a quote the edit is the replacement of the item or the block, where the fine form has no
+such place (§3.12), and every order of decisions reads alike. Four things keep the new form out, and
+the edit is refused as before: a split that is another person's, a gap behind the split that is not
+plain two line breaks, a next line that starts with a space, a tab or `>`, and a file with CRLF line
+breaks.
+
 **Whole-block deletion** uses the same mechanism: a deletion at the start of the following block,
 with a payload that ends in `\n\n`. At the end of the document, it is a deletion at the end of the
 previous block, with a payload that starts with `\n\n`. A join and a deletion inside a block can
