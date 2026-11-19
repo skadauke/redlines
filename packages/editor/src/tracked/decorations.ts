@@ -683,7 +683,9 @@ function analyze(state: EditorState, kept: number | null, zone?: Zone): Model {
       } else if (markup && mark.kind !== 'fmt' && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
           // Simple: the author's color, without the underline.
-          const className = redlines ? `rl-ins ${author}` : `rl-ins-plain ${author}`;
+          // The new place of moved blocks (format §3.14): a double underline, as a moved row has.
+          const moved = mark.kind === 'ins' && mark.entry.move !== undefined ? ' rl-moved' : '';
+          const className = redlines ? `rl-ins${moved} ${author}` : `rl-ins-plain ${author}`;
           // A substitution's text starts after the carrier of an opener alone on its line, which
           // its old text is drawn after: struck text is no inserted text.
           const start =
@@ -2106,6 +2108,8 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     textUnderlineOffset: '3px',
     textDecorationSkipInk: 'none',
   },
+  // The new place of moved blocks: a double underline, after Word's marks for a move.
+  '.rl-ins.rl-moved': { textDecorationStyle: 'double' },
   // Inserted text in Simple: the author's color alone, with no underline.
   '.rl-ins-plain': { color: 'var(--rl-color)' },
   // Deleted text: struck through, in its author's color.
