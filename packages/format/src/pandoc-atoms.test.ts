@@ -6,8 +6,10 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
+import { acceptAll, rejectAll } from './decide.ts';
 import { addHighlight } from './highlights.ts';
 import { expectEveryOrderRead } from './oracle.ts';
+import { parse } from './parse.ts';
 import { ada, bodyOf, context, file } from './test-helpers.ts';
 import { trackedEdits } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
@@ -98,4 +100,44 @@ describe('typed text that joins a key (#1074)', () => {
       0,
     );
   });
+});
+
+describe('a div typed whole in a quote is one insertion (§9.4, #1234)', () => {
+  const DIV = '::: {.callout-tip}\n> A.\n> :::';
+  const cases: [string, string, number, string][] = [
+    ['on an empty line of the quote', '> A line.\n>\n> \n\nAfter.', '> A line.\n>\n> '.length, DIV],
+    ['after a line of the quote', '> A line.\n\nAfter.', '> A line.'.length, `\n>\n> ${DIV}`],
+    [
+      'in a quote in a list item',
+      '- > A.\n\nAfter.',
+      '- > A.'.length,
+      '\n>\n  > ::: {.callout-tip}\n  > B.\n  > :::',
+    ],
+    [
+      'in a quote in a quote',
+      '> > A.\n\nAfter.',
+      '> > A.'.length,
+      '\n> >\n> > ::: {.callout-tip}\n> > B.\n> > :::',
+    ],
+  ];
+  for (const [name, doc, at, typed] of cases) {
+    it(`${name}: no marker on a fence line, every order reads alike`, () => {
+      const start = file(doc);
+      const done = trackedEdits(
+        start,
+        [{ from: at, to: at, insert: typed }],
+        context(ada, ['k3x9', 'm4yz', 'p5qr', 'w8nn'], QMD),
+      );
+      const after = applyChanges(start, done.changes);
+      const fences = bodyOf(after)
+        .split('\n')
+        .filter((line) => /^[ \t>]*:{3,}/.test(line));
+      expect(fences.length).toBeGreaterThanOrEqual(2);
+      expect(fences.filter((line) => line.includes('<!--'))).toEqual([]);
+      expectEveryOrderRead(name, after);
+      // Reject gives the document back, accept leaves no marks.
+      expect(bodyOf(applyChanges(after, rejectAll(after))).trimEnd()).toBe(bodyOf(start).trimEnd());
+      expect(parse(applyChanges(after, acceptAll(after))).marks).toEqual([]);
+    });
+  }
 });

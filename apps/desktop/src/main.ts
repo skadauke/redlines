@@ -22,7 +22,10 @@ import {
 import { codeFileHighlight, codeLanguagesFor } from '@redlines/code';
 import {
   createEditor,
+  dropProjectImage,
   editorDocumentHtml,
+  leaveProjectImage,
+  overProjectImage,
   PLAIN_ONLY_TRACKING,
   type Author,
   type CropRect,
@@ -78,7 +81,8 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
-import { requestPane } from './preferences/pane-request.ts';
+import { requestPane, type RequestedPane } from './preferences/pane-request.ts';
+import { menuPaletteCommands } from './menu-palette.ts';
 import { fillPrintPage, plainPageHtml, printPage } from './print.ts';
 import { exportToWord } from './word-export.ts';
 import { openWord } from './word-import.ts';
@@ -933,6 +937,12 @@ function reportWindow(): void {
   if (doc) windows?.reportDocument(doc.path, doc.dirty || doc.writing || draftsPending);
 }
 
+/** Whether the client point is over the document's page, beside the sidebar and under the title bar. */
+function insidePage(at: { x: number; y: number }): boolean {
+  const box = editor.view.dom.getBoundingClientRect();
+  return at.x >= box.left && at.x <= box.right && at.y >= box.top && at.y <= box.bottom;
+}
+
 const sidebar = createSidebar(app, {
   host,
   openFile: (path, { newWindow }) => {
@@ -949,6 +959,21 @@ const sidebar = createSidebar(app, {
   },
   isRunLive: () => runs.isLive(),
   showPlainOnly: () => settings.showPlainOnlyFiles,
+  // An image dragged out of the sidebar: over the page it shows where it goes, and letting go writes
+  // its link there (#1198). Elsewhere, such as over the sidebar itself, it goes nowhere.
+  imageDrag: {
+    over: (at) => {
+      if (insidePage(at)) overProjectImage(editor.view, at.y);
+      else leaveProjectImage(editor.view);
+    },
+    drop: (at, path) => {
+      if (insidePage(at)) {
+        dropProjectImage(editor.view, at.y, path);
+        editor.view.focus();
+      } else leaveProjectImage(editor.view);
+    },
+    leave: () => leaveProjectImage(editor.view),
+  },
   onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
   onClose: () => {
     changeSettings({ sidebarOpen: false });
@@ -1244,8 +1269,13 @@ async function readImageForAgent(src: string): Promise<{ mimeType: string; data:
  * agent itself; it asks for the pane, and Preferences shows it.
  */
 function openAgentPreferences(): void {
+  openPreferencesPane('agents');
+}
+
+/** Opens Preferences on `pane` (the palette's lines for the panes, and the Agents pane above). */
+function openPreferencesPane(pane: RequestedPane): void {
   if (!isTauri) return notice.flash('Preferences are in the app.');
-  requestPane('agents');
+  requestPane(pane);
   invoke('open_preferences').catch((error: unknown) => {
     console.error('Could not open Preferences', error);
     notice.flash('Couldn’t open Preferences.');
@@ -1330,6 +1360,15 @@ const acceptAllAndStopTracking = () => {
 const changeSettings = (change: Partial<Settings>) => {
   settings = keepWindowOwn(settings, updateSettings(change), change);
 };
+
+/** The panes of the Preferences window, by name, for the palette. */
+const PREFERENCE_PANES: readonly (readonly [RequestedPane, string])[] = [
+  ['general', 'General'],
+  ['editor', 'Editor'],
+  ['appearance', 'Appearance'],
+  ['agents', 'Agents'],
+  ['shortcuts', 'Shortcuts'],
+];
 
 /**
  * What the toolbar's palette offers besides the registry's commands: the app's own commands and
@@ -1429,6 +1468,22 @@ function toolbarCommands(): AppCommand[] {
       run: () => commands.checkForUpdates(),
       available: () => updateNotifications !== undefined,
     },
+    // Each pane of Preferences, to go to it by name (the Preferences window has its own search).
+    ...PREFERENCE_PANES.map(([pane, label]): AppCommand => ({
+      id: `app.preferences.${pane}`,
+      title: `Open ${label} Preferences`,
+      synonyms: ['settings', 'options', 'preferences', label.toLowerCase()],
+      run: () => openPreferencesPane(pane),
+    })),
+    // Every other row of the menu bar (About Redlines, New, Open, the exports, zoom, …).
+    ...menuPaletteCommands(
+      menuModel,
+      () => menuState,
+      ({ row }) => {
+        const key = row.id ? shortcutBook.keyOf(row.id) : null;
+        return key ? displayKey(key) : undefined;
+      },
+    ),
   ];
 }
 

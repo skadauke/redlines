@@ -58,6 +58,7 @@ import { tabItems } from './blocks/tab-items.ts';
 import { tableMarkers } from './table/markers.ts';
 import { imageFetcherFacet, images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
+export { dropProjectImage, leaveProjectImage, overProjectImage } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { blankRun, openBlock, openBlocks, takeBackChanges, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -93,7 +94,9 @@ import { FileView } from './tracked/file-view.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { quartoCites } from './preview/quarto-cites.ts';
+import { quartoHeadingAttributes } from './preview/quarto-heading-attrs.ts';
 import { quartoRefs } from './preview/quarto-refs.ts';
+import { quartoTableCaptions } from './preview/quarto-table-caption.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
@@ -475,6 +478,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     quartoRefs(),
+    quartoHeadingAttributes(),
+    quartoTableCaptions(),
     quartoCites(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.imageData ? imageReader.of(options.imageData) : [],

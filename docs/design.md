@@ -517,6 +517,8 @@ Redlines covers everything in the Markdown Guide's
   which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
+- **Heading attributes:** in `.qmd` and `.Rmd`, the `{#sec-intro}` after a heading's text is a small gray chip
+  (the interface's small size, never the heading's), with its source shown while the caret is in it.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
 - **Emoji:** the character itself in every file type, because shortcodes don't render in pandoc,
   Quarto or VS Code. Typing `:` and two letters lists the emoji whose names (gemoji's, GitHub's
@@ -1341,7 +1343,10 @@ reads a `.docx` with its revisions and comments (#840) and maps the result to Ma
 marks and ledger (#866), and has Google Docs' differences (#838). File › Export to Word… calls
 the writer (#841) and File › Open .docx… the reader (#881; pictures are carried into the images folder after a save panel, #885); the full Word
 round trip is still to be wired in, and Copy for Word as a command of its own is not built (an
-ordinary copy writes the HTML that Word and Docs draw well); File › Print and Export as PDF are built.
+ordinary copy writes the HTML that Word and Docs draw well: Arial like the export, a task item as a
+paragraph of its own and not an item of the bullet list above it, a table 6.5 in wide, a code block
+shaded gray, and a quote's paragraphs in `class=MsoQuote`, which Word reads as its "Quote" style,
+#1181); File › Print and Export as PDF are built.
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
@@ -2755,7 +2760,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
   line over its code. HTML is drawn from the same allowed list as Clean (§5.2), never live: no script,
   no style, and nothing the document can make load. Quarto divs are drawn too (a `.callout-*` div is a
-  quiet labelled box, any other div its text). An image that is a file in the
+  quiet labelled box, any other div its text). In a `.qmd` or `.Rmd` file the preview draws what the editor
+  draws of Quarto's syntax (`quarto.ts`): the attributes of a heading, a figure or a formula as a small
+  gray chip, a table's caption with its label ("Table 1:"), a cross-reference as its target's label
+  ("Figure 1") with a fine dotted underline, and `H~2~O` and `x^2^` as a subscript and a superscript. An image that is a file in the
   document's project is drawn, an `<img>` tag at its `width` and `height` when these are digits; any other is its alt text, and one from a server is never loaded.
   - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
     `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
