@@ -1168,7 +1168,11 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   as the handles are and with a move icon (four arrows), selects the whole table, as Select Table
   does, and a drag from it moves the whole table: a line shows between blocks where it will land,
   letting go moves it there as one step (tracked as a move with Track Changes on), and Escape lets it
-  go. It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
+  go. The press must go 24 px before the table can drop anywhere, so that a shaking hand moves
+  nothing. A Quarto or Pandoc caption (a `:` paragraph after the table) moves with it. With Track
+  Changes on a table moves only past the block above or below it, as ⌥↑ and ⌥↓ take it, since a
+  tracked move to a gap further away is not yet written so that it reads as a table in every order of
+  decisions; the hint says so. It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
   A grip's menu is used from the keyboard: Down, Up and Tab choose an item, which looks as one under
   the pointer, Return runs it and Escape closes the menu.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:

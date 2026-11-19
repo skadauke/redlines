@@ -38,6 +38,7 @@ import {
   rowTitles,
   selectedCells,
   tablesOf,
+  trackingField,
   touchedCols,
   touchedRows,
   type Table,
@@ -160,6 +161,26 @@ export const GRIPS_STYLE = `
 .rl-grip-item[aria-disabled="true"]:hover { background: none; }
 .rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 10px; font-size: var(--rl-size-ui); }
 `;
+
+/**
+ * Where a table's block ends once its caption is in it: a Quarto or Pandoc caption is a paragraph
+ * that starts with `:` on the lines after the table (after a blank line, or none), and goes with the
+ * table when it moves. `to` where there is none.
+ */
+export function captionEnd(state: EditorState, to: number): number {
+  const { doc } = state;
+  let line = doc.lineAt(to);
+  let next = line.number + 1;
+  // The blank lines between the table and its caption.
+  while (next <= doc.lines && /^[ \t]*$/.test(doc.line(next).text)) next++;
+  if (next > doc.lines || !/^ {0,3}:(?:[ \t]|$)/.test(doc.line(next).text)) return to;
+  line = doc.line(next);
+  // The caption runs to the next blank line.
+  while (line.number < doc.lines && !/^[ \t]*$/.test(doc.line(line.number + 1).text)) {
+    line = doc.line(line.number + 1);
+  }
+  return line.to;
+}
 
 /** The select-table handle's icon: four arrows, for a table that moves. */
 function moveIcon(): SVGSVGElement {
@@ -642,7 +663,12 @@ class Grips {
       if (which === 'selectAll') {
         el.className = 'rl-table-select';
         el.append(moveIcon());
-        this.hint(el, 'Select the table, or drag it');
+        this.hint(
+          el,
+          this.view.state.field(trackingField, false)
+            ? 'Select the table, or drag it past the block above or below'
+            : 'Select the table, or drag it',
+        );
       } else {
         el.className = `rl-edge-add ${which === 'addCol' ? 'rl-edge-col' : 'rl-edge-row'}`;
         el.textContent = '+';
@@ -664,8 +690,14 @@ class Grips {
             { row: table.rows.length - 1, col: table.columns - 1 },
           );
           if (selection) this.view.dispatch({ selection, userEvent: 'select' });
-          // A drag from the handle moves the whole table, as blocks are moved (#1199).
-          dragBlockAt(this.view, { from: table.from, to: table.to }, event, () => {});
+          // A drag from the handle moves the whole table, with its caption, as blocks are moved
+          // (#1199). The press already selected the cells, which is all a click does: nothing to run.
+          dragBlockAt(
+            this.view,
+            { from: table.from, to: captionEnd(this.view.state, table.to) },
+            event,
+            () => {},
+          );
         }
         this.hide();
       });

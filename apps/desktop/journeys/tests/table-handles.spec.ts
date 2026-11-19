@@ -162,7 +162,9 @@ test.describe('table handles @tables', () => {
     expect(await j.text()).toBe(DOC);
   });
 
-  test('with Track Changes on, a moved table is one tracked move', async ({ start }) => {
+  test('with Track Changes on, a moved table is one tracked move, and reads as a table', async ({
+    start,
+  }) => {
     const j = await open(start, 'light', true);
     const handle = (await j.page.locator('.rl-table-select').boundingBox())!;
     const last = (await j.page
@@ -178,5 +180,105 @@ test.describe('table handles @tables', () => {
       /Last paragraph\.[\s\S]*\| A \| B \|/,
     );
     expect(text).toMatch(/<!--(?:ins|del|sub|move)/);
+    // As the file reads: the newest text has the table after the paragraph, drawn as a table.
+    await j.page.evaluate(() => window.__redlines!.editor.setViewMode('clean'));
+    await expect(j.page.locator('.rl-tbl'), 'one table, drawn as a table').toHaveCount(1);
+    const order = await j.page.locator('.cm-content').innerText();
+    expect(order.indexOf('Last paragraph')).toBeLessThan(order.indexOf('A'));
+  });
+
+  test('a few pixels of a shaking hand move nothing', async ({ start }) => {
+    for (const tracking of [false, true]) {
+      const j = await open(start, 'light', tracking);
+      const handle = (await j.page.locator('.rl-table-select').boundingBox())!;
+      const at = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
+      for (const [dx, dy] of [
+        [5, 0],
+        [0, -5],
+        [0, 5],
+        [4, 4],
+        [0, -12],
+        [12, 0],
+      ] as const) {
+        await j.page.mouse.move(at.x, at.y);
+        await j.page.mouse.down();
+        await j.page.mouse.move(at.x + dx / 2, at.y + dy / 2);
+        await j.page.mouse.move(at.x + dx, at.y + dy);
+        await j.page.mouse.up();
+        expect(await j.text(), `${dx},${dy} moves nothing (tracking ${tracking})`).toBe(DOC);
+        await expect(j.page.locator('.rl-drop-line')).toHaveCount(0);
+        await j.hover('1');
+      }
+    }
+  });
+
+  test('a table moves with the caption that follows it', async ({ start }) => {
+    const captioned = `First paragraph.\n\n${TABLE}\n: A caption {#tbl-one}\n\nLast paragraph.\n`;
+    const j = await start({ doc: captioned, tracking: false, view: 'clean' });
+    await j.settle();
+    await j.hover('1');
+    const handle = (await j.page.locator('.rl-table-select').boundingBox())!;
+    const first = (await j.page
+      .locator('.cm-content .cm-line', { hasText: 'First paragraph' })
+      .boundingBox())!;
+    await j.page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await j.page.mouse.down();
+    await j.page.mouse.move(handle.x + 10, handle.y - 40, { steps: 6 });
+    await j.page.mouse.move(first.x + 40, first.y - 4, { steps: 8 });
+    await j.page.mouse.up();
+    expect(await j.text(), 'the caption went with the table').toBe(
+      `${TABLE}\n: A caption {#tbl-one}\n\nFirst paragraph.\n\nLast paragraph.\n`,
+    );
+  });
+
+  test('with Track Changes on the caption travels with the table, and reads as a table', async ({
+    start,
+  }) => {
+    const captioned = `First paragraph.\n\n${TABLE}\n: A caption {#tbl-one}\n\nLast paragraph.\n`;
+    const j = await start({ doc: captioned, tracking: true, view: 'redlines' });
+    await j.settle();
+    await j.hover('1');
+    const handle = (await j.page.locator('.rl-table-select').boundingBox())!;
+    const first = (await j.page
+      .locator('.cm-content .cm-line', { hasText: 'First paragraph' })
+      .boundingBox())!;
+    await j.page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await j.page.mouse.down();
+    await j.page.mouse.move(handle.x + 10, handle.y - 40, { steps: 6 });
+    await j.page.mouse.move(first.x + 40, first.y - 4, { steps: 8 });
+    await j.page.mouse.up();
+    await j.page.evaluate(() => window.__redlines!.editor.setViewMode('clean'));
+    const shown = await j.page.locator('.cm-content').innerText();
+    expect(shown.indexOf('A caption'), 'the caption is by the table').toBeLessThan(
+      shown.indexOf('First paragraph'),
+    );
+    await expect(j.page.locator('.rl-tbl')).toHaveCount(1);
+  });
+
+  test('with Track Changes on a table moves only past the block above or below it', async ({
+    start,
+  }) => {
+    const long = `One.\n\n${TABLE}\nThree.\n\nFour.\n\nFive.\n`;
+    const j = await start({ doc: long, tracking: true, view: 'redlines' });
+    await j.settle();
+    await j.hover('1');
+    await expect(j.page.locator('.rl-table-select')).toBeVisible();
+    await j.page.locator('.rl-table-select').hover();
+    await expect(j.page.locator('.rl-grip-hint')).toContainText('above or below');
+    const handle = (await j.page.locator('.rl-table-select').boundingBox())!;
+    const five = (await j.page
+      .locator('.cm-content .cm-line', { hasText: 'Five.' })
+      .boundingBox())!;
+    await j.page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await j.page.mouse.down();
+    await j.page.mouse.move(handle.x + 10, handle.y + 60, { steps: 6 });
+    await j.page.mouse.move(five.x + 40, five.y + five.height + 8, { steps: 10 });
+    await j.page.mouse.up();
+    await j.page.evaluate(() => window.__redlines!.editor.setViewMode('clean'));
+    const shown = await j.page.locator('.cm-content').innerText();
+    // Dropped at the far end, it lands one block down: after Three., before Four.
+    expect(shown.indexOf('Three.')).toBeLessThan(shown.indexOf('A'));
+    expect(shown.indexOf('A')).toBeLessThan(shown.indexOf('Four.'));
+    await expect(j.page.locator('.rl-tbl')).toHaveCount(1);
   });
 });

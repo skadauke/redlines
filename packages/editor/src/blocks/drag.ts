@@ -6,11 +6,18 @@
 
 import { EditorSelection, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
-import type { BlockGap, BlockRun } from '@redlines/format';
+import { type BlockGap, type BlockRun, neighbourGap } from '@redlines/format';
+import { trackingField } from '../tracked/typing.ts';
 import { asFile, type FileRead, moveRunTo, runOfSelection } from './move.ts';
 
 /** The pointer must move this far from the press before it is a drag and not a click. */
 export const DRAG_SLOP = 4;
+/**
+ * How far from the press a drag from a block's handle goes before it can drop anywhere: the handle is
+ * beside the block, so every gap is a place the pointer is nearest to, and a few pixels of a shaking
+ * hand would otherwise move the block.
+ */
+export const HANDLE_ARM = 24;
 /** The editor's edge, in pixels, where a drag scrolls. */
 const SCROLL_EDGE = 36;
 
@@ -105,12 +112,25 @@ export class BlockDrag {
     return this.target;
   }
 
+  /**
+   * The places the run may go. A table with Track Changes on goes only to the gaps beside it, one
+   * block up or down, as ⌥↑ and ⌥↓ take it: a tracked move of a table to a gap further away is not
+   * written so that every order of decisions reads it as a table (#1271).
+   */
+  private gaps(): BlockGap[] {
+    const { run, view } = this;
+    if (run.kind !== 'table' || !view.state.field(trackingField, false)) return run.gaps;
+    return [neighbourGap(run, true), neighbourGap(run, false)].filter(
+      (gap): gap is BlockGap => gap !== undefined,
+    );
+  }
+
   /** The pointer is at client `y`: the line goes to the nearest gap. */
   move(y: number): void {
     const { view, geometry } = this;
     // The page lays out the view's text, which has the open paragraph in it.
     const shown = this.shown.bind(this);
-    this.places = this.run.gaps.map((gap) => ({ gap, y: geometry.gapY(view, shown(gap)) }));
+    this.places = this.gaps().map((gap) => ({ gap, y: geometry.gapY(view, shown(gap)) }));
     // The run's extent is measured now, not at the press: the editor may have scrolled since.
     this.target = pickGap(this.places, geometry.extent(view, this.shownRun()), y);
     const at = this.places.find((place) => place.gap === this.target);
@@ -297,7 +317,7 @@ export function blockDrag(): Extension {
 
 /**
  * A press at the handle of a block that is drawn apart from its text, such as a table's (#1199), and
- * the drag from it: past `DRAG_SLOP` the block (`range`, its text) is dragged as selected blocks are,
+ * the drag from it: past `HANDLE_ARM`, which is clearly away from the handle, the block (`range`, its text) is dragged as selected blocks are,
  * with the line between blocks, and letting go moves it there (one step to undo, tracked with Track
  * Changes on); Escape lets it go where it was. A press that doesn't move calls `onClick`. False
  * where the press is no drag at all (a document that can't be edited): `onClick` is then the
@@ -342,7 +362,8 @@ export function dragBlockAt(
   const onMove = (e: MouseEvent) => {
     y = e.clientY;
     if (!drag) {
-      if (Math.hypot(e.clientX - start.x, y - start.y) < DRAG_SLOP) return;
+      // Clearly away from the handle first: a press that shakes a little is a click.
+      if (Math.hypot(e.clientX - start.x, y - start.y) < HANDLE_ARM) return;
       if (!view.state.doc.eq(pressed)) return abandon();
       // The block is the selection, as it is for a drag of selected blocks.
       view.dispatch({

@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
+import { captionEnd } from './grips.ts';
 import { forceParsing } from '@codemirror/language';
+import { EditorState } from '@codemirror/state';
 import { runScopeHandlers } from '@codemirror/view';
 import {
   createEditor,
@@ -793,5 +795,25 @@ describe('the widgets share the look of the app (#672)', () => {
       );
     expect(pill?.[1], 'the pill').toBeDefined();
     expect(select?.[1], 'the select-table handle has the pill’s shadow').toBe(pill?.[1]);
+  });
+});
+
+describe('where a table ends with its caption (#1271)', () => {
+  const end = (doc: string, table: string) => captionEnd(EditorState.create({ doc }), table.length);
+  it('takes a Pandoc or Quarto caption paragraph that follows, after blank lines or none', () => {
+    const table = '| A |\n| - |\n| 1 |';
+    expect(end(`${table}\n\n: Caption {#tbl-x}\n\nAfter.`, table)).toBe(
+      `${table}\n\n: Caption {#tbl-x}`.length,
+    );
+    expect(end(`${table}\n: Caption\nmore of it\n\nAfter.`, table)).toBe(
+      `${table}\n: Caption\nmore of it`.length,
+    );
+    expect(end(`${table}\n\n\n: Caption`, table)).toBe(`${table}\n\n\n: Caption`.length);
+  });
+  it('is the table’s own end where no caption follows', () => {
+    const table = '| A |\n| - |\n| 1 |';
+    expect(end(table, table)).toBe(table.length);
+    expect(end(`${table}\n\nAfter: not a caption.`, table)).toBe(table.length);
+    expect(end(`${table}\n\n:not a caption`, table)).toBe(table.length);
   });
 });
