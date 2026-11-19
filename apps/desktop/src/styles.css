@@ -642,7 +642,7 @@ body {
 }
 
 .rl-sidebar-item[aria-current='page'] {
-  background: var(--rl-rule);
+  background: var(--rl-pressed);
 }
 
 .rl-sidebar-item:focus-visible {
