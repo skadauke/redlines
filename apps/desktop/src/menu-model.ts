@@ -46,6 +46,8 @@ export interface MenuCommands {
    */
   switchLook(): void;
   toggleSidebar(): void;
+  /** Opens the sidebar at the document's chat, or closes it when it is showing the chat. */
+  showChat(): void;
   /** Shows the word count in the window's corner, or hides it (Preferences' switch). */
   toggleWordCount(): void;
   toggleTracking(): void;
@@ -93,6 +95,8 @@ export interface MenuCommands {
    */
   writeToLog?(): void;
   revealDevLog?(): void;
+  /** Help › Replay Onboarding, in dev builds only (#1206): the first-launch sheet and tour again. */
+  replayOnboarding?(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
@@ -108,6 +112,8 @@ export interface MenuState {
   /** The editor's `EditorUiState.canAcceptAll`: a change in the selection, or in the document. */
   canAcceptAll: boolean;
   sidebarOpen: boolean;
+  /** What the sidebar shows (#1194); the file list when it says nothing. */
+  sidebarView?: 'files' | 'chat';
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
   /** Whether the word count is shown in the window's corner. */
@@ -536,7 +542,15 @@ export function appMenuModel(
             text: 'Show Files',
             accelerator: 'Ctrl+Cmd+S',
             action: () => commands.toggleSidebar(),
-            textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
+            textFor: (state) =>
+              state.sidebarOpen && state.sidebarView !== 'chat' ? 'Hide Files' : 'Show Files',
+          },
+          {
+            text: 'Show Chat',
+            accelerator: 'Ctrl+Cmd+C',
+            action: () => commands.showChat(),
+            textFor: (state) =>
+              state.sidebarOpen && state.sidebarView === 'chat' ? 'Hide Chat' : 'Show Chat',
           },
           {
             text: 'Show Word Count',
@@ -618,6 +632,9 @@ export function appMenuModel(
               { text: 'Write to Log…', action: () => commands.writeToLog?.() },
               { text: 'Reveal Dev Log', action: () => commands.revealDevLog?.() },
             ]
+          : []),
+        ...(commands.replayOnboarding
+          ? [{ text: 'Replay Onboarding', action: () => commands.replayOnboarding?.() }]
           : []),
         SEPARATOR,
         { text: 'Show Agent Logs', action: () => commands.showAgentLogs() },

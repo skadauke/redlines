@@ -68,6 +68,7 @@ jobs:
       skip: ${{ steps.tested.outputs.skip }}
       ref: ${{ steps.target.outputs.ref }}
       thin: ${{ steps.target.outputs.thin }}
+      epic: ${{ steps.target.outputs.epic }}
       rust: ${{ steps.flags.outputs.rust }}
       quicklook: ${{ steps.flags.outputs.quicklook }}
       ui: ${{ steps.flags.outputs.ui }}
@@ -91,6 +92,15 @@ jobs:
           if [ "$EVENT" = pull_request ] || { [ "$EVENT" = push ] && [[ "$REF_NAME" == epic/* ]]; }; then
             thin=true
           fi
+          # An Epic's branch, or a pull request into one, is tested: the embeds' size checks allow
+          # the Epic's growth (`epicAllowanceBytes` in their size-budget.json), with a warning. The
+          # pull request from the Epic to main is held to the budgets themselves.
+          epic=false
+          if [ "$EVENT" = pull_request ]; then
+            [[ "$BASE_REF" == epic/* ]] && epic=true
+          elif [[ "$REF_NAME" == epic/* ]]; then
+            epic=true
+          fi
           # The one pull request from an Epic branch to main gets the full run.
           if [ "$EVENT" = pull_request ] && [ "$BASE_REF" = main ] && [[ "$HEAD_REF" == epic/* ]]; then
             thin=false
@@ -105,6 +115,7 @@ jobs:
               found=$(gh api "repos/$REPO/git/ref/heads/$branch" --jq '.object.sha' || true)
               if [ -n "$found" ]; then
                 ref="$found"
+                [[ "$branch" == epic/* ]] && epic=true
               elif [ -n "$EPIC_BRANCH" ]; then
                 echo "::error::EPIC_BRANCH is set to $EPIC_BRANCH, which is not a branch."
                 exit 1
@@ -114,6 +125,7 @@ jobs:
           fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "thin=$thin" >> "$GITHUB_OUTPUT"
+          echo "epic=$epic" >> "$GITHUB_OUTPUT"
 
       # A full run (scheduled or dispatched) of this commit that has finished with a success or a
       # failure (a cancelled run tested nothing), recorded by `record` as the commit status
@@ -249,13 +261,20 @@ jobs:
         run: pnpm format:check
 
       # Fails when the minimal embed (core and review) grows past apps/embed-smoke/size-budget.json.
+      # On an Epic's branch, and a pull request into one, it may grow past it by the file's Epic
+      # allowance, with a warning (check-size.ts says why).
       - name: Embed size budget
         run: pnpm --filter @redlines/embed-smoke size
+        env:
+          REDLINES_SIZE: ${{ needs.changes.outputs.epic == 'true' && 'epic' || '' }}
 
       # Fails when the website's bundle (the editor, review, the agents' runs, its stylesheet or its
-      # fonts) grows past apps/website-embed/size-budget.json.
+      # fonts) grows past apps/website-embed/size-budget.json; its JavaScript, as above, by the Epic's
+      # allowance on an Epic's branch.
       - name: Website embed size budget
         run: pnpm --filter @redlines/website-embed size
+        env:
+          REDLINES_SIZE: ${{ needs.changes.outputs.epic == 'true' && 'epic' || '' }}
 
   # The Mac app's Quick Look extension is Swift, which no other job compiles: it is built here for
   # both architectures, and its renderer is run in the system's JavaScriptCore on the fixtures of
