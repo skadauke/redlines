@@ -14,6 +14,15 @@
   display: none;
 }
 
+/*
+ * One inch of margin on every side of every page, as Word's default. WebKit takes a margin set here
+ * over the print dialog's own (which is none when the page asks for none), and the PDF export
+ * (src-tauri/src/pdf.rs) sets the same inch for the print operation.
+ */
+@page {
+  margin: 1in;
+}
+
 @media print {
   html,
   body {
@@ -161,7 +170,16 @@
     line-height: 1.4;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    /* A short block is kept whole; a long one (print.ts, `splitLongCode`) is split at a line. */
     break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #rl-print pre.rl-long {
+    break-inside: auto;
+    page-break-inside: auto;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
 
   #rl-print pre code {
@@ -183,6 +201,11 @@
     height: auto;
     margin: 0.5em 0;
     break-inside: avoid;
+  }
+
+  #rl-print p:has(> img:only-child) {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   #rl-print p > img:only-child {
