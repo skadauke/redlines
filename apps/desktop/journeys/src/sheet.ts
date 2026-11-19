@@ -331,24 +331,35 @@ const MORE: readonly Specimen[] = [
       ['reference-chip', '.rl-xref'],
       ['citation-chip', '.rl-cite'],
     ] as const
-  ).map(([name, selector]): Specimen => ({
-    name,
-    family: 'chips',
-    selector,
-    views: ['clean', 'simple'],
-    reach: {
-      rest,
-      hover: async (j) => {
-        await rest(j);
-        await pointAt(j, j.page.locator(selector).first());
+  ).map(([name, selector]): Specimen => {
+    // A click on a chip puts the caret in its line, which then shows its source (#1172): each
+    // state starts with the caret away, on the heading, so that the chips are drawn.
+    const away = async (j: Journey) => {
+      await j.caretAtStart();
+      await rest(j);
+    };
+    return {
+      name,
+      family: 'chips',
+      selector,
+      views: ['clean', 'simple'],
+      // Chosen, a citation shows its source in place of the chip (#1172).
+      mayVanish: ['selected'],
+      reach: {
+        rest: away,
+        hover: async (j) => {
+          await away(j);
+          await pointAt(j, j.page.locator(selector).first());
+        },
+        selected: async (j) => {
+          await away(j);
+          await j.page.locator(selector).first().click();
+          await j.page.mouse.move(AWAY.x, AWAY.y);
+        },
       },
-      selected: async (j) => {
-        await rest(j);
-        await j.page.locator(selector).first().click();
-        await j.page.mouse.move(AWAY.x, AWAY.y);
-      },
-    },
-  })),
+      after: (j) => j.caretAtStart(),
+    };
+  }),
 ];
 
 export const SPECIMENS: readonly Specimen[] = [
@@ -730,12 +741,6 @@ export const KNOWN: readonly KnownDisagreement[] = [
     family: 'handles',
     props: ['borderTopLeftRadius', 'backgroundColor', 'boxShadow'],
     why: 'the picture’s handles are white pills with an outline; the table’s grips are gray pills with a border and a bigger radius',
-  },
-  {
-    issue: 1172,
-    family: 'chips',
-    props: ['color'],
-    why: 'a reference chip is in the full ink, a citation chip in the gray one (both are heavy chips; #1172 makes them text with a dotted underline)',
   },
 ];
 
