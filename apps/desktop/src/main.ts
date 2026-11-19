@@ -227,7 +227,9 @@ function sessionStatus(): string | undefined {
   if (!session) return undefined;
   if (sessionState === 'offline') return 'Offline: your edits are kept';
   if (sessionState === 'ended') return 'No longer in the session';
-  return sessionPeers > 0 ? `In ${sessionPeers + 1} windows` : undefined;
+  // Which window this is, as Word numbers the windows of one document ("Window 2").
+  if (sessionPeers === 0) return undefined;
+  return session.number === null ? `In ${sessionPeers + 1} windows` : `Window ${session.number}`;
 }
 
 /** Joins the session of the document at `path`, as its leader when there is none yet. */

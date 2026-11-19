@@ -1939,8 +1939,10 @@ one session on one Mac, with no network, no account and no invitation.
   handover. The others show its caret with its name on a flag that fades after five seconds, and
   its selection tinted, in that color. A caret is sent as a position in the confirmed text at a
   version, and every window places it again among its own text, so it stays among the same words
-  while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
-  windows", or that edits are kept while the session can't be reached.
+  while text moves; nothing of it is stored. Beside the document's name, set apart from it in
+  regular italic where the name is bold, the title bar says which window this is, "Window 2", as
+  Word numbers the windows of one document (a tab with no number of its own says "In 2 windows"),
+  or that edits are kept while the session can't be reached.
 - **Undo is each window's own.** A step knows whose it is, and a change that came from another window
   is never undone by this one (§5.13): a tracked step is taken back by rejecting its own marks, and
   an untracked step that the other window changed since is left alone, with the name of the window

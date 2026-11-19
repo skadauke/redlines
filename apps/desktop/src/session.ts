@@ -97,6 +97,8 @@ export interface SessionOptions {
 export interface Session {
   readonly path: string;
   readonly binding: SyncBinding;
+  /** The number this window is known by among the document's windows: 1 for the first; none for a tab with no number of its own. */
+  readonly number: number | null;
   /** Whether this window leads: it runs the authority and writes the file. */
   readonly leading: boolean;
   /** How many windows are in the session, for the leader; one for any other window. */
@@ -265,6 +267,19 @@ export class PortLog implements DurableLog {
 export function ordinalOf(label: string): number {
   const found = /(\d+)$/.exec(label);
   return label === 'main' || !found ? 1 : Number(found[1]) + 1;
+}
+
+/**
+ * The number a window says it is, as Word numbers the windows of one document: the main window is
+ * "Window 1", `doc-<n>` is the one after it, and a tab a page named (`tab-<n>`) is its own number.
+ * A tab with a random name has none.
+ */
+export function windowNumberOf(label: string): number | null {
+  if (label === 'main') return 1;
+  const doc = /^doc-(\d+)$/.exec(label);
+  if (doc) return Number(doc[1]) + 1;
+  const tab = /^tab-(\d+)$/.exec(label);
+  return tab ? Number(tab[1]) : null;
 }
 
 /**
@@ -558,6 +573,7 @@ export async function joinSession(
   const session: Session = {
     path,
     binding,
+    number: windowNumberOf(ports.label),
     get leading() {
       return leading;
     },
