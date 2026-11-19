@@ -8,7 +8,6 @@
 //
 // This module finds the block an edit lies in and plans the changes; `track.ts` commits them.
 
-import { encodePayload } from './payload.ts';
 import { lineEnd, lineStart } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { nameOf } from './edit-support.ts';
@@ -572,6 +571,3 @@ export function closesAtEnd(block: CodeBlock, now: string): boolean {
   const fence = INDENT_CLOSE_FENCE.exec(rest)?.[1] ?? '';
   return !!block.unclosed && lines.length > 1 && fence[0] === run[0] && fence.length >= run.length;
 }
-
-/** The payload of a substitution of a block: its text, one line. */
-export const payloadOf = (old: string) => encodePayload(old);

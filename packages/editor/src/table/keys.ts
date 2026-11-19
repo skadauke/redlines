@@ -85,12 +85,6 @@ function hereIn(state: EditorState): Here | null {
   const row = found.table.rows.find((r) => r.cells.includes(found.cell));
   return row ? { table: found.table, row, cell: found.cell, head: main.head } : null;
 }
-
-/** Whether the caret is in a cell of a table. */
-export function inTable(state: EditorState): boolean {
-  return hereIn(state) !== null;
-}
-
 function goTo(view: EditorView, pos: number): boolean {
   const selection = visibleSelection(view.state, EditorSelection.single(pos));
   if (!selection.eq(view.state.selection)) {

@@ -70,13 +70,6 @@ export function gridOf(text: string, table: TableRead, parsed?: Parsed): Grid {
       : null,
   };
 }
-
-/** The text of the cell `col` of a line, between its pipes, as written. */
-export function contentOf(text: string, line: TableLineRead, col: number): string | undefined {
-  const cell = line.cells[col];
-  return cell ? text.slice(cell.contentFrom, cell.contentTo) : undefined;
-}
-
 /** Where a marker goes in the content of a cell: after the first space, in front of the text. */
 const slot = (content: string): number => (/^[ \t]/.test(content) ? 1 : 0);
 

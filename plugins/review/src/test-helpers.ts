@@ -259,33 +259,6 @@ export function stubHeights(heights: Record<string, number>): () => void {
     if (original) Object.defineProperty(proto, 'offsetHeight', original);
   };
 }
-
-/** Gives `el` this place on screen, as a layout would. */
-export function stubRect(
-  el: Element,
-  {
-    left = 0,
-    top = 0,
-    right = 0,
-    bottom = 0,
-  }: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>>,
-): void {
-  const rect = {
-    left,
-    top,
-    right,
-    bottom,
-    x: left,
-    y: top,
-    width: right - left,
-    height: bottom - top,
-  };
-  Object.defineProperty(el, 'getBoundingClientRect', {
-    configurable: true,
-    value: () => ({ ...rect, toJSON: () => rect }),
-  });
-}
-
 /** Gives `el` this width, as a layout would. */
 export function stubWidth(el: Element, width: number): void {
   Object.defineProperty(el, 'offsetWidth', { configurable: true, get: () => width });

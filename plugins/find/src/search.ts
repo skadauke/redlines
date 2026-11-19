@@ -147,12 +147,6 @@ export function searchDoc(
   }
   return { matches, invalid: false };
 }
-
-/** The matches of `query` in the text a reader sees, without regard to case, in document order. */
-export function findMatches(doc: string, query: string): Match[] {
-  return searchDoc(doc, query).matches;
-}
-
 /**
  * The replacement for a match. With a regular expression it reads `$&`, `$$`, `$1` to `$99` and
  * `$<name>` as JavaScript's replace does: a group that took no part is empty, and a number with no

@@ -123,6 +123,3 @@ export function toolbarIcon(name: ToolbarIcon, size = 16): SVGSVGElement {
   if (!(svg instanceof SVGSVGElement)) throw new Error(`Couldn't draw the ${name} icon`);
   return svg;
 }
-
-/** The names of the icons, for a test that checks every item has one. */
-export const ICON_NAMES = Object.keys(ICONS) as ToolbarIcon[];
