@@ -10,6 +10,22 @@ import { icon } from './icons.ts';
 /** How long a notification that passes by stays, unless the pointer or the keyboard is on it. */
 export const PASSING_MS = 4000;
 
+/** The time a notification is up before its words: the eye finding it, and the hand a moment. */
+export const READING_BASE_MS = 2000;
+
+/** The time for each word, at a reading speed of 200 words a minute. */
+export const WORD_MS = 300;
+
+/**
+ * How long a notification that passes by stays on screen: the time to read its text (a base time
+ * and its words at 200 a minute), or `timeout`, whichever is longer, so that a short one stays as
+ * long as its caller asked and a long one is not gone before it is read.
+ */
+export function stayMs(text: string, timeout: number): number {
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.max(timeout, READING_BASE_MS + words * WORD_MS);
+}
+
 export interface NotificationAction {
   label: string;
   /** Does what the notification offers. The notification stays until this closes it. */
@@ -23,7 +39,11 @@ export interface NotificationOptions {
   secondaryAction?: NotificationAction;
   /** The dismiss button's word, such as "Later"; without one, the button is a cross. */
   dismissLabel?: string;
-  /** Closes it after this many milliseconds; without it, it stays until it is handled. */
+  /**
+   * Closes it after this many milliseconds, or after the time to read its text if that is longer
+   * (`stayMs`); without it, it stays until it is handled. The time starts again each time the
+   * pointer or the keyboard has been on it.
+   */
   timeout?: number;
   /** A notification shown with the same key replaces this one. */
   key?: string;
@@ -141,7 +161,7 @@ export function createNotifications(container: HTMLElement): Notifications {
     const wait = () => {
       clearTimeout(timer);
       if (options.timeout === undefined || hovered || card.contains(document.activeElement)) return;
-      timer = setTimeout(() => notification.close(), options.timeout);
+      timer = setTimeout(() => notification.close(), stayMs(options.text, options.timeout));
     };
     card.addEventListener('pointerenter', () => {
       hovered = true;

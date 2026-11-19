@@ -14,6 +14,12 @@ describe('the copyright line', () => {
     expect(line).toBeDefined();
     expect(COPYRIGHT).toBe((line ?? '').replace('(c)', '©'));
   });
+
+  it('names the holder in full, in LICENSE and in the window (#1187)', () => {
+    const license = readFileSync(new URL('../../../LICENSE', import.meta.url), 'utf8');
+    expect(license).toContain('Copyright (c) 2026 Stephan Kadauke\n');
+    expect(COPYRIGHT).toBe('Copyright © 2026 Stephan Kadauke');
+  });
 });
 
 describe('the icon', () => {
