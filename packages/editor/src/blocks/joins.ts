@@ -1027,7 +1027,14 @@ function outOfList(
   const changes: ChangeSpec[] = [];
   const above = line.number > 1 ? doc.line(line.number - 1) : null;
   let before: string | null = null;
-  if (prev && above && !isGapLine(state, above)) {
+  if (prev && above && !isGapLine(state, above) && prev.kind === 'front-matter') {
+    // Right under front matter, which takes no change, tracked or not: the blank line goes in at the
+    // item's own start, beside the marker's deletion, not in the break after the closing fence, which
+    // is part of the front matter (#291).
+    changes.push({ from: own.prefix.from, insert: '\n' });
+    changes.push({ from: own.prefix.from, to: block.text.from });
+    before = state.sliceDoc(prev.lines.to, own.prefix.from);
+  } else if (prev && above && !isGapLine(state, above)) {
     // Right under the block above: a blank line between, in the same edit as the marker.
     before = `\n${blankOf(outer)}\n${outer}`;
     changes.push({ from: prev.lines.to, to: block.text.from, insert: before });
