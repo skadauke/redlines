@@ -27,4 +27,19 @@ describe('print.css', () => {
     expect(print).toMatch(/#rl-print pre\s*\{[^}]*white-space: pre-wrap/);
     expect(print).toMatch(/#rl-print tbody\s*\{[^}]*width: 100%/);
   });
+
+  it('has a margin of one inch on every page, in the page rule and in the PDF export', () => {
+    expect(css).toMatch(/^@page\s*\{\s*margin: 1in;\s*\}/m);
+    // The page rule is outside `@media print`, where an @page rule is not allowed.
+    expect(css.indexOf('@page')).toBeLessThan(css.indexOf('@media print'));
+    const rust = readFileSync(new URL('../src-tauri/src/pdf.rs', import.meta.url), 'utf8');
+    expect(rust).toContain('let margin: f64 = 72.0;');
+  });
+
+  it('keeps a short code block and a picture whole, and splits a long block with its box on each page', () => {
+    expect(print).toMatch(/#rl-print pre\s*\{[^}]*break-inside: avoid/);
+    expect(print).toMatch(/#rl-print pre\.rl-long\s*\{[^}]*break-inside: auto/);
+    expect(print).toMatch(/pre\.rl-long\s*\{[^}]*box-decoration-break: clone/);
+    expect(print).toMatch(/#rl-print p:has\(> img:only-child\)\s*\{[^}]*break-inside: avoid/);
+  });
 });
