@@ -21,8 +21,12 @@ async function open(page: Page, url: string): Promise<void> {
 
 test('the Welcome mode of Preferences: you, your agent, and set up this Mac', async ({ page }) => {
   const look = test.info().project.name;
-  const shot = (name: string) =>
-    expect.soft(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
+  // The pointer is left where the last click was, which a taller or shorter card puts over another
+  // button (hovered, or not, as the browser gets to update it): move it to an empty place first.
+  const shot = async (name: string) => {
+    await page.mouse.move(2, 790);
+    await expect.soft(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
+  };
   await open(page, '/preferences.html?welcome');
   const sheet = page.locator('.rl-onb');
   await expect(sheet).toBeVisible();
