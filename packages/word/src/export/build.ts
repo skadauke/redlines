@@ -47,6 +47,7 @@ import { alignsOf, blockWas, completeChanges, oldFormat, opsOf } from './changes
 import { drawnSize, loadImage } from './images.ts';
 import type { ImageSource, LoadedImage } from './images.ts';
 import { movesOf, patchMoves } from './moves.ts';
+import { isQuarto, quartoToMarkdown } from './quarto.ts';
 import type { MoveHalf, MoveRevision } from './moves.ts';
 
 /** The children of one paragraph, and the deletion of its mark when a deleted break ends it. */
@@ -334,12 +335,24 @@ export interface ExportOptions {
 }
 
 /** A Redlines file as the bytes of a .docx. */
-export async function exportDocx(text: string, options: ExportOptions = {}): Promise<Uint8Array> {
+export async function exportDocx(source: string, given: ExportOptions = {}): Promise<Uint8Array> {
+  // Quarto's own syntax is written as Word's terms (quarto.ts). The text is then no longer the
+  // file's, so a round trip's carriers, which hold the file's text and its blocks, are left out.
+  const quarto = isQuarto(source);
+  const text = quarto ? quartoToMarkdown(source) : source;
+  const options: ExportOptions = quarto ? { ...given, carriers: false } : given;
   const parsed = parse(text);
   const ledger: Ledger = parsed.ledger;
   const author = authorsOf(ledger);
   const ids = new WordIds();
   const report = options.report ?? [];
+  if (quarto) {
+    report.push({
+      kind: 'quarto',
+      message:
+        'Quarto’s callouts, references and formulas are written as Word’s own (a quote, a label, a line of TeX); editing them in Word and bringing them back does not restore Quarto’s syntax.',
+    });
+  }
   const moves = movesOf(parsed.marks, text);
   const inserted = insertions(parsed.marks, moves);
   const blocks = markdownBlocks(text);
