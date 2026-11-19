@@ -320,13 +320,16 @@ body {
   height: calc(17 * var(--rl-frame));
 }
 
-.rl-icon-button[aria-expanded='true'] {
-  background: var(--rl-pressed);
+/* One hover fill for every button and row, and the item the keys chose looks the same (#1247). */
+.rl-icon-button:hover,
+.rl-icon-button:focus-visible {
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
+  color: var(--rl-ink);
+  outline: none;
 }
 
-.rl-icon-button:focus-visible {
-  outline: 2px solid var(--rl-ink-3);
-  outline-offset: -2px;
+.rl-icon-button[aria-expanded='true'] {
+  background: var(--rl-pressed);
 }
 
 /* The outline's button is pressed while its window shows. */
@@ -441,7 +444,6 @@ body {
 
 .rl-menu-item:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
 
 .rl-menu-item:disabled {
@@ -636,9 +638,10 @@ body {
   cursor: default;
 }
 
-/* On the sidebar's tint, hover takes the pressed color and the open file a step more. */
-.rl-sidebar-item:hover {
-  background: var(--rl-pressed);
+/* On the sidebar's tint, hover takes the one hover fill and the open file a step more. */
+.rl-sidebar-item:hover,
+.rl-sidebar-item:focus-visible {
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
 }
 
 .rl-sidebar-item[aria-current='page'] {
@@ -647,7 +650,6 @@ body {
 
 .rl-sidebar-item:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
 
 /*
@@ -953,20 +955,16 @@ body.rl-image-dragging * {
   cursor: default;
 }
 
-/* The action is the card's one strong button: the full ink on the pressed gray. */
+/* The action is the card's one strong button: the full ink, bold. */
 .rl-notification-action {
-  background: var(--rl-pressed);
   color: var(--rl-ink, CanvasText);
   font-weight: 700;
 }
 
-.rl-notification-dismiss:enabled:hover {
-  background: var(--rl-pressed);
-  color: var(--rl-ink, CanvasText);
-}
-
+.rl-notification-dismiss:enabled:hover,
 .rl-notification-action:enabled:hover {
-  background: var(--rl-rule);
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
+  color: var(--rl-ink, CanvasText);
 }
 
 .rl-notification-close {
@@ -985,13 +983,15 @@ body.rl-image-dragging * {
 }
 
 .rl-notification-close:hover {
-  background: var(--rl-pressed);
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
   color: var(--rl-ink);
 }
 
+/* Chosen with the keys, a button looks as under the pointer. */
 .rl-notification button:focus-visible {
-  outline: 2px solid var(--rl-ink-3);
-  outline-offset: -2px;
+  outline: none;
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
+  color: var(--rl-ink, CanvasText);
 }
 
 .rl-notification button:disabled {
