@@ -1276,6 +1276,9 @@ const ask = createAsk(editor, {
   defaultAgent: () => loadSettings().defaultAgent ?? undefined,
   // The model the bubble's list starts at: Preferences' choice for the agent (#530, #507).
   chosenModel: (agent) => loadSettings().agentModels[agent],
+  // Every answered Ask is a turn in the document's chat too (#1194); Open in Chat shows it there.
+  onTurn: (turn) => chat.addTurn(turn),
+  openInChat: () => openChat(),
   notice: (message) => notice.flash(message),
   // Only agents: an @ of a person means nothing in a question to an agent.
   attachToField: (field) => attachAgentPicker(field, true),
@@ -1649,6 +1652,15 @@ const toggleSidebar = () => {
   if (settings.sidebarOpen && sidebar.view === 'chat') sidebar.setView('files');
   else changeSettings({ sidebarOpen: !settings.sidebarOpen });
   render();
+};
+
+/** Opens the sidebar at the chat, at its newest message, with the keyboard in the composer. */
+const openChat = () => {
+  sidebar.setView('chat');
+  if (!settings.sidebarOpen) changeSettings({ sidebarOpen: true });
+  render();
+  chat.reveal();
+  chat.focus();
 };
 
 /** Show Chat (⌃⌘C): the sidebar open at the document's chat; again, closed. */

@@ -14,13 +14,15 @@ import { copyText, exchangeAsMarkdown, keepAsComment } from './actions.ts';
 import { quoteFinder, selectionText } from './answer.ts';
 import { type Bubble, createBubble } from './bubble.ts';
 import { placeBubble } from './place.ts';
-import { type AskDeps, type AskSession, createAskSession } from './session.ts';
+import { type AskDeps, type AskSession, type AskTurn, createAskSession } from './session.ts';
 import { askTheme, RAILED } from './styles.ts';
+import { BASE_MS, shownFor } from './timing.ts';
 import { askTarget, setTarget, targetOf } from './target.ts';
 
 export { exchangeAsMarkdown, keepAsComment } from './actions.ts';
 export { findQuote, parseAnswer, quoteFinder, selectionText } from './answer.ts';
 export { createAskSession, EXPLAIN, askText } from './session.ts';
+export { shownFor } from './timing.ts';
 export type { AskDeps, AskSession, AskState, AskTurn } from './session.ts';
 
 export interface AskOptions extends AskDeps {
@@ -53,6 +55,11 @@ export interface AskOptions extends AskDeps {
   openInNewWindow?: (text: string) => void | Promise<void>;
   /** Puts text on the clipboard. Default: the page's own. */
   copy?: (text: string) => Promise<void> | void;
+  /**
+   * Opens the sidebar at the document's chat, where every Ask's turn is kept (#1194). Without it,
+   * Open in Chat is not offered. The bubble goes once it is called.
+   */
+  openInChat?: () => void;
   /** Shows a failed run's log. */
   showLog?: (path: string) => void;
   /**
@@ -115,6 +122,10 @@ interface Open {
   opening: boolean;
   /** The rail's hold on the bubble, while the rail lays it out among its notes. */
   pin: PinnedElement | null;
+  /** The timer that closes the bubble once its answer has been read (#1194), and the answer it is for. */
+  leaving: { timer: ReturnType<typeof setTimeout>; answers: number } | null;
+  /** How many answers the bubble has shown for, so that only a new one starts the time. */
+  timed: number;
   unsubscribe: () => void;
 }
 
@@ -170,8 +181,10 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       choice: state.choice,
       draft: state.turns.length > open.lastQuestion.answers ? '' : open.lastQuestion.text,
       canOpenWindow: options.openInNewWindow !== undefined,
+      canOpenChat: options.openInChat !== undefined,
     });
     place();
+    followTime(open);
   };
 
   /**
@@ -277,11 +290,45 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
     else close();
   };
 
+  /** Takes away the timer that closes the bubble, if one is running. */
+  function clearLeaving(mine: Open): void {
+    if (mine.leaving) clearTimeout(mine.leaving.timer);
+    mine.leaving = null;
+  }
+
+  /**
+   * The bubble goes by itself, so that the writer keeps their focus (#1194): once an answer is
+   * complete, after a time that follows its length (`shownFor`), and never while the pointer is on
+   * it or it holds a follow-up. The answer stays in the chat. A new question, a failure or the
+   * first-run question stops the clock, and the next answer starts it again.
+   */
+  function followTime(mine: Open): void {
+    const { state } = mine.session;
+    const busy = state.pending !== null || state.line !== null;
+    if (busy) return clearLeaving(mine);
+    if (state.turns.length === 0 || state.turns.length === mine.timed) return;
+    mine.timed = state.turns.length;
+    arm(mine, shownFor(state.turns.at(-1)?.answer ?? ''));
+  }
+
+  function arm(mine: Open, ms: number): void {
+    clearLeaving(mine);
+    const timer = setTimeout(() => {
+      mine.leaving = null;
+      if (open !== mine) return;
+      // Held by the pointer or a follow-up: it is armed again when they let go.
+      if (mine.bubble.el.matches(':hover') || mine.bubble.written) return;
+      close(mine.bubble.el.contains(doc.activeElement));
+    }, ms);
+    mine.leaving = { timer, answers: mine.timed };
+  }
+
   function close(refocus = false): void {
     if (!open) return;
     const closing = open;
     open = null;
     stopWaiting?.();
+    clearLeaving(closing);
     closing.unsubscribe();
     closing.session.close();
     // The notes go back to their places, if the rail had made room for the bubble.
@@ -325,7 +372,16 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       return false;
     }
     close();
-    const session = createAskSession(options, { quote: capped(quote) });
+    const session = createAskSession(
+      {
+        ...options,
+        // Every answered turn goes into the document's chat too, with the passage it was about.
+        ...(options.onTurn
+          ? { onTurn: (turn: AskTurn) => options.onTurn?.({ ...turn, about: quote }) }
+          : {}),
+      },
+      { quote: capped(quote) },
+    );
     const bubble = createBubble({
       submit: (text) => {
         if (open) open.lastQuestion = { text, answers: session.state.turns.length };
@@ -340,6 +396,12 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       ...(options.showLog ? { showLog: options.showLog } : {}),
       ...(options.openPreferences ? { openPreferences: options.openPreferences } : {}),
       makeComment,
+      openChat: () => {
+        const turns = session.state.turns;
+        if (!open || turns.length === 0) return;
+        close();
+        options.openInChat?.();
+      },
       openWindow: () => {
         const turns = session.state.turns;
         const mine = open;
@@ -394,9 +456,21 @@ export function createAsk(editor: Editor, options: AskOptions): Ask {
       lastQuestion: { text: '', answers: 0 },
       opening: false,
       pin: null,
+      leaving: null,
+      timed: 0,
       unsubscribe: session.subscribe(render),
     };
     open = opened;
+    // The pointer on the bubble holds it; letting go gives the answer a short moment more. A
+    // follow-up being typed holds it, and a field emptied again lets it go.
+    const settle = () => {
+      if (open !== opened || opened.timed === 0) return;
+      if (opened.bubble.written || opened.bubble.el.matches(':hover')) clearLeaving(opened);
+      else arm(opened, BASE_MS);
+    };
+    bubble.el.addEventListener('pointerenter', settle);
+    bubble.el.addEventListener('pointerleave', settle);
+    bubble.el.addEventListener('input', settle);
     doc.addEventListener('keydown', onKey);
     doc.addEventListener('pointerdown', onPress, true);
     win.addEventListener('resize', place);

@@ -119,7 +119,23 @@ export function widen(
    * holds the mark whole, is tried before the unit is given with the mark left out (#265). */
   beside = false,
 ): Widened {
-  return withDialect(ctx.dialect, () => widenIn(text, edits, ctx, beside));
+  const done = withDialect(ctx.dialect, () => widenIn(text, edits, ctx, beside));
+  heard.push(done.unit);
+  // What nobody took in this turn of the event loop was a try that was not written: it is dropped.
+  if (heard.length === 1) queueMicrotask(() => (heard.length = 0));
+  return done;
+}
+
+/** The units `widen` wrote since the last `drainWidenings`, in this turn of the event loop. */
+const heard: WidenedUnit[] = [];
+
+/**
+ * The units that edits were widened to since the last call, for the editor to say so (#1188): the
+ * writer that makes a transaction takes them as it records the edit. Only what `widen` wrote in
+ * this turn of the event loop is there, so that a try made long ago is not told as an edit's.
+ */
+export function drainWidenings(): WidenedUnit[] {
+  return heard.splice(0, heard.length);
 }
 
 function widenIn(

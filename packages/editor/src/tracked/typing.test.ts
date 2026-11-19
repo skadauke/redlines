@@ -36,6 +36,7 @@ import {
 } from '../index.ts';
 import { list, visibleText, withoutBlankLines } from './test-helpers.ts';
 
+import { widenedNotice } from './intent.ts';
 import { editSourceFacet, RAW_READ_ONLY } from './typing.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
@@ -442,7 +443,8 @@ describe('tracked typing', () => {
     type(editor, 'x');
     expect(editor.getDoc()).toContain('<!--sub ');
     expect(editor.getDoc()).toContain('Run `make xall` now.<!--/');
-    expect(notices).toEqual([]);
+    // Said once, quietly (#1188).
+    expect(notices).toEqual([widenedNotice(['block'])]);
   });
 
   it('makes typing, Enter and Backspace inside code a substitution of the block, in indented code of an item too (#153, lane R5)', () => {
@@ -483,8 +485,11 @@ describe('tracked typing', () => {
           ),
         );
       } else {
-        // The first edit replaces the block whole (format §3.5); the others edit its newest code.
-        expect(notices, doc).toEqual([]);
+        // The first edit replaces the block whole (format §3.5); the others edit its newest code. Code
+        // is written so by rule, which says nothing; a block widened from beyond it says so once
+        // (#1188).
+        expect(notices.length, doc).toBeLessThanOrEqual(1);
+        for (const notice of notices) expect(notice, doc).toBe(widenedNotice(['code']));
         expect(editor.getDoc().match(/<!--sub /g), doc).toHaveLength(1);
         expect(editor.getDoc(), doc).toContain('<!--/');
       }
@@ -539,7 +544,7 @@ describe('tracked typing', () => {
     expect(said).toEqual([
       'x at the start: changed',
       'Enter at the start: changed',
-      'Backspace at the start: changed',
+      `Backspace at the start: ${widenedNotice(['block'])}`,
       'Delete at the start: changed',
       'x at the middle: changed',
       'Enter at the middle: changed',
@@ -2143,7 +2148,7 @@ describe('every way to change text', () => {
     if (key === 'Mod-]') {
       // The indent is a replacement of the paragraph (format §3.12).
       expect(editor.getDoc()).toContain('<!--sub ');
-      expect(notices).toEqual([]);
+      expect(notices).toEqual([widenedNotice(['block'])]);
       return;
     }
     // The format can't mark a comment at the start of a paragraph's line, so it is refused.
@@ -2158,7 +2163,7 @@ describe('every way to change text', () => {
     editor.view.dispatch({ changes: { from: 0, insert: '  ' }, userEvent: 'indent' });
     // A replacement of the paragraph (format §3.12).
     expect(editor.getDoc()).toContain('<!--sub ');
-    expect(notices).toEqual([]);
+    expect(notices).toEqual([widenedNotice(['block'])]);
   });
 
   it('comments out as a plain edit with tracking off', () => {
