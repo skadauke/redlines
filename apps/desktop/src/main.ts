@@ -22,7 +22,10 @@ import {
 import { codeFileHighlight, codeLanguagesFor } from '@redlines/code';
 import {
   createEditor,
+  dropProjectImage,
   editorDocumentHtml,
+  leaveProjectImage,
+  overProjectImage,
   PLAIN_ONLY_TRACKING,
   type Author,
   type CropRect,
@@ -963,6 +966,12 @@ function reportWindow(): void {
   if (doc) windows?.reportDocument(doc.path, doc.dirty || doc.writing || draftsPending);
 }
 
+/** Whether the client point is over the document's page, beside the sidebar and under the title bar. */
+function insidePage(at: { x: number; y: number }): boolean {
+  const box = editor.view.dom.getBoundingClientRect();
+  return at.x >= box.left && at.x <= box.right && at.y >= box.top && at.y <= box.bottom;
+}
+
 const sidebar = createSidebar(app, {
   host,
   openFile: (path, { newWindow }) => {
@@ -979,6 +988,21 @@ const sidebar = createSidebar(app, {
   },
   isRunLive: () => runs.isLive(),
   showPlainOnly: () => settings.showPlainOnlyFiles,
+  // An image dragged out of the sidebar: over the page it shows where it goes, and letting go writes
+  // its link there (#1198). Elsewhere, such as over the sidebar itself, it goes nowhere.
+  imageDrag: {
+    over: (at) => {
+      if (insidePage(at)) overProjectImage(editor.view, at.y);
+      else leaveProjectImage(editor.view);
+    },
+    drop: (at, path) => {
+      if (insidePage(at)) {
+        dropProjectImage(editor.view, at.y, path);
+        editor.view.focus();
+      } else leaveProjectImage(editor.view);
+    },
+    leave: () => leaveProjectImage(editor.view),
+  },
   onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
   onClose: () => {
     changeSettings({ sidebarOpen: false });
