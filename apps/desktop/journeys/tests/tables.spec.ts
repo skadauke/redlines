@@ -149,7 +149,7 @@ test.describe('tables @tables', () => {
   });
 
   // #519: moving rows and columns by their grips. No cell is highlighted while a drag lasts; the drop
-  // line is a thick gray one that shows only where the row or column would go, never at its own place.
+  // line is a thick faint blue one (`--rl-drop`, #1200) that shows only where the row or column would go, never at its own place.
   const MOVE = '| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |\n';
   const MOVE3 = '| A | B | C |\n| - | - | - |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n';
   type Pg = import('@playwright/test').Page;
@@ -160,7 +160,7 @@ test.describe('tables @tables', () => {
       const line = document.querySelector<HTMLElement>('.rl-drop-line');
       if (!line) return null;
       const probe = document.createElement('span');
-      probe.style.color = 'var(--rl-ink-2)';
+      probe.style.color = 'var(--rl-drop)';
       document.body.append(probe);
       const token = getComputedStyle(probe).color;
       probe.remove();
@@ -179,7 +179,7 @@ test.describe('tables @tables', () => {
     const mode = `Track Changes ${tracking ? 'on' : 'off'}`;
     const view = tracking ? 'redlines' : 'clean';
 
-    test(`dragging a row highlights nothing, and draws a thick gray line only at a real target, ${mode}`, async ({
+    test(`dragging a row highlights nothing, and draws a thick faint blue line only at a real target, ${mode}`, async ({
       start,
     }) => {
       const j = await start({ doc: `Intro\n\n${MOVE}`, tracking, view });
@@ -204,7 +204,7 @@ test.describe('tables @tables', () => {
       await j.page.mouse.move(at.x + 30, last.y + 30, { steps: 10 });
       const line = await dropLine(j.page);
       expect(line, 'a line at the target').toMatchObject({ shown: true });
-      expect(line?.paint, 'the line is the theme gray').toBe(line?.token);
+      expect(line?.paint, 'the line is the faint blue of --rl-drop').toBe(line?.token);
       expect(line?.height, 'a thick line').toBeGreaterThanOrEqual(3);
       expect(await selected(j.page), 'nothing is highlighted in a drag').toBe(0);
       await j.shot('row-drag-target');
@@ -234,7 +234,7 @@ test.describe('tables @tables', () => {
       expect(await j.text(), 'the document is as it was').toBe(doc);
     });
 
-    test(`dragging a column highlights nothing, and draws a thick gray vertical line only at a real target, ${mode}`, async ({
+    test(`dragging a column highlights nothing, and draws a thick faint blue vertical line only at a real target, ${mode}`, async ({
       start,
     }) => {
       const j = await start({ doc: `Intro\n\n${MOVE3}`, tracking, view });
@@ -261,7 +261,7 @@ test.describe('tables @tables', () => {
       await j.page.mouse.move(third.right - 6, at.y, { steps: 10 });
       const line = await dropLine(j.page);
       expect(line, 'a line at the target').toMatchObject({ shown: true });
-      expect(line?.paint, 'the line is the theme gray').toBe(line?.token);
+      expect(line?.paint, 'the line is the faint blue of --rl-drop').toBe(line?.token);
       expect(line?.width, 'a thick line').toBeGreaterThanOrEqual(3);
       await j.shot('column-drag-target');
       await j.page.mouse.up();
