@@ -496,3 +496,21 @@ details[open] > summary {
   color: var(--rl-ink-2);
   font-size: 0.8em;
 }
+
+/* Math (math.ts): MathML, which the web view draws with the system's math font. A display stands on
+   its own line, centered, with its equation's number at the right. */
+.rl-math math {
+  font-size: 1.08em;
+}
+.rl-math-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 0.4em 0;
+}
+.rl-math-number {
+  position: absolute;
+  right: 0;
+  color: var(--rl-ink-2);
+}

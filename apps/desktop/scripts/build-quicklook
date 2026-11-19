@@ -481,6 +481,11 @@ def fixture_checks(checks: Checks) -> None:
 
     page = render(FIXTURES / "frontmatter.qmd")
     has(page, "frontmatter.qmd", '<pre class="rl-frontmatter">---', "title: &quot;Penguin bills&quot;", 'data-chunk="r setup, include=FALSE"', 'data-chunk="python"', "#| label: fig-bills", '<span class="rl-xref">Figure 1</span>')
+    # Math (#1216): Temml runs in JavaScriptCore with no DOM, and the formulas come out as MathML.
+    page = render(FIXTURES / "math.qmd")
+    has(page, "math.qmd", '<span class="rl-math">', 'class="rl-math rl-math-display"', "<msup>", "<mfrac>", '<span class="rl-math-number">(1)</span>', '<span class="rl-xref">Equation 1</span>', "It costs $5 and $6 here")
+    lacks(page, "math.qmd", "$$", "{#eq-", "RLMATHQX", "<script")
+
     page = render(FIXTURES / "analysis.Rmd")
     has(page, "analysis.Rmd", 'data-chunk="r, echo=FALSE, message=FALSE"', "<h1>Summary</h1>")
 

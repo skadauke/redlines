@@ -121,16 +121,7 @@ export interface KnownCase {
  * longer shows": delete the entry in that PR (and nothing else). A case that comes back after that
  * is then a failure of this check, with no entry to hide behind.
  */
-export const KNOWN: readonly KnownCase[] = [
-  ...([['math', /\$\$/, 'the display formula']] as const).map(([rule, text, what]): KnownCase => ({
-    issue: 1216,
-    doc: ['Build 21.qmd', 'frontmatter.qmd'],
-    surfaces: ['quicklook'],
-    rule,
-    text,
-    why: `the Quick Look page shows ${what} as source`,
-  })),
-];
+export const KNOWN: readonly KnownCase[] = [];
 
 export interface Found {
   doc: string;

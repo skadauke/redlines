@@ -162,6 +162,9 @@ importers:
       micromark-extension-gfm:
         specifier: 3.0.0
         version: 3.0.0
+      temml:
+        specifier: 0.14.0
+        version: 0.14.0
     devDependencies:
       micromark-util-types:
         specifier: 2.0.3
