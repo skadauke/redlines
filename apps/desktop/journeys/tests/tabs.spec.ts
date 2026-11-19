@@ -112,6 +112,10 @@ test('two tabs show one document, each with its own Undo, and the other goes on 
       '.rl-presence-flag { animation: none !important; opacity: 1 !important; } .cm-cursorLayer { visibility: hidden !important; }';
     document.head.append(style);
   });
+  // The passing "Track Changes is on" line is gone (it shows 2.4 s): the picture is of the settled
+  // windows, not of a race with that timer.
+  await expect(left.locator('.rl-notice')).toBeHidden({ timeout: 10_000 });
+  await expect(right.locator('.rl-notice')).toBeHidden({ timeout: 10_000 });
   await expect(page).toHaveScreenshot('two-tabs.png', { timeout: 10_000 });
 
   // The leader's page hangs: its lock is still held, and nothing comes from it. The other tab
