@@ -80,6 +80,8 @@ describe('agentPrompt', () => {
     );
     expect(prompt).toContain("person's home folder");
     expect(prompt).toContain('Hidden files and folders');
+    // A project inside a hidden folder is left out too, and the prompt says so (#382).
+    expect(prompt).toContain('inside a hidden folder');
     expect(prompt).toContain('Library');
     expect(prompt).toContain('do not change them');
     expect(prompt.split('\n').filter((line) => line.startsWith('System:'))).toEqual([]);

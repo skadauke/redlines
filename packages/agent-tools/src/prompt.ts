@@ -36,7 +36,7 @@ function scopeLines(scope: AgentScope, folder: string | undefined): string[] {
         folder === undefined
           ? "You may read the files in this document's folder, and in the person's home folder."
           : `You may read the files in this folder: ${oneLine(folder)}, and in the person's home folder.`,
-        'Hidden files and folders, and the Library folder (except its cloud storage folders), are not available to you.',
+        'Hidden files and folders, and the Library folder (except its cloud storage folders), are not available to you. That includes a folder that is itself inside a hidden folder, such as a project there, and files named .env.',
         'Use them to answer, and do not change them.',
       ];
   }
