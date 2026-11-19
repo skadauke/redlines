@@ -299,13 +299,16 @@ export const SPECIMENS: readonly Specimen[] = [
     family: 'rows',
     frame: '.rl-grip-menu',
     selector: '.rl-grip-item',
-    selectorFor: { hover: '.rl-grip-item:hover' },
-    // No `keys`: the grip's menu has no way to be chosen from with the keys (listed in the PR).
+    selectorFor: { hover: '.rl-grip-item:hover', keys: '.rl-grip-item:focus-visible' },
     reach: {
       rest: openGripMenu,
       hover: async (j) => {
         await openGripMenu(j);
         await hoverItem('.rl-grip-item')(j);
+      },
+      keys: async (j) => {
+        await openGripMenu(j);
+        await chooseWithKeys('.rl-grip-item')(j);
       },
     },
   },
@@ -508,12 +511,6 @@ export interface KnownDisagreement {
  * that no longer differs: the PR that fixes the issue deletes its entry, and nothing else.
  */
 export const KNOWN: readonly KnownDisagreement[] = [
-  {
-    issue: 1199,
-    family: 'handles',
-    props: ['borderTopLeftRadius', 'backgroundColor', 'boxShadow'],
-    why: 'the picture’s handles are white pills with an outline; the table’s grips are gray pills with a border and a bigger radius',
-  },
   {
     issue: 1246,
     family: 'cards',
