@@ -33,6 +33,8 @@ function inline(into: HTMLElement, text: string, deps: MarkdownDeps): void {
       if (deps.openLink) {
         const link = el('a', undefined, label);
         link.href = url;
+        // The words may say one address and the link go to another: the real one shows on hover.
+        link.title = url;
         link.addEventListener('click', (event) => {
           event.preventDefault();
           deps.openLink?.(url);

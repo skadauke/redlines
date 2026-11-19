@@ -156,6 +156,8 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
       button.type = 'button';
       button.className = 'rl-sidebar-tab';
       button.setAttribute('role', 'tab');
+      button.id = `rl-sidebar-tab-${which}`;
+      button.setAttribute('aria-controls', `rl-sidebar-panel-${which}`);
       button.textContent = name;
       button.addEventListener('click', () => show(which));
       tabs.append(button);
@@ -169,6 +171,13 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   }
   aside.append(label, list);
   if (options.chat) {
+    // Each tab names the panel it shows, and each panel the tab that shows it.
+    list.id = 'rl-sidebar-panel-files';
+    list.setAttribute('role', 'tabpanel');
+    list.setAttribute('aria-labelledby', 'rl-sidebar-tab-files');
+    options.chat.id = 'rl-sidebar-panel-chat';
+    options.chat.setAttribute('role', 'tabpanel');
+    options.chat.setAttribute('aria-labelledby', 'rl-sidebar-tab-chat');
     options.chat.hidden = true;
     aside.append(options.chat);
   }

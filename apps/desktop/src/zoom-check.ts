@@ -276,6 +276,7 @@ export async function runZoomCheck({
     ['text-keys-keep-the-caret', () => textKeysKeepTheCaret({ editor, textZoom })],
     ['pinch-keeps-its-line', () => pinchKeepsItsLine({ editor, scroller })],
     ['pinch-frame-time', () => pinchFrameTime({ editor, main })],
+    ['pinch-keeps-the-picture', () => pinchKeepsThePicture({ editor, main })],
   ] as const;
   if (mode !== 'surfaces') {
     for (const [name, check] of windowChecks) {
@@ -593,6 +594,61 @@ async function pinchKeepsItsLine({
   // A pinch that did nothing would keep every line where it was: the size must have followed it.
   if (!(widest >= 1.59)) failures.push({ why: 'the pinch did not change the text size', widest });
   if (scale() !== 1) failures.push({ why: 'the pinch did not end at 100%', scale: scale() });
+  return failures;
+}
+
+/**
+ * 5. With a picture in view, a pinch's frames never draw it narrower while the text grows (nor
+ * wider while it shrinks), the column never takes its width, and the page never scrolls sideways
+ * (#1157). The window is narrow and the document has notes, so that the held rail is beside the
+ * column, which took more of the window with each frame and shrank the picture.
+ */
+async function pinchKeepsThePicture({
+  editor,
+  main,
+}: {
+  editor: Editor;
+  main: HTMLElement;
+}): Promise<unknown[]> {
+  const { view } = editor;
+  const canvas = document.createElement('canvas');
+  canvas.width = 1600;
+  canvas.height = 800;
+  const context = canvas.getContext('2d');
+  if (context) {
+    context.fillStyle = '#c0392b';
+    context.fillRect(0, 0, 1600, 800);
+  }
+  const picture = `![A red square](${canvas.toDataURL('image/png')})`;
+  editor.setDoc(sample.replace('\n\n', `\n\n${picture}\n\n`));
+  editor.setViewMode('redlines');
+  main.style.flex = 'none';
+  main.style.width = '1100px';
+  view.scrollDOM.scrollTop = 0;
+  await frames();
+  const image = () => view.dom.querySelector<HTMLElement>('.rl-image img');
+  const first = image();
+  if (!first) return [{ why: 'the picture is not drawn' }];
+  const box = first.getBoundingClientRect();
+  // The fingers are on the picture's top edge, so that it stays in view while the text grows.
+  const at = { x: box.left + box.width / 2, y: box.top + 2 };
+  const failures: unknown[] = [];
+  let last = box.width;
+  let rising = true;
+  await pinchThrough(at, async (step) => {
+    await nextFrame();
+    const now = image()?.getBoundingClientRect().width ?? NaN;
+    // The first 60 steps grow the text, the next 60 shrink it.
+    rising = step < 60;
+    if (!(rising ? now >= last - 1 : now <= last + 1)) failures.push({ step, last, now });
+    last = now;
+    if (view.scrollDOM.scrollWidth > view.scrollDOM.clientWidth) {
+      failures.push({ step, why: 'the page scrolls sideways' });
+    }
+  });
+  await frames();
+  main.style.flex = '';
+  main.style.width = '';
   return failures;
 }
 

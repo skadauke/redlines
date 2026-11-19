@@ -15,7 +15,7 @@ test.describe('Ask and the chat', () => {
     });
     const bubble = j.page.locator('.rl-qa');
 
-    await j.page.getByText('The importer ships in April.').dblclick();
+    await j.page.getByText('The importer ships in April.').click({ clickCount: 3 });
     await j.press('Alt+Meta+a');
     await expect(bubble).toBeVisible();
     await j.page.locator('.rl-qa textarea').fill('When does it ship?');
@@ -30,7 +30,7 @@ test.describe('Ask and the chat', () => {
 
     // The chat was not open: Open in Chat is the way to it, from a second Ask.
     await expect(j.page.locator('.rl-sidebar')).toBeHidden();
-    await j.page.getByText('The tests run in CI.').dblclick();
+    await j.page.getByText('The tests run in CI.').click({ clickCount: 3 });
     await j.press('Alt+Meta+a');
     await j.press('Enter');
     await expect(bubble.locator('.rl-qa-answer')).toBeVisible();

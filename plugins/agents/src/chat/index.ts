@@ -13,7 +13,14 @@ import {
   type AskState,
   type AskTurn,
 } from '../ask/session.ts';
-import { parseRecord, recordText, TURNS_KEPT, type ChatRecord, type ChatStore } from './history.ts';
+import {
+  parseRecord,
+  readRecord,
+  recordText,
+  TURNS_KEPT,
+  type ChatRecord,
+  type ChatStore,
+} from './history.ts';
 import { createChatPanel, type ChatPanel } from './panel.ts';
 
 export { memoryStore, parseRecord, recordText } from './history.ts';
@@ -60,6 +67,8 @@ export function createChat(options: ChatOptions): Chat {
     name: string;
     record: ChatRecord;
     session: AskSession | null;
+    /** The message being answered, until it is answered, stopped or failed. */
+    inflight: string | null;
     unsubscribe: () => void;
   } | null = null;
   /** Counts the documents followed, so that a read that finishes late is dropped. */
@@ -79,7 +88,12 @@ export function createChat(options: ChatOptions): Chat {
     );
 
   const panel: ChatPanel = createChatPanel({
-    send: (text) => current?.session?.ask(text),
+    send: (text) => {
+      const open = current;
+      if (!open?.session) return;
+      open.inflight = text;
+      open.session.ask(text);
+    },
     stop: () => current?.session?.stop(),
     pick: (agent, model) => {
       const open = current;
@@ -148,6 +162,7 @@ export function createChat(options: ChatOptions): Chat {
       name,
       record,
       session: null,
+      inflight: null,
       unsubscribe: () => {},
     };
     const session = createAskSession(
@@ -160,6 +175,7 @@ export function createChat(options: ChatOptions): Chat {
         },
         defaultAgent: options.defaultAgent ?? (() => undefined),
         onTurn: (turn) => {
+          open.inflight = null;
           open.record = { ...open.record, turns: [...open.record.turns, turn].slice(-TURNS_KEPT) };
           save(open);
         },
@@ -171,7 +187,22 @@ export function createChat(options: ChatOptions): Chat {
     open.session = session;
     for (const turn of waiting.splice(0)) keep(open, turn);
     open.unsubscribe = session.subscribe((state) => {
-      if (current === open) draw(state);
+      if (current !== open) return;
+      // A message that is over and was not answered stays in the history, as stopped or failed.
+      if (state.pending === null && open.inflight !== null) {
+        const question = open.inflight;
+        open.inflight = null;
+        const line = state.line;
+        const failed = line?.kind === 'failed' ? line : null;
+        keep(open, {
+          question,
+          answer: failed ? failed.message : 'Stopped.',
+          agent: state.choice?.agent ?? { id: '', name: failed?.agentName ?? 'Agent' },
+          ended: failed ? 'failed' : 'stopped',
+          at: Date.now(),
+        });
+      }
+      draw(session.state);
     });
     return open;
   }
@@ -221,7 +252,16 @@ export function createChat(options: ChatOptions): Chat {
       };
       if (path === null) return open(parseRecord(null));
       options.store.read(path).then(
-        (text) => open(parseRecord(text)),
+        (text) => {
+          const record = text === null ? parseRecord(null) : readRecord(text);
+          if (record === null && text !== null) {
+            // A history that can't be read is kept aside, never written over.
+            void options.store.write(`${path}#unreadable`, text).catch(() => {});
+            options.notice('This chat’s history couldn’t be read, so the chat starts anew.');
+            return open(parseRecord(null));
+          }
+          open(record ?? parseRecord(null));
+        },
         (error: unknown) => {
           console.error('Could not read the chat', error);
           open(parseRecord(null));

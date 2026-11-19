@@ -16,7 +16,7 @@ const answers = (text: string): FakeScript =>
     yield { type: 'done', finalText: text };
   };
 
-function setup(script: FakeScript = answers('It ships in April.')) {
+function setup(script: FakeScript = answers('It ships in April.'), notices: string[] = []) {
   const relay = fakeRelay();
   const claude = fakeProvider({
     relay,
@@ -39,7 +39,7 @@ function setup(script: FakeScript = answers('It ships in April.')) {
     projectRoot: () => Promise.resolve(REPO),
     settings: { defaultScope: () => 'document', consent: () => undefined, setConsent: () => {} },
     store,
-    notice: () => {},
+    notice: (message) => notices.push(message),
   });
   document.body.append(chat.el);
   return { chat, claude, store, generation };
@@ -169,18 +169,79 @@ describe('the chat of a document', () => {
     });
   });
 
-  it('shows a failure on the live line and keeps no turn for it', async () => {
-    const { chat, store } = setup(async function* () {
+  it('shows a failure on the live line, and keeps the message as one that got no answer', async () => {
+    const { chat, store, claude } = setup(async function* () {
       await Promise.resolve();
       yield { type: 'error', message: 'Claude stopped.' } as const;
     });
     chat.follow('/repo/plan.md', 1, 'plan.md');
     await vi.waitFor(() => expect(chat.el.querySelector('.rl-chat-empty')).not.toBeNull());
-    send(chat, 'Q');
+    send(chat, 'What is the plan?');
     await vi.waitFor(() =>
       expect(chat.el.querySelector('.rl-chat-live')?.textContent).toContain('Claude stopped.'),
     );
-    expect(store.kept.size).toBe(0);
+    // The words the person wrote are still in the column, and in the history.
+    expect(chat.el.querySelector('.rl-chat-bubble')?.textContent).toBe('What is the plan?');
+    expect(chat.el.querySelector('.rl-chat-ended')?.textContent).toBe(
+      'Couldn’t answer: Claude stopped.',
+    );
+    await vi.waitFor(() => expect(store.kept.has('/repo/plan.md')).toBe(true));
+    expect(parseRecord(store.kept.get('/repo/plan.md') ?? null).turns).toMatchObject([
+      { question: 'What is the plan?', answer: 'Claude stopped.', ended: 'failed' },
+    ]);
+    // It is never sent to an agent as an answer.
+    expect(claude.requests).toHaveLength(1);
+  });
+
+  it('keeps a message that was stopped, as Stopped, and does not quote it to the agent', async () => {
+    const { chat, store, claude } = setup(async function* ({ tools }) {
+      await tools.initialize();
+      // Never answers: the person stops it.
+      await new Promise(() => {});
+      yield { type: 'done', finalText: 'never' } as const;
+    });
+    chat.follow('/repo/plan.md', 1, 'plan.md');
+    await vi.waitFor(() => expect(chat.el.querySelector('.rl-chat-empty')).not.toBeNull());
+    send(chat, 'A long question');
+    await vi.waitFor(() => expect(claude.requests).toHaveLength(1));
+    chat.el.querySelector<HTMLElement>('.rl-chat-send')!.click();
+    await vi.waitFor(() =>
+      expect(chat.el.querySelector('.rl-chat-ended')?.textContent).toBe('Stopped.'),
+    );
+    expect(chat.el.querySelector('.rl-chat-bubble')?.textContent).toBe('A long question');
+    await vi.waitFor(() =>
+      expect(parseRecord(store.kept.get('/repo/plan.md') ?? null).turns).toMatchObject([
+        { question: 'A long question', answer: 'Stopped.', ended: 'stopped' },
+      ]),
+    );
+  });
+
+  it('does not send on the Return that confirms an input method’s candidate', async () => {
+    const { chat, claude } = setup();
+    chat.follow('/repo/plan.md', 1, 'plan.md');
+    await vi.waitFor(() => expect(chat.el.querySelector('.rl-chat-empty')).not.toBeNull());
+    field(chat).value = 'に';
+    const confirm = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, cancelable: true });
+    field(chat).dispatchEvent(confirm);
+    expect(claude.requests).toHaveLength(0);
+    expect(field(chat).value).toBe('に');
+    // A plain Return sends.
+    field(chat).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+    await vi.waitFor(() => expect(claude.requests).toHaveLength(1));
+  });
+
+  it('keeps a history it can not read aside, says so, and starts a new chat', async () => {
+    const notices: string[] = [];
+    const { chat, store } = setup(undefined, notices);
+    await store.write('/repo/plan.md', '{"version":1,"turns":[');
+    chat.follow('/repo/plan.md', 1, 'plan.md');
+    await vi.waitFor(() => expect(chat.el.querySelector('.rl-chat-empty')).not.toBeNull());
+    expect(store.kept.get('/repo/plan.md#unreadable')).toBe('{"version":1,"turns":[');
+    expect(notices).toEqual(['This chat’s history couldn’t be read, so the chat starts anew.']);
+    send(chat, 'Q');
+    await vi.waitFor(() => expect(theirs(chat)).toHaveLength(1));
+    // The old text is still there, beside the new chat.
+    expect(store.kept.get('/repo/plan.md#unreadable')).toBe('{"version":1,"turns":[');
   });
 });
 
@@ -205,6 +266,13 @@ describe('a message in Markdown', () => {
     const out = html('<img src=x onerror=alert(1)> <script>x</script>');
     expect(out).not.toContain('<img');
     expect(out).not.toContain('<script');
+  });
+
+  it('shows a link’s real address on hover, so that its words can’t hide where it goes', () => {
+    const root = renderMarkdown('[https://apple.com](https://evil.example/x)', {
+      openLink: () => {},
+    });
+    expect(root.querySelector('a')?.title).toBe('https://evil.example/x');
   });
 
   it('links only a web address, and only through the host', () => {
@@ -239,11 +307,27 @@ describe('an Ask’s turn in the chat (#1194)', () => {
     await vi.waitFor(() => expect(store.kept.has('/repo/plan.md')).toBe(true));
     expect(parseRecord(store.kept.get('/repo/plan.md') ?? null).turns[0]).toMatchObject({
       about: 'a first lien on the property',
-      at: expect.any(Number),
+      at: expect.any(Number) as number,
     });
     send(chat, 'And a second lien?');
     await vi.waitFor(() => expect(theirs(chat)).toHaveLength(2));
     expect(claude.requests.at(-1)?.prompt).toContain('A lien is a claim on property.');
+  });
+
+  it('draws an Ask’s Sources apart from its answer, with no raw list', async () => {
+    const { chat } = setup();
+    chat.follow('/repo/plan.md', 1, 'plan.md');
+    await vi.waitFor(() => expect(chat.el.querySelector('.rl-chat-empty')).not.toBeNull());
+    chat.addTurn({
+      ...asked,
+      answer: 'A lien is a claim [1].\n\nSources:\n[1] "a first lien on the property"',
+    });
+    await vi.waitFor(() => expect(theirs(chat)).toHaveLength(1));
+    expect(chat.el.querySelector('.rl-chat-md')?.textContent).toBe('A lien is a claim [1].');
+    expect(chat.el.querySelector('.rl-chat-source')?.textContent).toBe(
+      '[1] “a first lien on the property”',
+    );
+    expect(chat.el.textContent).not.toContain('Sources:');
   });
 
   it('waits for the chat to be read when the Ask is answered first', async () => {

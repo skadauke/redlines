@@ -1782,10 +1782,10 @@ describe('how long the bubble stays (#1194)', () => {
     ask('Q');
     await vi.waitFor(() => expect(answerOf()).not.toBeNull(), { timeout: 2000 });
     const el = bubble()!;
-    el.matches = () => true;
+    const hover = vi.spyOn(el, 'matches').mockReturnValue(true);
     vi.advanceTimersByTime(shownFor(text) + 100);
     expect(bubble()).not.toBeNull();
-    el.matches = () => false;
+    hover.mockReturnValue(false);
     el.dispatchEvent(new Event('pointerleave'));
     vi.advanceTimersByTime(BASE_MS - 100);
     expect(bubble()).not.toBeNull();

@@ -9,6 +9,7 @@ import type { AgentScope } from '@redlines/plugin-api';
 import { renderLiveLine, type LiveLineActions } from '../live-line.ts';
 import type { LiveLine } from '../runs.ts';
 import type { AskChoice, AskTurn } from '../ask/session.ts';
+import { parseAnswer } from '../ask/answer.ts';
 import { EXPLAIN } from '../ask/session.ts';
 import { renderMarkdown } from './markdown.ts';
 import { addChatStyle } from './styles.ts';
@@ -197,7 +198,8 @@ export function createChatPanel(handlers: ChatHandlers): ChatPanel {
   });
   field.addEventListener('keydown', (event) => {
     // Return sends and Shift-Return starts a line; a Return that picks a composed character doesn't.
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    // (WebKit sends the Return that confirms a candidate after the composition has ended, as 229.)
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault();
       submit();
     }
@@ -233,12 +235,32 @@ export function createChatPanel(handlers: ChatHandlers): ChatPanel {
       mine.append(about);
     }
     mine.append(el('div', 'rl-chat-bubble', turn.question.trim() === '' ? EXPLAIN : turn.question));
+    if (turn.ended !== undefined) {
+      const over = el(
+        'div',
+        'rl-chat-msg rl-chat-ended',
+        turn.ended === 'stopped' ? 'Stopped.' : `Couldn’t answer: ${turn.answer}`,
+      );
+      return [mine, over];
+    }
     const theirs = el('div', 'rl-chat-msg rl-chat-theirs');
     const name = turn.model ? `${turn.agent.name} · ${modelName(turn)}` : turn.agent.name;
     theirs.append(el('div', 'rl-chat-from', name));
+    // An Ask's answer cites its passages with [1] and a Sources list: the list is drawn apart.
+    const parsed = turn.about === undefined ? null : parseAnswer(turn.answer);
     theirs.append(
-      renderMarkdown(turn.answer, handlers.openLink ? { openLink: handlers.openLink } : {}),
+      renderMarkdown(
+        parsed?.body ?? turn.answer,
+        handlers.openLink ? { openLink: handlers.openLink } : {},
+      ),
     );
+    if (parsed && parsed.sources.length > 0) {
+      const list = el('div', 'rl-chat-sources');
+      for (const { n, quote } of parsed.sources) {
+        list.append(el('div', 'rl-chat-source', `[${n}] “${shortQuote(quote)}”`));
+      }
+      theirs.append(list);
+    }
     const row = el('div', 'rl-chat-hover');
     const copy = el('button', 'rl-chat-act');
     copy.type = 'button';

@@ -80,6 +80,11 @@ export interface AskTurn {
    * shows above the question. The session itself never sets it.
    */
   about?: string;
+  /**
+   * For a chat's message that got no answer (#1194): it was stopped, or the agent failed, and
+   * `answer` is the failure's one line. It is kept in the history and never sent to an agent.
+   */
+  ended?: 'stopped' | 'failed';
 }
 
 /** The agent that answers the next question, and the models it can be told to run (#507). */
@@ -171,7 +176,9 @@ const EARLIER_ANSWERS =
  * answers are an agent's, which read a document that may say anything, so each is quoted with > on
  * every line, as the selected text is (`quoteBlock`), and said to be data.
  */
-export function askText(question: string, turns: readonly AskTurn[]): string {
+export function askText(question: string, all: readonly AskTurn[]): string {
+  // A message that got no answer has nothing to be quoted as.
+  const turns = all.filter((turn) => turn.ended === undefined);
   const asked = question.trim() === '' ? EXPLAIN : question.trim();
   if (turns.length === 0) return asked;
   const earlier = turns
@@ -486,7 +493,12 @@ export function createAskSession(
       return answer(line);
     };
     const request: AgentRequest = {
-      prompt: askText(asked, about.chat === true ? state.turns.slice(-CHAT_CONTEXT) : state.turns),
+      prompt: askText(
+        asked,
+        about.chat === true
+          ? state.turns.filter((turn) => turn.ended === undefined).slice(-CHAT_CONTEXT)
+          : state.turns,
+      ),
       systemPrompt:
         about.chat === true
           ? chatPrompt({
@@ -541,12 +553,13 @@ export function createAskSession(
               ? { model: modelFor(agent) }
               : {}),
           };
-          finish(mine, { turns: [...state.turns, turn], line: null });
+          // Told first, so that what listens to the state knows this message was answered.
           try {
             deps.onTurn?.(turn);
           } catch (error) {
             console.error('An Ask turn listener failed', error);
           }
+          finish(mine, { turns: [...state.turns, turn], line: null });
           return;
         }
       }

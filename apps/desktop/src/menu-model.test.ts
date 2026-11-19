@@ -204,7 +204,6 @@ describe('the menu model', () => {
       ['Save As…', 'Shift+CmdOrCtrl+S'],
       ['Rename…', undefined],
       ['Reveal in Finder', undefined],
-      ['Open in Another Window', undefined],
       '---',
       'Close',
       '---',
@@ -243,6 +242,8 @@ describe('the menu model', () => {
       ['Show Files', 'Ctrl+Cmd+S'],
       ['Show Chat', 'Ctrl+Cmd+C'],
       ['Show Word Count', undefined],
+      '---',
+      ['New Window', undefined],
       '---',
       'Enter Full Screen',
     ]);
@@ -297,7 +298,7 @@ describe('the menu model', () => {
     expect(c.rename).toHaveBeenCalledOnce();
     click('File', 'Reveal in Finder');
     expect(c.revealInFinder).toHaveBeenCalledOnce();
-    click('File', 'Open in Another Window');
+    click('View', 'New Window');
     expect(c.openAnotherWindow).toHaveBeenCalledOnce();
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
@@ -513,10 +514,12 @@ describe('the menu model', () => {
       ['Rename…', undefined],
     ]);
     // Enter Full Screen closes View, as it does on the Mac: what plugins register comes before it.
-    expect(readsAll(model, 'View').slice(-8)).toEqual([
+    expect(readsAll(model, 'View').slice(-10)).toEqual([
       ['Show Files', 'Ctrl+Cmd+S'],
       ['Show Chat', 'Ctrl+Cmd+C'],
       ['Show Word Count', undefined],
+      '---',
+      ['New Window', undefined],
       '---',
       ['Zoom In', undefined],
       ['Zoom Out', undefined],
