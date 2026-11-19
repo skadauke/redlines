@@ -10,9 +10,13 @@
 //!   followed only to another package of the same folder) into a folder only this user can use,
 //!   checks that Tailscale Inc. signed it (Apple team `W5364U7YZB`) and that Apple notarized it,
 //!   refuses with plain words if either fails, and installs it with macOS's own administrator
-//!   prompt (`osascript`, `do shell script … with administrator privileges`, running
-//!   `/usr/sbin/installer -pkg <that file> -target /`). Redlines never asks for a password: the
-//!   prompt is the system's. A person who isn't an administrator is sent to the App Store page.
+//!   prompt (`osascript`, `do shell script … with administrator privileges`). The checks as this user
+//!   give the plain refusal before any prompt; but this user could swap the file afterwards, so the
+//!   privileged step is one root shell that copies it into a root-only folder, makes the copy
+//!   root's and private, checks the copy again (signature, status, team, notarization) and only then
+//!   runs `/usr/sbin/installer -pkg <the copy> -target /`, every step chained with `&&`. Redlines
+//!   never asks for a password: the prompt is the system's. A person who isn't an administrator is
+//!   sent to the App Store page.
 //! - **Restart** quits Tailscale's app (a plain request to end, to this user's own process) and
 //!   opens it again. A fresh install can start the app before its network extension runs, and then
 //!   it never connects to it: Log in does nothing, and its log says `backendManager does not exist`,
@@ -97,11 +101,12 @@ pub trait Host {
     /// A folder only this user can use, for the download.
     fn work_dir(&self) -> Result<PathBuf, String>;
     fn download(&self, url: &str, to: &Path) -> Result<(), String>;
-    /// What `pkgutil --check-signature` says of the file.
-    fn signature(&self, pkg: &Path) -> String;
-    /// What `spctl --assess --type install -vv` says of the file.
-    fn assessment(&self, pkg: &Path) -> String;
-    /// Installs the file as the system's administrator prompt allows.
+    /// What `pkgutil --check-signature` says of the file, and whether it succeeded.
+    fn signature(&self, pkg: &Path) -> Checked;
+    /// What `spctl --assess --type install -vv` says of the file, and whether it succeeded.
+    fn assessment(&self, pkg: &Path) -> Checked;
+    /// Installs the file as the system's administrator prompt allows. The privileged step makes its
+    /// own root-owned copy and checks the copy again, so that what is installed is what was checked.
     fn install(&self, pkg: &Path) -> Result<(), InstallStop>;
     /// Opens an address or an app with the system's `open`.
     fn open(&self, target: &str) -> Result<(), String>;
@@ -110,17 +115,59 @@ pub trait Host {
     fn remove_dir(&self, dir: &Path);
 }
 
-/// Whether the text `pkgutil --check-signature` printed shows a package that Tailscale Inc. signed.
-pub fn signed_by_tailscale(text: &str) -> bool {
-    text.lines()
-        .any(|line| line.contains("Developer ID Installer:") && line.contains(&format!("({TEAM})")))
+/// What a checking program printed (its output and its errors), and whether it exited with 0.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Checked {
+    pub ok: bool,
+    pub text: String,
 }
 
-/// Whether the text `spctl` printed accepts the package as notarized by Apple.
-pub fn notarized(text: &str) -> bool {
-    text.contains("accepted")
-        && text.contains("Notarized Developer ID")
-        && !text.contains("rejected")
+/// Whether `line` is `<number>. Developer ID Installer: <name> (<team>)`, with nothing else: the
+/// certificate of the package's signer, which is the first of its chain (the leaf).
+fn is_installer_leaf(line: &str) -> bool {
+    let Some(rest) = line.trim().strip_prefix("1.") else {
+        return false;
+    };
+    is_installer_name(rest.trim_start())
+}
+
+/// `Developer ID Installer: <name> (W5364U7YZB)`, as the whole of the text.
+fn is_installer_name(text: &str) -> bool {
+    let suffix = format!(" ({TEAM})");
+    text.strip_prefix("Developer ID Installer: ")
+        .and_then(|name| name.strip_suffix(suffix.as_str()))
+        .is_some_and(|name| !name.trim().is_empty() && !name.contains(['(', ')', ':']))
+}
+
+/// Whether what `pkgutil --check-signature` printed (and exited with 0 for) is a package that
+/// Tailscale Inc. signed: the status line says it is signed with a certificate Apple issued for
+/// distribution (not untrusted, revoked or expired), and the leaf of the chain is an installer
+/// certificate of Tailscale's team, as a line of its own.
+pub fn signed_by_tailscale(checked: &Checked) -> bool {
+    checked.ok
+        && checked.text.lines().any(|line| {
+            line.trim()
+                == "Status: signed by a developer certificate issued by Apple for distribution"
+        })
+        && checked.text.lines().any(is_installer_leaf)
+}
+
+/// Whether what `spctl --assess --type install -vv` printed (and exited with 0 for) accepts `pkg`
+/// as notarized by Apple and Tailscale's: the verdict line for that very file, the source line,
+/// and the origin line, each a line of its own.
+pub fn notarized(checked: &Checked, pkg: &Path) -> bool {
+    let verdict = format!("{}: accepted", pkg.display());
+    checked.ok
+        && checked.text.lines().any(|line| line.trim_end() == verdict)
+        && checked
+            .text
+            .lines()
+            .any(|line| line.trim() == "source=Notarized Developer ID")
+        && checked.text.lines().any(|line| {
+            line.trim()
+                .strip_prefix("origin=")
+                .is_some_and(is_installer_name)
+        })
 }
 
 /// The address of a package, from what the server's `Location` said (or nothing): only a package of
@@ -157,17 +204,23 @@ pub fn version_of(url: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The AppleScript that installs the package with the system's administrator prompt. The path is
-/// the app's own (a file in a folder it made), and is written as a string with its quotes and
-/// backslashes escaped, and as a shell word by AppleScript's `quoted form of`.
+/// The AppleScript that installs the package with the system's administrator prompt, as one shell
+/// that runs as root. The file was checked as this user, who could swap it afterwards: so the
+/// privileged shell copies it into a folder only root can use, makes the copy root's and private,
+/// checks the copy (signature, status, team, notarization), and only then installs **the copy**,
+/// every step chained with `&&`, the folder removed at the end. The path of the file is the app's
+/// own (in a folder it made) and reaches the shell as AppleScript's `quoted form of`.
 pub fn admin_script(pkg: &Path) -> String {
-    let path = pkg
-        .display()
-        .to_string()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
+    let escape = |text: &str| text.replace('\\', "\\\\").replace('"', "\\\"");
+    let head = r#"D=$(/usr/bin/mktemp -d /private/var/tmp/redlines-tailscale.XXXXXX) || exit 1; trap '/bin/rm -rf "$D"' EXIT; P="$D/Tailscale.pkg"; /bin/cp "#;
+    let tail = format!(
+        r#" "$P" && /usr/sbin/chown root:wheel "$P" && /bin/chmod 600 "$P" && /usr/sbin/pkgutil --check-signature "$P" > "$D/signature" && /usr/bin/grep -Eq '^ +Status: signed by a developer certificate issued by Apple for distribution$' "$D/signature" && /usr/bin/grep -Eq '^ +1\. +Developer ID Installer: .+ \({TEAM}\)$' "$D/signature" && /usr/sbin/spctl --assess --type install -vv "$P" > "$D/assessment" 2>&1 && /usr/bin/grep -Fxq "$P: accepted" "$D/assessment" && /usr/bin/grep -Fxq 'source=Notarized Developer ID' "$D/assessment" && /usr/bin/grep -Eq '^origin=Developer ID Installer: .+ \({TEAM}\)$' "$D/assessment" && /usr/sbin/installer -pkg "$P" -target /"#
+    );
     format!(
-        "do shell script \"/usr/sbin/installer -pkg \" & quoted form of \"{path}\" & \" -target /\" with administrator privileges"
+        "do shell script \"{}\" & quoted form of \"{}\" & \"{}\" with administrator privileges",
+        escape(head),
+        escape(&pkg.display().to_string()),
+        escape(&tail),
     )
 }
 
@@ -242,7 +295,7 @@ pub fn run_install(host: &dyn Host, report: &dyn Fn(InstallState)) -> InstallSta
             "The download isn’t signed by Tailscale, so it wasn’t installed.",
         ));
     }
-    if !notarized(&host.assessment(&pkg)) {
+    if !notarized(&host.assessment(&pkg), &pkg) {
         return finish(InstallState::new(
             Phase::Failed,
             "macOS didn’t accept the download as notarized by Apple, so it wasn’t installed.",
@@ -332,6 +385,40 @@ fn output_of(program: &str, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// Runs a checking program: what it printed and whether it exited with 0.
+fn checked_output(program: &str, args: &[&str]) -> Checked {
+    match Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+    {
+        Ok(out) => Checked {
+            ok: out.status.success(),
+            text: format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        },
+        Err(_) => Checked {
+            ok: false,
+            text: String::new(),
+        },
+    }
+}
+
+/// `text` as a regular expression that matches it and nothing else.
+fn regex_escaped(text: &str) -> String {
+    let mut escaped = String::new();
+    for c in text.chars() {
+        if "\\.^$*+?()[]{}|".contains(c) {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
 fn header(headers: &str, name: &str) -> Option<String> {
     headers
         .lines()
@@ -358,7 +445,16 @@ impl Host for Mac {
         let head = |url: &str| {
             output_of(
                 "/usr/bin/curl",
-                &["-sSI", "--proto", "=https", "--max-time", "10", url],
+                &[
+                    "-sSI",
+                    "--proto",
+                    "=https",
+                    "--max-redirs",
+                    "0",
+                    "--max-time",
+                    "10",
+                    url,
+                ],
             )
         };
         let url = package_url(header(&head(PACKAGE_LATEST), "location").as_deref());
@@ -386,7 +482,20 @@ impl Host for Mac {
 
     fn download(&self, url: &str, to: &Path) -> Result<(), String> {
         let status = Command::new("/usr/bin/curl")
-            .args(["-fsSL", "--proto", "=https", "--max-time", "900", "-o"])
+            .args([
+                "-fsSL",
+                "--proto",
+                "=https",
+                "--proto-redir",
+                "=https",
+                "--max-redirs",
+                "3",
+                "--max-filesize",
+                "209715200",
+                "--max-time",
+                "900",
+                "-o",
+            ])
             .arg(to)
             .arg(url)
             .stdin(Stdio::null())
@@ -399,15 +508,15 @@ impl Host for Mac {
         }
     }
 
-    fn signature(&self, pkg: &Path) -> String {
-        output_of(
+    fn signature(&self, pkg: &Path) -> Checked {
+        checked_output(
             "/usr/sbin/pkgutil",
             &["--check-signature", &pkg.display().to_string()],
         )
     }
 
-    fn assessment(&self, pkg: &Path) -> String {
-        output_of(
+    fn assessment(&self, pkg: &Path) -> Checked {
+        checked_output(
             "/usr/sbin/spctl",
             &[
                 "--assess",
@@ -465,7 +574,10 @@ impl Apps for Mac {
         let uid = unsafe { libc::geteuid() };
         let mut pids = Vec::new();
         for app in tailscale::app_places() {
-            let pattern = format!("^{}/Contents/MacOS/Tailscale$", app.display());
+            let pattern = format!(
+                "^{}/Contents/MacOS/Tailscale$",
+                regex_escaped(&app.display().to_string())
+            );
             let found = output_of("/usr/bin/pgrep", &["-U", &uid.to_string(), "-f", &pattern]);
             pids.extend(
                 found
@@ -601,7 +713,13 @@ pub fn tailscale_install() {
         *state = Some(InstallState::new(Phase::Working, "Looking at this Mac…"));
     }
     std::thread::spawn(|| {
-        let last = run_install(&Mac, &set_state);
+        // A panic must not leave the window waiting for ever.
+        let last = std::panic::catch_unwind(|| run_install(&Mac, &set_state)).unwrap_or_else(|_| {
+            InstallState::new(
+                Phase::Failed,
+                "Something went wrong while installing Tailscale, and nothing else was changed.",
+            )
+        });
         set_state(last);
     });
 }
@@ -650,16 +768,23 @@ mod tests {
     use std::cell::RefCell;
     use std::os::unix::fs::PermissionsExt;
 
-    const GOOD_SIGNATURE: &str = "Package \"Tailscale.pkg\":\n   Status: signed by a developer certificate issued by Apple for distribution\n   Notarization: trusted by the Apple notary service\n   Certificate Chain:\n    1. Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n";
-    const GOOD_ASSESSMENT: &str = "/x/Tailscale.pkg: accepted\nsource=Notarized Developer ID\norigin=Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n";
+    const GOOD_SIGNATURE: &str = "Package \"Tailscale.pkg\":\n   Status: signed by a developer certificate issued by Apple for distribution\n   Notarization: trusted by the Apple notary service\n   Signed with a trusted timestamp on: 2026-10-01 10:00:00 +0000\n   Certificate Chain:\n    1. Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n       Expires: 2030-01-01 00:00:00 +0000\n    2. Developer ID Certification Authority\n    3. Apple Root CA\n";
+    const GOOD_ASSESSMENT: &str = "/fake/work/Tailscale.pkg: accepted\nsource=Notarized Developer ID\norigin=Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n";
+
+    fn said(text: &str) -> Checked {
+        Checked {
+            ok: true,
+            text: text.into(),
+        }
+    }
 
     /// A machine that records what was asked of it and installs nothing.
     struct Fake {
         admin: bool,
         found: RefCell<bool>,
         found_after_install: bool,
-        signature: String,
-        assessment: String,
+        signature: Checked,
+        assessment: Checked,
         download_ok: bool,
         install: RefCell<Option<Result<(), InstallStop>>>,
         calls: RefCell<Vec<String>>,
@@ -671,8 +796,8 @@ mod tests {
                 admin: true,
                 found: RefCell::new(false),
                 found_after_install: true,
-                signature: GOOD_SIGNATURE.into(),
-                assessment: GOOD_ASSESSMENT.into(),
+                signature: said(GOOD_SIGNATURE),
+                assessment: said(GOOD_ASSESSMENT),
                 download_ok: true,
                 install: RefCell::new(Some(Ok(()))),
                 calls: RefCell::new(Vec::new()),
@@ -710,10 +835,10 @@ mod tests {
                 Err("no".into())
             }
         }
-        fn signature(&self, _: &Path) -> String {
+        fn signature(&self, _: &Path) -> Checked {
             self.signature.clone()
         }
-        fn assessment(&self, _: &Path) -> String {
+        fn assessment(&self, _: &Path) -> Checked {
             self.assessment.clone()
         }
         fn install(&self, pkg: &Path) -> Result<(), InstallStop> {
@@ -765,45 +890,129 @@ mod tests {
 
     #[test]
     fn a_package_not_signed_by_tailscale_is_refused_before_it_is_installed() {
-        for signature in [
-            "Package \"Tailscale.pkg\":\n   Status: no signature\n",
-            // Another developer's certificate, with the name Tailscale in it.
-            "    1. Developer ID Installer: Tailscale Inc. (ABCDE12345)\n",
-            // The right team, but not an installer certificate.
-            "    1. Developer ID Application: Tailscale Inc. (W5364U7YZB)\n",
-            "",
-        ] {
+        let good = GOOD_SIGNATURE;
+        let wrong: Vec<(&str, Checked)> = vec![
+            ("no signature", said("Package \"Tailscale.pkg\":\n   Status: no signature\n")),
+            (
+                "another team",
+                said(&good.replace("W5364U7YZB", "ABCDE12345")),
+            ),
+            (
+                "the right team on an application certificate",
+                said(&good.replace("Developer ID Installer", "Developer ID Application")),
+            ),
+            (
+                "the team text in the wrong place: not the leaf of the chain",
+                said(&good.replace(
+                    "    1. Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n",
+                    "    1. Developer ID Installer: Someone Else (ABCDE12345)\n    2. Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n",
+                )),
+            ),
+            (
+                "the team text inside another line",
+                said(&good.replace(
+                    "    1. Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n",
+                    "    1. Developer ID Installer: Evil Ltd. (ABCDE12345) not Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n",
+                )),
+            ),
+            (
+                "an untrusted signature",
+                said(&good.replace(
+                    "signed by a developer certificate issued by Apple for distribution",
+                    "signed by a certificate that is not trusted",
+                )),
+            ),
+            (
+                "a revoked one",
+                said(&good.replace(
+                    "signed by a developer certificate issued by Apple for distribution",
+                    "signed by a developer certificate issued by Apple for distribution (revoked)",
+                )),
+            ),
+            (
+                "good-looking text and a failing exit",
+                Checked {
+                    ok: false,
+                    text: good.into(),
+                },
+            ),
+            ("nothing", said("")),
+        ];
+        for (why, signature) in wrong {
             let host = Fake {
-                signature: signature.into(),
+                signature,
                 ..Fake::good()
             };
             let (last, _) = run(&host);
-            assert_eq!(last.phase, Phase::Failed, "{signature}");
+            assert_eq!(last.phase, Phase::Failed, "{why}");
             assert!(
                 last.step.contains("isn’t signed by Tailscale"),
-                "{}",
+                "{why}: {}",
                 last.step
             );
-            assert!(!host.called("install"), "installed anyway: {signature}");
-            assert!(host.called("remove"), "left the download");
+            assert!(!host.called("install"), "installed anyway: {why}");
+            assert!(host.called("remove"), "left the download: {why}");
         }
     }
 
     #[test]
     fn a_package_apple_did_not_notarize_is_refused_before_it_is_installed() {
-        for assessment in [
-            "/x/Tailscale.pkg: rejected\nsource=Unnotarized Developer ID\n",
-            "/x/Tailscale.pkg: accepted\nsource=Developer ID\n",
-            "",
-        ] {
+        let pkg = "/fake/work/Tailscale.pkg";
+        let good = GOOD_ASSESSMENT;
+        let wrong: Vec<(&str, Checked)> = vec![
+            (
+                "rejected",
+                said(&format!(
+                    "{pkg}: rejected\nsource=Unnotarized Developer ID\n"
+                )),
+            ),
+            (
+                "not notarized",
+                said(&good.replace("Notarized Developer ID", "Developer ID")),
+            ),
+            (
+                "a verdict for another file",
+                said(&good.replace(pkg, "/fake/other/Tailscale.pkg")),
+            ),
+            (
+                "a path that contains accepted, and a rejection",
+                said(&format!(
+                    "{pkg}: rejected\n/x/{pkg}: accepted\nsource=Notarized Developer ID\norigin=Developer ID Installer: Tailscale Inc. (W5364U7YZB)\n"
+                )),
+            ),
+            (
+                "an origin line of another team",
+                said(&good.replace("W5364U7YZB", "ABCDE12345")),
+            ),
+            (
+                "no origin line",
+                said(&format!("{pkg}: accepted\nsource=Notarized Developer ID\n")),
+            ),
+            (
+                "the source inside another line",
+                said(&good.replace(
+                    "source=Notarized Developer ID",
+                    "note: source=Notarized Developer ID",
+                )),
+            ),
+            (
+                "good-looking text and a failing exit",
+                Checked {
+                    ok: false,
+                    text: good.into(),
+                },
+            ),
+            ("nothing", said("")),
+        ];
+        for (why, assessment) in wrong {
             let host = Fake {
-                assessment: assessment.into(),
+                assessment,
                 ..Fake::good()
             };
             let (last, _) = run(&host);
-            assert_eq!(last.phase, Phase::Failed, "{assessment}");
-            assert!(last.step.contains("notarized"), "{}", last.step);
-            assert!(!host.called("install"));
+            assert_eq!(last.phase, Phase::Failed, "{why}");
+            assert!(last.step.contains("notarized"), "{why}: {}", last.step);
+            assert!(!host.called("install"), "installed anyway: {why}");
         }
     }
 
@@ -892,16 +1101,54 @@ mod tests {
     }
 
     #[test]
-    fn the_administrator_script_runs_the_installer_on_the_one_file_with_its_path_escaped() {
+    fn the_administrator_script_checks_and_installs_a_root_owned_copy_in_one_chain() {
         let script = admin_script(Path::new("/tmp/redlines-tailscale-1/Tailscale.pkg"));
-        assert_eq!(
-            script,
-            "do shell script \"/usr/sbin/installer -pkg \" & quoted form of \"/tmp/redlines-tailscale-1/Tailscale.pkg\" & \" -target /\" with administrator privileges"
-        );
+        // The path reaches the shell as AppleScript's quoted form, once, and nothing else of the
+        // user's is in the script.
+        assert_eq!(script.matches("quoted form of").count(), 1);
+        assert!(script.contains("quoted form of \"/tmp/redlines-tailscale-1/Tailscale.pkg\""));
+        assert!(script.ends_with("with administrator privileges"));
+        assert_eq!(script.matches("/tmp/redlines-tailscale-1").count(), 1);
+        // In this order, each step after the one before it with `&&`: a root-only folder, the copy,
+        // its owner and mode, the signature, the status, the team, the verdict, the source, the
+        // origin, and then the installer on the copy and not on the file the user could change.
+        let in_order = [
+            "/usr/bin/mktemp -d /private/var/tmp/redlines-tailscale.",
+            "/bin/cp ",
+            "&& /usr/sbin/chown root:wheel",
+            "&& /bin/chmod 600",
+            "&& /usr/sbin/pkgutil --check-signature",
+            "Status: signed by a developer certificate issued by Apple for distribution",
+            "Developer ID Installer: .+ \\\\(W5364U7YZB\\\\)",
+            "&& /usr/sbin/spctl --assess --type install -vv",
+            "accepted",
+            "source=Notarized Developer ID",
+            "origin=Developer ID Installer",
+            "&& /usr/sbin/installer -pkg \\\"$P\\\" -target /",
+        ];
+        let mut from = 0;
+        for piece in in_order {
+            let at = script[from..]
+                .find(piece)
+                .unwrap_or_else(|| panic!("{piece} is missing or out of order in {script}"));
+            from += at + piece.len();
+        }
+        // The installer is the last thing, and the folder is removed however it ends.
+        assert!(script.contains("trap '/bin/rm -rf"));
+        assert!(!script.contains("-pkg \\\"/tmp"));
+        // A path with quotes and backslashes is escaped as an AppleScript string.
         let odd = admin_script(Path::new("/tmp/a\"b\\c/Tailscale.pkg"));
         assert!(
             odd.contains("quoted form of \"/tmp/a\\\"b\\\\c/Tailscale.pkg\""),
             "{odd}"
+        );
+    }
+
+    #[test]
+    fn the_app_path_in_the_process_pattern_matches_itself_only() {
+        assert_eq!(
+            regex_escaped("/Users/a.b/App (x)/Tailscale.app"),
+            "/Users/a\\.b/App \\(x\\)/Tailscale\\.app"
         );
     }
 

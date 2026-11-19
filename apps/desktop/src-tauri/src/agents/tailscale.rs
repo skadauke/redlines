@@ -190,9 +190,30 @@ fn says_unreachable(line: &str) -> bool {
 
 /// Whether an address is a secure page of Tailscale's own, the only kind a sign-in button opens.
 pub(super) fn is_tailscale_address(url: &str) -> bool {
-    url.strip_prefix("https://")
-        .and_then(|rest| rest.split(['/', '?', '#']).next())
-        .is_some_and(|host| host == "tailscale.com" || host.ends_with(".tailscale.com"))
+    // Nothing that a browser or `open` might read differently from this: no backslash, space or
+    // control character anywhere.
+    if url
+        .chars()
+        .any(|c| c == '\\' || c.is_whitespace() || c.is_control())
+    {
+        return false;
+    }
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // A host and nothing else: no user name (`@`), no port (`:`), only the characters of a name.
+    let plain = !authority.is_empty()
+        && authority
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    plain
+        && (authority == "tailscale.com"
+            || authority
+                .strip_suffix(".tailscale.com")
+                .is_some_and(|label| {
+                    !label.is_empty() && !label.starts_with('.') && !label.ends_with('.')
+                }))
 }
 
 /// Reads what `status --json` printed. `None` when it isn't Tailscale's JSON.
@@ -490,6 +511,38 @@ mod tests {
         let json = r#"{"BackendState":"Running","Self":{"HostName":"a","DNSName":"a.t.ts.net."},
             "Peer":null,"Health":null}"#;
         assert_eq!(status(json).state, State::NoPeers);
+    }
+
+    #[test]
+    fn only_a_plain_secure_page_of_tailscale_is_a_sign_in_address() {
+        for good in [
+            "https://login.tailscale.com/a/1234",
+            "https://tailscale.com/",
+            "https://login.tailscale.com",
+            "https://login.tailscale.com?x=1",
+        ] {
+            assert!(is_tailscale_address(good), "{good}");
+        }
+        for bad in [
+            // A browser reads the backslash as a slash: the host is evil.com.
+            "https://evil.com\\.tailscale.com/",
+            "https://evil.com\\@login.tailscale.com/",
+            "https://login.tailscale.com@evil.com/",
+            "https://user:pw@login.tailscale.com/",
+            "https://login.tailscale.com:8443/",
+            "https://login.tailscale.com.evil.com/",
+            "https://eviltailscale.com/",
+            "https://.tailscale.com/",
+            "https://login.tailscale.com /a",
+            "https://login.tailscale.com/a\n",
+            "https://login.tailscale.com/\u{7f}",
+            "http://login.tailscale.com/",
+            "https:///login.tailscale.com/",
+            "https://",
+            "",
+        ] {
+            assert!(!is_tailscale_address(bad), "{bad:?}");
+        }
     }
 
     #[test]
