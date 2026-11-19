@@ -537,14 +537,24 @@ keeps as the connection's operator token (`Kind::OperatorToken`, a 0600 file, ne
 the `client.deviceFamily` it was told when it approved a device, and compares every later connect
 with it; a remote client whose claim differs gets a `metadata-upgrade` approval request, and
 approving it replaces the device's tokens (`approveDevicePairing` writes every role's token again,
-`rotatedAtMs` set), with no way for a waiting client to receive the new one. Both connections
+`rotatedAtMs` set), and the Gateway sends the new one to no waiting client. Both connections
 therefore say `deviceFamily: "Mac"`, as OpenClaw's own clients do on macOS. A token the Gateway
 gave this device goes in `auth.deviceToken` ("Cached device credentials belong in deviceToken",
 OpenClaw's `connect-auth.ts`), where a stale one comes back as `AUTH_DEVICE_TOKEN_MISMATCH`; sent as
 `auth.token` it is read as the shared Gateway token first, and the answer is the wrong diagnosis. A
-token the person typed is a shared token and stays `auth.token` (`Kind::SharedToken`). OpenClaw's
-node host, on a stale device token, clears it and starts a pairing again; Redlines has the same
-one way back, a new setup code, which starts over whatever this Mac was given before.
+token the person typed is a shared token and stays `auth.token` (`Kind::SharedToken`). The files
+say which is which: the device's tokens are `node-device-token` and `operator-device-token`; the
+older `node-token` and `operator-token` are of unknown origin, are sent as `auth.token` as before
+(the Gateway also checks that as a device token), and are replaced by the next `hello-ok`.
+
+**After an approval replaced a token.** For a client that has only a setup code there is no way
+back but a new one: OpenClaw's node host clears a refused device token and pairs again. A client
+that keeps an explicit shared token is better off: it sends that again, and the Gateway gives the
+connection it opens a new device token (`shouldRetryGatewayWithDeviceToken` and
+`selectGatewayConnectAuth`). Redlines does the same with a typed token, on the node and for chat.
+The owner can also run `openclaw devices rotate --device <id> --role operator` and give the person
+a token to type. A new setup code deletes nothing before it is proved: it is sent first, and when it
+is refused or never connects the token that worked is tried next.
 
 **The order matters.** Used by the node first, a setup code was then refused to the operator
 ("already used") and the operator's request waited for approval ("role upgrade"). Used by the

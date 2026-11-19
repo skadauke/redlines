@@ -148,6 +148,9 @@ pub enum Status {
     Pairing {
         request_id: Option<String>,
         code: String,
+        /// This Mac was paired, and the Gateway wants it approved again (its device record
+        /// changed): the approval replaces this Mac's token, so a new setup code follows it.
+        again: bool,
     },
     Connected {
         tools: usize,
@@ -674,10 +677,14 @@ fn nap(stop: &AtomicBool, wait: Duration) {
 /// files, `connections.rs`).
 pub trait TokenStore: Send {
     fn keep(&mut self, token: Secret);
+    /// The token the Gateway gave this device (sent as `auth.deviceToken`).
     fn get(&self) -> Option<Secret>;
-    /// Forgets the device's token: a new setup code starts a pairing from nothing, and a token
-    /// from before it is never preferred to the code.
-    fn forget(&mut self);
+    /// A shared token, which the person typed or an older build kept without saying which it was
+    /// (sent as `auth.token`, as before). Nothing is ever deleted to make room for a new code:
+    /// what a connection earns replaces it.
+    fn shared(&self) -> Option<Secret> {
+        None
+    }
 }
 
 /// Starts the connection on a thread of its own, and keeps it up. `first` is what the first
@@ -693,30 +700,41 @@ pub fn start(
     let flag = Arc::clone(&stop);
     let thread = std::thread::spawn(move || {
         let timing = config.timing;
-        // A new setup code starts a fresh pairing, whatever this device held before: the token an
-        // old pairing left behind (one the Gateway has since replaced) is dropped, never sent.
-        if matches!(first, Credential::SetupCode(_)) {
-            tokens.forget();
-        }
-        let mut first = Some(first);
+        // What is tried, in this order: a new setup code, which starts a fresh pairing whatever
+        // this device held before (what an old pairing left is not preferred to it); then the
+        // token the Gateway gave this device; then a shared token; then what `first` was, when
+        // nothing is kept. Nothing is deleted to make room for a code: one that is mistyped, used
+        // or run out, or that never connects, leaves the token that worked, which is tried next.
+        let (mut code, mut other) = match first {
+            code @ Credential::SetupCode(_) => (Some(code), None),
+            other => (None, Some(other)),
+        };
+        let mut skip_device = false;
+        let mut skip_shared = false;
         let mut wait = timing.backoff_start;
         let mut pairing_since: Option<Instant> = None;
         emit(Event::Status(Status::Connecting));
         loop {
-            // The device's own token, once there is one; else what the person gave.
-            let credential = match tokens.get() {
-                Some(token) => Credential::DeviceToken(token),
-                None => match first.take() {
-                    Some(credential) => credential,
-                    None => {
-                        emit(Event::Status(Status::Failed(Failure::BadToken)));
-                        return;
-                    }
-                },
+            let credential = if let Some(code) = code.take() {
+                code
+            } else if let Some(token) = tokens.get().filter(|_| !skip_device) {
+                other = None;
+                Credential::DeviceToken(token)
+            } else if let Some(token) = tokens.shared().filter(|_| !skip_shared) {
+                other = None;
+                Credential::Token(token)
+            } else if let Some(credential) = other.take() {
+                credential
+            } else {
+                emit(Event::Status(Status::Failed(Failure::BadToken)));
+                return;
             };
-            let was_setup_code = matches!(credential, Credential::SetupCode(_));
             let began = Instant::now();
-            let mut keep = |token: Secret| tokens.keep(token);
+            let mut kept_now = false;
+            let mut keep = |token: Secret| {
+                kept_now = true;
+                tokens.keep(token)
+            };
             let mut connected = false;
             let mut report = |event: Event| {
                 if matches!(event, Event::Status(Status::Connected { .. })) {
@@ -725,14 +743,29 @@ pub fn start(
                 emit(event);
             };
             let ended = session(&config, &credential, &host, &mut report, &mut keep, &flag);
+            if connected {
+                skip_device = false;
+                skip_shared = false;
+            }
+            // What is tried again when the connection ends without an answer to the credential:
+            // a setup code until it has given a token, and what `first` was.
+            let nothing_kept = tokens.get().is_none() && tokens.shared().is_none();
+            let mut again = |credential: Credential| match credential {
+                Credential::SetupCode(_) if kept_now => {}
+                Credential::SetupCode(_) => code = Some(credential),
+                _ if nothing_kept => other = Some(credential),
+                _ => {}
+            };
             // A connection that held for a while starts the waits over; one that drops at once,
             // again and again, does not.
             if connected && began.elapsed() >= timing.backoff_max {
                 wait = timing.backoff_start;
                 pairing_since = None;
             }
-            // A setup code is used once; if this connection didn't end in a token, it is spent.
-            let _ = was_setup_code;
+            // What is kept, after this connection: the next thing to try when a credential is
+            // refused.
+            let device_left = !skip_device && tokens.get().is_some();
+            let shared_left = !skip_shared && tokens.shared().is_some();
             match ended {
                 Ended::Stopped => {
                     emit(Event::Status(Status::Stopped));
@@ -742,22 +775,40 @@ pub fn start(
                     emit(Event::Status(Status::Reconnecting { detail }));
                     nap(&flag, wait);
                     wait = (wait * 2).min(timing.backoff_max);
-                    first = Some(credential);
+                    again(credential);
                 }
                 Ended::Refused(
-                    Refusal::PairingRequired { request_id } | Refusal::ApproveAgain { request_id },
+                    refusal @ (Refusal::PairingRequired { .. } | Refusal::ApproveAgain { .. }),
                 ) => {
+                    let (Refusal::PairingRequired { request_id }
+                    | Refusal::ApproveAgain { request_id }) = &refusal
+                    else {
+                        unreachable!()
+                    };
                     let since = *pairing_since.get_or_insert_with(Instant::now);
                     if since.elapsed() >= timing.pairing_window {
                         emit(Event::Status(Status::Failed(Failure::NotApproved)));
                         return;
                     }
                     emit(Event::Status(Status::Pairing {
-                        request_id,
+                        request_id: request_id.clone(),
                         code: config.identity.short_code(),
+                        again: matches!(refusal, Refusal::ApproveAgain { .. }),
                     }));
                     nap(&flag, timing.pairing_retry);
-                    first = Some(credential);
+                    again(credential);
+                }
+                // A new code that is refused leaves what worked in place, and that is tried next.
+                Ended::Refused(Refusal::CodeUsed | Refusal::BadToken | Refusal::Other(_))
+                    if matches!(credential, Credential::SetupCode(_))
+                        && (device_left || shared_left) => {}
+                // A device token the Gateway no longer knows (an approval replaced it) is not the
+                // end when a shared token was typed: OpenClaw's clients keep that one, and the
+                // Gateway gives a new device token to the connection it opens.
+                Ended::Refused(Refusal::BadToken)
+                    if matches!(credential, Credential::DeviceToken(_)) && shared_left =>
+                {
+                    skip_device = true;
                 }
                 Ended::Refused(Refusal::CodeUsed) => {
                     emit(Event::Status(Status::Failed(Failure::CodeUsed)));
@@ -953,9 +1004,13 @@ mod tests {
         }
     }
 
-    struct Memory(Arc<Mutex<Option<String>>>);
+    /// The device's token, as the Gateway gave it, and a shared token the person typed.
+    struct Memory(Arc<Mutex<Option<String>>>, Option<String>);
 
     impl TokenStore for Memory {
+        fn shared(&self) -> Option<Secret> {
+            self.1.as_deref().and_then(|text| Secret::new(text).ok())
+        }
         fn keep(&mut self, token: Secret) {
             *self.0.lock().unwrap() = Some(token.expose().to_owned());
         }
@@ -965,9 +1020,6 @@ mod tests {
                 .unwrap()
                 .as_deref()
                 .and_then(|text| Secret::new(text).ok())
-        }
-        fn forget(&mut self) {
-            *self.0.lock().unwrap() = None;
         }
     }
 
@@ -996,6 +1048,21 @@ mod tests {
         }
 
         fn start_with(fake: &Fake, first: Credential, token: Option<&str>, call: Duration) -> Run {
+            Run::launch(fake, first, token, None, call)
+        }
+
+        /// With a shared token kept as well as the device's.
+        fn start_shared(fake: &Fake, first: Credential, token: Option<&str>, shared: &str) -> Run {
+            Run::launch(fake, first, token, Some(shared), timing().call)
+        }
+
+        fn launch(
+            fake: &Fake,
+            first: Credential,
+            token: Option<&str>,
+            shared: Option<&str>,
+            call: Duration,
+        ) -> Run {
             let events: Arc<Mutex<Vec<Event>>> = Arc::default();
             let kept = Arc::new(Mutex::new(token.map(str::to_owned)));
             let sink = Arc::clone(&events);
@@ -1009,7 +1076,7 @@ mod tests {
                 },
                 first,
                 Arc::new(Tools),
-                Box::new(Memory(Arc::clone(&kept))),
+                Box::new(Memory(Arc::clone(&kept), shared.map(str::to_owned))),
                 Box::new(move |event| sink.lock().unwrap().push(event)),
             );
             Run {
@@ -1203,7 +1270,8 @@ mod tests {
         assert_eq!(code.len(), 7);
         assert!(run.statuses().contains(&Status::Pairing {
             request_id: Some("req-7".into()),
-            code
+            code,
+            again: false
         }));
     }
 
@@ -1225,28 +1293,120 @@ mod tests {
                         "requestId": "req-8", "recommendedNextStep": "wait_then_retry"}),
                 );
             }),
+            // The owner approved, which replaced the token: this one is stale.
             Box::new(|socket, frames| {
                 greet(socket, "b");
                 take_connect(socket, frames, "b");
-                hello(socket, Some("dt-rotated"));
+                refuse(
+                    socket,
+                    "INVALID_REQUEST",
+                    "unauthorized: device token mismatch",
+                    json!({"code": "AUTH_DEVICE_TOKEN_MISMATCH"}),
+                );
+            }),
+        ]);
+        let run = Run::start(
+            &gateway,
+            Credential::DeviceToken(secret(TOKEN)),
+            Some(TOKEN),
+        );
+        run.wait("the end", |event| {
+            *event == Event::Status(Status::Failed(Failure::BadToken))
+        });
+        gateway.thread.join().unwrap();
+        // It said "approved again", not a first pairing's words, and then why it stopped.
+        assert!(run.statuses().iter().any(|status| matches!(
+            status,
+            Status::Pairing { request_id: Some(id), again: true, .. } if id == "req-8"
+        )));
+    }
+
+    /// OpenClaw's clients keep an explicit shared token and get a new device token on the next
+    /// connect: so does a node that holds one, when an approval replaced its device token.
+    #[test]
+    fn a_shared_token_connects_again_when_the_device_token_was_replaced() {
+        let gateway = fake(vec![
+            Box::new(|socket, frames| {
+                greet(socket, "a");
+                let params = take_connect(socket, frames, "a");
+                assert_eq!(params["auth"], json!({"deviceToken": TOKEN}));
+                refuse(
+                    socket,
+                    "INVALID_REQUEST",
+                    "unauthorized: device token mismatch",
+                    json!({"code": "AUTH_DEVICE_TOKEN_MISMATCH"}),
+                );
+            }),
+            Box::new(|socket, frames| {
+                greet(socket, "b");
+                let params = take_connect(socket, frames, "b");
+                assert_eq!(params["auth"], json!({"token": "typed-shared"}));
+                hello(socket, Some("dt-new"));
                 read_frame(socket, frames);
                 drain(socket, frames);
             }),
         ]);
-        let mut run = Run::start(
+        let mut run = Run::start_shared(
             &gateway,
             Credential::DeviceToken(secret(TOKEN)),
             Some(TOKEN),
+            "typed-shared",
         );
         run.wait("connected", |event| {
             matches!(event, Event::Status(Status::Connected { .. }))
         });
         run.stop();
         gateway.thread.join().unwrap();
-        assert!(run.statuses().iter().any(
-            |status| matches!(status, Status::Pairing { request_id: Some(id), .. } if id == "req-8")
-        ));
-        assert_eq!(run.token.lock().unwrap().as_deref(), Some("dt-rotated"));
+        assert_eq!(run.token.lock().unwrap().as_deref(), Some("dt-new"));
+    }
+
+    /// A new code that is refused (mistyped, used, run out) leaves the token that worked, and the
+    /// node connects with it.
+    #[test]
+    fn a_refused_code_leaves_the_old_token_in_place_and_it_is_used() {
+        let gateway = fake(vec![
+            Box::new(|socket, frames| {
+                greet(socket, "a");
+                let params = take_connect(socket, frames, "a");
+                assert_eq!(params["auth"], json!({"bootstrapToken": CODE}));
+                refuse(socket, "UNAUTHORIZED", "bootstrap token expired", json!({}));
+            }),
+            Box::new(|socket, frames| {
+                greet(socket, "b");
+                let params = take_connect(socket, frames, "b");
+                assert_eq!(params["auth"], json!({"deviceToken": TOKEN}));
+                hello(socket, None);
+                read_frame(socket, frames);
+                drain(socket, frames);
+            }),
+        ]);
+        let mut run = Run::start(&gateway, Credential::SetupCode(secret(CODE)), Some(TOKEN));
+        run.wait("connected", |event| {
+            matches!(event, Event::Status(Status::Connected { .. }))
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+        assert_eq!(run.token.lock().unwrap().as_deref(), Some(TOKEN));
+        assert!(
+            !run.statuses()
+                .iter()
+                .any(|status| matches!(status, Status::Failed(_)))
+        );
+    }
+
+    /// With nothing kept, a refused code is the end, as before.
+    #[test]
+    fn a_refused_code_with_nothing_kept_is_the_end() {
+        let gateway = fake(vec![Box::new(|socket, frames| {
+            greet(socket, "a");
+            take_connect(socket, frames, "a");
+            refuse(socket, "UNAUTHORIZED", "bootstrap token expired", json!({}));
+        })]);
+        let run = Run::start(&gateway, Credential::SetupCode(secret(CODE)), None);
+        run.wait("the end", |event| {
+            *event == Event::Status(Status::Failed(Failure::CodeUsed))
+        });
+        gateway.thread.join().unwrap();
     }
 
     /// #1161: a new setup code starts a fresh pairing, whatever an old pairing left behind. The
@@ -1558,9 +1718,10 @@ mod tests {
         assert_eq!(
             said(Status::Pairing {
                 request_id: Some("r".into()),
-                code: "7QF-2K9".into()
+                code: "7QF-2K9".into(),
+                again: false
             }),
-            json!({"state": "pairing", "request_id": "r", "code": "7QF-2K9"})
+            json!({"state": "pairing", "request_id": "r", "code": "7QF-2K9", "again": false})
         );
         assert_eq!(
             said(Status::Connected { tools: 6 }),
@@ -1633,7 +1794,7 @@ mod tests {
             },
             first,
             Arc::new(Six),
-            Box::new(Memory(kept)),
+            Box::new(Memory(kept, None)),
             Box::new(|event| eprintln!("LIVE {event:?}")),
         );
         std::thread::sleep(Duration::from_secs(seconds));

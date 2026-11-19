@@ -48,7 +48,7 @@ pub use which::Programs;
 use acp::{AcpAgent, AcpAgents, Found};
 use acp_runs::AcpRuns;
 use allowed::Agent;
-use connections::{Change, Connections, Kind, NewConnection, Secret, View};
+use connections::{Change, Connections, NewConnection, Secret, View};
 use log::RunInfo;
 use openclaw_nodes::Nodes;
 use process::{ExecOutput, RunMessage, Spec, Started};
@@ -285,10 +285,7 @@ pub fn openclaw_use_token(
 ) -> Result<Vec<View>, String> {
     let secret = Secret::new(&token)?;
     let store = app.state::<Connections>();
-    // A typed token starts over too: what an earlier pairing left is not preferred to it.
-    store.forget(&handle, Kind::NodeToken)?;
-    store.forget(&handle, Kind::OperatorToken)?;
-    store.keep(&handle, Kind::SharedToken, &secret)?;
+    openclaw_nodes::keep_typed_token(&store, &handle, &secret)?;
     let _ = app.emit(OPENCLAW_CHANGED, ());
     Ok(store.views())
 }
