@@ -44,81 +44,86 @@ afterAll(() => {
   real.destroy();
 });
 
-test('the editor writes what the format library writes, on the text an intent was made on', () => {
-  // Twelve documents per workload on a deep run (`REDLINES_FUZZ=12`, as elsewhere), three on an
-  // ordinary one.
-  const fuzz = Number(process.env['REDLINES_FUZZ']);
-  const cases = Number.isInteger(fuzz) && fuzz > 0 ? fuzz : 3;
-  let compared = 0;
-  let widened = 0;
-  let renumbered = 0;
-  const kinds = new Set<string>();
-  for (const workload of WORKLOADS) {
-    for (let n = 0; n < cases; n++) {
-      const rng = new Rng(seedFor(41, n));
-      let text = baseDocument(4, 10);
-      const counters = [0, 1, 2].map(() => ({ words: 0, notes: 0, replies: 0, intents: 0 }));
-      for (let step = 0; step < 14; step++) {
-        const who = step % 3;
-        const intent = makeIntent({
-          rng,
-          workload,
-          who,
-          local: text,
-          confirmed: text,
-          counter: counters[who] as (typeof counters)[number],
-          at: step * 1000,
-          guard: true,
-        });
-        if (!intent) continue;
-        useWriters(formatWriters);
-        const expected = derive(text, intent);
-        useWriters(real);
-        // A decision carries the mark as its writers read it: the editor's signature.
-        const mark =
-          intent.body.kind === 'decide'
-            ? parse(text).marks.find((m) => m.id === (intent.body as { mark: string }).mark)
-            : undefined;
-        const asSeen =
-          mark && intent.body.kind === 'decide'
-            ? { ...intent, body: { ...intent.body, seen: real.signature(text, mark) } }
-            : intent;
-        const actual = derive(text, asSeen);
-        useWriters(formatWriters);
-        const label = `${workload}/${n}/${step} ${intent.body.kind}`;
-        // Where the format library refuses an edit, the editor widens it (policy for edits): it
-        // writes more, never less. Where the library writes it, the editor writes the same.
-        if (expected.ok) {
-          expect(actual.ok, label).toBe(true);
-          if (!actual.ok) continue;
-          const got = applyChanges(text, actual.changes);
-          const want = applyChanges(text, expected.changes);
-          // The editor tries the fine form first, and widens when it is refused: ids are drawn
-          // from the source in the order it asked, so the same marks can carry other ids.
-          if (got !== want) renumbered++;
-          expect(withoutIds(got), label).toBe(withoutIds(want));
-          compared++;
-          kinds.add(intent.body.kind);
-          text = applyChanges(text, expected.changes);
-        } else if (actual.ok) {
-          widened++;
-          text = applyChanges(text, actual.changes);
+test(
+  'the editor writes what the format library writes, on the text an intent was made on',
+  () => {
+    // Twelve documents per workload on a deep run (`REDLINES_FUZZ=12`, as elsewhere), three on an
+    // ordinary one.
+    const fuzz = Number(process.env['REDLINES_FUZZ']);
+    const cases = Number.isInteger(fuzz) && fuzz > 0 ? fuzz : 3;
+    let compared = 0;
+    let widened = 0;
+    let renumbered = 0;
+    const kinds = new Set<string>();
+    for (const workload of WORKLOADS) {
+      for (let n = 0; n < cases; n++) {
+        const rng = new Rng(seedFor(41, n));
+        let text = baseDocument(4, 10);
+        const counters = [0, 1, 2].map(() => ({ words: 0, notes: 0, replies: 0, intents: 0 }));
+        for (let step = 0; step < 14; step++) {
+          const who = step % 3;
+          const intent = makeIntent({
+            rng,
+            workload,
+            who,
+            local: text,
+            confirmed: text,
+            counter: counters[who] as (typeof counters)[number],
+            at: step * 1000,
+            guard: true,
+          });
+          if (!intent) continue;
+          useWriters(formatWriters);
+          const expected = derive(text, intent);
+          useWriters(real);
+          // A decision carries the mark as its writers read it: the editor's signature.
+          const mark =
+            intent.body.kind === 'decide'
+              ? parse(text).marks.find((m) => m.id === (intent.body as { mark: string }).mark)
+              : undefined;
+          const asSeen =
+            mark && intent.body.kind === 'decide'
+              ? { ...intent, body: { ...intent.body, seen: real.signature(text, mark) } }
+              : intent;
+          const actual = derive(text, asSeen);
+          useWriters(formatWriters);
+          const label = `${workload}/${n}/${step} ${intent.body.kind}`;
+          // Where the format library refuses an edit, the editor widens it (policy for edits): it
+          // writes more, never less. Where the library writes it, the editor writes the same.
+          if (expected.ok) {
+            expect(actual.ok, label).toBe(true);
+            if (!actual.ok) continue;
+            const got = applyChanges(text, actual.changes);
+            const want = applyChanges(text, expected.changes);
+            // The editor tries the fine form first, and widens when it is refused: ids are drawn
+            // from the source in the order it asked, so the same marks can carry other ids.
+            if (got !== want) renumbered++;
+            expect(withoutIds(got), label).toBe(withoutIds(want));
+            compared++;
+            kinds.add(intent.body.kind);
+            text = applyChanges(text, expected.changes);
+          } else if (actual.ok) {
+            widened++;
+            text = applyChanges(text, actual.changes);
+          }
         }
       }
     }
-  }
-  console.info(
-    `REAL-DERIVE cases=${cases} compared=${compared} renumbered=${renumbered} widened=${widened}`,
-  );
-  // The editor widened some of what the library refuses, and refused none the library wrote.
-  // Most of what the editor writes is the library's, ids included.
-  expect(renumbered).toBeLessThan(compared / 4);
-  expect(compared).toBeGreaterThan(cases * 16);
-  // Typing, deleting, formatting, comments, replies and decisions all met the editor.
-  expect([...kinds].sort()).toEqual(
-    expect.arrayContaining(['type', 'delete', 'sub', 'bold', 'comment', 'reply', 'decide']),
-  );
-}, 60_000);
+    console.info(
+      `REAL-DERIVE cases=${cases} compared=${compared} renumbered=${renumbered} widened=${widened}`,
+    );
+    // The editor widened some of what the library refuses, and refused none the library wrote.
+    // Most of what the editor writes is the library's, ids included.
+    expect(renumbered).toBeLessThan(compared / 4);
+    expect(compared).toBeGreaterThan(cases * 16);
+    // Typing, deleting, formatting, comments, replies and decisions all met the editor.
+    expect([...kinds].sort()).toEqual(
+      expect.arrayContaining(['type', 'delete', 'sub', 'bold', 'comment', 'reply', 'decide']),
+    );
+    // 60 s for the default size, and 5 s a document beyond it (300 on a deep run take over a minute).
+  },
+  Math.max(60_000, (Number(process.env['REDLINES_FUZZ']) || 0) * 5_000),
+);
 
 test(
   'sessions over the editor settle and converge, with an authority and without',

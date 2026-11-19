@@ -5717,11 +5717,7 @@ function editsWidening(
         if (!widening && hardBreakBesideDeletionReadsOtherwise(text, edits, written.changes)) {
           throw new ReadsOtherwise();
         }
-        if (
-          widening &&
-          (readsOtherAtBoundary(text, edits, written.changes) ||
-            delimiterOrdersDiffer(text, edits, written.changes))
-        ) {
+        if (widening && readsOtherAtBoundary(text, edits, written.changes)) {
           // A write the format accepts that a reader of the file reads otherwise than the newest
           // view (#597, #601, #588): the unit is replaced, or the fine write is kept where it
           // can't be.
@@ -5835,7 +5831,10 @@ export function readsOtherAtBoundary(
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||
     delimiterBesideBreak(text, edits) ||
-    readsOtherInDecisions(text, edits, changes)
+    readsOtherInDecisions(text, edits, changes) ||
+    // A delimiter beside another person's mark whose decisions give other texts (#1136): the editor
+    // asks here, as `trackedEdits` does, so that both replace the unit.
+    delimiterOrdersDiffer(text, edits, changes)
   );
 }
 
