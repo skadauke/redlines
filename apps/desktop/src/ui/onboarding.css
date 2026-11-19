@@ -15,7 +15,7 @@
 }
 
 .rl-onb-title {
-  font-size: calc(var(--rl-size-ui) * 1.15);
+  font-size: var(--rl-size-ui);
 }
 
 .rl-onb-fields {

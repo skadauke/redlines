@@ -130,8 +130,9 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
       skipAll.addEventListener('click', () => end('skipped'));
       sheet.replaceChildren(place, heading, sub, ...body, row, skipAll);
       sheet.dataset['step'] = String(step);
-      (sheet.querySelector('input, select') as HTMLElement | null)?.focus();
-      if (!sheet.querySelector('input, select')) buttons.at(-1)?.focus();
+      const field = sheet.querySelector<HTMLElement>('input, select');
+      if (field) field.focus();
+      else buttons.at(-1)?.focus();
       backdrop.onkeydown = (event) => {
         if (event.key === 'Escape') {
           event.preventDefault();
@@ -288,14 +289,20 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
         const result = el('span', 'rl-onb-install-result');
         result.setAttribute('role', 'status');
         results.set(row.key, result);
-        words.append(el('span', 'rl-onb-install-title', row.title), el('span', 'rl-onb-install-text', row.text), result);
+        words.append(
+          el('span', 'rl-onb-install-title', row.title),
+          el('span', 'rl-onb-install-text', row.text),
+          result,
+        );
         item.append(box, words);
         list.append(item);
       }
       const install = button('Install and Continue', true);
       const skip = button('Skip');
       let busy = false;
-      skip.addEventListener('click', () => !busy && tour());
+      skip.addEventListener('click', () => {
+        if (!busy) void tour();
+      });
       install.addEventListener('click', () => {
         if (busy) return;
         busy = true;
@@ -317,7 +324,7 @@ export function runOnboarding(deps: OnboardingDeps): Promise<OnboardingEnd> {
           // The results stay in view until the person goes on.
           install.textContent = 'Continue';
           install.disabled = false;
-          install.onclick = () => tour();
+          install.onclick = () => void tour();
           busy = false;
         })();
       });
