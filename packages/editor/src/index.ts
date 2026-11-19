@@ -92,7 +92,7 @@ import {
 import { FileView } from './tracked/file-view.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
-import { quartoCites } from './preview/quarto-cites.ts';
+import { citationsFacet, quartoCites } from './preview/quarto-cites.ts';
 import { quartoRefs } from './preview/quarto-refs.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
@@ -479,6 +479,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     options.includes ? includeFacet.of(options.includes) : [],
+    options.citations ? citationsFacet.of(options.citations) : [],
     quartoIncludes(),
     imageSelection(),
     undoHistory(),

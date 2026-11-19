@@ -53,6 +53,9 @@ importers:
       '@redlines/agents':
         specifier: workspace:*
         version: link:../../plugins/agents
+      '@redlines/citations':
+        specifier: workspace:*
+        version: link:../../packages/citations
       '@redlines/code':
         specifier: workspace:*
         version: link:../../plugins/code

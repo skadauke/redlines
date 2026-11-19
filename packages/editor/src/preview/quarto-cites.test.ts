@@ -116,7 +116,8 @@ describe('citations from the bibliography (#1171)', () => {
       doc,
       author,
       dialect: 'pandoc',
-      includes: { read: async (path) => files[path] ?? null, open: () => {} },
+      includes: { read: (path) => Promise.resolve(files[path] ?? null), open: () => {} },
+      citations: () => import('@redlines/citations'),
     });
     forceParsing(editor.view, editor.view.state.doc.length, 10_000);
     editor.view.dispatch({ selection: { anchor: 0 } });

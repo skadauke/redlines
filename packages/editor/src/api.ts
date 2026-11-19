@@ -350,6 +350,13 @@ export interface EditorOptions {
    */
   includes?: IncludeHost;
   /**
+   * Loads the formatter of citations (`import('@redlines/citations')`), which draws `[@smith2020]`
+   * as "(Smith 2020)" from the bibliography that a Quarto document's front matter names, read
+   * through `includes`. It is the host's to import, so that a page that doesn't (the website's
+   * embed) never holds it. Default: none, and a citation shows its keys.
+   */
+  citations?: () => Promise<typeof import('@redlines/citations')>;
+  /**
    * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
    * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
    * to keep, as fractions of its width and height. Writes the copy beside the original, in the

@@ -10,6 +10,7 @@
 import {
   type EditorState,
   type Extension,
+  Facet,
   type Range,
   StateEffect,
   StateField,
@@ -172,6 +173,12 @@ interface Loaded {
   api: Pick<typeof import('@redlines/citations'), 'formatBracket' | 'formatNarrative'>;
 }
 
+/** The host's way to load the formatter of citations; without it the chips say the keys. */
+export const citationsFacet = Facet.define<
+  () => Promise<typeof import('@redlines/citations')>,
+  (() => Promise<typeof import('@redlines/citations')>) | null
+>({ combine: (values) => values[0] ?? null });
+
 const setBibliography = StateEffect.define<Loaded | null>();
 
 const loadedField = StateField.define<Loaded | null>({
@@ -306,12 +313,13 @@ const bibliographyLoader = ViewPlugin.fromClass(
       const front = view.state.facet(dialectFacet) === 'pandoc' ? frontMatter(view.state.doc) : '';
       const host = view.state.facet(includeFacet);
       const token = ++this.token;
-      if (!front || !host) {
+      const load = view.state.facet(citationsFacet);
+      if (!front || !host || !load) {
         this.clear();
         return;
       }
       try {
-        const api = await import('@redlines/citations');
+        const api = await load();
         const refs = api.bibliographyRefs(front);
         if (!refs) {
           this.clear();
