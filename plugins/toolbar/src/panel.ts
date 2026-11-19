@@ -185,6 +185,7 @@ export function drawPanel(
   panel: HTMLElement,
   bar: ShownBar,
   spelling: SpellingRows | null,
+  bubble: HTMLElement | null,
   handlers: PanelHandlers,
   onMenu: (id: MenuId | null) => void = () => {},
 ): DrawnPanel {
@@ -192,7 +193,13 @@ export function drawPanel(
   const items = new Map<string, { button: HTMLButtonElement; paired: boolean }>();
   /** The headers of the menus, which say what the selection is where the menu is about one. */
   const heads = new Map<MenuId, HTMLElement>();
+  // Top to bottom: the spelling rows, the review card of the place (the host's `bubble`), the bar.
   if (spelling) panel.append(spellingBlock(spelling, handlers), rule(true));
+  if (bubble) {
+    const slot = element('div', 'rl-toolbar-bubble');
+    slot.append(bubble);
+    panel.append(slot, rule(true));
+  }
   const row = element('div', 'rl-toolbar-bar');
   panel.append(row);
 
@@ -326,8 +333,9 @@ export function drawPanel(
     bar: tops.map((top) => boxes.findIndex((box) => box.top === top)),
     menus: lines.map((rows) => rows.map((buttons) => buttons.length)),
   });
+  // The rows the arrow keys walk above the bar: the suggestions, and the review card's buttons.
   const words = () =>
-    [...panel.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word')].filter(
+    [...panel.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word, .rl-bubble-action')].filter(
       (word) => !word.disabled,
     );
   const here = (): Position | null => {
@@ -375,12 +383,22 @@ export function drawPanel(
       setOpen(index < 0 ? null : index);
     },
     openId: () => (open === null ? null : (boxes[open]?.id ?? null)),
+    // The first suggestion; else the review card's first button; else the bar's first.
     entry: () => words()[0] ?? tops[0],
     key(event) {
       const active = panel.ownerDocument.activeElement;
       const list = words();
       const at = list.findIndex((word) => word === active);
       if (at >= 0) {
+        // The review card's buttons are a row: the side arrows move along it.
+        const row = list[at]?.closest('.rl-bubble-actions');
+        if (row && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+          const siblings = [...row.querySelectorAll<HTMLButtonElement>('.rl-bubble-action')];
+          const next =
+            siblings[siblings.indexOf(list[at]!) + (event.key === 'ArrowRight' ? 1 : -1)];
+          next?.focus();
+          return true;
+        }
         // The suggestions are a column above the bar.
         if (event.key === 'ArrowDown') {
           if (at + 1 < list.length) list[at + 1]?.focus();
