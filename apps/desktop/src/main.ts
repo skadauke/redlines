@@ -533,6 +533,8 @@ const editor = createEditor(element('#editor'), {
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
     return file === null ? null : imageSizes.of(file);
   },
+  // The formatter of citations is loaded only when a document names a bibliography.
+  citations: () => import('@redlines/citations'),
   // Math is drawn as MathML by Temml, loaded when a document has a formula.
   math: () => import('temml').then((module) => module.default),
   // An include of a Quarto document (`{{< include _part.qmd >}}`) is read and opened as a file of

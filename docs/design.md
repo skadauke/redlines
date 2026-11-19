@@ -1550,6 +1550,7 @@ same Welcome mode and then runs the tour, at any time.
 - captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's, Obsidian's and Quarto's are built); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (citations are drawn as chips);
+  citations are drawn as chips; when the front matter names a bibliography (`bibliography:`, a BibTeX or CSL JSON file beside the document) a chip says what the style prints, Chicago author-date by default, `(Knuth 1984)`, and APA's or numbers when `csl:` names one of those (`packages/citations`, loaded only by the app, #1171); the Word export writes the same text. Other CSL styles are drawn as the default, and nothing prints a list of references;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
   step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;

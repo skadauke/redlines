@@ -350,6 +350,13 @@ export interface EditorOptions {
    */
   includes?: IncludeHost;
   /**
+   * Loads the formatter of citations (`import('@redlines/citations')`), which draws `[@smith2020]`
+   * as "(Smith 2020)" from the bibliography that a Quarto document's front matter names, read
+   * through `includes`. It is the host's to import, so that a page that doesn't (the website's
+   * embed) never holds it. Default: none, and a citation shows its keys.
+   */
+  citations?: () => Promise<typeof import('@redlines/citations')>;
+  /**
    * Loads the engine that draws math (`$x^2$`, `$$ E = mc^2 $$`): TeX in, MathML out (Temml's
    * `renderToString`). It is the host's to import, so that a page that doesn't (the website's
    * embed) never holds it, and it is called only when a document has a formula. Default: none, and
