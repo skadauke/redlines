@@ -155,6 +155,7 @@ export const TOOLBAR_STYLE = `
 /* The palette: the search box and its lines take the bar's place in the card. */
 .rl-toolbar[data-search] .rl-toolbar-bar,
 .rl-toolbar[data-search] .rl-toolbar-spelling,
+.rl-toolbar[data-search] .rl-toolbar-bubble,
 .rl-toolbar[data-search] .rl-toolbar-rule-under { display: none; }
 .rl-toolbar[data-search] { width: min(440px, calc(100vw - 16px)); }
 .rl-toolbar-search { display: flex; flex-direction: column; gap: 4px; }
