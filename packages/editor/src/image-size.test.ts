@@ -254,7 +254,10 @@ describe('where the tag would be an HTML block', () => {
       tc: false,
       others: 'bo',
       expect: { file: '<img src="b.png" alt="a" width="360"><split>⏎more' },
-      skip: { render: 'a lone <img> is an HTML block until the split goes (#628)' },
+      skip: {
+        render:
+          'a lone <img> is an HTML block until the split goes (#628, the shape left is #1332)',
+      },
     },
   ]);
 
