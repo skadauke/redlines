@@ -80,6 +80,7 @@ const COMMANDS: &[&str] = &[
     "project_root",
     "quick_look_available",
     "quit_all",
+    "read_office_picture",
     "real_path",
     "relaunch",
     "relay_answer",

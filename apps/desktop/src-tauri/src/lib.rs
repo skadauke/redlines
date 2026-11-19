@@ -86,6 +86,7 @@ mod windows;
 
 // Undo and Redo in a text field, for the Edit menu's items.
 mod edit_menu;
+mod office_picture;
 
 // The window zoom, which the app keeps and sets on every window.
 mod zoom;
@@ -440,6 +441,7 @@ pub fn run() {
             spelling::spelling_learn,
             edit_menu::undo_in_field,
             edit_menu::paste_in_field,
+            office_picture::read_office_picture,
             open_preferences,
             open_about,
             dock_icon::app_icon_mark,

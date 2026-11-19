@@ -65,6 +65,7 @@
     "allow-print-window",
     "allow-project-root",
     "allow-quit-all",
+    "allow-read-office-picture",
     "allow-real-path",
     "allow-relaunch",
     "allow-relay-answer",

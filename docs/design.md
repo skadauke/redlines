@@ -1348,6 +1348,12 @@ paragraph of its own and not an item of the bullet list above it, a table 6.5 in
 shaded gray, and a quote's paragraphs in `class=MsoQuote`, which Word reads as its "Quote" style,
 #1181); File › Print and Export as PDF are built.
 
+- **A picture copied in Word** reaches a web view at the size it has on the page; Word's own drawing
+  format on the pasteboard (`com.microsoft.Art--GVML-ClipFormat`, an Office package) holds the
+  original, so the app reads it natively when it is there (`read_office_picture`, only for the window
+  that has the keys, up to 50 MB), takes the largest picture under `clipboard/media/` of the
+  package when it is the picture that was pasted (larger, of its shape), and saves it in its own
+  format; without the package, or with another picture, the paste is the one the page has (#1182).
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
