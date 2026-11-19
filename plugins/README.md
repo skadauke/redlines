@@ -21,11 +21,10 @@ ship with the app; each one can be turned off. These are written:
 | `agent-codex` ([`@redlines/agent-codex`](agent-codex)) | The Codex provider: starts the person's own Codex |
 | `agent-acp` ([`@redlines/agent-acp`](agent-acp)) | The Agent Client Protocol provider: starts an agent the person added, and OpenClaw's `openclaw acp` bridge, which has no toolbox (the Gateway connection, whose runs edit through the node's tools, is in the app); Preferences adds OpenClaw agents, and no other yet |
 
-The others are planned:
+Math is drawn by the editor core, and the first run is the desktop app's own onboarding, so neither is a plugin. The others are planned:
 
 | Plugin       | What it adds                                              |
 | ------------ | --------------------------------------------------------- |
-| `math`       | Math formulas                                             |
 | `diagrams`   | Mermaid diagrams                                          |
 | `paste`      | Paste handlers                                            |
 | `word`       | Copy for Word, and the menu commands for `.docx` (the code is `packages/word`, which the app's File menu calls now; no plugin yet) |
@@ -34,5 +33,4 @@ The others are planned:
 | `workspace`  | The folder sidebar, Quick Open and folder search; desktop |
 | `git`        | Optional git features                                     |
 | `collab`     | Live sessions: invitations and presence across networks (`sync` is the window's side of a session) |
-| `ai`         | Chat panel and agents in comments (Ask is in `agents`)    |
-| `onboarding` | The first run; desktop                                    |
+| `ai`         | Agents in comments and the levels (Ask and the chat panel are in `agents`) |

@@ -1534,7 +1534,7 @@ comment needs an author, and Redlines has no accounts.
    Redlines, and open a welcome document that shows an edit, a suggestion, a comment and an agent
    at work.
 
-The first run is a plugin (§6.4). In an app that embeds Redlines, the identity comes from that
+The app's first run is what §5.11a describes; it lives in the desktop app, not in a plugin. In an app that embeds Redlines, the identity comes from that
 app's login and there is no first run. Changing your name or email later never rewrites old files;
 a new email under the same name becomes an alias in the ledger
 ([format §5.3](format.md#53-people)).
@@ -1604,8 +1604,7 @@ same Welcome mode and then runs the tour, at any time.
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
 - captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's, Obsidian's and Quarto's are built); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
-- a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (citations are drawn as chips);
-  citations are drawn as chips; when the front matter names a bibliography (`bibliography:`, a BibTeX or CSL JSON file beside the document) a chip says what the style prints, Chicago author-date by default, `(Knuth 1984)`, and APA's or numbers when `csl:` names one of those (`packages/citations`, loaded only by the app, #1171); the Word export writes the same text. Other CSL styles are drawn as the default, and nothing prints a list of references;
+- a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (not built; citations are drawn as chips, and when the front matter names a bibliography (`bibliography:`, a BibTeX or CSL JSON file beside the document) a chip says what the style prints, Chicago author-date by default, `(Knuth 1984)`, and APA's or numbers when `csl:` names one of those (`packages/citations`, loaded only by the app, #1171); the Word export writes the same text. Other CSL styles are drawn as the default, and nothing prints a list of references);
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
   step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
@@ -1751,6 +1750,7 @@ without the editor.
 | `@redlines/render`     | Static HTML rendering and pagination, for print, PDF, HTML export and previews                                                              | Browsers, Node          |
 | `@redlines/clipboard`  | HTML-to-Markdown conversion for paste, and the copy formats: Redlines' own, Word's HTML, generic HTML, Markdown, plain text                 | Browsers                |
 | `@redlines/word`       | Word (`.docx`) export (`exportDocx`), import (a reader that turns a `.docx` into blocks and runs with its revisions and comments, and a mapper from that model to Markdown with its marks and ledger) and the Google Docs differences (§5.10; [export](word-export/README.md)). File › Export to Word… and Open .docx… call it; it is kept out of the editor's bundle | Browsers, Node          |
+| `@redlines/citations`  | Citations of a Quarto or pandoc document, formatted from its bibliography (BibTeX or CSL JSON) as author-date or numbers (§5.12) | Anywhere (no DOM, no Node APIs) |
 | `@redlines/collab`     | The session authority that orders every edit and decision of a live session, with its hub, the window client, the write-ahead log and the transports (memory, and the app's events). A server that hosts sessions across networks is not built (§7.2) | Anywhere (the authority runs in a window of the app) |
 | `@redlines/collab-sim` | The session simulation harness: seeded live sessions over the real format library, with an oracle that checks every run. Research tooling, not shipped | Node                    |
 | `@redlines/mcp`        | The MCP server, for agents outside Redlines                                                                                                | Node                    |
@@ -1761,7 +1761,7 @@ without the editor.
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
 
-Written so far: `format`, `editor`, `plugin-api`, `agent-tools`, `agent-process`, `collab`,
+Written so far: `format`, `editor`, `plugin-api`, `agent-tools`, `agent-process`, `citations`, `collab`,
 `collab-sim`, `word` and `redlines`. `@redlines/react` and `@redlines/render` are not written. The paste
 converter and the copy formats that `@redlines/clipboard` names are in `@redlines/editor`
 (`clipboard/`), the MCP server that `@redlines/mcp` names is in `@redlines/agent-tools`, and print
@@ -1815,8 +1815,9 @@ the same identity and the sandbox entitlement that an app extension must have
 
 **The core** (`@redlines/editor`) holds:
 
-- display and editing of all the Markdown in §5.2; code, math and diagrams appear as formatted
-  source until their plugins render them;
+- display and editing of all the Markdown in §5.2; math is drawn by the core (inline and display,
+  by Temml, loaded only when a document has a formula, #1173), while code and diagrams appear as
+  formatted source until their plugins render them;
 - the tracked-change layer: showing marks, editing with Track Changes on, accepting and
   rejecting, the views and Track Changes;
 - comment anchors and the ledger;
@@ -1827,8 +1828,8 @@ the same identity and the sandbox entitlement that an app extension must have
 table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu and the grips), `emoji`,
 `toolbar`, `agents`, the three providers and `sync` (a window's side of a live session, §7.1a; the
 `collab` row below is the invitations and presence across networks, still to come) (`plugins/`). The `ai` row is what
-`agents` is growing toward: its chat panel isn't
-written. The `word` row is a library so far, `@redlines/word` (§6.3), and no plugin: the app's File ›
+`agents` is growing toward: its chat panel is written (§8.7, `plugins/agents/src/chat`), and
+the rest of the row is not. The `math` row is the core's today (above), and `onboarding` is the desktop app's own (§5.11a). The `word` row is a library so far, `@redlines/word` (§6.3), and no plugin: the app's File ›
 Export to Word… and Open .docx… call it, and neither `print` nor `export` is written as a plugin (the
 app's File › Print and Export as PDF are its own).
 
@@ -1863,7 +1864,7 @@ Where the desktop app's own features live:
   Export as PDF are the desktop app's own. The host supplies the
   printing capability: the desktop app prints and writes PDF files through its webview (WebKit on
   macOS, WebView2 on Windows, WebKitGTK on Linux), and a browser host uses the browser's print.
-- **The first run** is the `onboarding` plugin, which only the desktop app turns on.
+- **The first run** is the desktop app's own onboarding (§5.11a), which no other host has.
 - **The AI chat panel** is the `ai` plugin. Running agents is a host capability: the desktop app
   runs them as local processes (§8.6), Syrus runs them on its server, and a web app offers them
   only if it supplies its own.
