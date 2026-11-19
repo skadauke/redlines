@@ -12,7 +12,8 @@
 
 import { Annotation } from '@codemirror/state';
 import type { ChangeSet, EditorState, Transaction } from '@codemirror/state';
-import type { Person, TextChange } from '@redlines/format';
+import { drainWidenings } from '@redlines/format';
+import type { Person, TextChange, UnitKind } from '@redlines/format';
 import type { MoveIntent } from '../blocks/move-intent.ts';
 import type { TableIntent } from '../table/intent.ts';
 import type { WidenedPasteIntent } from '../table/widened-paste.ts';
@@ -69,21 +70,30 @@ export interface StepsIntent {
   steps: readonly (TypingIntent | TableIntent)[];
 }
 
-export type Intent =
+export type Intent = (
   | TypingIntent
   | FormatIntent
   | TableIntent
   | StepsIntent
   | MoveIntent
   | WidenedPasteIntent
-  | ReviewIntent;
+  | ReviewIntent
+) & {
+  /** The units the edit was widened to, when it was (format §3.12): what the notice says (#1188). */
+  widened?: readonly UnitKind[];
+};
 
 /** An intent with no id yet: what the writers make. */
 export type Unnamed<T = Intent> = T extends unknown ? Omit<T, 'id'> : never;
 
 /** The annotation that records an intent a writer made, with an id of its own. */
 export function recordedAs(intent: Unnamed): ReturnType<typeof intentAnnotation.of> {
-  return intentAnnotation.of({ ...intent, id: newIntentId() });
+  const widened = drainWidenings().map((unit) => unit.kind);
+  return intentAnnotation.of({
+    ...intent,
+    id: newIntentId(),
+    ...(widened.length > 0 ? { widened } : {}),
+  } as Intent);
 }
 
 /**
@@ -188,4 +198,24 @@ function stream(seed: string, n: number): Uint8Array {
     out[i] = (h >>> 0) & 0xff;
   }
   return out;
+}
+
+/** What the unit is called in the notice. */
+const UNIT_NAMES: Record<UnitKind, string> = {
+  table: 'table',
+  list: 'list',
+  quote: 'quote',
+  code: 'code block',
+  item: 'list item',
+  block: 'paragraph',
+};
+
+/**
+ * What the editor says when an edit was widened to the unit that holds it (#1188): quiet, and in
+ * the words of a person. The biggest unit is the one named, when an edit widened to several.
+ */
+export function widenedNotice(units: readonly UnitKind[]): string {
+  const order: UnitKind[] = ['table', 'list', 'quote', 'code', 'item', 'block'];
+  const kind = order.find((each) => units.includes(each)) ?? 'block';
+  return `Tracked as a replacement of the whole ${UNIT_NAMES[kind]}, so that the file and the document read alike.`;
 }

@@ -150,7 +150,7 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
-import { intentOf, plainIntent, recordedAs } from './tracked/intent.ts';
+import { intentOf, plainIntent, recordedAs, widenedNotice } from './tracked/intent.ts';
 import { guardDecision, seenOf, writeReview } from './tracked/review-intent.ts';
 import { DecidedLog, skippedMessage } from './tracked/decided.ts';
 import type { DecisionOutcome } from './tracked/decided.ts';
@@ -500,6 +500,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       for (const tr of update.transactions) {
         for (const effect of tr.effects) {
           if (effect.is(refusedEditEffect)) options.onNotice?.(effect.value);
+        }
+        // An edit that was widened to keep the file and the document alike says so, once (#1188).
+        const widened = intentOf(tr)?.widened;
+        if (widened?.length && !tr.annotation(Transaction.remote)) {
+          options.onNotice?.(widenedNotice(widened));
         }
       }
       const { startState, state } = update;
