@@ -3652,6 +3652,12 @@ deletion that happen to share text: Redlines names it `Moved block` on one card,
 place with a double underline, as the new place of a moved row, after Word's marks for a move. A
 move written as a widened substitution is a replacement, and is drawn as one.
 
+A link whose partner is gone is ignored, and dropped when the ledger is next written: the block moved
+again, or deleted at its new place, leaves the first deletion's `move` naming a mark that no longer
+exists, as a deleted moved row does (§3.7). A deletion typed right next to the old place is a
+deletion of its own, as beside any other deletion with a link: it is no longer taken into the move's
+deletion.
+
 - **The unit.** A move takes a run of siblings under one parent, as `widen-units.ts` reads them: a
   paragraph, a heading, a code block, a table, a quote or a list at the top of the file, a block of
   a quote, an item of a list. A caret in a paragraph moves the paragraph; in an item, the item with

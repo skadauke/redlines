@@ -11,6 +11,7 @@ import { Untrackable } from './widen.ts';
 import { expectEveryOrderRead, expectSound } from './oracle.ts';
 import { parse } from './parse.ts';
 import { ada, bo, bodyOf, context, file, problemsOf, thread } from './test-helpers.ts';
+import { trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** A deterministic random source of its own, for ids. */
@@ -286,5 +287,52 @@ describe('a move of blocks is written as a move (§3.14, #1201)', () => {
       ).toBe(true);
       expectEveryOrderRead('move in a container', after);
     }
+  });
+});
+
+describe('a link whose partner is gone (§3.14, #1201 review)', () => {
+  const BASE = file('One.\n\nTwo.\n\nThree.\n\nFour.');
+  const dangling = (text: string) => {
+    const parsed = parse(text);
+    return parsed.marks.filter(
+      (mark) =>
+        mark.entry.move !== undefined &&
+        !parsed.marks.some((other) => other.id === mark.entry.move),
+    );
+  };
+
+  it('moving the same block again leaves no link to the first insertion', () => {
+    const once = moved(BASE, 'Two.', false);
+    expect(dangling(once)).toEqual([]);
+    const twice = moved(once, 'Two.', false);
+    expect(dangling(twice)).toEqual([]);
+    expectEveryOrderRead('moved twice', twice);
+  });
+
+  it('deleting the moved block at its new place leaves the old deletion with no link', () => {
+    const once = moved(BASE, 'Two.', false);
+    const view = newestView(once).text;
+    const at = view.lastIndexOf('Two.');
+    const done = trackedEdits(
+      once,
+      [{ from: at, to: at + 4, insert: '' }],
+      context(ada, ['k3x9', 'm4yz', 'p5qr']),
+    );
+    const after = applyChanges(once, done.changes);
+    expect(dangling(after)).toEqual([]);
+    expectEveryOrderRead('moved then deleted', after);
+  });
+
+  it('a deletion typed beside the old place stays a deletion of its own', () => {
+    const once = moved(BASE, 'Two.', false);
+    const view = newestView(once).text;
+    const at = view.indexOf('One.') + 'One.'.length;
+    const done = trackedEdits(
+      once,
+      [{ from: at - 1, to: at, insert: '' }],
+      context(ada, ['k3x9', 'm4yz', 'p5qr']),
+    );
+    const after = applyChanges(once, done.changes);
+    expect(parse(after).marks.filter((mark) => mark.kind === 'del').length).toBe(2);
   });
 });
