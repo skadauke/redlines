@@ -239,6 +239,63 @@ test.describe('lists @lists', () => {
     }
   });
 
+  // #1158: after ⇥ or ⇧⇥ the caret is where the bullet put the text, in the same frame: the
+  // browser's own selection stands exactly where CodeMirror puts the caret (not in a place that only
+  // reads the same, such as the end of the line's element, which has no box and no caret), and keys
+  // typed right after land in order.
+  for (const tracking of [true, false]) {
+    test(`⇥ and ⇧⇥ seat the caret at the bullet's frame, Track Changes ${tracking ? 'on' : 'off'} (#1158)`, async ({
+      start,
+    }) => {
+      const j = await start({
+        doc: '- one\n  - two\n    - three\n- four\n',
+        tracking,
+        view: 'clean',
+      });
+      await j.caretAfter('two');
+      const seated = () =>
+        j.page.evaluate(() => {
+          const { view } = window.__redlines!.editor;
+          const head = view.state.selection.main.head;
+          const at = view.domAtPos(head);
+          const selection = getSelection()!;
+          const range = selection.getRangeAt(0);
+          const box = range.getBoundingClientRect();
+          return {
+            exact: selection.focusNode === at.node && selection.focusOffset === at.offset,
+            valid:
+              selection.focusOffset <=
+              (selection.focusNode?.nodeType === 3
+                ? (selection.focusNode as Text).length
+                : (selection.focusNode?.childNodes.length ?? 0)),
+            drawn: box.height > 0,
+            left: box.left,
+            wanted: view.coordsAtPos(head)?.left ?? -1,
+          };
+        });
+      for (const keys of [['Tab'], ['Shift+Tab'], ['Tab', 'Shift+Tab'], ['Shift+Tab', 'Tab']]) {
+        for (const key of keys) await j.press(key);
+        const now = await seated();
+        const what = `after ${keys.join(', ')}`;
+        expect(now.exact, `${what}: the browser's selection is CodeMirror's`).toBe(true);
+        expect(now.valid, `${what}: the selection's offset is in its node`).toBe(true);
+        expect(now.drawn, `${what}: the caret has a box`).toBe(true);
+        expect(Math.abs(now.left - now.wanted), `${what}: the caret is by the text`).toBeLessThan(
+          1.5,
+        );
+      }
+      // Keys typed at once after the key land in order, each at the caret.
+      for (const keys of [['Tab'], ['Shift+Tab']]) {
+        await j.after(keys, 'abcdefgh');
+        const caret = await j.caret();
+        expect(caret.lineText, `typed after ${keys.join(', ')}`).toContain('abcdefgh');
+        expect(await j.cmText()).toContain('abcdefgh');
+        await j.press('Backspace', 'Backspace', 'Backspace', 'Backspace');
+        await j.press('Backspace', 'Backspace', 'Backspace', 'Backspace');
+      }
+    });
+  }
+
   test("showing a marker's source does not move the item's text", async ({ start }) => {
     const j = await start({ doc: '- aaa\n  - bbb\n1. ccc\n', tracking: false, view: 'clean' });
     for (const word of ['aaa', 'bbb', 'ccc']) {
