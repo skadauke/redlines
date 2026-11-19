@@ -136,6 +136,8 @@ describe('the messages the Rust side lets through to an Agent Client Protocol ag
         (option) => (option as { optionId?: string }).optionId === answer.outcome.optionId,
       ) as { kind?: string } | undefined;
       expect(kind?.kind === 'allow_once', what).toBe(allowed);
+      // Never "always": an agent is asked each time.
+      expect(kind?.kind, what).not.toBe('allow_always');
     }
   });
 });

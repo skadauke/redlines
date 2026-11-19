@@ -622,6 +622,7 @@ done
         let stand_in = write_stand_in(temp.path());
         let token = temp.path().join("moby-token");
         fs::write(&token, "not-a-real-token\n").unwrap();
+        let token = fs::canonicalize(&token).unwrap();
         let agents = AcpAgents::new(temp.path().join("acp-agents.json"));
         agents
             .add(

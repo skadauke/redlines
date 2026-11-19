@@ -104,6 +104,9 @@ describe('the OpenClaw section', () => {
     expect(text).toContain('It can’t change the document');
     expect(text).toContain('never reads the file');
     expect(text).toContain('installed on this Mac');
+    // Where the token comes from, and that a Gateway elsewhere may ask to approve the command.
+    expect(text).toContain('openclaw gateway auth-token --show');
+    expect(text).toContain('approve the openclaw command as a device');
   });
 
   it('adds an agent from its name, its Gateway and its token file, once all three are given', async () => {
