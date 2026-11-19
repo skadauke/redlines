@@ -34,6 +34,7 @@ import {
   type ReviewContext,
   segmentSpan,
   suggestionIn,
+  clearOfClip,
   visibleSpace,
   visibleStart,
   setReason,
@@ -186,7 +187,12 @@ const OFF_SCREEN: Rect = { left: -1e4, right: -1e4, top: -1e4, bottom: -1e4 };
 
 class Card implements TooltipView {
   readonly dom: HTMLElement;
-  readonly offset = { x: -13, y: 6 };
+  /** How far the anchor was lowered to stay out of CodeMirror's clip (`clearOfClip`). */
+  private shift = 0;
+  /** Where the card is from its anchor; the room that was added to the anchor is taken off. */
+  get offset(): { x: number; y: number } {
+    return { x: -13, y: 6 - this.shift };
+  }
   private readonly view: EditorView;
   private readonly found: Found;
   private readonly by: string;
@@ -275,7 +281,9 @@ class Card implements TooltipView {
       rect.top = Math.min(rect.top, this.boxRect.top);
       rect.bottom = Math.max(rect.bottom, this.boxRect.bottom);
     }
-    return rect;
+    const placed = clearOfClip(this.view, rect);
+    this.shift = placed.shift;
+    return placed.rect;
   };
 }
 
@@ -329,11 +337,12 @@ export function cards(ctx: ReviewContext): {
     const found = pinning ?? (redlines(view) ? pointedAt(view, pos, side) : null);
     if (!found) return null;
     const { from, to } = found.span;
-    // Not clipped: CodeMirror puts away a tooltip whose anchor is above the top of the editor's own
-    // box, less the room a host keeps over it (`scrollMargins`: the title bar's). The page is what
-    // scrolls, so that box is the whole document, which starts below that room already: the room
-    // would be taken twice, and a change on the first line would have no card. `visibleSpace` keeps
-    // the card where it can be seen.
+    // CodeMirror puts away a tooltip whose anchor is above the top of the editor's own box, less the
+    // room a host keeps over it (`scrollMargins`: the title bar's). The page is what scrolls, so
+    // that box is the whole document, which starts below that room already: a change on the first
+    // line would have no card. `clip: false` is not taken from a hover tooltip (its host drops it),
+    // so the card's anchor is kept out of the clip (`Card.getCoords`, `clearOfClip`), and
+    // `visibleSpace` is where the card can be seen.
     return {
       pos: from,
       end: to,
