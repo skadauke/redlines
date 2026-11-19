@@ -4,6 +4,7 @@ import { runScopeHandlers } from '@codemirror/view';
 import { createEditor, type Editor, rectOf, selectedCells, wholeRect } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTables, plugin } from './index.ts';
+import { isWidenedNotice } from '@redlines/editor';
 
 interface Mounted {
   editor: Editor;
@@ -20,7 +21,9 @@ function mount(doc: string, tracking = false): Editor {
     doc,
     author: { handle: 'ada', name: 'Ada Lovelace' },
     tracking,
-    onNotice: (message) => notices.push(message),
+    onNotice: (message) => {
+      if (!isWidenedNotice(message)) notices.push(message);
+    },
   });
   forceParsing(editor.view, editor.view.state.doc.length, 5000);
   mounted.push({ editor, remove: createTables(editor) });

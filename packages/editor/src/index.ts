@@ -286,6 +286,7 @@ export { editSourceFacet } from './tracked/typing.ts';
 export {
   intentAnnotation,
   intentOf,
+  isWidenedNotice,
   newIntentId,
   plainIntent,
   recordedAs,
