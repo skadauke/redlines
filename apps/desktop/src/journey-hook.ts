@@ -6,7 +6,7 @@
 import { type Editor, parsedAt } from '@redlines/editor';
 import type { DocumentController } from './document.ts';
 
-export interface JourneyHook {
+interface JourneyHook {
   editor: Editor;
   controller: DocumentController;
   /** A row of the menu bar by its text, or null: whether it is enabled, and a way to choose it. */

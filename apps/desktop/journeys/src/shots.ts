@@ -13,7 +13,7 @@ export function shotName(name: string, look: { scheme: string; textSize: number 
 }
 
 /** The folder a run's screenshots are written to: one folder per journey, under the output folder. */
-export function shotsDir(info: TestInfo): string {
+function shotsDir(info: TestInfo): string {
   return join(info.outputDir, 'shots');
 }
 

@@ -178,7 +178,7 @@ const BLOCK_START =
   /^ {0,3}(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$|<[A-Za-z/!?])/;
 
 /** What reading a block needs: the file read, and who is changing it. */
-export interface BlockReader extends FormatReader {
+interface BlockReader extends FormatReader {
   parsed: Parsed;
   /** The author of the change, whose own pending changes are changed in place. */
   owner: string | undefined;
@@ -544,7 +544,7 @@ const columnOf = (syntax: string) => ITEM.exec(syntax)?.[1]?.length ?? syntax.le
 /** What a block change comes to. `write` gives its changes with the markers given; with none, the
  * syntax alone, as Track Changes off types it. `edit` is a change of the author's own block change:
  * `kept` when the mark stays, written by `write`, or else taken away by `changes`. */
-export type BlockPlan =
+type BlockPlan =
   | {
       kind: 'mark';
       at: number;

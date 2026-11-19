@@ -16,7 +16,7 @@ import type {
 /** The plugins the desktop app activates, in order. */
 export const DESKTOP_PLUGINS: readonly Plugin[] = [find, code, outline];
 
-export interface ActivateOptions {
+interface ActivateOptions {
   /** Who is using the app; until it is known, plugins see a stand-in. */
   author?: PluginContext['author'];
   /** Shows a short message that does not interrupt; defaults to the console. */

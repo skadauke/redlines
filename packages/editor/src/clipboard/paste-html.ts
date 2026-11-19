@@ -251,7 +251,7 @@ function formatOf(el: Element, parent: Format): Format {
 }
 
 /** A picture that came with its bytes in the HTML, as the clipboard held it. */
-export interface PastedPicture {
+interface PastedPicture {
   bytes: Uint8Array<ArrayBuffer>;
   /** The type of the bytes themselves (sniffed: Word labels a JPEG `image/png`). */
   type: string;
@@ -268,7 +268,7 @@ export interface PastedPicture {
  * Whether a picture's address is one the host fetches for a paste: Google Docs' pictures, `https`
  * on Google's image servers. The host holds the same list (`remote_image.rs`) and refuses any other.
  */
-export function isFetchablePicture(src: string): boolean {
+function isFetchablePicture(src: string): boolean {
   try {
     const url = new URL(src.trim());
     return (

@@ -28,7 +28,7 @@ import { restartBefore, scan, type Scan, type Span } from './scan.ts';
 /** A document shorter than this is parsed from its start whatever the viewport: it takes no time. */
 export const LIKELY_FROM = 300_000;
 /** How far past what is parsed the viewport lands before the parse starts nearer to it, in characters. */
-export const REACH = 150_000;
+const REACH = 150_000;
 /** How far above the viewport the likely parse starts, so that a short scroll up needs no new one. */
 const LEAD = 30_000;
 /** How long the viewport rests before the exact parse is made again from the start, in ms. */

@@ -18,10 +18,10 @@ import type { EditErrorCode } from './errors.ts';
 
 /** What becomes of a refusal. `info` is no refusal: a notice that tells, or shows an error that
  * has its own tier. */
-export type RefusalTier = 'widen' | 'alert' | 'disable' | 'keep' | 'info';
+type RefusalTier = 'widen' | 'alert' | 'disable' | 'keep' | 'info';
 
 /** A refusal: the file, the key of its message, its tier, and why. */
-export type RefusalEntry = readonly [file: string, key: string, tier: RefusalTier, why: string];
+type RefusalEntry = readonly [file: string, key: string, tier: RefusalTier, why: string];
 
 /**
  * The error codes that stay refusals: where any write would leave the file wrong, or the

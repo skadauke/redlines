@@ -23,7 +23,7 @@ import {
 } from './crash-report.ts';
 
 /** The event the app tells the windows in that something is waiting. */
-export const CRASH_EVENT = 'crash-pending';
+const CRASH_EVENT = 'crash-pending';
 
 /** What the page needs of the app for crashes; `tauriCrashLink` has the app's. */
 export interface CrashLink {
@@ -61,11 +61,11 @@ export function tauriCrashLink(): CrashLink {
 }
 
 /** How often the page tells the app it is alive. */
-export const BEAT_MS = 2000;
+const BEAT_MS = 2000;
 /** A timer this late is slow work, which is logged. */
-export const SLOW_MS = 200;
+const SLOW_MS = 200;
 /** How often the document's shape is worked out again, when it changed. */
-export const SHAPE_EVERY_MS = 10_000;
+const SHAPE_EVERY_MS = 10_000;
 /** The same message within this time is the same failure. */
 const SAME_MS = 5000;
 /** At most this many cards a minute. */
@@ -76,7 +76,7 @@ const LOGGED_PER_MINUTE = 10;
 
 const KEY = 'problem';
 
-export interface CrashWatchOptions {
+interface CrashWatchOptions {
   link: CrashLink;
   notifications: Notifications;
   /** The document's text, for its shape only. */
@@ -113,7 +113,7 @@ export interface CrashWatch {
 }
 
 /** What an error says and where, from whatever was thrown. */
-export function describeError(error: unknown): { message: string; trace: string } {
+function describeError(error: unknown): { message: string; trace: string } {
   if (error instanceof Error) {
     return { message: `${error.name}: ${error.message}`, trace: error.stack ?? '' };
   }

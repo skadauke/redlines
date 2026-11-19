@@ -701,7 +701,7 @@ function startsList(
 }
 
 /** Where a position is in its line (see `lineStartKind`). */
-export type LineStart =
+type LineStart =
   /** Not at the start of the line's content: text comes before it. */
   | 'inline'
   /** The first character of a block: a paragraph, a list item, a heading. */
@@ -817,7 +817,7 @@ function readLineStart(
 
 /** A line break between two lines, with the blank line and the prefix of the next line that go
  * with it (format §3.4). */
-export interface Break {
+interface Break {
   /** Where the line break starts: the end of the line before. */
   start: number;
   /** The first character of the next line's content, after its prefix. */

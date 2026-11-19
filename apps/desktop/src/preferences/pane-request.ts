@@ -5,7 +5,7 @@
 // takes it away, and a request that waited too long was for a window that never opened.
 
 /** The panes of the Preferences window (`PANES` in panes.ts, which a test holds this to). */
-export type RequestedPane = 'general' | 'appearance' | 'editor' | 'agents' | 'shortcuts';
+type RequestedPane = 'general' | 'appearance' | 'editor' | 'agents' | 'shortcuts';
 
 export const PANE_REQUEST_KEY = 'redlines.preferences-pane';
 

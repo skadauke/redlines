@@ -118,7 +118,7 @@ import type { MarkRange, Parsed, Range, Segment } from './types.ts';
 /** A paragraph of marks apart: the segments of those marks in it (`id:index`), how many of them are
  * of marks that change the text (all but highlights), and its visible text, which no decision of
  * any mark changes but theirs, and theirs not while they are pending. */
-export interface ApartParagraph {
+interface ApartParagraph {
   segments: readonly string[];
   changing: number;
   shown: string;

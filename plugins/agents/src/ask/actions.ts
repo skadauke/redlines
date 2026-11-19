@@ -41,7 +41,7 @@ function personOfAgent(agent: { id: string; name: string }, me: Author): Person 
   };
 }
 
-export interface KeepAsComment {
+interface KeepAsComment {
   /** What the questions are about: the range of the document, as the bubble tracked it. */
   range: { from: number; to: number };
   /** The exchange: each answer is written as the reply of the agent that gave it. */

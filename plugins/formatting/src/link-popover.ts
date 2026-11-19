@@ -5,7 +5,7 @@
 
 import { EditorView } from '@codemirror/view';
 
-export interface LinkPopover {
+interface LinkPopover {
   /** Where the popover hangs: just below this position of the document. */
   at: number;
   /** The address the link has now, or '' for text that is not yet a link. */

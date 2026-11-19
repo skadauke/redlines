@@ -5,7 +5,7 @@
 
 import { EditorView } from '@codemirror/view';
 
-export interface CalloutMenu {
+interface CalloutMenu {
   /** The button the menu hangs from: just below it, or above it with no room below. */
   anchor: HTMLElement;
   /** The types offered, in order, and the one the alert has now. */

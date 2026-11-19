@@ -11,7 +11,7 @@ export const DEFAULT_HANDLES: Readonly<Record<string, string>> = {
 };
 
 /** The longest handle. */
-export const MAX_HANDLE = 24;
+const MAX_HANDLE = 24;
 
 /** Lowercase letters, digits and hyphens, not starting or ending in a hyphen. */
 export function isHandle(text: string): boolean {

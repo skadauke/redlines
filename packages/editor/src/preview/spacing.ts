@@ -18,7 +18,7 @@ type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
  * The text the blocks are read from: the document, or, while an empty paragraph is open, the
  * document with a character in it (`blocks/open.ts`), which has the same lines.
  */
-export interface Reading {
+interface Reading {
   doc: Text;
   sliceDoc(from: number, to?: number): string;
   /** Whether line `n` belongs to a break: blank, or markers alone, in the document. */
@@ -28,7 +28,7 @@ export interface Reading {
 }
 
 /** The document itself as a reading. */
-export function readingOf(state: EditorState): Reading {
+function readingOf(state: EditorState): Reading {
   const ledger = state.field(parsedField, false)?.ledgerRange;
   return {
     doc: state.doc,
@@ -43,10 +43,10 @@ export function readingOf(state: EditorState): Reading {
  * headings 2 to 6, `item` between the items of a tight list, `loose` between the items of a loose
  * list and between the paragraphs of a quote or an item. Each is a line class, `rl-space-<kind>`.
  */
-export type Spacing = 'block' | 'h1' | 'heading' | 'item' | 'loose';
+type Spacing = 'block' | 'h1' | 'heading' | 'item' | 'loose';
 
 /** What the blocks are read from: a reading, its tree, and its positions in the document. */
-export interface ReadTree {
+interface ReadTree {
   reading: Reading;
   tree: Tree;
   /** A position of the reading in the document. */
@@ -191,7 +191,7 @@ function boxOf(state: Reading, leaf: SyntaxNode): number | null {
 const TINTED = new Set(['FencedCode', 'CodeBlock', 'FrontMatter']);
 
 /** Where the space between two blocks goes: a line, by its number, and which side of it. */
-export interface Space {
+interface Space {
   line: number;
   spacing: Spacing;
   /** Below the line's text, for a boxed block under it, rather than above. */

@@ -6,7 +6,7 @@
 // setting is in the windows' settings. update-link.ts is the app's side of each of these.
 
 /** Idle, checking, downloading what a check found, or ready to install it. */
-export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready';
+type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready';
 
 export interface UpdateState {
   readonly phase: UpdatePhase;

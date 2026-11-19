@@ -5,7 +5,7 @@
 import type { AgentModel } from '@redlines/plugin-api';
 import { el, uniqueId } from './pane-dom.ts';
 
-export interface ModelFieldDeps {
+interface ModelFieldDeps {
   models: readonly AgentModel[];
   /** The model chosen for the agent, if any. */
   chosen(): string | undefined;

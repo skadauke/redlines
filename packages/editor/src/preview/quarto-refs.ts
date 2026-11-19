@@ -37,7 +37,7 @@ const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
 const UNNUMBERED = /\{[^}]*(?:\.unnumbered|\s-)[^}]*\}[ \t]*$/;
 
 /** A target: its label's text, "Figure 2", and where it is in the document. */
-export interface Target {
+interface Target {
   text: string;
   pos: number;
 }

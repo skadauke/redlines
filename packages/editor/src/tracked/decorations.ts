@@ -1233,7 +1233,7 @@ const COMMENT = Decoration.mark({ class: 'rl-comment' });
 /**
  * A stretch the caret steps over: hidden text, or hidden lines with the line breaks around them.
  */
-export class Atom extends RangeValue {
+class Atom extends RangeValue {
   /**
    * Whether it draws something, deleted text or a move to another line, so that the caret looks
    * different at its two ends. Markers draw nothing.
@@ -1795,7 +1795,7 @@ const trackedField = StateField.define<Display>({
 });
 
 /** A run of whole lines hidden from view: blank lines, lines of markers alone, the ledger. */
-export class HiddenRun extends RangeValue {
+class HiddenRun extends RangeValue {
   /** How many lines it holds. */
   readonly lines: number;
 

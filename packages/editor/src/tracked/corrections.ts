@@ -93,7 +93,7 @@ const isLowSurrogate = (code: number) => code >= 0xdc00 && code < 0xe000;
  * stretch of shown text, the new text in the last one, nearest the caret. Null when the page shows
  * other text there, such as deleted text drawn in the word.
  */
-export function correctionEdits(
+function correctionEdits(
   state: EditorState,
   from: number,
   to: number,

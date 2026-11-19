@@ -38,7 +38,7 @@ export interface TitleBarState {
   toolbarShown: boolean;
 }
 
-export interface TitleBarActions {
+interface TitleBarActions {
   /**
    * The key a row of the menu bar has now (`View/Clean`, in CodeMirror's notation), or null for
    * none: the hints and the menus show the person's own keys (#551). Without it the fixed keys below.
@@ -110,11 +110,11 @@ export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
   redlines: 'Alt+Meta+2',
   raw: 'Alt+Meta+3',
 };
-export const TOOLBAR_KEY = '⇧⌘P';
-export const TOOLBAR_ARIA_KEY = 'Shift+Meta+P';
+const TOOLBAR_KEY = '⇧⌘P';
+const TOOLBAR_ARIA_KEY = 'Shift+Meta+P';
 export const TRACKING_KEY = '⇧⌘E';
 export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
-export const FILES_KEY = '⌃⌘S';
+const FILES_KEY = '⌃⌘S';
 
 /** The menu bar rows whose keys the bar shows. */
 const KEY_ROWS = {

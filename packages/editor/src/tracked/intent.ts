@@ -135,7 +135,7 @@ export function newIntentId(): string {
 }
 
 /** A random source and the log of what it gave. */
-export interface Drawing {
+interface Drawing {
   random: ((n: number) => Uint8Array) | undefined;
   drawn: number[][];
 }

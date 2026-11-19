@@ -49,12 +49,12 @@ export interface SidebarOptions {
 }
 
 /** A saved document, and the project it is in. */
-export interface SidebarDocument {
+interface SidebarDocument {
   path: string;
   root: ProjectRoot;
 }
 
-export interface Sidebar {
+interface Sidebar {
   setOpen(open: boolean): void;
   /** The width to draw, in CSS px (a stored one is made right). */
   setWidth(width: number): void;

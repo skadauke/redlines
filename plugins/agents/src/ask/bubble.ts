@@ -31,7 +31,7 @@ export interface BubbleView {
   canOpenWindow: boolean;
 }
 
-export interface BubbleHandlers {
+interface BubbleHandlers {
   /** The field was submitted: a question, or a follow-up, possibly empty. */
   submit(text: string): void;
   /** Cancel, or Esc in the field. */

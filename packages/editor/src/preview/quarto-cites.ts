@@ -163,7 +163,7 @@ class CiteWidget extends WidgetType {
 }
 
 /** The chips of the citations in `state`; none outside a pandoc file or in Plain. */
-export function citeDecorations(state: EditorState): DecorationSet {
+function citeDecorations(state: EditorState): DecorationSet {
   if (state.facet(dialectFacet) !== 'pandoc') return Decoration.none;
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const citations = read(state.doc);

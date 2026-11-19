@@ -218,7 +218,7 @@ export function createShelf(storage: PageStorage, now: () => number = Date.now):
 type Ready = 'opened' | 'saved';
 
 /** What a window's page does with the shelf. */
-export interface DocumentData {
+interface DocumentData {
   /**
    * The window's document, at each change of its state: another document took the window
    * (`generation`), or the document got another path, by Rename or Save As.

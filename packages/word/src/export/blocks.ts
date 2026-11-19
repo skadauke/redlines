@@ -45,7 +45,7 @@ export type Atom =
   /** `para`: the break between two blocks of a deleted text, not a line break in one. */
   | { kind: 'break'; from: number; to: number; para?: boolean };
 
-export interface ListContext {
+interface ListContext {
   ordered: boolean;
   /** 0 for an item of a list at the top. */
   level: number;
@@ -69,13 +69,13 @@ export interface Leaf {
   codeBlock?: number;
 }
 
-export interface TableCell {
+interface TableCell {
   atoms: Atom[];
   from: number;
   to: number;
 }
 
-export interface TableBlock {
+interface TableBlock {
   type: 'table';
   from: number;
   to: number;
@@ -99,7 +99,7 @@ const NAMED: Record<string, string> = {
 };
 
 /** The text of a character reference, `&amp;` or `&#8212;`; the reference itself when unknown. */
-export function decodeReference(reference: string): string {
+function decodeReference(reference: string): string {
   const body = reference.slice(1, -1);
   const numeric = /^#(?:[xX]([0-9a-fA-F]+)|(\d+))$/.exec(body);
   if (numeric) {

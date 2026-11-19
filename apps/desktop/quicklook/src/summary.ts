@@ -35,7 +35,7 @@ export function isChange(mark: MarkRange): boolean {
   return isDrawnChange(mark) && mark.entry.move === undefined;
 }
 
-export interface Pending {
+interface Pending {
   /** Suggestions, as "Change 3 of 17" in the review bar counts them. */
   changes: number;
   /** Threads that aren't resolved. */

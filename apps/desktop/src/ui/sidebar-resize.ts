@@ -19,13 +19,13 @@ export function sidebarWidthOf(value: unknown): number {
   return Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, value)));
 }
 
-export interface SidebarResize {
+interface SidebarResize {
   /** The width to draw: what the person has chosen, and between a drag's moves, its latest. */
   setWidth(width: number): void;
   destroy(): void;
 }
 
-export interface ResizeOptions {
+interface ResizeOptions {
   /** The sidebar, whose left edge is the drag's origin. */
   aside: HTMLElement;
   /** The page, which is told that a drag is on (`data-sidebar-drag`), so that it follows the pointer. */

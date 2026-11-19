@@ -12,7 +12,7 @@ import type { EditorView } from '@codemirror/view';
 export const PROJECT_IMAGE_TYPE = 'application/x-redlines-project-image';
 
 /** A place between blocks where a block of its own can go. */
-export interface BlockGap {
+interface BlockGap {
   /** Where the text is written. */
   pos: number;
   /** The line breaks that set the new block apart, written before it and after it. */

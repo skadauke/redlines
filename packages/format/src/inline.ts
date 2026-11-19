@@ -34,7 +34,7 @@ export type Place =
 
 /** The text next to a marker, when it is not the text of the paragraph on either side of the
  * position: what is written before a closer, or after an opener. */
-export interface Around {
+interface Around {
   before?: string;
   after?: string;
   /** Where markers of the file stand in `after`: the indices of the characters that one is in front of. */
@@ -45,7 +45,7 @@ export interface Around {
 }
 
 /** The text of a paragraph without the markers, and where each character of it is in the file. */
-export interface Paragraph {
+interface Paragraph {
   text: string;
   /** For each character, its offset in the file; one more for the end. */
   offsets: number[];
@@ -61,7 +61,7 @@ export const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.
  * takes a fence only when nothing else is on its line. A writer widens it to the unit that holds the
  * fence, which is the div or the paragraph its fence starts or ends (§3.12).
  */
-export const DIV_FENCE = 'A marker can not stand on a :::\u00a0line, the fence of a div.';
+const DIV_FENCE = 'A marker can not stand on a :::\u00a0line, the fence of a div.';
 
 /** A line that is a fenced div's fence: three or more colons after the quote markers. */
 const DIV_FENCE_LINE = /^[ \t>]*:{3,}/;

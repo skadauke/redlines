@@ -433,7 +433,7 @@ function indentOf(text: string): number {
 }
 
 /** Fills `prefix` of every unit: what stands before its text on its first line. */
-export function withPrefixes(text: string, units: readonly Unit[]): void {
+function withPrefixes(text: string, units: readonly Unit[]): void {
   for (const unit of units) {
     unit.prefix = text.slice(unit.lineFrom, unit.from);
     withPrefixes(text, unit.children);

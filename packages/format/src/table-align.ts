@@ -74,7 +74,7 @@ const WORDS: Record<TableAlign, string> = {
 
 /** A delimiter cell for `align`, as wide as `old`: dashes, with a colon at the ends the alignment
  * asks for. A cell of one dash grows by the colons. */
-export function delimiterCell(old: string, align: TableAlign): string {
+function delimiterCell(old: string, align: TableAlign): string {
   const left = align === 'left' || align === 'center' ? ':' : '';
   const right = align === 'right' || align === 'center' ? ':' : '';
   const dashes = Math.max(1, old.length - left.length - right.length);
@@ -298,14 +298,14 @@ function movedCopies(
 }
 
 /** What aligning columns gives: the changes, and where the caret goes in the new text. */
-export interface AlignEdit {
+interface AlignEdit {
   changes: TextChange[];
   caret: number;
   cols: number[];
 }
 
 /** An alignment of columns. */
-export interface AlignOp {
+interface AlignOp {
   cols: readonly number[];
   align: TableAlign;
 }

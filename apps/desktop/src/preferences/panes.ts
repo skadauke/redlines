@@ -29,7 +29,7 @@ export const PANES: readonly { id: PaneId; label: string }[] = [
 ];
 
 /** A group of rows under a small heading: what the filter names beside each result. */
-export interface Section {
+interface Section {
   title: string;
   rows: HTMLElement[];
 }

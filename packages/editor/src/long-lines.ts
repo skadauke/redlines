@@ -20,7 +20,7 @@ export const SHOWN = 2_000;
 /** A `data:` URI whose base64 is shorter than this is left as text, in a long line too. */
 const MIN_DATA = 1_000;
 
-export interface ChipSpec {
+interface ChipSpec {
   from: number;
   to: number;
   label: string;
@@ -171,7 +171,7 @@ function build(state: EditorState): DecorationSet {
 }
 
 /** The chips, kept as the document is edited: only the lines an edit touches are read again. */
-export const chipsField = StateField.define<DecorationSet>({
+const chipsField = StateField.define<DecorationSet>({
   create: build,
   update(chips, tr) {
     if (!tr.docChanged) return chips;

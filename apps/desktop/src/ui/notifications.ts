@@ -10,7 +10,7 @@ import { icon } from './icons.ts';
 /** How long a notification that passes by stays, unless the pointer or the keyboard is on it. */
 export const PASSING_MS = 4000;
 
-export interface NotificationAction {
+interface NotificationAction {
   label: string;
   /** Does what the notification offers. The notification stays until this closes it. */
   run(notification: Notification): void;

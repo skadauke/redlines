@@ -1511,7 +1511,7 @@ export function planDelete(state: EditorState): KeyEdit | null {
  * the block where it ends keeps its kind. A selection of the whole document leaves one empty
  * paragraph. Any other selection is the tracked layer's, as typing deletes it (null).
  */
-export function planSelectionDelete(state: EditorState, forward: boolean): KeyEdit | null {
+function planSelectionDelete(state: EditorState, forward: boolean): KeyEdit | null {
   const { from, to } = state.selection.main;
   const userEvent = forward ? 'delete.forward.block' : 'delete.backward.block';
   const first = blockAt(state, from);

@@ -21,7 +21,7 @@ import { reachOf } from './reach.ts';
 import type { EmojiLookup } from '../preview/emoji.ts';
 
 /** One stretch of what is copied: Markdown text, or cells with the table's alignments. */
-export type CopyPart = { md: string } | { rows: string[][]; header: boolean; aligns: string[] };
+type CopyPart = { md: string } | { rows: string[][]; header: boolean; aligns: string[] };
 
 /** What a copy of cells puts on the clipboard: the text, and what the HTML is made of. */
 export interface TableCopy {

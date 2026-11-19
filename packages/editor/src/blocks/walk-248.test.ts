@@ -49,7 +49,7 @@ const WALKED: Invariant[] = [
 ];
 
 /** A document in the script's notation, of the shapes #248 names; `<del a>` is another person's. */
-export function issueDocument(random: () => number): string {
+function issueDocument(random: () => number): string {
   const below = (n: number) => Math.floor(random() * n);
   const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
   const words = (n: number) => Array.from({ length: n }, () => pick(WORDS)).join(' ');

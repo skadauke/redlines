@@ -30,7 +30,7 @@ import { markDivs } from './divs.ts';
 import { Html } from './html.ts';
 
 /** Whether a fence's info string is written in braces, as a chunk's is, and Pandoc's attributes. */
-export const isBraced = (info: string): boolean => info.startsWith('{');
+const isBraced = (info: string): boolean => info.startsWith('{');
 
 /** The engine of a chunk's info string, `r` for `{r setup}`, or null when it names none, as
  * Pandoc's attributes (`{.python .numberLines}`) don't. Quarto's literal `{{r}}` has one too. */
@@ -154,7 +154,7 @@ const IMAGE =
   /<img src="([^"]*)" alt="([^"]*)"(?: title="[^"]*")?(?: width="(\d{1,5}%?)")?(?: height="(\d{1,5}%?)")? \/>/g;
 
 /** The most local images that a document is asked about: a preview shows no more. */
-export const MAX_IMAGES = 40;
+const MAX_IMAGES = 40;
 
 /** The file path that an image's `src` stands for, as the document wrote it: micromark writes it
  * percent-encoded and with its quotes and ampersands escaped. Null for an address that isn't a path:

@@ -41,7 +41,7 @@ import {
 import { deleteTableSpec } from './ops.ts';
 
 /** What a selection reaches in the tables of a state. */
-export interface Reach {
+interface Reach {
   /** The tables the selection covers entirely. */
   whole: Table[];
   /** The tables it ends inside: the whole rows it reaches, `[first, last]` by index (the header is
@@ -132,7 +132,7 @@ function outsideOf(state: EditorState, range: SelectionRange, tables: Table[]) {
 
 /** What deleting `range` does, in plain edits of the state's text, and where the caret goes (the
  * start text's offsets); with `insert`, what is written there. */
-export function reachChanges(
+function reachChanges(
   state: EditorState,
   range: SelectionRange,
   insert = '',
@@ -359,7 +359,7 @@ const selectedField = StateField.define<DecorationSet>({
 /** The class the editor's root has while cells are selected (`selectedField` marks some): the theme
  * hides the page's own text highlight in the table's rows by it. A class on the root, from the state,
  * and not a `:has()` on the content, which WebKit rechecks as the DOM changes. */
-export const CELL_SELECTING = 'rl-cell-selecting';
+const CELL_SELECTING = 'rl-cell-selecting';
 const selectingAttributes = EditorView.editorAttributes.compute([selectedField], (state) =>
   state.field(selectedField).size > 0 ? { class: CELL_SELECTING } : { class: '' },
 );

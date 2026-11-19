@@ -6,7 +6,7 @@ import { basename, join } from 'node:path';
 
 const repo = new URL('../../../../', import.meta.url).pathname;
 
-export interface TestDocument {
+interface TestDocument {
   /** The file's name, which is also what a known case names it by. */
   name: string;
   text: string;

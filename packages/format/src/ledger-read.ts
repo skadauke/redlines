@@ -271,7 +271,7 @@ function lastOfRepeatedSettings(source: string): string {
 }
 
 /** Reads the YAML inside a ledger comment. `range` is attached to the warnings. */
-export function readLedger(source: string, range: Range): LedgerRead {
+function readLedger(source: string, range: Range): LedgerRead {
   const warnings: Warning[] = [];
   const warn = (code: WarningCode, message: string, id?: string) =>
     warnings.push(id === undefined ? { code, message, range } : { code, message, range, id });

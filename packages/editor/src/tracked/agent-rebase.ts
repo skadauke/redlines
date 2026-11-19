@@ -27,21 +27,21 @@ const idsOfBodies = (...bodies: string[]): Set<string> =>
 const CONTEXT = 40;
 
 /** One change of an agent's edit, with the text around it in the base. */
-export interface AnchoredChange extends TextChange {
+interface AnchoredChange extends TextChange {
   removed: string;
   before: string;
   after: string;
 }
 
 /** An edit of the agent's that wasn't placed, and what to tell the person. */
-export interface DroppedChange {
+interface DroppedChange {
   /** Where it was in the text the agent worked from. */
   from: number;
   removed: string;
   insert: string;
 }
 
-export interface Rebased {
+interface Rebased {
   /** The text with the agent's edits placed among what others wrote since. */
   text: string;
   /** The agent's changes that were placed. */

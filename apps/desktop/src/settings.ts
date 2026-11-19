@@ -18,7 +18,7 @@ import { SIDEBAR_DEFAULT, sidebarWidthOf } from './ui/sidebar-resize.ts';
  * folder and the home folder, which the plugin API calls `everything` (Preferences › Agents says
  * "This folder and my home folder").
  */
-export type AgentScope = 'document' | 'folder' | 'everything';
+type AgentScope = 'document' | 'folder' | 'everything';
 
 /** Light or dark: as the system is (Match System), or always the one chosen (design §6.6). */
 export type AppearanceChoice = 'system' | Appearance;

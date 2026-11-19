@@ -187,7 +187,7 @@ function linkUnder(view: EditorView, target: EventTarget | null): Hovered | null
 }
 
 /** What the extension needs of the host and the page. */
-export interface LinkOpeningOptions {
+interface LinkOpeningOptions {
   /** Opens an address, which is `http`, `https` or `mailto`, in the host's browser or mail app. */
   open(address: string): void;
   /** How long the pointer rests on a link before its hint shows, in ms. Default: 400 (the title bar's). */

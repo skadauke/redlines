@@ -18,7 +18,7 @@ import type { Comment, DocxModel, Revision } from './model.ts';
 const RESERVED = new Set(['y', 'n', 'yes', 'no', 'on', 'off', 'true', 'false', 'null', 'unknown']);
 
 /** A ledger time from a revision's best time, or the epoch for one nobody timed. */
-export function timeOf(at: string): string {
+function timeOf(at: string): string {
   return at !== '' ? at : ledgerTime(NO_TIME);
 }
 

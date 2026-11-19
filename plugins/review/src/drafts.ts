@@ -22,7 +22,7 @@ export const DRAFT_DELAY = 500;
 export const DRAFT_LONGEST = 2000;
 
 /** Under what the review keeps a document's drafts in its store. */
-export const DRAFTS_KEY = 'drafts';
+const DRAFTS_KEY = 'drafts';
 
 /**
  * The longest document a new comment keeps a copy of, in characters, to find its text again as a
@@ -31,14 +31,14 @@ export const DRAFTS_KEY = 'drafts';
 export const MAX_COPY = 200_000;
 
 /** A new comment as it is kept: what it is on, and what is written. */
-export interface KeptComment extends KeptAnchor {
+interface KeptComment extends KeptAnchor {
   text: string;
   /** The version of its text. */
   v: string;
 }
 
 /** A reply as it is kept. */
-export interface KeptReply {
+interface KeptReply {
   text: string;
   v: string;
 }
@@ -61,7 +61,7 @@ export interface KeptDrafts {
 }
 
 /** A new comment in the rail now: what it is on, and what is written in it. */
-export interface CommentNow {
+interface CommentNow {
   range: Anchor;
   text: string;
 }

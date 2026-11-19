@@ -13,7 +13,7 @@ export interface Shape {
   menus: readonly (readonly number[])[];
 }
 
-export interface Move {
+interface Move {
   position: Position;
   /** The menu that is open after the move, by its index among the menus, or null. */
   open: number | null;

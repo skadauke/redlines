@@ -11,7 +11,7 @@ export interface DefaultChoice {
   name: string;
 }
 
-export interface DefaultAgentRow {
+interface DefaultAgentRow {
   row: HTMLElement;
   /** Gives the row the agents that are set up now, and draws it (hidden when there are fewer than two). */
   show(choices: readonly DefaultChoice[]): void;

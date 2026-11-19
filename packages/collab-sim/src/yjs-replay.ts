@@ -23,9 +23,9 @@ import { baseDocument } from './text.ts';
 import { makeIntent } from './workloads.ts';
 import type { Scene } from './workloads.ts';
 
-export type LogOrder = 'array' | 'lamport';
+type LogOrder = 'array' | 'lamport';
 
-export interface YjsReplayConfig extends ReplayConfig {
+interface YjsReplayConfig extends ReplayConfig {
   order?: LogOrder;
   /** Yjs's garbage collection of deleted content (nothing is deleted here, so it only matters in
    * compaction experiments). */
@@ -39,7 +39,7 @@ export interface YOp {
   intent: Intent;
 }
 
-export interface YjsStats extends ReplayStats {
+interface YjsStats extends ReplayStats {
   /** The steps a replica really redoes when a batch arrives (the plain log's `rewound` is per
    * intent; this is per batch, where a reconnect brings many intents at once). */
   rederived: number;
@@ -52,7 +52,7 @@ export interface YjsStats extends ReplayStats {
   duplicates: number;
 }
 
-export interface YjsReplayResult extends Omit<ReplayResult, 'stats'> {
+interface YjsReplayResult extends Omit<ReplayResult, 'stats'> {
   stats: YjsStats;
   /** The order of the final log, ids. */
   order: string[];

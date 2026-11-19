@@ -10,7 +10,7 @@ import type { BlockGap, BlockRun } from '@redlines/format';
 import { asFile, type FileRead, moveRunTo, runOfSelection } from './move.ts';
 
 /** The pointer must move this far from the press before it is a drag and not a click. */
-export const DRAG_SLOP = 4;
+const DRAG_SLOP = 4;
 /** The editor's edge, in pixels, where a drag scrolls. */
 const SCROLL_EDGE = 36;
 
@@ -22,7 +22,7 @@ export interface DragGeometry {
   extent(view: EditorView, run: BlockRun): { top: number; bottom: number };
 }
 
-export const pageGeometry: DragGeometry = {
+const pageGeometry: DragGeometry = {
   gapY(view, gap) {
     // The text's own edges: a block's line block holds the space above it too.
     const top = (pos: number) =>

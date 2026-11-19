@@ -9,7 +9,7 @@ import type { Text } from '@codemirror/state';
 export const QUARTO_CALLOUTS = ['note', 'tip', 'important', 'warning', 'caution'] as const;
 
 /** A fenced div: the lines of its fences, and its attributes. */
-export interface Div {
+interface Div {
   /** The line numbers (1-based) of the opening and closing fences; `close` is 0 for an unclosed div. */
   open: number;
   close: number;
@@ -36,7 +36,7 @@ const CODE_FENCE = /^[ \t]*(`{3,}|~{3,})/;
 const MAY_MATTER = /^[ \t]*[`~:]/;
 
 /** The attributes of an opening fence: `{.class #id key="value"}`, or one bare class (`::: warning`). */
-export function readAttributes(text: string): {
+function readAttributes(text: string): {
   classes: string[];
   attributes: Record<string, string>;
 } {

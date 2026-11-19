@@ -25,7 +25,7 @@ function segment(each: Segment): string {
 }
 
 /** What the fallback's data says, in the words of `reviewView`. */
-export const toReview = (text: DemoText): string =>
+const toReview = (text: DemoText): string =>
   `# ${text.title}\n\n${text.segments.map(segment).join('')}\n`;
 
 /** `reviewView` names each mark by id too; the fallback's data holds no ids. */

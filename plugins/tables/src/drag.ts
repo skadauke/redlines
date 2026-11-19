@@ -10,10 +10,10 @@ import type { EditorView } from '@codemirror/view';
 export const DRAG_SLOP = 4;
 
 /** The drop line's thickness, in px: it keeps its size at every text size, as the borders do. */
-export const DROP_LINE = 3;
+const DROP_LINE = 3;
 
 /** How near the scroller's edge the page starts to scroll, in px. */
-export const EDGE = 36;
+const EDGE = 36;
 
 /** The boundary a pointer at `y` is nearest to: `rowTops` are the tops of the rows and the bottom
  * of the last, `rows.length + 1` of them (for columns, `x` and the lefts of the columns). */

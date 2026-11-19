@@ -109,7 +109,7 @@ export interface RailOptions extends BoxOptions {
 }
 
 /** A note in the rail. */
-export interface Note {
+interface Note {
   /** The thread's id, or the change's. */
   id: string;
   thread?: Thread;
@@ -2092,7 +2092,7 @@ class NoteView {
 }
 
 /** The rail, and what can be asked of it from outside the editor. */
-export interface RailControl {
+interface RailControl {
   extension: Extension;
   startComment(initialText?: string): boolean;
   hasDraft(): boolean;

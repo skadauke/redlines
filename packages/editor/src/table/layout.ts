@@ -44,7 +44,7 @@ import { type MissingCaret, missingCaret } from './missing.ts';
 import { BR } from './stops.ts';
 
 /** What the layout builds for a state. */
-export interface Layout {
+interface Layout {
   /** The wrappers around the lines of each table: the one that scrolls and the one that is the table. */
   wrappers: RangeSet<BlockWrapper>;
   /** Rows, hidden pipes and padding, line breaks and fillers. */

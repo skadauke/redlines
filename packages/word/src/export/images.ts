@@ -2,7 +2,7 @@
 // pictures by address in a file that travels, so an image is embedded when its bytes are known: a
 // `data:` address carries them, and for any other the caller's `images` option is asked.
 
-export type ImageKind = 'png' | 'jpg' | 'gif' | 'bmp';
+type ImageKind = 'png' | 'jpg' | 'gif' | 'bmp';
 
 export interface LoadedImage {
   type: ImageKind;
@@ -16,10 +16,10 @@ export interface LoadedImage {
 export type ImageSource = (src: string) => Uint8Array | undefined | Promise<Uint8Array | undefined>;
 
 /** The widest an image is drawn in a page's text, in pixels (6.5 inches at 96 per inch). */
-export const MAX_IMAGE_WIDTH = 624;
+const MAX_IMAGE_WIDTH = 624;
 
 /** The bytes of a `data:` address, or undefined when it is not one that holds base64 or plain text. */
-export function dataUri(src: string): Uint8Array | undefined {
+function dataUri(src: string): Uint8Array | undefined {
   const found = /^data:([^,]*),([\s\S]*)$/i.exec(src);
   if (!found) return undefined;
   const base64 = /;base64$/i.test(found[1] ?? '');
@@ -39,7 +39,7 @@ const le32 = (b: Uint8Array, at: number) => le16(b, at) + le16(b, at + 2) * 6553
 
 /** The kind and the size of PNG, JPEG, GIF and BMP bytes; undefined for anything else (SVG and WebP
  * are the ones Word can't draw from a file written here). */
-export function imageInfo(data: Uint8Array): Omit<LoadedImage, 'data'> | undefined {
+function imageInfo(data: Uint8Array): Omit<LoadedImage, 'data'> | undefined {
   if (data.length > 24 && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e) {
     return { type: 'png', width: u32(data, 16), height: u32(data, 20) };
   }

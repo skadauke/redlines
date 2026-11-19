@@ -7,7 +7,7 @@ import type { Host } from './host.ts';
 import { PASSING_MS } from './ui/notifications.ts';
 import type { NotificationOptions } from './ui/notifications.ts';
 
-export interface WordImportParts {
+interface WordImportParts {
   host: Pick<Host, 'openDocx' | 'saveAs' | 'write' | 'addImages'>;
   /** The name of the project's folder for images, as the settings say. */
   folderName(): string;
@@ -19,7 +19,7 @@ export interface WordImportParts {
 }
 
 /** How many of the report's lines a card holds before it says there are more. */
-export const REPORT_LINES = 3;
+const REPORT_LINES = 3;
 
 /** The card's words: the file opened, then what could not be kept. */
 export function importMessage(
@@ -62,7 +62,7 @@ function encodeLink(path: string): string {
 }
 
 /** `Plan.docx` as `Plan.md`. */
-export function markdownName(docx: string): string {
+function markdownName(docx: string): string {
   return `${docx.replace(/\.docx$/i, '') || 'Untitled'}.md`;
 }
 

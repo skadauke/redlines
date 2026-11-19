@@ -92,7 +92,7 @@ function outsideClosers(text: string, at: number): number {
 }
 
 /** What a range comes to once its ends are off the fences. */
-export interface FencedRange {
+interface FencedRange {
   /** The range to place with the usual rules, none of whose ends is on a fence line. */
   inner: Range;
   /** Where both ends go out of divs: the whole div, with no other placing to do. */
