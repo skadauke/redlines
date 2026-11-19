@@ -508,6 +508,24 @@ function insideCode(text: string, changes: readonly TextChange[]): boolean {
 }
 
 /**
+ * The widened write of a move. A table's move never decides another person's pending changes: a
+ * replacement that holds them in its old text would turn them into text when it is accepted, so the
+ * move is not written tracked: the person is asked first, as for any edit no unit can hold (#1279).
+ */
+function widenMove(text: string, view: TextChange[], ctx: EditContext, run: BlockRun) {
+  const widened = widen(text, view, ctx);
+  if (run.kind === 'table' && widened.held.length > 0) {
+    throw new Untrackable(
+      'no-unit',
+      'A table is moved past or with another person’s pending changes, which a tracked move would decide.',
+      undefined,
+      widened.held,
+    );
+  }
+  return widened;
+}
+
+/**
  * The tracked move of `run` to `gap`: the edits of `moveBlockEdits` (with where the run lands) written as the author's tracked
  * changes, a deletion at the old place and an insertion at the new, all in one group so that they
  * are decided together. Where a fine write isn't sound (a line break that someone else inserted
@@ -535,7 +553,7 @@ export function trackedBlockMove(
       // the markers of an insertion, a mark each on a line of its own, which read otherwise when
       // some of them are decided and others not (#1052, walk seed 44).
       try {
-        return { changes: widen(text, plan.view, ctx).changes, moved: plan.moved };
+        return { changes: widenMove(text, plan.view, ctx, run).changes, moved: plan.moved };
       } catch (error) {
         if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
       }
@@ -556,7 +574,7 @@ export function trackedBlockMove(
         if (!(error instanceof EditError)) throw error;
       }
     }
-    return { changes: widen(text, plan.view, ctx).changes, moved: plan.moved };
+    return { changes: widenMove(text, plan.view, ctx, run).changes, moved: plan.moved };
   });
 }
 

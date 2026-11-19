@@ -85,6 +85,14 @@ const spots = ViewPlugin.define(() => ({
   },
 }));
 
+/** Why a project image isn't linked: it is on another drive from the document. */
+export const NO_LINK =
+  'This picture is on another drive from the document, so the document can’t link it.';
+
+/** Why the sidebar's pictures are not dropped into a document that is not saved: no folder to link from. */
+export const NO_FOLDER =
+  'Pictures can’t be added from the sidebar to a document that isn’t saved: save it, to add pictures from its folder.';
+
 /** What stands for the links in the probe that asks whether the document takes them. */
 const PROBE = imageLink('image.png');
 
@@ -395,12 +403,13 @@ export function images(
   onImageFiles: ((files: File[], spot: ImageSpot, pasted: boolean) => void) | undefined,
   notice: ((message: string) => void) | undefined,
   projectImageLink?: (dragged: string) => string | null,
+  hasFolder?: () => boolean,
 ): Extension {
   const base = [
     imageSaverFacet.of(onImageFiles),
     spots,
     freshImageField,
-    ...(projectImageLink ? [projectDrops(projectImageLink, notice)] : []),
+    ...(projectImageLink ? [projectDrops(projectImageLink, notice, hasFolder)] : []),
   ];
   if (!onImageFiles) return base;
   const take = (
@@ -487,6 +496,8 @@ function carriesProjectImage(event: DragEvent): boolean {
 interface ProjectDrops {
   linkFor: (dragged: string) => string | null;
   notice: ((message: string) => void) | undefined;
+  /** Whether the document has a folder to link from; default yes. */
+  hasFolder?: (() => boolean) | undefined;
 }
 
 const projectDropsFacet = Facet.define<ProjectDrops, ProjectDrops | null>({
@@ -505,7 +516,10 @@ const dropLineOf = (view: EditorView) => {
  * gap between blocks it is nearest. False where the document takes no such drag.
  */
 export function overProjectImage(view: EditorView, y: number): boolean {
-  if (!view.state.facet(projectDropsFacet)) return false;
+  // Raw, with Track Changes on, takes no image: no line, and the drop is not allowed.
+  const drops = view.state.facet(projectDropsFacet);
+  // A document with no folder takes no such drag either: no line, and the drop is not allowed.
+  if (!drops || rawIsReadOnly(view.state) || drops.hasFolder?.() === false) return false;
   const near = nearestGap(view, y);
   if (near) dropLineOf(view).show(near.y);
   else dropLineOf(view).hide();
@@ -526,8 +540,15 @@ export function dropProjectImage(view: EditorView, y: number, dragged: string): 
   dropLineOf(view).hide();
   const drops = view.state.facet(projectDropsFacet);
   if (!drops || rawIsReadOnly(view.state)) return;
+  if (drops.hasFolder?.() === false) {
+    drops.notice?.(NO_FOLDER);
+    return;
+  }
   const link = dragged ? drops.linkFor(dragged) : null;
-  if (link === null) return;
+  if (link === null) {
+    drops.notice?.(NO_LINK);
+    return;
+  }
   const near = nearestGap(view, y);
   if (!near) return;
   const { gap } = near;
@@ -544,15 +565,16 @@ export function dropProjectImage(view: EditorView, y: number, dragged: string): 
 function projectDrops(
   linkFor: (dragged: string) => string | null,
   notice: ((message: string) => void) | undefined,
+  hasFolder?: () => boolean,
 ): Extension {
   return [
-    projectDropsFacet.of({ linkFor, notice }),
+    projectDropsFacet.of({ linkFor, notice, hasFolder }),
     EditorView.domEventHandlers({
       dragover(event, view) {
         if (!carriesProjectImage(event)) return false;
+        if (!overProjectImage(view, event.clientY)) return false;
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-        overProjectImage(view, event.clientY);
         return true;
       },
       dragleave(event, view) {

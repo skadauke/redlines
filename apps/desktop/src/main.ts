@@ -627,6 +627,7 @@ const editor = createEditor(element('#editor'), {
     : undefined,
   // An image dragged from the sidebar is the project's own file: linked by its path, not copied.
   projectImageLink: (dragged) => relativeImagePath(controller.state.path, dragged),
+  projectImageFolder: () => controller.state.path !== null,
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {

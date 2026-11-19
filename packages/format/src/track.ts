@@ -1181,7 +1181,11 @@ const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
  * a line, with nothing after the text on its last line; anywhere else the text is written as it was.
  */
 function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
-  if (where.rest.trim() !== '' || wholeTopDiv(tokens, linePrefix, where)) return;
+  // What follows the typed text is on the line of its last text, unless the text ends with a break
+  // (a div typed whole at the start of a paragraph, with the blank line after it, #1169).
+  const endsInBreak = tokens.length > 0 && 'brk' in tokens[tokens.length - 1]!;
+  if (where.rest.trim() !== '' && !endsInBreak) return;
+  if (wholeTopDiv(tokens, linePrefix, where) || where.rest.trim() !== '') return;
   // Typed text that ends in a bare fence line and is no div at the top level (a div closed
   // wherever it opened, as in a quote or after text on its line): the closer stands alone on the
   // line after it (#1088).
@@ -1212,14 +1216,17 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
     return atLineStart && DIV_FENCE_TYPED.test(token.text.split('\n')[0]?.replace(/\r$/, '') ?? '');
   });
   if (first < 0) return false;
-  const rest = tokens.slice(first);
+  // At the top level the breaks after the last text stay behind the div, after its closer, as for a
+  // code block (#1169); in a container they are part of what the lines are read by (#1234).
+  const lastText = tokens.findLastIndex((token) => 'text' in token);
+  const rest = linePrefix === '' ? tokens.slice(first, lastText + 1) : tokens.slice(first);
   if (rest.some((token) => 'text' in token && token.fence === true)) return false;
   // The container of the lines after the first: what each break leaves on its next line.
   const tails = rest.flatMap((token) =>
     'brk' in token ? [token.brk.slice(token.brk.lastIndexOf('\n') + 1)] : [],
   );
   const container = tails.at(-1) ?? linePrefix;
-  if (linePrefix === '' ? tails.some((tail) => tail !== '') : false) return false;
+  // (At the top level a break's tail may be a block's mark typed on the next line, as a heading's `## `.)
   if (linePrefix !== '') {
     if (tails.length === 0 || tails.some((tail) => tail !== container)) return false;
     if (continuationPrefix(container) !== container) return false;
@@ -1263,6 +1270,39 @@ function typingOf(tokens: readonly Token[]): Typing {
       .join(''),
     ...(last && 'fence' in last && last.fence ? { fenced: true } : {}),
   };
+}
+
+/** A line of a table: pipes, after the prefix of its container. */
+const TABLE_LINE = /^[ \t]*(?:>[ \t]*)*\|/;
+
+/**
+ * Where the text typed has the rows of a table, one line after another (the table is a block of its
+ * own, or in an item or a quote), the breaks between its rows are text of the change, not splits: a
+ * row that ends in a marker is no delimiter row, so the file read as it is, every change pending,
+ * would show the table as a paragraph (#1279). The breaks before the first row and after the last stay
+ * splits. True when a break was changed.
+ */
+function tableRowBreaks(tokens: Token[]): boolean {
+  let changed = false;
+  for (let i = 1; i + 1 < tokens.length; i++) {
+    const token = tokens[i];
+    const before = tokens[i - 1];
+    const after = tokens[i + 1];
+    if (
+      token &&
+      'brk' in token &&
+      before &&
+      'text' in before &&
+      after &&
+      'text' in after &&
+      TABLE_LINE.test(before.text.slice(before.text.lastIndexOf('\n') + 1)) &&
+      TABLE_LINE.test(after.text)
+    ) {
+      tokens[i] = { text: token.brk };
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /**
@@ -4522,6 +4562,10 @@ function planEdit(plan: Plan, edit: TextChange): void {
         }
       }
     }
+    // The rows of a table typed as a block are one line break apart in the text of the change, with no
+    // split between them: a row that ends in a marker is no delimiter row, so the file read as it is
+    // (every change pending) would show the table as a paragraph (#1279).
+    if (tableRowBreaks(tokens)) plain = true;
     // The line break in front of a prefix is typed again as text, not as a break: it is not new. A
     // split that the range took in is cancelled with its break, and the break is not typed again.
     if (lead !== '' && from === covers.from && to === covers.to) tokens.unshift({ text: lead });
@@ -5647,6 +5691,9 @@ function editsWidening(
   }
 }
 
+/** A marker's closer alone on its line, and an ordered item that doesn't start at 1 on the next. */
+const CLOSER_BEFORE_ITEM = /<!--\/\w+-->[ \t]*\r?\n[ \t]*(?!0*1[.)])\d{1,9}[.)](?:[ \t]|\r?\n|$)/;
+
 /**
  * Whether `changes`, a fine write of `edits`, are at a block's boundary (`atBlockBoundary`) and
  * make a file that micromark reads otherwise than its newest view (#597, #601, #588), or whether
@@ -5663,6 +5710,16 @@ export function readsOtherAtBoundary(
   // stands and otherwise once the deletion is rejected: the unit is replaced (#1104).
   if (edits.some((edit) => afterBareDeletion(text, edit.from))) return true;
   if (hardBreakBesideDeletionReadsOtherwise(text, edits, changes)) return true;
+  // A closer's line between indented code and an item that starts at a number other than 1: micromark
+  // reads the item after the closer as a list, and as text after the code without it (#601).
+  if (
+    changes.some((change) => change.insert.includes('<!--/')) &&
+    CLOSER_BEFORE_ITEM.test(applyChanges(text, changes)) &&
+    // (The item is outside the paragraph that the change is in, so the whole file is read.)
+    readsOtherMicromark(text, changes, true)
+  ) {
+    return true;
+  }
   return (
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||

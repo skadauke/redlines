@@ -667,7 +667,7 @@ them) and emails written as autolinks (opened as `mailto:`; in `[x](logo@2x.png)
 space in the path of a `<...>` destination opens as `%20`, and an image that is a link's text opens it too: the limit of a copy, which turns `javascript:` and its kin into plain
 text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
 the address again before it runs the system's opener, and the website's demos open a new tab. A
-link that doesn't open is left to the editor like any text, with no hint. A relative link to
+link that doesn't open is left to the editor like any text, with no hint. A link that wraps over two lines is one link to the hint: moving the pointer from one half to the other goes on with its pause and its hint. The hint doesn't show while another tooltip does, as a change's card over a link in the full markup. A relative link to
 another document doesn't open yet.
 
 ### 5.3 Views: Clean, Redlines, Plain
