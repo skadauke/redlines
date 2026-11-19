@@ -48,7 +48,7 @@ pub use which::Programs;
 use acp::{AcpAgent, AcpAgents, Found};
 use acp_runs::AcpRuns;
 use allowed::Agent;
-use connections::{Change, Connections, Kind, NewConnection, Secret, View};
+use connections::{Change, Connections, NewConnection, Secret, View};
 use log::RunInfo;
 use openclaw_nodes::Nodes;
 use process::{ExecOutput, RunMessage, Spec, Started};
@@ -274,8 +274,9 @@ pub fn openclaw_connection_remove(app: AppHandle, handle: String) -> Result<Vec<
 }
 
 /// Keeps a token the person typed, for a Gateway where they can't make a setup code: for the
-/// connection's node and its operator both. It is written to files only this user can read and
-/// never shown or returned.
+/// connection's node and its operator both. It is a shared Gateway token, sent as `auth.token`;
+/// what the Gateway gives this device in return is kept apart and sent as `auth.deviceToken`.
+/// It is written to files only this user can read and never shown or returned.
 #[tauri::command(async)]
 pub fn openclaw_use_token(
     app: AppHandle,
@@ -284,8 +285,7 @@ pub fn openclaw_use_token(
 ) -> Result<Vec<View>, String> {
     let secret = Secret::new(&token)?;
     let store = app.state::<Connections>();
-    store.keep(&handle, Kind::NodeToken, &secret)?;
-    store.keep(&handle, Kind::OperatorToken, &secret)?;
+    openclaw_nodes::keep_typed_token(&store, &handle, &secret)?;
     let _ = app.emit(OPENCLAW_CHANGED, ());
     Ok(store.views())
 }
