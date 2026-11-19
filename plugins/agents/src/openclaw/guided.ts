@@ -1,5 +1,6 @@
 // The guided OpenClaw agents in Preferences › Agents: the agents the person connected (the agent's
-// card of the design's screen 7), and the button that opens the setup sheet (sheet.ts). A card
+// card of the design's screen 7), and the button that opens the setup, a window of its own
+// (sheet.ts is what it shows; apps/desktop/src/openclaw-setup/main.ts). A card
 // shows who the agent writes as, what it may do (the level), which folders its tools reach, when
 // it was last used, and whether it is connected; every control changes the connection through the
 // host, which asks the person before it gives an agent more.
@@ -7,23 +8,38 @@
 import { LEVELS, type OpenClawChange, type OpenClawConnection } from './connection.ts';
 import { failure } from './failures.ts';
 import { connectionLine, failureOf, type NodeStatus } from './node.ts';
-import { openSheet, type Sheet, type SheetDeps } from './sheet.ts';
 
-export interface GuidedDeps extends SheetDeps {
-  connections: SheetDeps['connections'] & {
+export interface GuidedDeps {
+  connections: {
     list(): Promise<OpenClawConnection[]>;
     change(handle: string, change: OpenClawChange): Promise<OpenClawConnection[]>;
+    remove(handle: string): Promise<unknown>;
+  };
+  node: {
+    /** Connects with the token kept, when the code is null. */
+    connect(handle: string, setupCode: string | null): Promise<void>;
+    status(handle: string): Promise<NodeStatus | null>;
+    stop(handle: string): Promise<void>;
   };
   /** The folder panel: a whole path, or null when the person cancels. */
   chooseFolder(): Promise<string | null>;
+  /** Opens the setup, in a window of its own (it is one window: a second call shows the first). */
+  openSetup(): void;
+  /**
+   * Asks the agent to fix a typo in a practice note through the connection. Absent where the app
+   * can't yet.
+   */
+  test?: {
+    run(handle: string): Promise<{ answered: boolean; usedTools: boolean; line: string }>;
+  };
+  /** Waits, in milliseconds; the tests make them short. */
+  poll?: { node?: number };
 }
 
 export interface GuidedOptions {
   alive(): boolean;
   /** The connections changed: the picker and the default agent follow. */
   changed?(list: readonly OpenClawConnection[]): void;
-  /** For screenshots and tests: open the sheet at once, as `openSheet`'s `start` says. */
-  start?: Parameters<typeof openSheet>[1]['start'];
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -75,12 +91,10 @@ function whereIs(connection: OpenClawConnection): string {
 export function renderGuided(deps: GuidedDeps, options: GuidedOptions): HTMLElement {
   const root = el('div', 'rl-oc-guided');
   const cards = el('div', 'rl-pref-list');
-  const host = el('div', 'rl-oc-host');
   const problem = el('div', 'rl-pref-note rl-pref-failure');
   problem.setAttribute('role', 'status');
   let list: OpenClawConnection[] = [];
   let statuses = new Map<string, NodeStatus | null>();
-  let sheet: Sheet | null = null;
   let removing: string | null = null;
   const alive = () => options.alive();
 
@@ -278,20 +292,12 @@ export function renderGuided(deps: GuidedDeps, options: GuidedOptions): HTMLElem
   }
 
   const open = button('Connect OpenClaw…', () => {
-    if (sheet) return;
     problem.textContent = '';
-    const made = openSheet(deps, {
-      alive,
-      onClose: () => {
-        sheet = null;
-        open.hidden = false;
-        void refresh();
-      },
-      onChanged: () => void refresh(),
-    });
-    sheet = made;
-    open.hidden = true;
-    host.append(made.element);
+    try {
+      deps.openSetup();
+    } catch (error) {
+      say(error);
+    }
   });
 
   async function refresh(): Promise<void> {
@@ -318,34 +324,18 @@ export function renderGuided(deps: GuidedDeps, options: GuidedOptions): HTMLElem
     }
   }
 
-  // Where each connection is, looked at again every few seconds while the pane is open.
+  // Where each connection is, looked at again every few seconds while the pane is open: a
+  // connection made in the setup window shows here when it is made.
   const every = deps.poll?.node ?? 3000;
   const timer = setInterval(
     () => {
-      if (!alive()) {
-        clearInterval(timer);
-        // The pane is gone: a sheet not finished goes with it, and what it began is undone.
-        sheet?.dispose();
-      } else if (list.length > 0) void refresh();
+      if (!alive()) clearInterval(timer);
+      else void refresh();
     },
     Math.max(every, 1000),
   );
 
-  root.append(cards, open, host, problem);
+  root.append(cards, open, problem);
   void refresh();
-  if (options.start) {
-    const made = openSheet(deps, {
-      alive,
-      onClose: () => {
-        sheet = null;
-        open.hidden = false;
-      },
-      onChanged: () => void refresh(),
-      start: options.start,
-    });
-    sheet = made;
-    open.hidden = true;
-    host.append(made.element);
-  }
   return root;
 }

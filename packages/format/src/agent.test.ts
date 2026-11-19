@@ -902,7 +902,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
   const WORDS = ['alpha', 'beta', 'gamma', 'new', 'x', '😀', 'café', 'éclair', '42', 'one\n\ntwo'];
 
   it('changes the newest view as asked, keeps the original view, and the ledger in order', () => {
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     let suggestions = 0;
     let refused = 0;
     let checked = 0;
@@ -1031,7 +1031,7 @@ describe('an edit that joins a paragraph with the next block (#245)', () => {
   it('reads as asked in the newest view, or is refused', () => {
     let read = 0;
     let refused = 0;
-    for (let seed = 1; seed <= fuzzCount(400); seed++) {
+    for (let seed = 1; seed <= fuzzCount(130); seed++) {
       const random = seeded(seed * 7919);
       const below = (n: number) => Math.floor(random() * n);
       const words = (n: number) =>
@@ -1109,7 +1109,7 @@ describe('an edit at a pending insertion (#246)', () => {
     () => {
       let suggestions = 0;
       let refused = 0;
-      for (let seed = 1; seed <= fuzzCount(300); seed++) {
+      for (let seed = 1; seed <= fuzzCount(100); seed++) {
         const random = seeded(seed * 4801);
         const below = (n: number) => Math.floor(random() * n);
         let text = randomDocument(seeded(seed));

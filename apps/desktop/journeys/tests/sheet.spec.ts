@@ -25,7 +25,12 @@ const VIEWS: ViewName[] = ['redlines', 'clean', 'simple'];
 
 /** The window around an element, for its picture. */
 async function around(j: Journey, selector: string, pad = 60) {
-  const box = await j.page.locator(selector).filter({ visible: true }).first().boundingBox();
+  const box = await j.page
+    .locator(selector)
+    .filter({ visible: true })
+    .first()
+    .boundingBox()
+    .catch(() => null);
   if (!box) return undefined;
   const x = Math.max(0, box.x - pad);
   const y = Math.max(0, box.y - pad);
@@ -72,6 +77,8 @@ async function contactSheet(
       width: document.documentElement.scrollWidth,
       height: document.documentElement.scrollHeight,
     }));
+    // The picture is the whole page: the window is made as big as it.
+    await page.setViewportSize({ width: Math.max(1280, size.width), height: size.height });
     await writeShot(page, info, shotName(name, j.options), {
       clip: { x: 0, y: 0, width: size.width, height: size.height },
     });
@@ -122,13 +129,24 @@ test.describe('the sheet of every interface element (#1208) @views @tables @bloc
               await release(j.page);
               continue;
             }
-            const style = await styleOf(j.page, specimen, state);
+            let style = await styleOf(j.page, specimen, state);
+            if (style === null && !specimen.mayVanish?.includes(state)) {
+              // A hover or a focus that the page hasn't caught up with.
+              await j.page.waitForTimeout(250);
+              style = await styleOf(j.page, specimen, state);
+              if (style === null) {
+                await reach(j);
+                await j.page.waitForTimeout(250);
+                style = await styleOf(j.page, specimen, state);
+              }
+            }
             styles[`${view}/${specimen.name}/${state}`] = style;
             const name = `${view}-${specimen.name}-${state}`;
             if (style === null && specimen.mayVanish?.includes(state)) {
               row[state] = await j.shot(name);
             } else if (style === null) {
               unreached.push(`${view}/${specimen.name}/${state}: the element isn't there`);
+              await j.shot(`${name}-missing`);
             } else {
               const clip = specimen.frame
                 ? await around(j, specimen.frame, 16)
@@ -137,6 +155,7 @@ test.describe('the sheet of every interface element (#1208) @views @tables @bloc
             }
             await release(j.page);
           }
+          await specimen.after?.(j);
           sheets.set(specimen.family, { ...sheets.get(specimen.family), [specimen.name]: row });
         }
         for (const [family, rows] of sheets) {

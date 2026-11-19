@@ -1,11 +1,11 @@
 //! Whether this Mac is on a Tailscale network, and which other computers it can see: the first
 //! screen of connecting an OpenClaw agent on another computer (docs/research/openclaw-connection.md).
 //!
-//! Redlines only *looks*. It finds Tailscale's command, runs `status --json` (one fixed line, with
+//! This file only *looks*. It finds Tailscale's command, runs `status --json` (one fixed line, with
 //! `TAILSCALE_BE_CLI=1` so that the app's own window doesn't open), and turns the answer into one
-//! state and a list of computers. It never starts, stops, signs in or changes Tailscale: the person
-//! does that in Tailscale's own app, and Redlines notices. The sign-in address Tailscale gives is
-//! passed on as it is, to be opened by the person, and nothing is ever kept.
+//! state and a list of computers. Changing Tailscale (installing it, restarting its app, starting
+//! its sign-in) is `tailscale_setup.rs`, only from the OpenClaw setup window and only when the
+//! person asks. The sign-in address Tailscale gives is passed on as it is, and nothing is kept.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -27,10 +27,11 @@ const PLACES: &[&str] = &[
     "/opt/homebrew/bin/tailscale",
 ];
 
-/// The app, for `open`, and the page to download it from. Both are fixed: no page text reaches
-/// either.
+/// The admin console's DNS page, where HTTPS certificates are switched on.
+const HTTPS_PAGE: &str = "https://login.tailscale.com/admin/dns";
+
+/// The app, for `open`. It is fixed: no page text reaches it.
 const APP: &str = "/Applications/Tailscale.app";
-const DOWNLOAD: &str = "https://tailscale.com/download/mac";
 
 /// The one thing this Mac's Tailscale is, for the screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +89,12 @@ pub struct Status {
     pub blocked: bool,
     /// What Tailscale's health check said, for Details.
     pub health: Vec<String>,
+    /// Where in System Settings macOS asks to allow Tailscale's network extension (this Mac's).
+    pub allow_in: String,
+    /// Whether HTTPS certificates are turned on for the network (`CertDomains` in `status --json`
+    /// holds the names they would be for): Tailscale Serve, which gives a Gateway its `https://`
+    /// address, needs them. `None` when Tailscale doesn't say (an older one, or not signed in).
+    pub https: Option<bool>,
 }
 
 impl Status {
@@ -102,6 +109,8 @@ impl Status {
             peers: Vec::new(),
             blocked: false,
             health: Vec::new(),
+            allow_in: String::new(),
+            https: None,
         }
     }
 }
@@ -188,10 +197,43 @@ fn says_unreachable(line: &str) -> bool {
 }
 
 /// Whether an address is a secure page of Tailscale's own, the only kind a sign-in button opens.
-fn is_tailscale_address(url: &str) -> bool {
-    url.strip_prefix("https://")
-        .and_then(|rest| rest.split(['/', '?', '#']).next())
-        .is_some_and(|host| host == "tailscale.com" || host.ends_with(".tailscale.com"))
+pub(super) fn is_tailscale_address(url: &str) -> bool {
+    // Nothing that a browser or `open` might read differently from this: no backslash, space or
+    // control character anywhere.
+    if url
+        .chars()
+        .any(|c| c == '\\' || c.is_whitespace() || c.is_control())
+    {
+        return false;
+    }
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // A host and nothing else: no user name (`@`), no port (`:`), only the characters of a name.
+    let plain = !authority.is_empty()
+        && authority
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    plain
+        && (authority == "tailscale.com"
+            || authority
+                .strip_suffix(".tailscale.com")
+                .is_some_and(|label| {
+                    !label.is_empty() && !label.starts_with('.') && !label.ends_with('.')
+                }))
+}
+
+/// Whether the network has HTTPS certificates, from `CertDomains`: a list of names when it does,
+/// and `null` or empty when it doesn't (Go writes a missing list as `null`). A status with no such
+/// field says nothing.
+fn https_of(json: &str) -> Option<bool> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    match value.get("CertDomains")? {
+        serde_json::Value::Array(names) => Some(!names.is_empty()),
+        serde_json::Value::Null => Some(false),
+        _ => None,
+    }
 }
 
 /// Reads what `status --json` printed. `None` when it isn't Tailscale's JSON.
@@ -263,6 +305,8 @@ pub fn parse_status(json: &str, program: Option<String>) -> Option<Status> {
         peers,
         blocked,
         health,
+        allow_in: String::new(),
+        https: https_of(json),
     })
 }
 
@@ -359,7 +403,7 @@ fn run_status(program: &Path, timeout: Duration) -> Ran {
     }
 }
 
-fn places() -> Vec<PathBuf> {
+pub(super) fn places() -> Vec<PathBuf> {
     let mut places: Vec<PathBuf> = PLACES.iter().map(PathBuf::from).collect();
     if let Some(home) = std::env::var_os("HOME") {
         places.insert(
@@ -370,16 +414,71 @@ fn places() -> Vec<PathBuf> {
     places
 }
 
+/// Where Tailscale's app may be: in Applications, or in the person's own.
+pub(super) fn app_places() -> Vec<PathBuf> {
+    let mut apps = vec![PathBuf::from(APP)];
+    if let Some(home) = std::env::var_os("HOME") {
+        apps.push(Path::new(&home).join("Applications/Tailscale.app"));
+    }
+    apps
+}
+
+/// Whether Tailscale's app is installed in either place.
+pub(super) fn app_installed_here() -> bool {
+    app_places().iter().any(|app| app.is_dir())
+}
+
+/// Where, in System Settings, macOS asks the person to allow Tailscale's network extension: the
+/// pane moved in macOS 15.
+pub fn allow_location(major: u32) -> &'static str {
+    if major >= 15 {
+        "System Settings › General › Login Items & Extensions › Network Extensions"
+    } else {
+        "System Settings › Privacy & Security, where it says Tailscale was blocked"
+    }
+}
+
+fn macos_major() -> u32 {
+    Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .and_then(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .split('.')
+                .next()
+                .and_then(|major| major.parse().ok())
+        })
+        .unwrap_or(15)
+}
+
 /// What this Mac's Tailscale is, for the screen. Changes nothing.
 #[tauri::command(async)]
 pub fn tailscale_status() -> Status {
-    check(&places(), Path::new(APP), |program| {
+    let mut status = check(&places(), Path::new(APP), |program| {
         run_status(program, STATUS_TIMEOUT)
-    })
+    });
+    status.allow_in = allow_location(macos_major()).to_string();
+    status
 }
 
-/// Opens Tailscale's app, so that the person can turn it on or sign in. It never starts or stops
-/// Tailscale itself.
+/// Opens the page of Tailscale's admin console where HTTPS certificates are turned on (DNS). The
+/// address is fixed: no page text reaches it.
+#[tauri::command(async)]
+pub fn tailscale_open_https_settings() -> Result<(), String> {
+    let status = Command::new("open")
+        .arg(HTTPS_PAGE)
+        .status()
+        .map_err(|error| format!("Couldn’t open the page: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Couldn’t open the page. Go to login.tailscale.com/admin/dns.".to_string())
+    }
+}
+
+/// Opens Tailscale's app, so that it can start, or the person can turn it on.
 #[tauri::command(async)]
 pub fn tailscale_open_app() -> Result<(), String> {
     let status = Command::new("open")
@@ -390,20 +489,6 @@ pub fn tailscale_open_app() -> Result<(), String> {
         Ok(())
     } else {
         Err("Couldn’t open Tailscale. Open it from Applications.".to_string())
-    }
-}
-
-/// Opens Tailscale's download page in the browser.
-#[tauri::command(async)]
-pub fn tailscale_download() -> Result<(), String> {
-    let status = Command::new("open")
-        .arg(DOWNLOAD)
-        .status()
-        .map_err(|error| format!("Couldn’t open the page: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Couldn’t open the page. Go to tailscale.com/download.".to_string())
     }
 }
 
@@ -458,10 +543,58 @@ mod tests {
     }
 
     #[test]
+    fn https_certificates_are_on_when_the_network_has_names_for_them_and_off_when_it_has_none() {
+        let with = |field: &str| {
+            status(&format!(
+                r#"{{"BackendState":"Running","Self":{{"DNSName":"a.t.ts.net."}}{field}}}"#
+            ))
+            .https
+        };
+        assert_eq!(with(r#","CertDomains":["a.t.ts.net"]"#), Some(true));
+        assert_eq!(with(r#","CertDomains":[]"#), Some(false));
+        // Go writes a list that was never made as null.
+        assert_eq!(with(r#","CertDomains":null"#), Some(false));
+        // A Tailscale that says nothing about it says nothing.
+        assert_eq!(with(""), None);
+    }
+
+    #[test]
     fn running_with_no_other_computer_is_no_peers() {
         let json = r#"{"BackendState":"Running","Self":{"HostName":"a","DNSName":"a.t.ts.net."},
             "Peer":null,"Health":null}"#;
         assert_eq!(status(json).state, State::NoPeers);
+    }
+
+    #[test]
+    fn only_a_plain_secure_page_of_tailscale_is_a_sign_in_address() {
+        for good in [
+            "https://login.tailscale.com/a/1234",
+            "https://tailscale.com/",
+            "https://login.tailscale.com",
+            "https://login.tailscale.com?x=1",
+        ] {
+            assert!(is_tailscale_address(good), "{good}");
+        }
+        for bad in [
+            // A browser reads the backslash as a slash: the host is evil.com.
+            "https://evil.com\\.tailscale.com/",
+            "https://evil.com\\@login.tailscale.com/",
+            "https://login.tailscale.com@evil.com/",
+            "https://user:pw@login.tailscale.com/",
+            "https://login.tailscale.com:8443/",
+            "https://login.tailscale.com.evil.com/",
+            "https://eviltailscale.com/",
+            "https://.tailscale.com/",
+            "https://login.tailscale.com /a",
+            "https://login.tailscale.com/a\n",
+            "https://login.tailscale.com/\u{7f}",
+            "http://login.tailscale.com/",
+            "https:///login.tailscale.com/",
+            "https://",
+            "",
+        ] {
+            assert!(!is_tailscale_address(bad), "{bad:?}");
+        }
     }
 
     #[test]

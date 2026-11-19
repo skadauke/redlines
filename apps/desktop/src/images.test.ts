@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { localImageUrl, relativeImagePath } from './images.ts';
+import { localImagePath, localImageUrl, relativeImagePath } from './images.ts';
 
 const url = (path: string) => `asset://${path}`;
 const at = (src: string, document = '/repo/docs/plan.md', project = '/repo') =>
@@ -61,5 +61,27 @@ describe('relativeImagePath', () => {
   it('has none for a document with no file, or on another drive', () => {
     expect(relativeImagePath(null, '/p/shot.png')).toBeNull();
     expect(relativeImagePath('C:\\p\\doc.md', 'D:\\p\\x.png')).toBeNull();
+  });
+});
+
+describe('the file an include names (#1175)', () => {
+  // The build-21 Test Drive's layout: a document in a folder of Downloads that is no repository, so
+  // that its project is its own folder, which has a space in a name above it.
+  const folder = '/Users/ada/Downloads/Redlines Test Drive/build-21';
+  const document = `${folder}/Build 21.qmd`;
+  const included = (path: string) => localImagePath(path, document, folder);
+
+  it('is a file beside the document, or below it', () => {
+    expect(included('_method.qmd')).toBe(`${folder}/_method.qmd`);
+    expect(included('./_method.qmd')).toBe(`${folder}/_method.qmd`);
+    expect(included('parts/_method.qmd')).toBe(`${folder}/parts/_method.qmd`);
+    expect(included('parts/../_method.qmd')).toBe(`${folder}/_method.qmd`);
+  });
+
+  it('is never a file outside the document’s folder', () => {
+    expect(included('../_method.qmd')).toBeNull();
+    expect(included('/Users/ada/Downloads/other.qmd')).toBeNull();
+    expect(included('/etc/hosts')).toBeNull();
+    expect(included(`../build-21-extra/_method.qmd`)).toBeNull();
   });
 });
