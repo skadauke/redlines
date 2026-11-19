@@ -1138,7 +1138,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   menu (Insert Above and Below, Delete, Delete Table, Move Up and Down, Clear Contents), Esc closes
   it and keeps the selection; a drag moves the rows, and the others selected with it, to any
   boundary, the last included: nothing is highlighted while it lasts, the rows dim, a copy follows
-  the pointer, a 3 px gray line (the theme's `--rl-ink-2`) marks the drop and shows only where the
+  the pointer, a 3 px faint blue line (the theme's `--rl-drop`, the one drop marker of the blocks, the table, the rows and the pictures) marks the drop and shows only where the
   rows would go, never at their own place, the page scrolls near its edges, Esc cancels. A + shows
   within 8 px of a row boundary in the strip beside the table, with a thin line across it, and a
   press inserts a row there.
