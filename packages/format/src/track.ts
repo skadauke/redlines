@@ -118,6 +118,7 @@ import {
   textLike,
   underliningBullet,
   visible,
+  DIV_IN_ITEM,
 } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
@@ -1205,14 +1206,14 @@ function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
  * container, or whose breaks are some other kind, is written as it was.
  */
 function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boolean {
-  const first = tokens.findIndex((token, i) => {
+  let first = tokens.findIndex((token, i) => {
     if (!('text' in token) || token.fence === true) return false;
     const before = tokens[i - 1];
     const atLineStart = before === undefined ? where.prefix !== undefined : 'brk' in before;
     return atLineStart && DIV_FENCE_TYPED.test(token.text.split('\n')[0]?.replace(/\r$/, '') ?? '');
   });
   if (first < 0) return false;
-  const rest = tokens.slice(first);
+  let rest = tokens.slice(first);
   if (rest.some((token) => 'text' in token && token.fence === true)) return false;
   // The container of the lines after the first: what each break leaves on its next line.
   const tails = rest.flatMap((token) =>
@@ -1223,10 +1224,23 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
   if (linePrefix !== '') {
     if (tails.length === 0 || tails.some((tail) => tail !== container)) return false;
     if (continuationPrefix(container) !== container) return false;
-    // In a list item (a tight one) the closer alone on its line is an HTML block after the div's
-    // paragraph text, which renders a line break that the view has not: only where the innermost
-    // container is a quote does the file read as the view, so an item keeps the old form.
-    if (!/>[ \t]*$/.test(container)) return false;
+    // In a list item the closer alone on its line is an HTML block after the div's text. Where the
+    // div is a block of its own after a blank line, in the typed text (a second paragraph of the
+    // item, which makes the item loose in every state), the breaks before it go into the insertion
+    // with it, so that no state has the div glued to the text before it, and the file reads as the
+    // view. Where it is not (the first block of the item, or after one line break), a tight item
+    // would read a line break that the view has not: the edit is no fine write, and is widened or
+    // asked about as any other (#1234).
+    if (!/>[ \t]*$/.test(container)) {
+      const lead = tokens.slice(0, first);
+      const blankLead =
+        lead.length > 0 &&
+        lead.every((token) => 'brk' in token) &&
+        lead.some((token) => 'brk' in token && BLANK_IN_BREAK.test(token.brk));
+      if (!blankLead) throw new EditError(DIV_IN_ITEM, 'no-legal-placement');
+      rest = tokens.slice(0);
+      first = 0;
+    }
     // A typed line that is not the container's would end the div there.
     if (
       rest.some(

@@ -64,6 +64,8 @@ import {
   untrackedEdit,
   readsOtherAtBoundary,
   widenedFirstEdits,
+  DIV_IN_ITEM,
+  DIV_IN_ITEM_ASK,
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
 import { dialectFacet } from '../dialect.ts';
@@ -1108,6 +1110,17 @@ function trackedSpec(
         !tr.isUserEvent(AUTOCORRECTION)
       ) {
         return askedAbout(tr, edits, backward);
+      }
+      // A div that no fine write and no list holds (format §9.4, #1234): asked about, as an edit that
+      // can't be tracked is, and made without tracking on Make Edit.
+      if (
+        error.message === DIV_IN_ITEM &&
+        start.facet(untrackedAskFacet) &&
+        !tr.isUserEvent(AUTOCORRECTION)
+      ) {
+        return holdEdit(tr, 'accept-pending', annotationsOfTransaction(tr), {
+          title: DIV_IN_ITEM_ASK,
+        });
       }
       return refused(tr, error);
     }

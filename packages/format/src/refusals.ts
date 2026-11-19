@@ -801,6 +801,12 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/format/src/table-rules.ts', 'PENDING_PIPE', 'widen', 'inventory #117'],
   [
     'packages/format/src/track.ts',
+    'DIV_IN_ITEM',
+    'widen',
+    "a div typed first in a list item, or right under its text, has no place for its insertion's closer, alone on a line (a tight item reads a line break the view lacks): a signal, not a refusal that stays, written as a replacement of the list where one holds it and otherwise asked about before an untracked edit (format §9.4, #1234)",
+  ],
+  [
+    'packages/format/src/track.ts',
     'A line break at the end of this text would take ',
     'widen',
     'inventory #51',

@@ -141,3 +141,63 @@ describe('a div typed whole in a quote is one insertion (§9.4, #1234)', () => {
     });
   }
 });
+
+describe('a div typed in a list item (§9.4, #1234)', () => {
+  const DIV = '\n\n  ::: {.callout-tip}\n  A.\n  :::';
+  const IDS = ['k3x9', 'm4yz', 'p5qr', 'w8nn', 'b3dn', 'c4fr'];
+  const loose: [string, string, number][] = [
+    ['after the text of an item, as its second paragraph', '- one\n\nAfter.', '- one'.length],
+    ['the same with another item after it', '- one\n- two\n\nAfter.', '- one'.length],
+    ['in a nested item', '- one\n  - two\n\nAfter.', '- one\n  - two'.length],
+  ];
+  for (const [name, doc, at] of loose) {
+    it(`${name}: one insertion, no marker on a fence line, every order reads alike`, () => {
+      const start = file(doc);
+      const typed = name.startsWith('in a nested') ? DIV.replaceAll('\n  ', '\n    ') : DIV;
+      const done = trackedEdits(
+        start,
+        [{ from: at, to: at, insert: typed }],
+        context(ada, IDS, QMD),
+      );
+      const after = applyChanges(start, done.changes);
+      const fences = bodyOf(after)
+        .split('\n')
+        .filter((line) => /^[ \t>]*:{3,}/.test(line));
+      expect(fences.length).toBeGreaterThanOrEqual(2);
+      expect(fences.filter((line) => line.includes('<!--'))).toEqual([]);
+      expect(parse(after).marks.filter((mark) => mark.kind === 'split')).toEqual([]);
+      expectEveryOrderRead(name, after);
+      expect(bodyOf(applyChanges(after, rejectAll(after))).trimEnd()).toBe(bodyOf(start).trimEnd());
+      expect(parse(applyChanges(after, acceptAll(after))).marks).toEqual([]);
+    });
+  }
+
+  it('first in an empty item, or right under its text, is no fine write: widened or asked about', () => {
+    for (const [doc, at, typed] of [
+      ['- \n\nAfter.', 2, '::: {.callout-tip}\n  A.\n  :::'],
+      ['- one\n\nAfter.', 5, '\n  ::: {.callout-tip}\n  A.\n  :::'],
+    ] as const) {
+      const start = file(doc);
+      let after: string | undefined;
+      try {
+        after = applyChanges(
+          start,
+          trackedEdits(start, [{ from: at, to: at, insert: typed }], context(ada, IDS, QMD))
+            .changes,
+        );
+      } catch (error) {
+        // No marker was written: the caller widens it or asks (an EditError).
+        expect(String(error)).toMatch(/div typed in a list item/);
+      }
+      if (after !== undefined) {
+        // Where a replacement of the list holds it, every order reads alike and no fence has a marker.
+        expect(
+          bodyOf(after)
+            .split('\n')
+            .filter((line) => /^[ \t>]*:{3,}/.test(line) && line.includes('<!--')),
+        ).toEqual([]);
+        expectEveryOrderRead('widened', after);
+      }
+    }
+  });
+});

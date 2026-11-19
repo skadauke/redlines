@@ -93,6 +93,7 @@ export {
 } from './track.ts';
 export type { TrackedEdits } from './track.ts';
 export { emptiedFormats } from './emptied-formats.ts';
+export { DIV_IN_ITEM, DIV_IN_ITEM_ASK } from './inline.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';
 export type { UntrackedContext } from './untracked.ts';
 export { newestView, originalView, reviewView, threadEntries } from './views.ts';
