@@ -65,6 +65,7 @@ export const EVENTS = {
   left: 'session-left',
   save: 'session-save',
   saved: 'session-saved',
+  tracking: 'session-tracking',
 } as const;
 
 export interface SessionOptions {
@@ -84,6 +85,8 @@ export interface SessionOptions {
   onState?(state: SyncState): void;
   /** The other windows of the session changed. */
   onPeers?(peers: readonly Peer[]): void;
+  /** Another window of the document turned Track Changes on or off: it is the document's. */
+  onTracking?(on: boolean): void;
   notice?(message: string): void;
   /**
    * The window has no text of its own and joins a session that is there: if there is none, it
@@ -103,6 +106,8 @@ export interface Session {
   readonly members: number;
   /** Whether everything this window made is confirmed by the authority. */
   readonly confirmed: boolean;
+  /** Tells every other window of the document that Track Changes is now on or off. */
+  shareTracking(on: boolean): Promise<void>;
   /** Has the file written, by the leader, and resolves to the text it holds or null. */
   save(): Promise<string | null>;
   /** Leaves the session. The editor keeps its text. */
@@ -476,6 +481,9 @@ export async function joinSession(
     remote = new Remote(ports, leader);
     transport = new Switch(remote);
   }
+  await listen(EVENTS.tracking, (payload) => {
+    options.onTracking?.((payload as { on: boolean }).on);
+  });
   await listen(EVENTS.saved, (payload) => {
     const { id, text } = payload as { id?: number; text: string | null };
     if (id !== undefined) {
@@ -566,6 +574,10 @@ export async function joinSession(
     },
     get confirmed() {
       return binding.replica.pending.length === 0 && binding.client.state === 'synced';
+    },
+    shareTracking: async (on) => {
+      const others = (await ports.members(path).catch(() => [])).filter((l) => l !== ports.label);
+      await Promise.all(others.map((l) => ports.send(l, EVENTS.tracking, { on }).catch(() => {})));
     },
     save: () => {
       if (leading) return saveNow();
