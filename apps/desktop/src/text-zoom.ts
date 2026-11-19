@@ -16,6 +16,7 @@ import {
   visibleTop,
   type ReadingPlace,
 } from './reading-place.ts';
+import { railSqueezes } from '@redlines/review';
 import { applyTextSize, stepSize, watchPinch } from './text-size.ts';
 
 export interface TextZoomOptions {
@@ -170,26 +171,54 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
   /** A change that is not a pinch. */
   const change = (size: number) => apply(size, stickyPlace());
 
+  // The pinch is on, and the size the notes and margins are held at (null: they follow the text).
+  let pinching = false;
+  let held: number | null = null;
+  /**
+   * The margin notes and the margins grow with the text above 100% (`--rl-note-scale`). Where the
+   * window has room for them beside the column they follow the fingers. Where it hasn't, the rail
+   * held beside the column would take more of the window with each frame, and a picture, as wide as
+   * the column, would shrink while the text grew (#1157): from the frame that would squeeze the
+   * column they keep the size they had before it, until the fingers lift. `before` is the size the
+   * page is at, `size` the one it is going to.
+   */
+  const holdNotes = (size: number, before: number) => {
+    if (held !== null) return;
+    const column = parseFloat(getComputedStyle(root).getPropertyValue('--rl-column')) || 680;
+    const width = scroller.clientWidth;
+    if (!railSqueezes({ width, column, textScale: size })) return;
+    held = Math.max(1, before);
+    root.style.setProperty(NOTE_SCALE, String(held));
+  };
+  const releaseNotes = () => {
+    held = null;
+    root.style.removeProperty(NOTE_SCALE);
+  };
+
   const stopPinch = watchPinch(win, {
     size: () => current,
     start: (point) => {
       began = current;
       sticky = null;
       place = placeAt(view, scroller, point);
-      // The margin notes and the margins keep the size they have until the fingers lift: they grow
-      // with the text above 100% (`--rl-note-scale`), and a rail held beside the column would take
-      // more of the window with each frame, so that a picture, as wide as the column, shrank while
-      // the text grew (#1157).
-      root.style.setProperty(NOTE_SCALE, String(Math.max(1, current)));
+      // A second `gesturestart` before the `gestureend` is the same pinch: it keeps what is held.
+      if (!pinching) {
+        pinching = true;
+        held = null;
+        holdNotes(current, current);
+      }
       options.holdRail(true);
     },
     change: (size) => {
-      if (place) apply(size, place);
+      if (!place) return;
+      holdNotes(size, current);
+      apply(size, place);
     },
     end: (size) => {
       place = null;
+      pinching = false;
       // Before the rail is let go, so that it measures the size the notes are to have.
-      root.style.removeProperty(NOTE_SCALE);
+      releaseNotes();
       // Where the fingers stopped is the size; nothing snaps to the ladder.
       if (size !== began) {
         options.save(size);
@@ -220,6 +249,7 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
     },
     stop() {
       stopPinch();
+      releaseNotes();
       stopped = true;
       win.removeEventListener('wheel', onScrollInput, { capture: true });
       win.removeEventListener('touchmove', onScrollInput, { capture: true });

@@ -15,10 +15,12 @@ interface Frame {
   scale: number;
   img: number;
   sideways: boolean;
+  /** The widest note in the rail, in px (0 when none is drawn). */
+  note: number;
 }
 
 test.describe('pinching with a picture @blocks', () => {
-  for (const width of [900, 1100, 1700]) {
+  for (const width of [900, 1100, 1700, 2600]) {
     test(`the picture grows with the text, and the page has one scroll bar, in a window ${width} px wide`, async ({
       start,
     }) => {
@@ -68,6 +70,12 @@ test.describe('pinching with a picture @blocks', () => {
             scale,
             img: img ? img.getBoundingClientRect().width : -1,
             sideways: scroller.scrollWidth > scroller.clientWidth,
+            note: Math.max(
+              0,
+              ...Array.from(document.querySelectorAll<HTMLElement>('.rl-note')).map(
+                (note) => note.offsetWidth,
+              ),
+            ),
           });
         };
         const frame = () => new Promise((done) => requestAnimationFrame(() => done(null)));
@@ -100,6 +108,11 @@ test.describe('pinching with a picture @blocks', () => {
       }
       for (let i = 1; i < back.length; i++) {
         expect(back[i]!.img, `at ${back[i]!.scale}`).toBeLessThanOrEqual(back[i - 1]!.img + 1);
+      }
+      if (width >= 2600) {
+        // Room for the notes and the text: the notes grow with the fingers, as they always did.
+        const widest = Math.max(...out.map((f) => f.note));
+        expect(widest, 'the notes grow with the text').toBeGreaterThan(out[0]!.note * 1.5);
       }
       expect(
         frames.filter((f) => f.sideways),
