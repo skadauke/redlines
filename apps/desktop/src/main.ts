@@ -505,6 +505,8 @@ const editor = createEditor(element('#editor'), {
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
     return file === null ? null : imageSizes.of(file);
   },
+  // Math is drawn as MathML by Temml, loaded when a document has a formula.
+  math: () => import('temml').then((module) => module.default),
   // An include of a Quarto document (`{{< include _part.qmd >}}`) is read and opened as a file of
   // its own, as a local image is found: relative to the document, and only inside its project (a
   // browser tab's one folder in memory has no path of its own).

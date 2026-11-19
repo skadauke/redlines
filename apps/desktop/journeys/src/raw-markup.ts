@@ -147,22 +147,6 @@ export const KNOWN: readonly KnownCase[] = [
     why: 'a table’s caption line and its {#tbl-…} are drawn as source',
   },
   {
-    issue: 1173,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'math',
-    text: /\$\$/,
-    why: 'the display formula shows as source',
-  },
-  {
-    issue: 1173,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'attributes',
-    text: /\{#eq-/,
-    why: 'the formula’s {#eq-mass} shows as source',
-  },
-  {
     issue: 1176,
     doc: 'Build 21.qmd',
     surfaces: ['redlines', 'clean', 'simple'],
