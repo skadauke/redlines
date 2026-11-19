@@ -1953,8 +1953,10 @@ one session on one Mac, with no network, no account and no invitation.
   fades after five seconds, and its selection tinted, in that color; while a selection lasts, its
   caret and flag stay (#1168), so that it is clear who marked what. A caret is sent as a
   position in the confirmed text at a version, and every window places it again among its own text, so it stays among the same words
-  while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
-  windows", or that edits are kept while the session can't be reached.
+  while text moves; nothing of it is stored. Beside the document's name, set apart from it in
+  regular italic where the name is bold, the title bar says which window this is, "Window 2", as
+  Word numbers the windows of one document (a tab with no number of its own says "In 2 windows"),
+  or that edits are kept while the session can't be reached.
 - **Track Changes is the document's.** Turning it on or off in one window turns it on or off in
   every window of the document, with the toggle and the "Track Changes on" notice in each. A window
   that joins takes the leader's setting. The window says it to the others as an event between
