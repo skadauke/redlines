@@ -95,6 +95,7 @@ import { markdownPreview } from './preview/decorations.ts';
 import { quartoCites } from './preview/quarto-cites.ts';
 import { quartoHeadingAttributes } from './preview/quarto-heading-attrs.ts';
 import { quartoRefs } from './preview/quarto-refs.ts';
+import { quartoTableCaptions } from './preview/quarto-table-caption.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
@@ -475,6 +476,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableWidths(),
     quartoRefs(),
     quartoHeadingAttributes(),
+    quartoTableCaptions(),
     quartoCites(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.imageData ? imageReader.of(options.imageData) : [],

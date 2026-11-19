@@ -36,7 +36,7 @@ export function headingAttributes(
   return { from, to: from + braces.length, inner: braces.slice(1, -1).trim() };
 }
 
-class ChipWidget extends WidgetType {
+export class ChipWidget extends WidgetType {
   readonly text: string;
 
   constructor(text: string) {

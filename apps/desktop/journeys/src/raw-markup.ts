@@ -131,22 +131,6 @@ export const KNOWN: readonly KnownCase[] = [
     why: 'a callout whose title holds an insertion shows its marker',
   },
   {
-    issue: 1170,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'attributes',
-    text: /\{#sec-/,
-    why: 'a heading’s {#sec-…} is drawn as part of the heading',
-  },
-  {
-    issue: 1212,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'attributes',
-    text: /\{#tbl-/,
-    why: 'a table’s caption line and its {#tbl-…} are drawn as source',
-  },
-  {
     issue: 1173,
     doc: 'Build 21.qmd',
     surfaces: ['redlines', 'clean', 'simple'],
