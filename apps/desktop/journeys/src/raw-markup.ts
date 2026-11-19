@@ -155,14 +155,6 @@ export const KNOWN: readonly KnownCase[] = [
     why: 'H~2~O shows as source',
   },
   {
-    issue: 1172,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'reference',
-    text: /@sec-intro/,
-    why: 'a reference to a section isn’t drawn as a link',
-  },
-  {
     issue: 1213,
     doc: 'divs.qmd',
     surfaces: ['redlines', 'clean', 'simple'],
