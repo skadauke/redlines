@@ -86,7 +86,7 @@ const spots = ViewPlugin.define(() => ({
 }));
 
 /** Why a project image isn't linked: the document has no folder to reach it from. */
-export const NO_LINK = 'The image can’t be linked from this document.';
+export const NO_LINK = 'This document has no folder to link the image from.';
 
 /** What stands for the links in the probe that asks whether the document takes them. */
 const PROBE = imageLink('image.png');
