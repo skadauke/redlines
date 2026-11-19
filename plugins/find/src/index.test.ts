@@ -5,6 +5,7 @@ import { acceptAll, applyChanges, newestView, originalView, rejectAll } from '@r
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFind, plugin } from './index.ts';
 import { setFind } from './search.ts';
+import { isWidenedNotice } from '@redlines/editor';
 
 /** Rejecting every change gives the original text, accepting every change the newest. */
 function expectEveryOrder(written: string, original: string): void {
@@ -29,7 +30,9 @@ function mount(doc: string, options: Partial<EditorOptions> = {}): Mounted {
   const editor = createEditor(parent, {
     doc,
     author: { handle: 'ada', name: 'Ada Lovelace' },
-    onNotice: (message) => notices.push(message),
+    onNotice: (message) => {
+      if (!isWidenedNotice(message)) notices.push(message);
+    },
     ...options,
   });
   const result = { editor, notices, remove: createFind(editor) };

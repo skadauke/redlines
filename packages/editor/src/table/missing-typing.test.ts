@@ -13,6 +13,7 @@ import { createEditor, type Editor, redo, undo } from '../index.ts';
 import { cellsOfRect, rectOf, rectSelection, selectRect, whole } from './cells.ts';
 import { missingCaret } from './missing.ts';
 import { tablesOf } from './model.ts';
+import { isWidenedNotice } from '../tracked/intent.ts';
 
 interface Row {
   name: string;
@@ -179,7 +180,9 @@ function load(doc: string, caret: number, tracking = false): Editor {
     doc,
     author: ada,
     tracking,
-    onNotice: (message) => notices.push(message),
+    onNotice: (message) => {
+      if (!isWidenedNotice(message)) notices.push(message);
+    },
   });
   Object.assign(editor, { notices });
   open.push(editor);
