@@ -5,7 +5,7 @@
 // Duplicate ids and handles, which two sides can draw alike, are renamed (format §2.3, §7.3).
 
 import { applyChanges } from './changes.ts';
-import { idsIn, newId } from './ids.ts';
+import { newId } from './ids.ts';
 import { emptyLedgerMap } from './ledger-map.ts';
 import type { LedgerMap } from './ledger-map.ts';
 import { scan } from './scan.ts';
@@ -439,7 +439,3 @@ export function renameMarkId(body: string, from: string, to: string): string {
   }
   return applyChanges(body, changes);
 }
-
-/** Every id a body uses, for `LedgerMergeOptions.taken`. */
-export const idsOfBodies = (...bodies: string[]): Set<string> =>
-  new Set(bodies.flatMap((body) => [...idsIn(body)]));

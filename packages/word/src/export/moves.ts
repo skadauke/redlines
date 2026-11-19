@@ -5,7 +5,7 @@
 // ids are renamed, and each side is wrapped in its range, which carries the move's name.
 
 import type { MarkRange } from '@redlines/format';
-import { decodePayload, plainPayload } from '@redlines/format';
+import { plainPayload } from '@redlines/format';
 
 export interface MoveHalf {
   side: 'from' | 'to';
@@ -59,10 +59,6 @@ export interface MoveRevision extends MoveHalf {
   /** An id for the range that wraps the side. */
   rangeId: number;
 }
-
-/** The old text of a deletion, decoded: what moves with it. Exported for tests. */
-export const decoded = (payload: string) => decodePayload(payload);
-
 /** Renames the revisions that are halves of moves, and wraps each side in its range. */
 export function patchMoves(xml: string, revisions: MoveRevision[]): string {
   let out = xml;

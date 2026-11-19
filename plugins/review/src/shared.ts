@@ -28,7 +28,6 @@ import {
   type Range,
   type Segment,
   suggestions,
-  type TextChange,
   type Time,
   plainPayload,
 } from '@redlines/format';
@@ -189,11 +188,6 @@ export interface ChangeTexts {
 /** Whether a change is an inserted table row (format §3.7). */
 export const isRowInsertion = (change: MarkRange) =>
   change.kind === 'ins' && change.payload === 'row';
-
-/** What rows inserted together did, in the words of a card and a note: `Inserted 2 rows`. */
-export const insertedRows = (count: number) =>
-  count === 1 ? 'Inserted row' : `Inserted ${count} rows`;
-
 /** Whether a change is a deleted table row (format §3.7). */
 export const isRowDeletion = (change: MarkRange) =>
   change.kind === 'del' && /^row=/.test(change.payload ?? '');
@@ -372,15 +366,6 @@ export function editContext(author: Author, dialect?: MarkdownDialect): EditCont
     ...(dialect === undefined ? {} : { dialect }),
   };
 }
-
-/**
- * Applies a ledger edit made by @redlines/format, such as a reply. It isn't typing, so Track
- * Changes leaves it alone, and Undo takes it back.
- */
-export function applyEdit(view: EditorView, changes: TextChange[], userEvent: string): void {
-  if (changes.length) view.dispatch({ changes, userEvent });
-}
-
 /**
  * A review action by `author`, now: a comment, a highlight, a reply, a resolve or a reopen. Written
  * by the format and applied as one step, with what was asked recorded beside it. Returns the id of

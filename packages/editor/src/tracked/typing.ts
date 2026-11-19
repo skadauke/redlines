@@ -188,23 +188,6 @@ export function contextFor(state: EditorState): EditContext {
     dialect: state.facet(dialectFacet),
   };
 }
-
-/**
- * A block change (`FormatOp`) of `range`, as the format writes it: tracked with Track Changes on,
- * written directly with it off, as the Paragraph menu's commands do. The changes are final,
- * markers and all, for a transaction marked `trackedEditAnnotation`.
- *
- * @throws EditError when the format refuses it.
- */
-export function blockFormatChanges(
-  state: EditorState,
-  range: Range,
-  op: FormatOp,
-  widening = false,
-): TextChange[] {
-  return blockFormat(state, range, op, widening).changes;
-}
-
 /** `blockFormatChanges`, with the intent that wrote them, for the transaction that makes them. */
 export function blockFormat(
   state: EditorState,
@@ -1040,18 +1023,6 @@ export function authoredWrite(
     : untrackEdits(state, text, parsed, made, false);
   return { changes: done.changes, intent: done.intent! };
 }
-
-/** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
- * question to the person answered Make Edit asks for (`ask.ts`). */
-export function untrackedChanges(
-  state: EditorState,
-  text: string,
-  parsed: Parsed,
-  edits: readonly TextChange[],
-): ChangeSet {
-  return untrackedWrite(state, text, parsed, edits).changes;
-}
-
 /** `untrackedChanges`, with the typing intent that wrote them. */
 export function untrackedWrite(
   state: EditorState,

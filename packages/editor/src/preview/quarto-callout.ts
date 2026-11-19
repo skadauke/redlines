@@ -255,8 +255,3 @@ const field = StateField.define<DecorationSet>({
 export function quartoCallouts(): Extension {
   return [turned, field];
 }
-
-/** The decorations that the callouts hold, for tests. */
-export function quartoCalloutField(): StateField<DecorationSet> {
-  return field;
-}
