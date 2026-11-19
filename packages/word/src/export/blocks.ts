@@ -65,6 +65,8 @@ export interface Leaf {
   list: ListContext | null;
   /** How many block quotes it is in. */
   quote: number;
+  /** Of a code line: which code block it is a line of, so that two blocks side by side are two. */
+  codeBlock?: number;
 }
 
 export interface TableCell {
@@ -210,6 +212,7 @@ export function markdownBlocks(text: string): Block[] {
   let quote = 0;
   let newItem = false;
   let inCode = false;
+  let codeBlocks = 0;
   let breakFollows = false;
 
   const fmt = (): Fmt => ({
@@ -301,9 +304,11 @@ export function markdownBlocks(text: string): Block[] {
         case 'codeFenced':
         case 'codeIndented':
           inCode = true;
+          codeBlocks++;
           break;
         case 'codeFlowValue': {
           const line = startLeaf('code', token);
+          line.codeBlock = codeBlocks;
           line.atoms.push({
             kind: 'text',
             text: slice(),
