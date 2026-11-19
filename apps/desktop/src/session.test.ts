@@ -350,9 +350,9 @@ describe('what the windows are called', () => {
     expect(ordinalOf('doc-12')).toBe(13);
   });
 
-  it('gives each window a name and a color that every window shows it in, through a handover', async () => {
+  it('gives each window a name that every window shows it by, through a handover', async () => {
     const app = new FakeApp();
-    const peers: Record<string, { name: string; color?: string }[]> = {};
+    const peers: Record<string, { name: string }[]> = {};
     const named = async (label: string, doc: string) => {
       const editor = editorFor(doc);
       const session = await joinSession(app.ports(label), editor, {
@@ -360,7 +360,7 @@ describe('what the windows are called', () => {
         person: { handle: 'ada', name: 'Ada' },
         save: () => Promise.resolve(editor.view.state.doc.toString()),
         onPeers: (list) => {
-          peers[label] = list.map(({ name, color }) => ({ name, color }));
+          peers[label] = list.map((peer) => ({ name: peer.name }));
         },
         saveDelayMs: 20,
       });
@@ -374,22 +374,15 @@ describe('what the windows are called', () => {
     for (const w of [one, two, three]) w.editor.view.dispatch({ selection: { anchor: 2 } });
     await wait(250);
     expect(peers['doc-1']).toEqual(
-      expect.arrayContaining([
-        { name: 'Ada (window 3)', color: 'p3' },
-        { name: 'Ada (window 4)', color: 'p4' },
-      ]),
+      expect.arrayContaining([{ name: 'Ada (window 3)' }, { name: 'Ada (window 4)' }]),
     );
     // The leader closes; the next one hosts. Window 3 is still window 3, in the same color.
     await one.session.stop();
     await wait(400);
     for (const w of [two, three]) w.editor.view.dispatch({ selection: { anchor: 3 } });
     await wait(250);
-    expect(peers['doc-2']).toEqual(
-      expect.arrayContaining([{ name: 'Ada (window 4)', color: 'p4' }]),
-    );
-    expect(peers['doc-3']).toEqual(
-      expect.arrayContaining([{ name: 'Ada (window 3)', color: 'p3' }]),
-    );
+    expect(peers['doc-2']).toEqual(expect.arrayContaining([{ name: 'Ada (window 4)' }]));
+    expect(peers['doc-3']).toEqual(expect.arrayContaining([{ name: 'Ada (window 3)' }]));
   });
 });
 
