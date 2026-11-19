@@ -14,12 +14,13 @@ let zooms: TextZoom[] = [];
  * scroller starts 52 px down, under a bar above it; with `floating` it reaches the top of the
  * window, and the bar's 52 px floating over it are a scroll margin: the same arrangement.
  */
-function setup(size = 1, floating = false) {
+function setup(size = 1, floating = false, width = 800) {
   const scroller = document.createElement('div');
   document.body.append(scroller);
   const box = floating ? { top: 0, height: 772 } : { top: 52, height: 720 };
   scroller.getBoundingClientRect = () => new DOMRect(0, box.top, 800, box.height);
   Object.defineProperty(scroller, 'clientHeight', { value: box.height });
+  Object.defineProperty(scroller, 'clientWidth', { value: width, configurable: true });
   const edits = vi.fn();
   const view = new EditorView({
     state: EditorState.create({
@@ -113,6 +114,77 @@ describe('followTextZoom', () => {
     expect(holdRail).toHaveBeenLastCalledWith(false);
     expect(say).toHaveBeenCalledTimes(1);
     expect(say).toHaveBeenCalledWith('Text size 137%');
+  });
+
+  describe('the notes and margins in a pinch (#1157)', () => {
+    const noteScale = (root: HTMLElement) => root.style.getPropertyValue('--rl-note-scale');
+
+    it('keeps them at the size they had where the window has no room for them to grow', () => {
+      const { root } = setup(1.5);
+      expect(noteScale(root)).toBe('');
+      send('gesturestart');
+      // The rail is held beside the column: if its space grew with the text, the column, and a
+      // picture as wide as it, would shrink as the text grew.
+      expect(noteScale(root)).toBe('1.5');
+      send('gesturechange', 1.2);
+      send('gesturechange', 1.6);
+      expect(root.style.getPropertyValue(SCALE)).toBe('2.4');
+      expect(noteScale(root)).toBe('1.5');
+      send('gestureend');
+      expect(noteScale(root)).toBe('');
+    });
+
+    it('lets them grow with the text where the window has room, and holds them from the frame it has not', () => {
+      const { root } = setup(1, false, 1200);
+      send('gesturestart');
+      expect(noteScale(root)).toBe('');
+      send('gesturechange', 1.1);
+      expect(noteScale(root)).toBe('');
+      // 120% would take the column's width: the notes stay as they were at 110%.
+      send('gesturechange', 1.2);
+      expect(noteScale(root)).toBe('1.1');
+      send('gesturechange', 1.6);
+      expect(noteScale(root)).toBe('1.1');
+      send('gestureend');
+      expect(noteScale(root)).toBe('');
+    });
+
+    it('never holds them in a window wide enough for every size', () => {
+      const { root } = setup(1, false, 4000);
+      send('gesturestart');
+      send('gesturechange', 2);
+      send('gesturechange', 3.5);
+      expect(noteScale(root)).toBe('');
+      send('gestureend');
+    });
+
+    it('takes the size once for a pinch, whatever the number of gesturestarts', () => {
+      const { root } = setup(1.5);
+      send('gesturestart');
+      send('gesturechange', 1.3);
+      expect(noteScale(root)).toBe('1.5');
+      send('gesturestart');
+      expect(noteScale(root)).toBe('1.5');
+      send('gesturechange', 1.1);
+      expect(noteScale(root)).toBe('1.5');
+      send('gestureend');
+      expect(noteScale(root)).toBe('');
+    });
+
+    it('holds them at 100% when a pinch starts below it', () => {
+      const { root } = setup(0.9);
+      send('gesturestart');
+      expect(noteScale(root)).toBe('1');
+      send('gestureend');
+    });
+
+    it('puts them back when the follower is stopped with the fingers down', () => {
+      const { root, zoom } = setup(1.5);
+      send('gesturestart');
+      expect(noteScale(root)).toBe('1.5');
+      zoom.stop();
+      expect(noteScale(root)).toBe('');
+    });
   });
 
   it('lets the rail go when the window loses the focus with the fingers down', () => {

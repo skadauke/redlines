@@ -1690,6 +1690,14 @@ doesn't know the markers, and the item would be tight in the file and loose in t
 As one split the blank line is a line of the file as it is, and rejecting the split takes the blank
 line and the item away with it, the item above tight again.
 
+The same holds at the top level for a `-` item (#443): Return or Shift-Return at the start of the
+first item of a `- ` list right under a line of text, with Track Changes on, is one split of the
+same form (`Fruit:<!--split k3x9-->\n\n- \n- apples`). Written as two changes, the blank line
+and the new item, an order of decisions that keeps the item and rejects the blank line would put
+an empty `-` right under the text, which Markdown reads as the text's underline. A bullet of `+`
+or `*`, and a number, read as text there, and keep the two changes. Backspace right after the key
+takes it back whole.
+
 **Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
 other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
 prefix of the next line) by a paragraph break, as Return on either side of it does, is written
