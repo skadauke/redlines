@@ -423,12 +423,16 @@ export const baseThemeSpec: ThemeSpec = {
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
   },
-  '.rl-callout-fold:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
-  '.rl-callout-fold:focus': { outline: 'none' },
-  '.rl-callout-fold:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
-  '.rl-callout-menu:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
-  '.rl-callout-menu:focus': { outline: 'none' },
-  '.rl-callout-menu:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
+  '.rl-callout-fold:hover, .rl-callout-fold:focus-visible': {
+    color: 'var(--rl-ink)',
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+  },
+  '.rl-callout-fold:focus, .rl-callout-fold:focus-visible': { outline: 'none' },
+  '.rl-callout-menu:hover, .rl-callout-menu:focus-visible': {
+    color: 'var(--rl-ink)',
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+  },
+  '.rl-callout-menu:focus, .rl-callout-menu:focus-visible': { outline: 'none' },
   '.rl-callout-pending, .rl-callout-pending .rl-callout-icon': { color: 'var(--rl-color)' },
 
   // Images: no frame. One on a line of its own is centered, at most as wide as the text column;

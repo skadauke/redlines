@@ -90,12 +90,14 @@ export const findTheme = EditorView.baseTheme({
     cursor: 'default',
   },
   '.rl-find-toggle-wholeWord': { textDecoration: 'underline', textUnderlineOffset: '3px' },
-  '.rl-find-toggle:hover': { backgroundColor: 'var(--rl-pressed)' },
+  '.rl-find-toggle:hover, .rl-find-toggle:focus-visible': {
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+    outline: 'none',
+  },
   '.rl-find-toggle[aria-pressed="true"]': {
     backgroundColor: 'color-mix(in srgb, var(--rl-ink) 18%, transparent)',
     color: 'var(--rl-ink)',
   },
-  '.rl-find-toggle:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
   '.rl-find-pen': {
     flex: 'none',
     display: 'flex',
@@ -131,13 +133,11 @@ export const findTheme = EditorView.baseTheme({
   '.rl-find-icon': { width: 'var(--rl-ctl-h, 26px)', padding: '0' },
   '.rl-find-disclosure': { width: '24px' },
   '.rl-find-text': { padding: '0 10px', color: 'var(--rl-ink)' },
-  '.rl-find-icon:enabled:hover, .rl-find-text:enabled:hover': {
-    backgroundColor: 'var(--rl-pressed)',
-  },
-  '.rl-find-icon:focus-visible, .rl-find-text:focus-visible': {
-    outline: '2px solid var(--rl-ink-3)',
-    outlineOffset: '-2px',
-  },
+  '.rl-find-icon:enabled:hover, .rl-find-text:enabled:hover, .rl-find-icon:focus-visible, .rl-find-text:focus-visible':
+    {
+      backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+      outline: 'none',
+    },
   '.rl-find-icon:disabled, .rl-find-text:disabled': { color: 'var(--rl-ink-3)' },
   // Why something was left alone: one line, below the rows.
   '.rl-find-error': {

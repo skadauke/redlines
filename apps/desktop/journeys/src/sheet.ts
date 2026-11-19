@@ -127,6 +127,8 @@ const eyeWithKeys = async (j: Journey) => {
   await j.page.getByRole('button', { name: 'View', exact: true }).focus();
   await j.page.keyboard.press('ArrowDown');
   await j.page.locator('.rl-menu-item').filter({ visible: true }).first().waitFor();
+  // One that isn't the current view (that one is the menu's "selected" row, which is drawn apart).
+  await j.page.locator('.rl-menu-item').filter({ visible: true }).nth(2).focus();
 };
 
 /** The palette, from a right-click on the paragraph, with its Format menu open. */
@@ -322,12 +324,12 @@ export const SPECIMENS: readonly Specimen[] = [
       rest,
       hover: async (j) => {
         await rest(j);
-        await pointAt(j, j.page.locator('.rl-titlebar-end .rl-icon-button').nth(1));
+        await pointAt(j, j.page.locator('.rl-titlebar-end .rl-icon-button').nth(0));
       },
       keys: async (j) => {
         await rest(j);
         await j.page.keyboard.press('Shift');
-        await j.page.locator('.rl-titlebar-end .rl-icon-button').nth(1).focus();
+        await j.page.locator('.rl-titlebar-end .rl-icon-button').nth(0).focus();
       },
     },
   },
@@ -519,30 +521,6 @@ export const KNOWN: readonly KnownDisagreement[] = [
     family: 'cards',
     props: ['borderTopLeftRadius', 'boxShadow'],
     why: 'a margin note has an 8 px radius and no shadow, the palette’s menu 10 px, a notification and the other menus 12 px',
-  },
-  {
-    issue: 1247,
-    family: 'hover',
-    props: ['backgroundColor'],
-    why: 'rows take 55% of the pressed gray, buttons the full gray, the action the rule gray, and the title bar’s buttons none',
-  },
-  {
-    issue: 1191,
-    family: 'keys-like-hover',
-    props: ['backgroundColor'],
-    why: 'a key-chosen menu row is the full pressed gray, unlike its hover (the palette; the same shape in the other rows)',
-  },
-  {
-    issue: 1247,
-    family: 'keys-like-hover',
-    props: ['outlineStyle'],
-    why: 'buttons show a ring when chosen with the keys and no fill, unlike their hover',
-  },
-  {
-    issue: 1247,
-    family: 'focus-ring',
-    props: ['outlineStyle', 'outlineWidth', 'outlineColor'],
-    why: 'rows show a fill and no ring when chosen with the keys, buttons a 2 px ring',
   },
 ];
 
