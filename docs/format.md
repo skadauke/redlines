@@ -1185,7 +1185,7 @@ at the outer edge of a whole inline construct. A marker never goes:
    a digit or punctuation and an emoji shortcode; or inside `{{< >}}`, a cross-reference or a citation in the text (`@fig-x`, `@sec-x`, `@smith2020`), a
    citation bracket (`[@a; @b]`, `[-@a]`), the brackets and attributes of a span (`[x]{.mark}`: a marker never stands between them) or `(\#fig:x)`. Four of these are pandoc's alone and
    are held in a file of the pandoc dialect only (§9.1): `^x^`, `~x~`, the `:::` line, and the
-   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. Text typed in front of a word that makes a key with it (`@fig-x` before `42`) takes the rest of the key into the tracked change, so that no marker stands in the key; with Track Changes off, where that can't be done, the edit says so (#1074). A decision that would bring a letter or a digit in front of the marker that starts such a key (a deletion rejected, a replacement's old text given back) is made with that insertion, so that in no order of decisions does a marker stand before a key with a word against it (#1088). GitHub shows a
+   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. Text typed in front of a word that makes a key with it (`@fig-x` before `42`) takes the rest of the key into the tracked change, so that no marker stands in the key; with Track Changes off, where that can't be done, the person is asked whether to accept the other person's change first (§3.4, an alert comes before a refusal) and the text is typed after it, and where nothing can ask (an agent, the command line) the edit says so, in words that name the ways round (#1074, #1204). A decision that would bring a letter or a digit in front of the marker that starts such a key (a deletion rejected, a replacement's old text given back) is made with that insertion, so that in no order of decisions does a marker stand before a key with a word against it (#1088). GitHub shows a
    shortcode as its emoji only at the start of a text or after white space, and as written after
    anything else: a letter or a digit (`a:tent:`), punctuation (`(:tent:`, `.:tent:`) or another
    shortcode. Redlines draws the same (#388), and a marker never changes which: between that
@@ -1689,6 +1689,22 @@ would be an insertion whose closer stands on it, a line that is no blank line to
 doesn't know the markers, and the item would be tight in the file and loose in the newest view.
 As one split the blank line is a line of the file as it is, and rejecting the split takes the blank
 line and the item away with it, the item above tight again.
+
+The same holds at the top level for a `-` item (#443): Return or Shift-Return at the start of the
+first item of a `- ` list right under a line of text, with Track Changes on, is one split of the
+same form (`Fruit:<!--split k3x9-->\n\n- \n- apples`). Written as two changes, the blank line
+and the new item, an order of decisions that keeps the item and rejects the blank line would put
+an empty `-` right under the text, which Markdown reads as the text's underline. A bullet of `+`
+or `*`, and a number, read as text there, and keep the two changes. Backspace right after the key
+takes it back whole.
+
+**Tab under the empty item a Return just left (#1202).** Where the author's own Return made an empty
+item whose split's break holds a blank line before the next item, Tab on that next item would put
+it under an empty item that Markdown ends at the blank line: the file would read it as no child,
+the newest view as one. The blank line is part of the author's own pending break, so the Tab takes
+it with it and the item stands directly under the empty one (`+ <!--split k3x9-->\n  + alpha`). If
+the split is not the author's own, or the line above is no empty item, the key still says why it
+does nothing.
 
 **Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
 other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
@@ -4531,8 +4547,11 @@ A file changes only when its content does.
   of it is a deletion, and text typed next to it stands outside it). A div typed with Track Changes
   on, from its opening fence to the end of the typed text, is one insertion with no `split`
   marker inside; its closer stands alone on the line after the closing fence, as after a code
-  fence (§3.3). This holds at the top level of the file; in a quote or a list item the typed
-  fence lines keep the old form (not built).
+  fence (§3.3). This holds at the top level of the file and in a quote (also one in a list item or in
+  another quote), the closer standing alone on the line after the closing fence behind the quote's
+  prefix (`> :::` then `> <!--/k3x9-->`), as in a fenced code block (#1234). In a list item the typed
+  fence lines keep the old form (not built): the closer alone on a line is an HTML block after the
+  div's text, and in a tight item that renders a line break that the newest view does not have.
 - knitr runs code it finds inside HTML comments, in payloads and in the ledger alike, so both
   escape every backtick (§2.5). This was verified with knitr 1.51.
 - No Redlines comment starts with `#`, which Jupytext's cell markers and Quarto's editing comments

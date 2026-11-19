@@ -710,7 +710,7 @@ function assertNoSplitKey(text: string, changes: readonly TextChange[], typed: s
   for (const key of before) now.splice(now.indexOf(key), now.includes(key) ? 1 : 0);
   if (now.length > 0) {
     throw new EditError(
-      "Text can't be typed here with Track Changes off: it would end a reference or a citation inside its key, where pandoc reads it as two. Turn on Track Changes, or type it away from the change next to it.",
+      "Text can't be typed here with Track Changes off: it would end a reference or a citation inside its key, where pandoc reads it as two. Accept or reject the change next to it first, turn on Track Changes, or type it away from the change.",
       'no-legal-placement',
     );
   }

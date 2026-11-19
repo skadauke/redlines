@@ -66,6 +66,7 @@ interface Hook {
       contentDOM: HTMLElement;
       viewport: { from: number; to: number };
       coordsAtPos(pos: number): { left: number; right: number; top: number; bottom: number } | null;
+      domAtPos(pos: number): { node: Node; offset: number };
       focus(): void;
       requestMeasure(): void;
       dispatch(spec: unknown): void;
@@ -78,6 +79,7 @@ interface Hook {
   };
   controller: { createWith(text: string): Promise<void> };
   openFile(path: string, text: string): Promise<void>;
+  dockToolbar(docked: boolean): void;
   menuRow(text: string): { enabled: boolean; run(): boolean } | null;
   parsedAtViewport(): boolean;
 }
@@ -334,6 +336,12 @@ export class Journey {
     }, text);
     await this.settle();
     return ran;
+  }
+
+  /** Docks the toolbar at the bottom center of the window, as the preference does, or takes it down. */
+  async dockToolbar(docked = true): Promise<void> {
+    await this.page.evaluate((on) => window.__redlines!.dockToolbar(on), docked);
+    await this.settle();
   }
 
   /** Waits for the page to draw what it has: two frames, and the editor's measuring. */

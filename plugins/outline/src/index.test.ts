@@ -14,7 +14,7 @@ describe('the outline plugin', () => {
       author: { handle: 'ada', name: 'Ada Lovelace' },
     });
     const declared = plugin.manifest.contributes?.commands?.map(({ id }) => id);
-    expect(declared).toEqual(['outline.focus']);
+    expect(declared).toEqual(['outline.focus', 'outline.toggle']);
     const remove = plugin.activate({
       editor,
       host: {},

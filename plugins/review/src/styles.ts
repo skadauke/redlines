@@ -54,7 +54,8 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     width: '100%',
     padding: `${notePx(6)} ${notePx(10)} ${notePx(9)}`,
     border: '1px solid var(--rl-rule)',
-    borderRadius: notePx(8),
+    // The theme's card radius, as what floats has it, with the note's scale.
+    borderRadius: 'calc(var(--rl-radius-card) * var(--rl-note-scale, 1))',
     // Room around a new comment's note, scrolled into view as it opens.
     scrollMargin: notePx(12),
     transition: 'border-color 120ms ease',
@@ -310,7 +311,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
 
   // A change's card, floating over the page above or below the change's lines. It replaces the
   // look of the tooltip that holds it.
-  '&light .cm-tooltip.cm-tooltip-hover:has(> .rl-card), &dark .cm-tooltip.cm-tooltip-hover:has(> .rl-card)':
+  '&light .cm-tooltip.cm-tooltip-hover:has(> .rl-card), &dark .cm-tooltip.cm-tooltip-hover:has(> .rl-card), &light .cm-tooltip.cm-tooltip-hover:has(> .rl-bubble-card), &dark .cm-tooltip.cm-tooltip-hover:has(> .rl-bubble-card)':
     { border: 'none', backgroundColor: 'transparent' },
   '.rl-card': {
     boxSizing: 'border-box',
@@ -318,7 +319,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     maxWidth: `min(${notePx(360)}, ${WINDOW})`,
     padding: `${notePx(6)} ${notePx(6)} ${notePx(9)} ${notePx(12)}`,
     border: '1px solid var(--rl-rule)',
-    borderRadius: notePx(10),
+    borderRadius: 'calc(var(--rl-radius-card) * var(--rl-note-scale, 1))',
     backgroundColor: 'var(--rl-card)',
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
