@@ -5,6 +5,7 @@
 import { forceParsing } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
+import { setViewModeEffect } from '../tracked/field.ts';
 import { calloutsOf, divsOf } from './divs.ts';
 import { quartoCalloutDecorations } from './quarto-callout.ts';
 
@@ -158,4 +159,44 @@ describe('a callout in the preview', () => {
     const editor = editorAt('::: {.columns}\nx\n:::\n\n::: {.callout-note}\nunclosed\n', 0);
     expect(classes(editor).size).toBe(0);
   });
+});
+
+describe('a tracked change in the title of a callout (#1169)', () => {
+  const TRACKED = [
+    '# Intro',
+    '',
+    '::: {.callout-tip}',
+    '## A <!--ins zjh9-->useful <!--/zjh9-->tip',
+    '',
+    'A tip says something that helps.',
+    ':::',
+    '',
+    '<!-- redlines',
+    'version: 1',
+    'people:',
+    '  bo: {name: Bo}',
+    'marks:',
+    '  zjh9: {by: bo, at: 2026-11-18T02:59Z}',
+    '-->',
+    '',
+  ].join('\n');
+
+  const titleOf = (editor: Editor) => {
+    const name = editor.view.contentDOM.querySelector('.rl-callout-name');
+    return {
+      text: name?.textContent ?? null,
+      inserted: name?.querySelector('.rl-ins, .rl-ins-plain'),
+    };
+  };
+
+  for (const mode of ['redlines', 'simple', 'clean'] as const) {
+    it(`draws the title without the mark's text in ${mode}`, () => {
+      const editor = editorAt(TRACKED, 0);
+      editor.view.dispatch({ effects: setViewModeEffect.of(mode), selection: { anchor: 0 } });
+      const { text, inserted } = titleOf(editor);
+      expect(text).toBe('A useful tip');
+      if (mode === 'clean') expect(inserted).toBeNull();
+      else expect(inserted?.textContent).toBe('useful ');
+    });
+  }
 });
