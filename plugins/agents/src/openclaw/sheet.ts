@@ -28,9 +28,15 @@ import {
   type MacSetup,
   type MacTimes,
 } from './mac-setup.ts';
-import { tailscaleView, type TailscaleStatus } from './tailscale.ts';
+import {
+  httpsCheck,
+  tailscaleView,
+  type TailscalePeer,
+  type TailscaleStatus,
+} from './tailscale.ts';
 
-export type Step = 'start' | 'mac' | 'computer' | 'prompt' | 'approve' | 'test';
+export type Step =
+  'looking' | 'gateways' | 'start' | 'mac' | 'computer' | 'prompt' | 'approve' | 'test';
 
 /** What the sheet asks of the app. Every call may reject, with a sentence to show. */
 export interface SheetDeps {
@@ -43,6 +49,8 @@ export interface SheetDeps {
   tailscale: {
     status(): Promise<TailscaleStatus>;
     openApp(): Promise<void>;
+    /** Opens the admin page where HTTPS certificates are turned on. */
+    openHttpsSettings(): Promise<void>;
     /**
      * Starts installing Tailscale (the package from Tailscale, checked for its signature and
      * Apple's notarization, installed with the system's own administrator prompt; the App Store
@@ -96,6 +104,13 @@ export interface SheetOptions {
   alive(): boolean;
   /** The sheet is finished or was cancelled. */
   onClose(): void;
+  /**
+   * Opens on a look around, not on the choice: Tailscale and the other computers are checked, each
+   * one that is on is asked whether it answers as an OpenClaw Gateway (the probe sends nothing),
+   * and when some do, the sheet opens straight on them, each with Connect. Otherwise it opens on
+   * the choice as it always did.
+   */
+  discover?: boolean;
   /** A connection was made or removed: the list is drawn again. */
   onChanged(): void;
   /** For screenshots and tests: the screen to open at, and what it knows. */
@@ -213,7 +228,9 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
   root.append(body);
 
   const begin = options.start;
-  let step: Step = begin?.step ?? 'start';
+  let step: Step = begin?.step ?? (options.discover ? 'looking' : 'start');
+  /** The computers that answered as a Gateway when the sheet looked around, by their address. */
+  let gateways: { peer: TailscalePeer; probe: GatewayProbe & { kind: 'found' } }[] = [];
   let where: Where = begin?.where ?? 'other';
   let tailscale: TailscaleStatus | null = begin?.tailscale ?? null;
   let setup: MacSetup = { ...NEW_MAC_SETUP, ...begin?.macSetup };
@@ -373,6 +390,105 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
       case 'reconnect':
         return void reconnect();
     }
+  }
+
+  // ---- Look around, and the Gateways found
+
+  /** The computers worth asking: on now, and not a phone or a TV, a few of them. */
+  const askable = (peers: readonly TailscalePeer[]) =>
+    peers
+      .filter((peer) => peer.online && !['iOS', 'android', 'tvOS'].includes(peer.os))
+      .slice(0, 8);
+
+  /**
+   * Asks each computer that is on whether it answers as an OpenClaw Gateway, at its Tailscale
+   * address (Tailscale Serve gives a Gateway one, on port 443). The probe opens the WebSocket,
+   * reads the greeting and closes: nothing secret is sent or needed.
+   */
+  async function askAround(peers: readonly TailscalePeer[]): Promise<void> {
+    const results = await Promise.all(
+      askable(peers).map(async (peer) => ({
+        peer,
+        probe: await deps.probe(peer.dns_name, null).catch((): null => null),
+      })),
+    );
+    gateways = results.flatMap(({ peer, probe: found }) =>
+      found?.kind === 'found' ? [{ peer, probe: found }] : [],
+    );
+  }
+
+  /** The first look, when the sheet opens: all must pass at once for it to open on the Gateways. */
+  async function lookAround(): Promise<void> {
+    const status = await deps.tailscale.status().catch((): null => null);
+    if (!live() || step !== 'looking') return;
+    if (status) {
+      tailscale = status;
+      checkedAt = Date.now();
+      if (status.state === 'ready' && !status.blocked) await askAround(status.peers);
+    }
+    // The person went on by hand while it looked: that is where they are.
+    if (!live() || step !== 'looking') return;
+    step = gateways.length > 0 ? 'gateways' : 'start';
+    draw();
+  }
+
+  function drawLooking(): HTMLElement[] {
+    return [
+      el('h1', undefined, 'Looking for your OpenClaw…'),
+      el(
+        'p',
+        'rl-oc-sub',
+        'Checking Tailscale on this Mac and asking your other computers that are on whether OpenClaw answers there. Nothing is sent to them.',
+      ),
+      foot(
+        'This takes a few seconds.',
+        button('Set up by hand', () => go('start')),
+      ),
+    ];
+  }
+
+  /** Connect: the setup goes on from the computer, as if it had been picked and found. */
+  function connectTo(found: (typeof gateways)[number]): void {
+    where = 'other';
+    picked = found.peer.dns_name;
+    typed = '';
+    probe = found.probe;
+    url = found.probe.url;
+    computer = shortName(found.probe.host);
+    go('prompt');
+  }
+
+  function drawGateways(): HTMLElement[] {
+    const nodes: HTMLElement[] = [
+      el('h1', undefined, gateways.length === 1 ? 'Found your OpenClaw' : 'Found your OpenClaws'),
+      el(
+        'p',
+        'rl-oc-sub',
+        'Tailscale is on, and these computers answer as an OpenClaw Gateway over it. Redlines only said hello; nothing was sent to them.',
+      ),
+    ];
+    const list = el('div', 'rl-oc-list');
+    for (const found of gateways) {
+      list.append(
+        row({
+          dot: 'on',
+          title: found.peer.name,
+          detail: [found.peer.dns_name, found.peer.os].filter(Boolean).join(' · '),
+          action: button('Connect', () => connectTo(found), {
+            primary: true,
+            ariaLabel: `Connect to ${found.peer.name}`,
+          }),
+        }),
+      );
+    }
+    nodes.push(list);
+    nodes.push(
+      foot(
+        link('Set up another computer', () => go('start')),
+        button('Cancel', close),
+      ),
+    );
+    return nodes;
   }
 
   // ---- Start
@@ -582,6 +698,30 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         }),
       );
     }
+    const https = httpsCheck(tailscale);
+    if (https) {
+      nodes.push(
+        row({
+          mark: https.mark,
+          title: https.title,
+          ...(https.detail ? { detail: https.detail } : {}),
+        }),
+      );
+      if (https.mark === 'no') {
+        nodes.push(
+          el(
+            'div',
+            'rl-oc-note',
+            'Turn on HTTPS Certificates in Tailscale’s admin page, under DNS. Redlines notices by itself.',
+          ),
+        );
+        nodes.push(
+          button('Open the DNS page', () => {
+            void deps.tailscale.openHttpsSettings().catch(() => {});
+          }),
+        );
+      }
+    }
     const plan = macPlan(tailscale, setup, Date.now(), times);
     const planned =
       plan.waiting !== null ||
@@ -686,7 +826,9 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
           peer.dns_name,
           peer.os,
           peer.online
-            ? 'on now'
+            ? gateways.some((found) => found.peer.dns_name === peer.dns_name)
+              ? 'on now · OpenClaw found'
+              : 'on now'
             : peer.last_seen
               ? `last seen ${peer.last_seen.slice(0, 10)}`
               : 'off',
@@ -764,6 +906,21 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
         status.append(note);
       } else if (view.failure) {
         status.append(card(view.failure, view.detail));
+        // Serve gives a Gateway its https:// address, and needs the network's certificates.
+        if (view.failure === 'no-gateway' && tailscale?.https === false) {
+          status.append(
+            el(
+              'div',
+              'rl-oc-note',
+              'HTTPS certificates are off for your Tailscale network, and Tailscale Serve needs them. Turn them on in the admin page, under DNS, then check again.',
+            ),
+          );
+          status.append(
+            button('Open the DNS page', () => {
+              void deps.tailscale.openHttpsSettings().catch(() => {});
+            }),
+          );
+        }
       } else {
         status.append(el('div', 'rl-oc-note', `${view.title} ${view.line}`));
       }
@@ -1238,6 +1395,12 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
       : null;
     let content: HTMLElement[];
     switch (step) {
+      case 'looking':
+        content = drawLooking();
+        break;
+      case 'gateways':
+        content = drawGateways();
+        break;
       case 'start':
         content = drawStart();
         break;
@@ -1276,6 +1439,7 @@ export function openSheet(deps: SheetDeps, options: SheetOptions): Sheet {
   function enter(): void {
     if (lastEntered === step) return;
     lastEntered = step;
+    if (step === 'looking') void lookAround();
     if (step === 'mac') pollTailscale();
     if (step === 'computer' && tailscale === null) checkTailscale();
     if (step === 'approve') pollNode();

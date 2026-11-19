@@ -53,6 +53,7 @@ async function appDeps(): Promise<SheetDeps> {
     tailscale: {
       status: tailscale.status,
       openApp: tailscale.openApp,
+      openHttpsSettings: tailscale.openHttpsSettings,
       install: tailscale.install,
       installState: tailscale.installState,
       openAppStore: tailscale.openAppStore,
@@ -90,6 +91,8 @@ async function run(): Promise<void> {
     onClose: closeWindow,
     // The Agents pane of Preferences looks at the connections by itself.
     onChanged: () => {},
+    // In the app, it looks around first: if everything passes, it opens on the Gateways it found.
+    ...(screen === null && (isTauri || query.get('discover') === '1') ? { discover: true } : {}),
     ...(screen !== null && STEPS.includes(screen)
       ? {
           start: {

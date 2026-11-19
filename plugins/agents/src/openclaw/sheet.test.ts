@@ -27,6 +27,7 @@ const READY: TailscaleStatus = {
   blocked: false,
   health: [],
   allow_in: 'System Settings › General › Login Items & Extensions › Network Extensions',
+  https: true,
 };
 
 const CODE = 'setup-code-1234567890';
@@ -76,6 +77,10 @@ function world(): World {
       status: () => Promise.resolve(w.tailscale.current),
       openApp: () => {
         w.opened.push('app');
+        return Promise.resolve();
+      },
+      openHttpsSettings: () => {
+        w.opened.push('https-page');
         return Promise.resolve();
       },
       install: () => {
@@ -223,6 +228,124 @@ describe('the setup sheet', () => {
     expect(w.opened).toEqual([]);
     click(root, 'Open Tailscale');
     expect(w.opened).toEqual(['app']);
+  });
+
+  describe('looking around when it opens, and the Gateways found', () => {
+    const mini = peer('studio-mini', true);
+    const phone = { ...peer('pixel', true), os: 'android' };
+    const asleep = peer('old-laptop', false);
+    const asked: string[] = [];
+    const onlyMini = (w: World) => {
+      asked.length = 0;
+      w.deps.probe = (address) => {
+        asked.push(address);
+        return Promise.resolve(
+          address.startsWith('studio-mini')
+            ? { kind: 'found', url: 'wss://studio-mini.yak-bebop.ts.net', host: address }
+            : { kind: 'no-gateway', url: `wss://${address}`, host: address, detail: 'refused' },
+        );
+      };
+    };
+
+    it('opens on the Gateways it found when everything passes, and Connect goes on to the agent', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, peers: [mini, phone, asleep, peer('home-server', true)] };
+      onlyMini(w);
+      const root = open(w, { discover: true });
+      expect(step(root)).toBe('looking');
+      expect(text(root)).toContain('Looking for your OpenClaw');
+      await tick(60);
+      expect(step(root)).toBe('gateways');
+      expect(text(root)).toContain('Found your OpenClaw');
+      expect(text(root)).toContain('studio-mini');
+      expect(text(root)).not.toContain('home-server');
+      // Only computers that are on, and not a phone, are asked, at their Tailscale names.
+      expect(asked.sort()).toEqual([
+        'home-server.yak-bebop.ts.net',
+        'studio-mini.yak-bebop.ts.net',
+      ]);
+      click(root, 'Connect');
+      await tick();
+      expect(step(root)).toBe('prompt');
+      expect(text(root)).toContain('studio-mini');
+      expect(w.connected).toEqual([]);
+    });
+
+    it('opens on the choice when no Gateway answers, Tailscale is not ready, or the network blocks it', async () => {
+      const none = world();
+      none.tailscale.current = { ...READY, peers: [mini] };
+      none.deps.probe = () =>
+        Promise.resolve({ kind: 'no-gateway', url: 'wss://x', host: 'x', detail: 'refused' });
+      let root = open(none, { discover: true });
+      await tick(60);
+      expect(step(root)).toBe('start');
+      sheet?.dispose();
+
+      const off = world();
+      off.tailscale.current = { ...READY, state: 'off', peers: [] };
+      onlyMini(off);
+      root = open(off, { discover: true });
+      await tick(60);
+      expect(step(root)).toBe('start');
+      expect(asked).toEqual([]);
+      sheet?.dispose();
+
+      const blocked = world();
+      blocked.tailscale.current = { ...READY, blocked: true, peers: [mini] };
+      onlyMini(blocked);
+      root = open(blocked, { discover: true });
+      await tick(60);
+      expect(step(root)).toBe('start');
+      expect(asked).toEqual([]);
+    });
+
+    it('lets the person set up by hand while it looks', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, peers: [mini] };
+      onlyMini(w);
+      const root = open(w, { discover: true });
+      click(root, 'Set up by hand');
+      expect(step(root)).toBe('start');
+      await tick(60);
+      expect(step(root)).toBe('start');
+    });
+
+    it('does not look unless asked to: a plain sheet opens on the choice', () => {
+      expect(step(open(world()))).toBe('start');
+    });
+
+    it('says when HTTPS certificates are off, and opens the admin page that turns them on', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, https: false };
+      const root = open(w, { start: { step: 'mac' } });
+      await tick();
+      expect(text(root)).toContain('HTTPS certificates are off for your network');
+      expect(text(root)).toContain('Tailscale Serve needs them');
+      // It does not stop the person.
+      const next = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Continue');
+      expect(next?.disabled).toBe(false);
+      click(root, 'Open the DNS page');
+      expect(w.opened).toEqual(['https-page']);
+      w.tailscale.current = READY;
+      await tick(60);
+      expect(text(root)).toContain('HTTPS certificates are on for your network');
+    });
+
+    it('where no Gateway answers and certificates are off, says Serve needs them, beside the prompt', async () => {
+      const w = world();
+      w.tailscale.current = { ...READY, https: false, peers: [mini] };
+      w.probe.current = { kind: 'no-gateway', url: 'wss://x', host: 'x', detail: 'refused' };
+      const root = open(w, {
+        start: { step: 'computer', tailscale: { ...READY, https: false, peers: [mini] } },
+      });
+      click(root, /studio-mini/);
+      await tick();
+      expect(root.querySelector('[data-failure="no-gateway"]')).not.toBeNull();
+      expect(text(root)).toContain('Tailscale Serve needs them');
+      expect(text(root)).toContain('Copy a prompt for your agent');
+      click(root, 'Open the DNS page');
+      expect(w.opened).toEqual(['https-page']);
+    });
   });
 
   describe('Tailscale on this Mac, done by the setup when the person asks', () => {

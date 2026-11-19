@@ -567,6 +567,7 @@ pub fn run() {
             agents::openclaw_this_mac,
             agents::openclaw_use_token,
             agents::tailscale::tailscale_open_app,
+            agents::tailscale::tailscale_open_https_settings,
             agents::tailscale::tailscale_status,
             agents::tailscale_setup::tailscale_install,
             agents::tailscale_setup::tailscale_install_state,

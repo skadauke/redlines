@@ -20,6 +20,7 @@ const base: TailscaleStatus = {
   peers: [peer('mini', 'macOS', true), peer('old', 'windows', false), peer('srv', 'linux', true)],
   blocked: false,
   health: [],
+  https: true,
   allow_in: 'System Settings',
 };
 const of = (change: Partial<TailscaleStatus>) => tailscaleView({ ...base, ...change });

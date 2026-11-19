@@ -21,6 +21,7 @@ import { invoke } from '@tauri-apps/api/core';
 export const tailscale = {
   status: () => invoke<TailscaleStatus>('tailscale_status'),
   openApp: () => invoke<void>('tailscale_open_app'),
+  openHttpsSettings: () => invoke<void>('tailscale_open_https_settings'),
   install: () => invoke<void>('tailscale_install'),
   installState: () => invoke<InstallState>('tailscale_install_state'),
   openAppStore: () => invoke<void>('tailscale_open_app_store'),

@@ -7,7 +7,8 @@
 //
 //   oc     start | mac | computer | prompt | approve | test | failures (every failure card), or
 //          card, on preferences.html: the agent's card in Preferences › Agents
-//   ts     missing | off | signed-out | no-peers | blocked | ready (the default)
+//   ts     missing | off | signed-out | no-peers | blocked | no-https | ready (the default)
+//   discover=1  with no `oc`: look around first, as the app does (then `probe=` says what answers)
 //   mac    what the setup has done about Tailscale, for the waits: installing | app-store |
 //          install-failed | waiting | allow | signing-in | hung | still-hung
 //   probe  found (default) | silent | none
@@ -49,6 +50,7 @@ function tailscaleFor(kind: string): TailscaleStatus {
     ],
     blocked: false,
     health: [],
+    https: true,
     allow_in: 'System Settings › General › Login Items & Extensions › Network Extensions',
   };
   switch (kind) {
@@ -74,6 +76,8 @@ function tailscaleFor(kind: string): TailscaleStatus {
       };
     case 'no-peers':
       return { ...ready, state: 'no-peers', peers: [] };
+    case 'no-https':
+      return { ...ready, https: false };
     case 'blocked':
       return {
         ...ready,
@@ -183,6 +187,7 @@ export function devGuided(query: URLSearchParams): GuidedDeps & SheetDeps {
           ...(query.get('mac') === 'hung' ? { auth_url: null } : {}),
         }),
       openApp: () => Promise.resolve(),
+      openHttpsSettings: () => Promise.resolve(),
       install: () => Promise.resolve(),
       installState: () =>
         Promise.resolve(macSetupFor(query).install ?? { phase: 'idle', step: '' }),

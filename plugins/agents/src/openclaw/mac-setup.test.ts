@@ -12,6 +12,7 @@ const base: TailscaleStatus = {
   peers: [],
   blocked: false,
   health: [],
+  https: true,
   allow_in: 'System Settings › General › Login Items & Extensions › Network Extensions',
 };
 const NOW = 1_000_000;

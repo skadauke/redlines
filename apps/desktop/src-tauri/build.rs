@@ -116,6 +116,7 @@ const COMMANDS: &[&str] = &[
     "tailscale_install",
     "tailscale_install_state",
     "tailscale_open_app",
+    "tailscale_open_https_settings",
     "tailscale_open_app_store",
     "tailscale_restart_app",
     "tailscale_sign_in",

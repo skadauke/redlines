@@ -17,6 +17,8 @@ export interface TailscaleStatus {
   health: string[];
   /** Where in System Settings macOS asks to allow Tailscale's network extension. */
   allow_in: string;
+  /** Whether HTTPS certificates are on for the network, which Tailscale Serve needs; null: not said. */
+  https: boolean | null;
 }
 
 export interface TailscalePeer {
@@ -30,7 +32,7 @@ export interface TailscalePeer {
 
 /** One of the three rows: done, waiting for the one above it, or the one that needs something. */
 export interface Check {
-  id: 'installed' | 'signed-in' | 'sees-others';
+  id: 'installed' | 'signed-in' | 'sees-others' | 'https';
   title: string;
   /** The line under the title, when there is one. */
   detail?: string;
@@ -51,6 +53,25 @@ export interface TailscaleView {
   action: TailscaleAction | null;
   /** Whether Continue is open. */
   ready: boolean;
+}
+
+/**
+ * The check of the network's HTTPS certificates, which Tailscale Serve needs to give a Gateway its
+ * `https://` address: for a Mac that is signed in, and nothing for one that isn't or when Tailscale
+ * doesn't say. It never stops the person (the Gateway may be reached another way).
+ */
+export function httpsCheck(status: TailscaleStatus): Check | null {
+  if ((status.state !== 'ready' && status.state !== 'no-peers') || status.https === null) {
+    return null;
+  }
+  return status.https
+    ? { id: 'https', title: 'HTTPS certificates are on for your network', mark: 'ok' }
+    : {
+        id: 'https',
+        title: 'HTTPS certificates are off for your network',
+        detail: 'Tailscale Serve needs them to give your agent’s Gateway an https:// address.',
+        mark: 'no',
+      };
 }
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);

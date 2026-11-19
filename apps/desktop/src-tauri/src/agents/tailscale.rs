@@ -27,6 +27,9 @@ const PLACES: &[&str] = &[
     "/opt/homebrew/bin/tailscale",
 ];
 
+/// The admin console's DNS page, where HTTPS certificates are switched on.
+const HTTPS_PAGE: &str = "https://login.tailscale.com/admin/dns";
+
 /// The app, for `open`. It is fixed: no page text reaches it.
 const APP: &str = "/Applications/Tailscale.app";
 
@@ -88,6 +91,10 @@ pub struct Status {
     pub health: Vec<String>,
     /// Where in System Settings macOS asks to allow Tailscale's network extension (this Mac's).
     pub allow_in: String,
+    /// Whether HTTPS certificates are turned on for the network (`CertDomains` in `status --json`
+    /// holds the names they would be for): Tailscale Serve, which gives a Gateway its `https://`
+    /// address, needs them. `None` when Tailscale doesn't say (an older one, or not signed in).
+    pub https: Option<bool>,
 }
 
 impl Status {
@@ -103,6 +110,7 @@ impl Status {
             blocked: false,
             health: Vec::new(),
             allow_in: String::new(),
+            https: None,
         }
     }
 }
@@ -195,6 +203,18 @@ pub(super) fn is_tailscale_address(url: &str) -> bool {
         .is_some_and(|host| host == "tailscale.com" || host.ends_with(".tailscale.com"))
 }
 
+/// Whether the network has HTTPS certificates, from `CertDomains`: a list of names when it does,
+/// and `null` or empty when it doesn't (Go writes a missing list as `null`). A status with no such
+/// field says nothing.
+fn https_of(json: &str) -> Option<bool> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    match value.get("CertDomains")? {
+        serde_json::Value::Array(names) => Some(!names.is_empty()),
+        serde_json::Value::Null => Some(false),
+        _ => None,
+    }
+}
+
 /// Reads what `status --json` printed. `None` when it isn't Tailscale's JSON.
 pub fn parse_status(json: &str, program: Option<String>) -> Option<Status> {
     let raw: Raw = serde_json::from_str(json).ok()?;
@@ -265,6 +285,7 @@ pub fn parse_status(json: &str, program: Option<String>) -> Option<Status> {
         blocked,
         health,
         allow_in: String::new(),
+        https: https_of(json),
     })
 }
 
@@ -421,6 +442,21 @@ pub fn tailscale_status() -> Status {
     status
 }
 
+/// Opens the page of Tailscale's admin console where HTTPS certificates are turned on (DNS). The
+/// address is fixed: no page text reaches it.
+#[tauri::command(async)]
+pub fn tailscale_open_https_settings() -> Result<(), String> {
+    let status = Command::new("open")
+        .arg(HTTPS_PAGE)
+        .status()
+        .map_err(|error| format!("Couldn’t open the page: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Couldn’t open the page. Go to login.tailscale.com/admin/dns.".to_string())
+    }
+}
+
 /// Opens Tailscale's app, so that it can start, or the person can turn it on.
 #[tauri::command(async)]
 pub fn tailscale_open_app() -> Result<(), String> {
@@ -483,6 +519,22 @@ mod tests {
             Some("2026-10-25T10:00:00Z")
         );
         assert!(!found.blocked);
+    }
+
+    #[test]
+    fn https_certificates_are_on_when_the_network_has_names_for_them_and_off_when_it_has_none() {
+        let with = |field: &str| {
+            status(&format!(
+                r#"{{"BackendState":"Running","Self":{{"DNSName":"a.t.ts.net."}}{field}}}"#
+            ))
+            .https
+        };
+        assert_eq!(with(r#","CertDomains":["a.t.ts.net"]"#), Some(true));
+        assert_eq!(with(r#","CertDomains":[]"#), Some(false));
+        // Go writes a list that was never made as null.
+        assert_eq!(with(r#","CertDomains":null"#), Some(false));
+        // A Tailscale that says nothing about it says nothing.
+        assert_eq!(with(""), None);
     }
 
     #[test]
