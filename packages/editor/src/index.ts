@@ -58,6 +58,7 @@ import { tabItems } from './blocks/tab-items.ts';
 import { tableMarkers } from './table/markers.ts';
 import { imageFetcherFacet, images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
+export { dropProjectImage, leaveProjectImage, overProjectImage } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { blankRun, openBlock, openBlocks, takeBackChanges, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -92,13 +93,17 @@ import {
 import { FileView } from './tracked/file-view.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { math, mathFacet } from './preview/math.ts';
 import { citationsFacet, quartoCites } from './preview/quarto-cites.ts';
+import { quartoHeadingAttributes } from './preview/quarto-heading-attrs.ts';
 import { quartoRefs } from './preview/quarto-refs.ts';
+import { quartoTableCaptions } from './preview/quarto-table-caption.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
 import { tableMouse } from './table/mouse.ts';
+import { longSelection } from './long-selection.ts';
 import { tableReach } from './table/reach.ts';
 import { tableWidths } from './table/widths.ts';
 import { tableGhosts } from './table/ghosts.ts';
@@ -470,16 +475,21 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // After the stops, whose guard it runs ahead of.
     tableFill(),
     tableMouse(),
+    longSelection,
     tableReach(),
     tableWidths(),
     quartoRefs(),
+    quartoHeadingAttributes(),
+    quartoTableCaptions(),
     quartoCites(),
+    math(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     options.includes ? includeFacet.of(options.includes) : [],
     options.citations ? citationsFacet.of(options.citations) : [],
+    options.math ? mathFacet.of(options.math) : [],
     quartoIncludes(),
     imageSelection(),
     undoHistory(),

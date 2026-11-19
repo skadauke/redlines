@@ -304,8 +304,13 @@ describe.each([true, false])('every write, Track Changes %s', (tracking) => {
     // A few places in each line, and the images, whose commands need one selected.
     const places: [number, number][] = [];
     let at = 0;
-    for (const line of DOC.split('\n')) {
-      places.push([at, 0], [at + Math.floor(line.length / 2), (at % 3) * 4]);
+    // Every line in the depth run (`REDLINES_FUZZ` set), every other line in the default one: an
+    // intent is missed by what a command does, not by which line the caret is on.
+    const everyLine = process.env['REDLINES_FUZZ'] ? 1 : 2;
+    for (const [i, line] of DOC.split('\n').entries()) {
+      if (i % everyLine === 0) {
+        places.push([at, 0], [at + Math.floor(line.length / 2), (at % 3) * 4]);
+      }
       at += line.length + 1;
     }
     for (const m of DOC.matchAll(/!\[alt\]\(pic.png\)|<img[^>]*>/g)) {

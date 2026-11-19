@@ -165,3 +165,20 @@ describe('citations in the Word export (#1171)', () => {
     expect(report.find((r) => r.kind === 'bibliography')?.message).toContain('refs.bib');
   });
 });
+
+describe('math in the Word export (#1173)', () => {
+  it('writes an inline formula as its TeX in code, with no dollars, and leaves money alone', () => {
+    const out = quartoToMarkdown(
+      '# T {#sec-t}\n\nMass $m$ and $E = mc^2$, costs $5 and $6, \\$x\\$ and `$c$`.\n',
+    );
+    expect(out).toContain('Mass `m` and `E = mc^2`, costs $5 and $6, \\$x\\$ and `$c$`.');
+  });
+
+  it('writes a display formula as a paragraph of its TeX, numbered', () => {
+    const out = quartoToMarkdown(
+      '# T {#sec-t}\n\n$$\n\\int_0^1 x\\,dx\n$$ {#eq-int}\n\nSee @eq-int.\n',
+    );
+    expect(out).toContain('\\int_0^1 x\\,dx    (1)');
+    expect(out).toContain('See Equation 1.');
+  });
+});

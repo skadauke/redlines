@@ -714,6 +714,33 @@ export function imagePress(
     null;
   return (event, view) => {
     if (event.button !== 0) return false;
+    // A second press that lands on a picture is the picture's, whatever the first press did: it
+    // opens a local one, and selects nothing, so that no word of its source is ever selected (#1196).
+    if (event.detail >= 2) {
+      const hit = event.target instanceof Element ? event.target : null;
+      const wrap = hit?.closest('.rl-image');
+      if (wrap && view.contentDOM.contains(wrap) && !hit?.closest('.rl-image-handle')) {
+        first = null;
+        let node: SyntaxNode | null = null;
+        try {
+          node = imageNodeAt(view.state, view.posAtDOM(wrap));
+        } catch {
+          // The widget is gone already.
+        }
+        if (!node) return false;
+        if (event.detail === 2) {
+          const path = localPathOf(view.state, node);
+          if (path !== null) {
+            try {
+              open(path);
+            } catch (error) {
+              console.warn('Could not open the image', error);
+            }
+          }
+        }
+        return true;
+      }
+    }
     if (event.detail === 2 && first) {
       const press = first;
       first = null;

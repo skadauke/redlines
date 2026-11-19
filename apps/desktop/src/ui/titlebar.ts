@@ -1,5 +1,5 @@
 // The title bar (design §5.1): part of the page, with the file name centered and four icons and
-// no labels. Files, next to the window buttons, explains itself on hover; the wrench shows and
+// no labels. Files, next to the window buttons, explains itself on hover; the outline button shows and
 // hides the toolbar (#685); View and Review open their menus on hover, and a click on either does
 // what it does most often: the View button, a page that shows the view, switches between Clean and
 // Redlines, the pen turns Track Changes on and off. Each says what a click will
@@ -34,8 +34,8 @@ export interface TitleBarState {
   hasRedlines: boolean;
   sidebarOpen: boolean;
   showResolved: boolean;
-  /** Whether the toolbar shows, by any means: the wrench is pressed while it does. */
-  toolbarShown: boolean;
+  /** Whether the outline shows as a window: its button is pressed while it does. */
+  outlineShown: boolean;
 }
 
 export interface TitleBarActions {
@@ -44,8 +44,8 @@ export interface TitleBarActions {
    * none: the hints and the menus show the person's own keys (#551). Without it the fixed keys below.
    */
   keyOf?(id: string): string | null;
-  /** Shows the toolbar at the bottom of the window, or puts it away (the wrench). */
-  toggleToolbar(): void;
+  /** Shows the outline as a window under its button, or puts it away. */
+  toggleOutline(): void;
   /** Shows a view of the View menu: Redlines in the look shown last (`Editor.showView`). */
   setView(view: MenuView): void;
   /** Turns Redlines' simple look on or off, as a click on a change bar does (`Editor.switchLook`). */
@@ -110,8 +110,6 @@ export const VIEW_ARIA_KEYS: Record<MenuView, string> = {
   redlines: 'Alt+Meta+2',
   raw: 'Alt+Meta+3',
 };
-export const TOOLBAR_KEY = '⇧⌘P';
-export const TOOLBAR_ARIA_KEY = 'Shift+Meta+P';
 export const TRACKING_KEY = '⇧⌘E';
 export const TRACKING_ARIA_KEY = 'Shift+Meta+E';
 export const FILES_KEY = '⌃⌘S';
@@ -123,7 +121,6 @@ const KEY_ROWS = {
   raw: 'View/Raw',
   tracking: 'Review/Track Changes',
   files: 'View/Show Files',
-  toolbar: 'command:toolbar.show',
 } as const;
 
 /**
@@ -182,7 +179,7 @@ export function createTitleBar(
     hasRedlines: false,
     sidebarOpen: false,
     showResolved: false,
-    toolbarShown: false,
+    outlineShown: false,
   };
 
   const bar = element('header', 'rl-titlebar');
@@ -313,24 +310,24 @@ export function createTitleBar(
     input.setSelectionRange(0, dot > 0 ? dot : state.name.length);
   };
 
-  // The toolbar's wrench: a click shows it or puts it away, and the button is pressed while it shows.
-  const toolbarControl = element('div', 'rl-control');
-  const toolbarButton = iconButton('Toolbar', icon('wrench', 18));
-  toolbarButton.classList.add('rl-wrench-button');
-  // The toolbar's own press handling leaves it to the click (plugins/toolbar).
-  toolbarButton.dataset['toolbarControl'] = '';
-  toolbarButton.setAttribute('aria-keyshortcuts', TOOLBAR_ARIA_KEY);
-  toolbarControl.append(toolbarButton);
-  const toolbarTip = createTip(toolbarControl, toolbarButton, 'rl-wrench-tip', {
+  // The outline: a click shows it as a window under the button, or puts it away, and the button is
+  // pressed while it shows. It is reached at every text size, where the margin has no room for it.
+  const outlineControl = element('div', 'rl-control');
+  const outlineButton = iconButton('Outline', icon('outline', 18));
+  outlineButton.classList.add('rl-outline-button');
+  // The outline's own press handling leaves it to the click (plugins/outline).
+  outlineButton.dataset['outlineControl'] = '';
+  outlineControl.append(outlineButton);
+  const outlineTip = createTip(outlineControl, outlineButton, 'rl-outline-tip', {
     end: true,
     beforeShow: () => hideTips(),
   });
-  // The press leaves the document's caret and selection where they were: the toolbar acts on them.
-  toolbarButton.addEventListener('mousedown', (event) => event.preventDefault());
-  toolbarButton.addEventListener('click', (event) => {
-    actions.toggleToolbar();
+  // The press leaves the document's caret and selection where they were.
+  outlineButton.addEventListener('mousedown', (event) => event.preventDefault());
+  outlineButton.addEventListener('click', (event) => {
+    actions.toggleOutline();
     // The pointer is still there: what the next click will do is said once it has rested.
-    if (event.detail > 0) toolbarTip.arm();
+    if (event.detail > 0) outlineTip.arm();
   });
 
   // View and Review.
@@ -355,8 +352,8 @@ export function createTitleBar(
     beforeShow: () => hideTips(),
   });
   reviewButton.setAttribute('aria-keyshortcuts', TRACKING_ARIA_KEY);
-  end.append(toolbarControl, viewControl, reviewControl);
-  const tips = [filesTip, toolbarTip, viewTip, reviewTip];
+  end.append(outlineControl, viewControl, reviewControl);
+  const tips = [filesTip, outlineTip, viewTip, reviewTip];
   const hideTips = () => {
     for (const tip of tips) tip.hide();
   };
@@ -516,11 +513,7 @@ export function createTitleBar(
     const toView = viewAfterClick(next.view);
     viewTip.set(`Show ${VIEW_NAMES[toView]}`, keyShown(toView, VIEW_KEYS[toView]));
     setAria(viewButton, keyAria(toView, VIEW_ARIA_KEYS[toView]));
-    toolbarTip.set(
-      next.toolbarShown ? 'Hide Toolbar' : 'Show Toolbar',
-      keyShown('toolbar', TOOLBAR_KEY),
-    );
-    setAria(toolbarButton, keyAria('toolbar', TOOLBAR_ARIA_KEY));
+    outlineTip.set(next.outlineShown ? 'Hide Outline' : 'Show Outline', '');
     reviewTip.set(
       next.tracking ? 'Turn off Track Changes' : 'Turn on Track Changes',
       keyShown('tracking', TRACKING_KEY),
@@ -550,7 +543,7 @@ export function createTitleBar(
       shownIcon = shownNow;
       viewButton.replaceChildren(icon(VIEW_ICONS[shownNow], 18));
     }
-    toolbarButton.setAttribute('aria-pressed', String(next.toolbarShown));
+    outlineButton.setAttribute('aria-pressed', String(next.outlineShown));
     reviewButton.setAttribute('aria-pressed', String(next.tracking));
 
     if (penTracking !== next.tracking) {
