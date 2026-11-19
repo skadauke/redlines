@@ -56,6 +56,7 @@ export async function fillPrintPage(html: string, doc: Document = document): Pro
   const container = printContainer(doc);
   container.innerHTML = html;
   fitTableColumns(container);
+  splitLongCode(container);
   keepHeadingsWithNext(container);
   // A release only empties the page it filled: an older print's hold may let go later, under a
   // newer page that is being written to a PDF.
@@ -103,17 +104,40 @@ export function fitTableColumns(root: ParentNode): void {
   }
 }
 
+/** A code block of more lines than this is split across pages; a shorter one is kept whole. */
+export const SHORT_CODE_LINES = 30;
+
+const codeLines = (pre: Element) => (pre.textContent ?? '').replace(/\n$/, '').split('\n').length;
+
+/**
+ * Marks the code blocks that are too long to keep whole (`rl-long`, print.css): a long one is split
+ * at a line, as Word splits it, with its box drawn on each page, where a short one never splits.
+ */
+export function splitLongCode(root: ParentNode): void {
+  for (const pre of Array.from(root.querySelectorAll('pre'))) {
+    if (codeLines(pre) > SHORT_CODE_LINES) pre.classList.add('rl-long');
+  }
+}
+
 /**
  * Keeps each heading with the start of what follows it, which WebKit's own `break-after: avoid`
  * does not (a heading is left alone at the foot of a page). The heading and the next block go in a
  * box that is not split; a table gives its head and first row, and the rest follows as a table of
- * its own, since a whole long table in the box would move to the next page and leave a gap.
+ * its own, since a whole long table in the box would move to the next page and leave a gap. A
+ * heading before another heading goes in the box of that one, so that a chain of them is kept
+ * together with what follows the last. A picture and a short code block go in whole.
  */
 export function keepHeadingsWithNext(root: ParentNode): void {
-  for (const heading of Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'))) {
+  // From the last heading to the first, so that a heading finds the box of the one after it.
+  for (const heading of Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6')).reverse()) {
     const next = heading.nextElementSibling;
-    // Only a paragraph or a table: a long list or code block in the box would leave a gap.
-    if (!next || !/^(?:P|TABLE)$/.test(next.tagName)) continue;
+    // Only what is short: a long list or code block in the box would leave a gap.
+    const whole =
+      !!next &&
+      (next.classList.contains('rl-keep') ||
+        /^(?:P|IMG|FIGURE)$/.test(next.tagName) ||
+        (next.tagName === 'PRE' && !next.classList.contains('rl-long')));
+    if (!next || (!whole && next.tagName !== 'TABLE')) continue;
     const wrap = heading.ownerDocument.createElement('div');
     wrap.className = 'rl-keep';
     heading.before(wrap);

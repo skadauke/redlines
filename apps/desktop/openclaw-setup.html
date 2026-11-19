@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Connect OpenClaw</title>
+  </head>
+  <body>
+    <!-- The setup of an OpenClaw agent, in a window of its own (src-tauri/src/lib.rs,
+         open_openclaw_setup): a title bar beside the window buttons, dragged by anything in it, and
+         under it the setup's steps in a column that scrolls and grows with the window
+         (openclaw-setup/main.ts). -->
+    <header class="rl-ocw-bar" data-tauri-drag-region>
+      <h1 class="rl-ocw-title" data-tauri-drag-region>Connect OpenClaw</h1>
+    </header>
+    <main class="rl-ocw-scroll" id="setup"></main>
+    <script type="module" src="/src/openclaw-setup/main.ts"></script>
+  </body>
+</html>

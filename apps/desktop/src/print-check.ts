@@ -79,5 +79,82 @@ async function check(editor: Editor): Promise<void> {
     !markers &&
     rules.length > 0 &&
     pdf;
-  console.warn(`PRINT-CHECK done ${ok ? 1 : 0} passed, ${ok ? 0 : 1} failed`);
+  const breaks = await checkBreaks(editor);
+  const passed = ok && breaks;
+  console.warn(`PRINT-CHECK done ${passed ? 1 : 0} passed, ${passed ? 0 : 1} failed`);
+}
+
+/** A tiny picture, which a print can hold without a file. */
+const PICTURE =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/**
+ * The page's margin and its breaks (#1184): the rule that gives every page an inch, headings in a
+ * box with what follows (a paragraph, a short code block, a picture, a table's first row, and the
+ * heading after them), a short code block and a picture that do not split, and a long code block
+ * that does. WebKit's pagination can't be run here, so this reads what the page asks of it: the
+ * rules in the sheets and the structure that `fillPrintPage` made.
+ */
+async function checkBreaks(editor: Editor): Promise<boolean> {
+  const code = (n: number) => Array.from({ length: n }, (_, i) => `line ${i}`).join('\n');
+  const doc = [
+    '# Title',
+    '',
+    '## A heading before a paragraph',
+    '',
+    'Text.',
+    '',
+    '## A heading before a short block',
+    '',
+    '```',
+    code(10),
+    '```',
+    '',
+    '## A heading before a picture',
+    '',
+    `![A pixel](${PICTURE})`,
+    '',
+    '## A heading before a table',
+    '',
+    '| a | b |',
+    '| - | - |',
+    '| 1 | 2 |',
+    '| 3 | 4 |',
+    '',
+    '## A long block',
+    '',
+    '```',
+    code(80),
+    '```',
+    '',
+  ].join('\n');
+  editor.reloadDoc(doc);
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+  const release = await fillPrintPage(editorDocumentHtml(editor.view));
+  const page = printContainer();
+  const rules = Array.from(document.styleSheets).flatMap((sheet) => Array.from(sheet.cssRules));
+  const pageRule = rules.find((rule): rule is CSSPageRule => rule instanceof CSSPageRule);
+  const headings = Array.from(page.querySelectorAll('h2'));
+  const kept = headings.filter((heading) => heading.parentElement?.classList.contains('rl-keep'));
+  const pres = Array.from(page.querySelectorAll('pre'));
+  const result = {
+    margin: pageRule?.style.margin ?? null,
+    headings: headings.length,
+    headingsKept: kept.length,
+    shortBlocksWhole: pres.filter((pre) => !pre.classList.contains('rl-long')).length,
+    longBlocksSplit: pres.filter((pre) => pre.classList.contains('rl-long')).length,
+    // A heading is never the last thing in its box: something follows it.
+    keptAlone: kept.filter((heading) => !heading.nextElementSibling).length,
+  };
+  console.warn(`PRINT-CHECK breaks ${JSON.stringify(result)}`);
+  release();
+  // Of the five headings, the one before the long block is the only one not boxed.
+  return (
+    /^1in$|^72pt$|^96px$/.test(result.margin ?? '') &&
+    result.headings === 5 &&
+    result.headingsKept === 4 &&
+    result.shortBlocksWhole === 1 &&
+    result.longBlocksSplit === 1 &&
+    result.keptAlone === 0
+  );
 }

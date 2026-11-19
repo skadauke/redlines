@@ -15,11 +15,16 @@ fn action_name(redo: bool) -> &'static str {
 }
 
 /// Whether the window `caller`, whose page owns the menu bar's items, may send Undo to the window
-/// that has the keys, `key`: its own, or Preferences', which has no menu bar of its own. Never
+/// that has the keys, `key`: its own, or Preferences' or the OpenClaw setup's, which have no menu bar
+/// of their own. Never
 /// another document's: a window that is new and has no menu yet leaves the last window's menu bar
 /// in place, and its Undo must not reach the key window's typing.
 fn may_undo(caller: &str, key: Option<&str>) -> bool {
-    key.is_some_and(|key| key == caller || key == crate::windows::PREFERENCES_WINDOW)
+    key.is_some_and(|key| {
+        key == caller
+            || key == crate::windows::PREFERENCES_WINDOW
+            || key == crate::windows::OPENCLAW_SETUP_WINDOW
+    })
 }
 
 /// The window that has the keys now, which is the one whose field the Mac's Edit items act on.
@@ -146,6 +151,7 @@ mod tests {
     fn undo_reaches_the_callers_own_window_and_preferences_only() {
         assert!(may_undo("doc-1", Some("doc-1")));
         assert!(may_undo("doc-1", Some("preferences")));
+        assert!(may_undo("doc-1", Some("openclaw-setup")));
         assert!(!may_undo("doc-1", Some("doc-2")));
         assert!(!may_undo("doc-1", None));
         assert!(!may_undo("doc-1", Some("install")));

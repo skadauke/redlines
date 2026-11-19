@@ -23,6 +23,23 @@ export const STYLE = `
   display: none;
 }
 
+/* Shown from the title bar's button: a window over the page, under the button, at any text size.
+   Placed by the script (top, right); it takes the pointer where the margin's nav takes none. */
+.rl-outline[data-floating='true'] {
+  position: fixed;
+  z-index: 320;
+  width: 296px;
+  align-items: flex-start;
+  pointer-events: auto;
+}
+.rl-outline[data-floating='true'] .rl-outline-panel {
+  margin-left: 0;
+  max-height: inherit;
+  border: 1px solid var(--rl-rule);
+  border-radius: var(--rl-radius-card, 12px);
+  background: var(--rl-card, var(--rl-page, Canvas));
+}
+
 /* At rest: a column of short lines. Open: a card with the headings' text. */
 .rl-outline-panel {
   position: relative;
@@ -128,7 +145,8 @@ export const STYLE = `
   white-space: nowrap;
   cursor: pointer;
 }
-.rl-outline-item:hover {
+.rl-outline-item:hover,
+.rl-outline-item:focus-visible {
   background: var(--rl-tint);
   color: var(--rl-ink);
 }
@@ -137,8 +155,7 @@ export const STYLE = `
   font-weight: 700;
 }
 .rl-outline-item:focus-visible {
-  outline: 2px solid var(--rl-ink-3);
-  outline-offset: -2px;
+  outline: none;
 }
 
 /* The full text of a heading the card cuts off, beside it, after the title bar's delay. */

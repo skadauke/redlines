@@ -1,5 +1,5 @@
-// The toolbar (#504, #685): away until summoned, shown by the title bar's wrench at the bottom
-// center, by ⇧⌘P at the caret and by a right-click at the pointer.
+// The toolbar (#504, #685): away until summoned, shown by ⇧⌘P at the caret and by a right-click at
+// the pointer, or docked at the bottom center by the preference (`j.dockToolbar`).
 
 import { expect, test, type Journey } from '../src/journey.ts';
 import { isOpaque } from '../src/contrast.ts';
@@ -7,26 +7,23 @@ import { isOpaque } from '../src/contrast.ts';
 const DOC = 'The quick brown fox jumps over the lazy dog.\n\nA second paragraph of text.\n';
 
 const toolbar = (j: Journey) => j.page.locator('.rl-toolbar');
-const wrench = (j: Journey) => j.page.locator('.rl-wrench-button');
 
 test.describe('the toolbar @views', () => {
-  test('is away until it is summoned, and the wrench is left of the eye', async ({ start }) => {
+  test('is away until it is summoned, and the title bar has no button for it', async ({
+    start,
+  }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
     await expect(toolbar(j)).toBeHidden();
-    await expect(wrench(j)).toHaveAttribute('aria-pressed', 'false');
-    const [w, eye] = await Promise.all([
-      wrench(j).boundingBox(),
-      j.page.getByRole('button', { name: 'View', exact: true }).boundingBox(),
-    ]);
-    expect(w!.x + w!.width).toBeLessThanOrEqual(eye!.x);
+    await expect(j.page.locator('.rl-wrench-button')).toHaveCount(0);
     await j.shot('away');
   });
 
-  test('the wrench docks it at the bottom center, and again puts it away', async ({ start }) => {
+  test('docked (the preference), it is at the bottom center and stays while the person writes', async ({
+    start,
+  }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
-    await wrench(j).click();
+    await j.dockToolbar();
     await expect(toolbar(j)).toBeVisible();
-    await expect(wrench(j)).toHaveAttribute('aria-pressed', 'true');
     const box = (await toolbar(j).boundingBox())!;
     const { width, height } = j.page.viewportSize()!;
     expect(Math.abs(box.x + box.width / 2 - width / 2)).toBeLessThan(2);
@@ -38,22 +35,19 @@ test.describe('the toolbar @views', () => {
     await j.click('quick');
     await j.type('X');
     await expect(toolbar(j)).toBeVisible();
-    await wrench(j).click();
+    await j.dockToolbar(false);
     await expect(toolbar(j)).toBeHidden();
-    await expect(wrench(j)).toHaveAttribute('aria-pressed', 'false');
   });
 
-  test('⇧⌘P shows it at the caret, and the wrench follows', async ({ start }) => {
+  test('⇧⌘P shows it at the caret', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
     await j.caretAfter('brown');
     await j.press('Meta+Shift+P');
     await expect(toolbar(j)).toBeVisible();
-    await expect(wrench(j)).toHaveAttribute('aria-pressed', 'true');
     await expect(toolbar(j)).not.toHaveClass(/rl-toolbar-docked/);
     await j.shot('at-the-caret');
     await j.press('Escape');
     await expect(toolbar(j)).toBeHidden();
-    await expect(wrench(j)).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('a right-click shows it at the pointer, and typing puts it away', async ({ start }) => {
@@ -71,7 +65,7 @@ test.describe('the toolbar @views', () => {
   }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
     await j.caretAfter('brown');
-    await wrench(j).click();
+    await j.dockToolbar();
     const names = await toolbar(j).locator('.rl-toolbar-top').allTextContents();
     expect(names.map((name) => name.trim())).toEqual([
       'Ask',
@@ -110,7 +104,7 @@ test.describe('the toolbar @views', () => {
     await j.caretAfter('quick');
     await j.type(' very');
     await j.caretAfter('lazy');
-    await wrench(j).click();
+    await j.dockToolbar();
     await toolbar(j).locator('.rl-toolbar-top', { hasText: 'Review' }).click();
     const accept = toolbar(j).locator('[data-command="change.accept"]');
     await expect(accept).toHaveAttribute('aria-disabled', 'true');
@@ -129,7 +123,7 @@ test.describe('the toolbar @views', () => {
 
   test('fades while typing and returns when the pointer moves', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
-    await wrench(j).click();
+    await j.dockToolbar();
     await j.caretAfter('quick');
     await j.type('x');
     await expect(toolbar(j)).toHaveCSS('opacity', '0');
@@ -142,7 +136,7 @@ test.describe('the toolbar @views', () => {
   test('does not cover the last lines of the document', async ({ start }) => {
     const long = Array.from({ length: 60 }, (_, i) => `Paragraph number ${i + 1} of the text.`);
     const j = await start({ doc: `${long.join('\n\n')}\n`, tracking: false, view: 'clean' });
-    await wrench(j).click();
+    await j.dockToolbar();
     await j.page.keyboard.press('Meta+ArrowDown');
     await j.caretAtEnd();
     await j.page.evaluate(() => {
@@ -164,7 +158,7 @@ test.describe('the toolbar @views', () => {
     const table = '| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n';
     const j = await start({ doc: `Intro\n\n${table}\nAfter\n`, tracking: false, view: 'clean' });
     await j.caretAfter('Intro');
-    await wrench(j).click();
+    await j.dockToolbar();
     await expect(toolbar(j).locator('.rl-toolbar-top[data-menu="table"]')).toHaveCount(0);
     await j.caretAfter('3');
     const top = toolbar(j).locator('.rl-toolbar-top[data-menu="table"]');
@@ -229,7 +223,7 @@ test.describe('the toolbar @views', () => {
       );
     });
     await j.caretAfter('Before');
-    await wrench(j).click();
+    await j.dockToolbar();
     const top = toolbar(j).locator('.rl-toolbar-top[data-menu="image"]');
     await expect(top).toHaveCount(0);
     await j.page.locator('.rl-image img').click();

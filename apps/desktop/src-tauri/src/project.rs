@@ -1824,6 +1824,51 @@ mod tests {
     }
 
     #[test]
+    fn allows_the_files_beside_a_document_in_a_folder_that_is_no_repository() {
+        // A document in a folder of Downloads, with a space in the name of the folder above it, and
+        // an included file beside it (#1175): the folder is the project, and the file is shown.
+        let top = folder("include-beside");
+        make(
+            &top,
+            &[
+                "Test Drive/build-21/Build 21.qmd",
+                "Test Drive/build-21/_method.qmd",
+            ],
+        );
+        let project = top.join("Test Drive/build-21");
+        assert!(
+            shown_in(
+                std::slice::from_ref(&project),
+                &project.join("_method.qmd"),
+                true
+            )
+            .is_ok()
+        );
+        // Not a file beside the project's folder, nor a hidden one in it.
+        make(
+            &top,
+            &["Test Drive/other.qmd", "Test Drive/build-21/.hidden.qmd"],
+        );
+        assert!(
+            shown_in(
+                std::slice::from_ref(&project),
+                &top.join("Test Drive/other.qmd"),
+                true
+            )
+            .is_err()
+        );
+        assert!(
+            shown_in(
+                std::slice::from_ref(&project),
+                &project.join(".hidden.qmd"),
+                true
+            )
+            .is_err()
+        );
+        fs::remove_dir_all(&top).unwrap();
+    }
+
+    #[test]
     fn allow_document_refuses_a_path_outside_the_root() {
         let outside = folder("allow-outside");
         make(&outside, &["secret.md", "repo/.git/", "repo/docs/plan.md"]);
