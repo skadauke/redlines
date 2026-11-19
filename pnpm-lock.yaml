@@ -238,6 +238,8 @@ importers:
         specifier: workspace:*
         version: link:../plugin-api
 
+  packages/citations: {}
+
   packages/cli:
     dependencies:
       '@redlines/format':
@@ -304,6 +306,9 @@ importers:
       '@lezer/markdown':
         specifier: ^1.8.1
         version: 1.8.1
+      '@redlines/citations':
+        specifier: workspace:*
+        version: link:../citations
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
@@ -353,6 +358,9 @@ importers:
 
   packages/word:
     dependencies:
+      '@redlines/citations':
+        specifier: workspace:*
+        version: link:../citations
       '@redlines/format':
         specifier: workspace:*
         version: link:../format

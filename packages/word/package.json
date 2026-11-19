@@ -12,6 +12,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@redlines/citations": "workspace:*",
     "@redlines/format": "workspace:*",
     "docx": "9.15.1",
     "fflate": "0.8.3",

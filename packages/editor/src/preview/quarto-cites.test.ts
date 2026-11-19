@@ -101,3 +101,63 @@ describe('citations as chips', () => {
     expect(chips(editorAt(DOC, 0, 'gfm'))).toEqual([]);
   });
 });
+
+describe('citations from the bibliography (#1171)', () => {
+  const BIB = [
+    '@book{knuth1984, author = {Donald E. Knuth}, title = {The TeXbook}, year = {1984}}',
+    '@article{lamport1994, author = {Lamport, Leslie}, title = {LaTeX}, year = {1994}}',
+  ].join('\n');
+  const FRONT = '---\ntitle: T\nbibliography: refs.bib\n---\n\n';
+
+  function withHost(doc: string, files: Record<string, string>): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc,
+      author,
+      dialect: 'pandoc',
+      includes: { read: async (path) => files[path] ?? null, open: () => {} },
+    });
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    editor.view.dispatch({ selection: { anchor: 0 } });
+    open.push(editor);
+    return editor;
+  }
+
+  const settled = async (editor: Editor, want: (text: (string | null)[]) => boolean) => {
+    for (let i = 0; i < 100 && !want(chips(editor)); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+
+  it('prints a citation as author and year, with a page, and one that is part of the sentence', async () => {
+    const editor = withHost(
+      `${FRONT}As @knuth1984 shows [@lamport1994, p. 4; @knuth1984], and [-@knuth1984].\n`,
+      { 'refs.bib': BIB },
+    );
+    await settled(editor, (text) => text.includes('Knuth (1984)'));
+    expect(chips(editor)).toEqual(['Knuth (1984)', '(Lamport 1994, 4; Knuth 1984)', '(1984)']);
+    // The keys are the chip's title; the source shows under the caret.
+    expect(editor.view.dom.querySelector('.rl-cite')?.getAttribute('title')).toBe('knuth1984');
+  });
+
+  it('keeps the keys without a bibliography, for a key that is not in it, and without a host', async () => {
+    const none = withHost(`${FRONT}See [@knuth1984].\n`, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(chips(none)).toEqual(['knuth1984']);
+    const missing = withHost(`${FRONT}See [@nobody1999].\n`, { 'refs.bib': BIB });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(chips(missing)).toEqual(['nobody1999']);
+    expect(chips(editorAt(`${FRONT}See [@knuth1984].\n`, 0))).toEqual(['knuth1984']);
+  });
+
+  it('takes the style from the csl file the front matter names', async () => {
+    const apa = '<style><id>http://www.zotero.org/styles/apa</id><title>APA</title></style>';
+    const editor = withHost(
+      '---\nbibliography: refs.bib\ncsl: apa.csl\n---\n\nSee [@knuth1984].\n',
+      { 'refs.bib': BIB, 'apa.csl': apa },
+    );
+    await settled(editor, (text) => text.includes('(Knuth, 1984)'));
+    expect(chips(editor)).toEqual(['(Knuth, 1984)']);
+  });
+});

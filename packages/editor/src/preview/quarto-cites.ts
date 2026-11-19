@@ -11,13 +11,23 @@ import {
   type EditorState,
   type Extension,
   type Range,
+  StateEffect,
   StateField,
   type Text,
 } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+  WidgetType,
+} from '@codemirror/view';
+import type { Context, Entry, Item } from '@redlines/citations';
 import { dialectFacet } from '../dialect.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { blanked } from './quarto-refs.ts';
+import { includeFacet } from './quarto-include.ts';
 
 /** The kinds of label that Quarto numbers: a key that starts with one is a cross-reference. */
 const XREF = /^(?:fig|tbl|sec|eq|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|cau|imp)-/;
@@ -35,15 +45,20 @@ interface Citation {
   keys: string[];
   /** What the chip says: the keys, with a locator after the key it belongs to. */
   text: string;
+  /** The works cited and how, for the bibliography to print; none for a narrative one's. */
+  items?: Item[];
+  /** A citation that is part of the sentence (`@smith2020`). */
+  narrative?: boolean;
 }
 
 const kept = new WeakMap<Text, Citation[]>();
 
 /** The text of a bracket as a chip says it: the keys, parted by semicolons, with their locators. A
  * bracket that holds a key Quarto numbers anywhere is a cross-reference's. */
-function bracketText(bracket: string): { keys: string[]; text: string } | undefined {
+function bracketText(bracket: string): { keys: string[]; text: string; items: Item[] } | undefined {
   const keys: string[] = [];
   const parts: string[] = [];
+  const items: Item[] = [];
   for (const part of bracket.slice(1, -1).split(';')) {
     const found = [...part.matchAll(KEY)];
     const last = found.at(-1);
@@ -53,9 +68,17 @@ function bracketText(bracket: string): { keys: string[]; text: string } | undefi
     const locator = part.slice((last.index ?? 0) + last[0].length).trim();
     const said = named.join(', ');
     parts.push(locator === '' ? said : `${said} ${locator.replace(/^,\s*/, '')}`);
+    for (const each of found) {
+      items.push({
+        key: each[1] ?? '',
+        prefix: each === found[0] ? part.slice(0, each.index ?? 0).trim() : '',
+        suffix: each === last ? locator.replace(/^,\s*/, '') : '',
+        suppress: each[0].startsWith('-'),
+      });
+    }
   }
   if (keys.length === 0 || keys.some((key) => XREF.test(key))) return undefined;
-  return { keys, text: parts.join('; ') };
+  return { keys, text: parts.join('; '), items };
 }
 
 function read(doc: Text): Citation[] {
@@ -127,6 +150,7 @@ function read(doc: Text): Citation[] {
         to: line.from + to,
         keys: [key[1] ?? ''],
         text: key[1] ?? '',
+        narrative: true,
       });
     }
   }
@@ -140,16 +164,51 @@ export function citationsOf(doc: Text): readonly Citation[] {
   return read(doc);
 }
 
+/** The bibliography a document's front matter names, read, and what formats with it. */
+interface Loaded {
+  /** What it was read from, so that the same files are not read into a new value. */
+  stamp: string;
+  context: (cited: string[]) => Context;
+  api: Pick<typeof import('@redlines/citations'), 'formatBracket' | 'formatNarrative'>;
+}
+
+const setBibliography = StateEffect.define<Loaded | null>();
+
+const loadedField = StateField.define<Loaded | null>({
+  create: () => null,
+  update(value, tr) {
+    for (const effect of tr.effects) if (effect.is(setBibliography)) return effect.value;
+    return value;
+  },
+});
+
+/** The text of the front matter that names a bibliography or a style, or '' (nothing to load). */
+function frontMatter(doc: Text): string {
+  if (doc.lines < 3 || !/^---[ \t]*$/.test(doc.line(1).text)) return '';
+  const lines: string[] = [];
+  for (let n = 1; n <= Math.min(doc.lines, 120); n++) {
+    const text = doc.line(n).text;
+    lines.push(text);
+    if (n > 1 && /^(?:---|\.\.\.)[ \t]*$/.test(text)) {
+      const whole = lines.join('\n');
+      return /^(?:bibliography|csl)\s*:/m.test(whole) ? whole : '';
+    }
+  }
+  return '';
+}
+
 class CiteWidget extends WidgetType {
   readonly text: string;
+  readonly keys: string;
 
-  constructor(text: string) {
+  constructor(text: string, keys: string) {
     super();
     this.text = text;
+    this.keys = keys;
   }
 
   override eq(other: CiteWidget): boolean {
-    return other.text === this.text;
+    return other.text === this.text && other.keys === this.keys;
   }
 
   override toDOM(): HTMLElement {
@@ -158,6 +217,8 @@ class CiteWidget extends WidgetType {
     chip.textContent = this.text;
     chip.setAttribute('role', 'note');
     chip.setAttribute('aria-label', `Citation: ${this.text}`);
+    // The keys, where the chip says the authors.
+    if (this.keys !== this.text) chip.title = this.keys;
     return chip;
   }
 }
@@ -169,11 +230,21 @@ export function citeDecorations(state: EditorState): DecorationSet {
   const citations = read(state.doc);
   if (citations.length === 0) return Decoration.none;
   const ledger = state.field(parsedField, false)?.ledgerRange;
+  const loaded = state.field(loadedField, false) ?? null;
+  const context = loaded?.context(citations.flatMap((citation) => citation.keys));
+  /** What the bibliography prints of a citation; undefined where it has no such work. */
+  const printed = (citation: Citation): string | undefined => {
+    if (!loaded || !context) return undefined;
+    if (citation.narrative) return loaded.api.formatNarrative(citation.keys[0] ?? '', context);
+    return citation.items ? loaded.api.formatBracket(citation.items, context) : undefined;
+  };
   const ranges: Range<Decoration>[] = [];
-  for (const { from, to, text } of citations) {
+  for (const citation of citations) {
+    const { from, to } = citation;
     if (ledger && from >= ledger.from) break;
     if (state.selection.ranges.some((range) => range.from <= to && range.to >= from)) continue;
-    ranges.push(Decoration.replace({ widget: new CiteWidget(text) }).range(from, to));
+    const widget = new CiteWidget(printed(citation) ?? citation.text, citation.text);
+    ranges.push(Decoration.replace({ widget }).range(from, to));
   }
   return Decoration.set(ranges, true);
 }
@@ -183,6 +254,7 @@ const field = StateField.define<DecorationSet>({
   update: (value, tr) =>
     tr.docChanged ||
     tr.selection !== undefined ||
+    tr.effects.some((effect) => effect.is(setBibliography)) ||
     tr.startState.facet(dialectFacet) !== tr.state.facet(dialectFacet) ||
     tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false)
       ? citeDecorations(tr.state)
@@ -192,6 +264,84 @@ const field = StateField.define<DecorationSet>({
     EditorView.atomicRanges.of((v) => v.state.field(f)),
   ],
 });
+
+/**
+ * Reads the bibliography and the style that the front matter names, through the host that reads a
+ * document's includes (the files beside the document), when the front matter says so or the window
+ * comes back to the front (the files may have changed). `@redlines/citations` is loaded only then, so
+ * a document with no bibliography never holds it.
+ */
+const bibliographyLoader = ViewPlugin.fromClass(
+  class {
+    view: EditorView;
+    token = 0;
+    stamp = '';
+    readonly focus = () => void this.load();
+
+    constructor(view: EditorView) {
+      this.view = view;
+      view.dom.addEventListener('focusin', this.focus);
+      void this.load();
+    }
+
+    update(update: ViewUpdate) {
+      const moved = update.startState.facet(dialectFacet) !== update.state.facet(dialectFacet);
+      if (update.docChanged || moved) void this.load();
+    }
+
+    destroy() {
+      this.token++;
+      this.view.dom.removeEventListener('focusin', this.focus);
+    }
+
+    clear() {
+      this.stamp = '';
+      if (this.view.state.field(loadedField, false)) {
+        this.view.dispatch({ effects: setBibliography.of(null) });
+      }
+    }
+
+    async load() {
+      const view = this.view;
+      const front = view.state.facet(dialectFacet) === 'pandoc' ? frontMatter(view.state.doc) : '';
+      const host = view.state.facet(includeFacet);
+      const token = ++this.token;
+      if (!front || !host) {
+        this.clear();
+        return;
+      }
+      try {
+        const api = await import('@redlines/citations');
+        const refs = api.bibliographyRefs(front);
+        if (!refs) {
+          this.clear();
+          return;
+        }
+        const paths = [...refs.files, ...(refs.csl ? [refs.csl] : [])];
+        const texts = await Promise.all(paths.map((path) => host.read(path)));
+        if (token !== this.token) return;
+        const stamp = JSON.stringify([refs, texts]);
+        if (stamp === this.stamp) return;
+        this.stamp = stamp;
+        const bib = new Map<string, Entry>();
+        refs.files.forEach((path, i) => {
+          const text = texts[i];
+          if (!text) return;
+          for (const [key, entry] of api.parseBibliography(path, text)) bib.set(key, entry);
+        });
+        const cslText = refs.csl ? texts[refs.files.length] : undefined;
+        const style = (cslText ? api.styleOfCsl(cslText) : undefined) ?? 'chicago-author-date';
+        const loaded: Loaded | null =
+          bib.size === 0
+            ? null
+            : { stamp, api, context: (cited) => api.makeContext(bib, style, cited) };
+        view.dispatch({ effects: setBibliography.of(loaded) });
+      } catch {
+        if (token === this.token) this.clear();
+      }
+    }
+  },
+);
 
 /** A small chip like the cross-reference's, a quieter gray: a citation has no place to go. */
 const theme = EditorView.baseTheme({
@@ -207,5 +357,5 @@ const theme = EditorView.baseTheme({
 
 /** Citations drawn as chips in a pandoc file. */
 export function quartoCites(): Extension {
-  return [field, theme];
+  return [loadedField, field, bibliographyLoader, theme];
 }
