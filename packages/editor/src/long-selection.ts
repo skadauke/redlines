@@ -7,13 +7,19 @@
 // work them out again when the content's boxes are made again. So after the window moves, with a
 // selection that reaches out of it, the content's `display` is changed and changed back in one
 // frame, with nothing laid out or drawn between: the lines, the selection and the scroll are
-// untouched, and the boxes are new.
+// untouched, and the boxes are new. It costs a layout of the window, so it runs at most once in
+// `EVERY_MS` while the document scrolls, and once more when the scroll stops.
 
 import { type EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 
+/** The shortest time between two refreshes while the document scrolls. */
+const EVERY_MS = 150;
+
 export const longSelection = ViewPlugin.fromClass(
   class {
+    timer = 0;
     frame = 0;
+    last = -Infinity;
     down = false;
     private readonly onDown = () => (this.down = true);
     private readonly onUp = () => (this.down = false);
@@ -27,17 +33,26 @@ export const longSelection = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
-      if (!update.viewportChanged || update.state.selection.main.empty || this.frame) return;
+      // The window moved, or what is drawn in it changed with no edit or new selection (a widget
+      // drawn late): the lines the browser has not seen.
+      if (update.docChanged || update.selectionSet) return;
+      if (update.state.selection.main.empty || this.timer) return;
       const { anchor, head } = update.state.selection.main;
       const { from, to } = update.view.viewport;
       // Only a selection with an end out of the window has lines the browser has not seen.
       if (anchor >= from && anchor <= to && head >= from && head <= to) return;
       const win = this.view.dom.ownerDocument.defaultView;
       if (!win?.requestAnimationFrame) return;
-      this.frame = win.requestAnimationFrame(() => {
-        this.frame = 0;
-        this.refresh();
-      });
+      // Soon, in a frame, when none ran lately; else when the gap since the last one is over.
+      const wait = Math.max(0, this.last + EVERY_MS - win.performance.now());
+      this.timer = win.setTimeout(() => {
+        this.frame = win.requestAnimationFrame(() => {
+          this.timer = 0;
+          this.frame = 0;
+          this.last = win.performance.now();
+          this.refresh();
+        });
+      }, wait);
     }
 
     refresh() {
@@ -53,7 +68,9 @@ export const longSelection = ViewPlugin.fromClass(
     destroy() {
       this.view.dom.removeEventListener('mousedown', this.onDown);
       this.view.dom.ownerDocument.removeEventListener('mouseup', this.onUp);
-      if (this.frame) this.view.dom.ownerDocument.defaultView?.cancelAnimationFrame(this.frame);
+      const win = this.view.dom.ownerDocument.defaultView;
+      if (this.timer) win?.clearTimeout(this.timer);
+      if (this.frame) win?.cancelAnimationFrame(this.frame);
     }
   },
 );

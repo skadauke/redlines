@@ -161,7 +161,7 @@ for (const view of ['clean', 'redlines', 'simple'] as ViewName[]) {
     const bad: string[] = [];
     for (const [n, top] of screens.entries()) {
       await go(top);
-      await j.page.waitForTimeout(400);
+      await j.page.waitForTimeout(800);
       const rows = await rowsOf(j);
       const after = await j.page.screenshot();
       const counts = await changed(j, before[n]!, after, rows);
