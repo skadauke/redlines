@@ -76,6 +76,11 @@ export interface AskTurn {
   /** The model that wrote it, as the agent lists it, when one was asked for. */
   model?: string;
   /**
+   * For a turn that Ask made (#1194): the passage of the document it was about, which the chat
+   * shows above the question. The session itself never sets it.
+   */
+  about?: string;
+  /**
    * For a chat's message that got no answer (#1194): it was stopped, or the agent failed, and
    * `answer` is the failure's one line. It is kept in the history and never sent to an agent.
    */

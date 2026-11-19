@@ -2724,16 +2724,24 @@ the text:
   about", with the selected passage quoted, so the chat is the full record of every question put to
   an agent about the document, and an answer that was only glanced at can be found again.
 - **The answer shows briefly in the main window,** in Ask's bubble (§8.5), so that the writer keeps
-  their focus: the bubble is a short view of the turn, and it goes by itself some seconds after
-  the answer is complete, unless the pointer is on it or it holds a follow-up. **Open in Chat** (the
-  bubble's action, beside Open in New Window) opens the sidebar at that turn. Make Comment and Copy
-  stay as they are.
+  their focus: the bubble is a short view of the turn, and it goes by itself once the answer is
+  complete, after 4 seconds and the answer's words at 200 a minute (at most 90 seconds), the rule
+  of a notification's time on screen (#1185). The pointer on it holds it, and a second after the
+  pointer leaves it goes; a follow-up being typed holds it, and a field emptied again lets it go;
+  a failure or the first-run question on its line holds it. Only an answer starts the time, so a
+  follow-up's answer starts it again. **Open in Chat** (the bubble's action, first of its four)
+  closes it and opens the sidebar at the chat's newest message, with the keyboard in the
+  composer. Make Comment, Open in New Window and Copy stay as they are.
 - **A follow-up in the bubble is the chat's next turn,** and the chat's next message is a follow-up
   of the Ask: one conversation, and the agent sees the earlier turns whichever started them.
 - **Read-only holds.** An Ask's turn is read-only whatever the chat's level becomes, and the chat
   marks it so.
-- Esc or a press elsewhere closes the bubble, and stops a run still going, as before; the turn
-  stays in the chat, with "Stopped" as its answer.
+- Esc or a press elsewhere closes the bubble, and stops a run still going, as before. An Ask that
+  was never answered has no turn in the chat; a chat message that is stopped or fails stays in the
+  history as an unanswered turn ("Stopped", or the failure's one line), is never sent to an agent
+  as an answer, and is in the column with the words the person wrote.
+- **The turn in the chat** has the passage quoted above the question ("Asked about"), the answer
+  as the agent wrote it with its Sources apart, and is kept like any other turn.
 - With the panel open at the document's chat, the bubble still shows: the bubble is for the text,
   the panel for the conversation.
 
@@ -2792,7 +2800,7 @@ list's search finds a question again by its words.
 1. The sidebar's Chat view with the document's chat: the column, the composer, answers rendered as
    Markdown, the picker with the agents and their models, the live line, history kept per document
    in the app's data, Stop, Retry and Copy. Read-only.
-2. Ask writing its turn into the chat, with the bubble that goes by itself and Open in Chat.
+2. Ask writing its turn into the chat, with the bubble that goes by itself and Open in Chat (written).
 3. The sidebar's foot.
 4. Later: edits at the document's level, chats with none, the chat list, Start Over, folding old
    turns, answers that cite with links to ranges, Codex's efforts.

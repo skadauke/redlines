@@ -48,6 +48,13 @@ export interface Chat {
    * another path is the same document, renamed or saved, and its chat goes with it.
    */
   follow(path: string | null, generation: number, name: string): void;
+  /**
+   * Adds a turn that was answered outside the chat, an Ask's (#1194): it is kept in the document's
+   * chat and the agent sees it with the next message. Before the chat has been read it waits.
+   */
+  addTurn(turn: AskTurn): void;
+  /** Shows the newest message, where an Ask's answer was just kept. */
+  reveal(): void;
   focus(): void;
   destroy(): void;
 }
@@ -66,6 +73,8 @@ export function createChat(options: ChatOptions): Chat {
   } | null = null;
   /** Counts the documents followed, so that a read that finishes late is dropped. */
   let epoch = 0;
+  /** Turns that came before the chat was read, kept for when it is. */
+  const waiting: AskTurn[] = [];
   let agents: readonly AgentInfo[] = [];
   let destroyed = false;
 
@@ -176,6 +185,7 @@ export function createChat(options: ChatOptions): Chat {
     if (record.agent !== undefined) session.setAgent(record.agent);
     if (record.model !== undefined) session.setModel(record.model);
     open.session = session;
+    for (const turn of waiting.splice(0)) keep(open, turn);
     open.unsubscribe = session.subscribe((state) => {
       if (current !== open) return;
       // A message that is over and was not answered stays in the history, as stopped or failed.
@@ -258,6 +268,13 @@ export function createChat(options: ChatOptions): Chat {
         },
       );
     },
+    addTurn(turn) {
+      if (destroyed) return;
+      const stamped = turn.at === undefined ? { ...turn, at: Date.now() } : turn;
+      if (current?.session) keep(current, stamped);
+      else waiting.push(stamped);
+    },
+    reveal: () => panel.reveal(),
     focus: () => panel.focusComposer(),
     destroy() {
       destroyed = true;
