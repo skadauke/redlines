@@ -17,6 +17,8 @@ test.describe('Ask, with the selection starting above the window', () => {
     // stop short (387 px on CI): scroll until the end of the selection is in the window.
     const end = j.page.getByText('Paragraph 45 of the plan.');
     await expect(async () => {
+      // The editor measures the lines it drew; ask it to, so the page's height is the real one.
+      await j.page.evaluate(() => window.__redlines!.editor.view.requestMeasure());
       await end.scrollIntoViewIfNeeded();
       await j.settle();
       const box = await end.boundingBox();

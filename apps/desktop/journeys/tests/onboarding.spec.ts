@@ -22,7 +22,7 @@ async function open(page: Page, url: string): Promise<void> {
 test('the Welcome mode of Preferences: you, your agent, and set up this Mac', async ({ page }) => {
   const look = test.info().project.name;
   const shot = (name: string) =>
-    expect(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
+    expect.soft(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
   await open(page, '/preferences.html?welcome');
   const sheet = page.locator('.rl-onb');
   await expect(sheet).toBeVisible();
@@ -69,7 +69,7 @@ test('Skip Setup ends the Welcome mode from the first screen, and says it was sk
 test('the tour: the pen, the views button and the command palette', async ({ page }) => {
   const look = test.info().project.name;
   const shot = (name: string) =>
-    expect(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
+    expect.soft(page).toHaveScreenshot(`onboarding-${name}-${look}.png`, { timeout: 10_000 });
   await open(page, '/?onboarding');
   const card = page.locator('.rl-tour-card');
   await expect(card).toContainText('The Redlines pen');
