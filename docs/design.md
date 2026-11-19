@@ -115,8 +115,9 @@ from this table.
 
 The Mac app is built; Windows and Linux are planned (§10). Live collaboration with people is built between windows of one Mac and planned across networks (§7). The editor is not yet published as a
 package others can embed: the packages are private, and the website's embed is a demo. R Markdown
-and Quarto files are edited with their divs, callouts, citations, cross-references and includes
-drawn; running their code cells is not what Redlines does. Several windows of one document on one
+and Quarto files are edited with their divs, callouts, citations, cross-references, includes and
+math (`$x^2$`, `$$ … $$`, in Markdown files too, drawn as MathML by Temml, which the app loads when a
+document has a formula, #1173) drawn; running their code cells is not what Redlines does. Several windows of one document on one
 Mac work, but live collaboration with people means people on different computers.
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
