@@ -115,8 +115,9 @@ from this table.
 
 The Mac app is built; Windows and Linux are planned (§10). Live collaboration with people is built between windows of one Mac and planned across networks (§7). The editor is not yet published as a
 package others can embed: the packages are private, and the website's embed is a demo. R Markdown
-and Quarto files are edited with their divs, callouts, citations, cross-references and includes
-drawn; running their code cells is not what Redlines does. Several windows of one document on one
+and Quarto files are edited with their divs, callouts, citations, cross-references, includes and
+math (`$x^2$`, `$$ … $$`, in Markdown files too, drawn as MathML by Temml, which the app loads when a
+document has a formula, #1173) drawn; running their code cells is not what Redlines does. Several windows of one document on one
 Mac work, but live collaboration with people means people on different computers.
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
@@ -322,10 +323,16 @@ The window, on the desktop:
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
-- **A toolbar, shown only when summoned** (#504). It is summoned three ways. The wrench in the
-  title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
-  puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
-  in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
+- **The outline button** (#1193). The first of the three icons at the right of the title bar, left
+  of the eye, opens the outline as a window under the button, over the page, and puts it away
+  (pressed while it shows). It lists every heading, goes to one on a click and then goes away, and
+  goes away on Esc or a press elsewhere. It reaches the outline at every text size: the outline in
+  the left margin has no room at the largest sizes, and the window does not depend on the margin.
+  (It took the place of the wrench, which showed the toolbar docked: the toolbar is summoned as
+  below, and Preferences keeps it docked.)
+- **A toolbar, shown only when summoned** (#504). It is summoned two ways, and Preferences can keep
+  it docked. ⇧⌘P (Show Toolbar, in the View menu) shows it at the caret and puts it away, with the
+  keyboard in it. A right-click shows it
   at the pointer, where it takes the place of the system's context menu. Both open the same bar: on
   a change, a comment or a highlight, that place's review card (who, what, and Accept and Reject,
   Resolve and Reply, or Remove) is stacked above the bar in the same card, under the spelling rows;
@@ -338,7 +345,7 @@ The window, on the desktop:
   it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
   elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›
   Editor › Show the toolbar at the bottom keeps it docked from the start, for those who want it
-  always shown; the wrench still puts it away for that window. Nothing else is drawn at the bottom
+  always shown. Nothing else is drawn at the bottom
   of the window to summon it (the handle that was there is gone, decided on 2026-11-15). It is a
   small card in one row: **Ask | Insert · Review · [List] · [Table] · [Image] · Format · Edit**, a vertical line after
   Ask. Each name opens a menu on a click (hovering from one open menu to another switches menus),
@@ -1140,7 +1147,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   menu (Insert Above and Below, Delete, Delete Table, Move Up and Down, Clear Contents), Esc closes
   it and keeps the selection; a drag moves the rows, and the others selected with it, to any
   boundary, the last included: nothing is highlighted while it lasts, the rows dim, a copy follows
-  the pointer, a 3 px gray line (the theme's `--rl-ink-2`) marks the drop and shows only where the
+  the pointer, a 3 px faint blue line (the theme's `--rl-drop`, the one drop marker of the blocks, the table, the rows and the pictures) marks the drop and shows only where the
   rows would go, never at their own place, the page scrolls near its edges, Esc cancels. A + shows
   within 8 px of a row boundary in the strip beside the table, with a thin line across it, and a
   press inserts a row there.
@@ -1296,7 +1303,7 @@ key the person chose beats a binding of the editor's or a plugin's own.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
-| Show the toolbar               | ⇧⌘P (at the caret; the title bar's wrench docks it)                                           | Ctrl+Shift+P              |
+| Show the toolbar               | ⇧⌘P (at the caret; Preferences can dock it)                                           | Ctrl+Shift+P              |
 | Show the outline               | ⌃⌘O (View › Show Outline: opens the list and puts the focus on the heading you are reading)  | —                         |
 | Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
@@ -1486,7 +1493,7 @@ a new email under the same name becomes an alias in the ledger
 **Should (v1 if time allows):**
 
 - a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the toolbar (§5.1), which
-  opens from the title bar's wrench, on ⇧⌘P and on right-click rather than floating over a
+  opens on ⇧⌘P and on right-click rather than floating over a
   selection by itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in
   it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
@@ -1743,7 +1750,7 @@ app's File › Print and Export as PDF are its own).
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
-| `toolbar`    | The toolbar: the title bar's wrench, right-click and ⇧⌘P (§5.1) | —               |
+| `toolbar`    | The toolbar: right-click and ⇧⌘P (§5.1) | —               |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 
@@ -2308,10 +2315,20 @@ copy only, never the plugin, and the Claude Code row says to keep one. Publishin
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks
-a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a sheet
+a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a window of
+its own, larger than Preferences and resizable, which Preferences › Agents and the @ picker (its
+last row, while no OpenClaw agent is connected) open
 ([research note](research/openclaw-connection.md), screens 1 to 7, and a gray card for every
 failure): whether this Mac has Tailscale installed, is signed in and sees other computers
-(`tailscale status --json`, read only: Redlines never starts, stops or changes Tailscale); which
+(`tailscale status --json`, read only), and, where something is missing, does most of the setting up itself,
+only from that window and only when the person presses the button: it downloads Tailscale's
+package from pkgs.tailscale.com, checks that Tailscale signed it (Apple team W5364U7YZB) and Apple
+notarized it, refuses in plain words if either fails, and installs it with macOS's own
+administrator prompt (never a password field of Redlines'; the App Store page for a person who is
+not an administrator); opens the app and waits for its network extension, saying where in System
+Settings to allow it; starts the sign-in and opens its page; and restarts Tailscale's app once
+after a fresh install, and when the sign-in hangs (the app started before its extension and never
+connected to it). Which
 computer, found by opening its WebSocket and reading its greeting (nothing is sent); a prompt to
 send the person's agent, which holds no secret and asks for the private road only (Tailscale
 Serve, auth on, one command, the tools for one agent); a secure field for the setup code the agent

@@ -332,8 +332,8 @@ body {
   background: var(--rl-pressed);
 }
 
-/* The wrench is pressed while the toolbar shows. */
-.rl-wrench-button[aria-pressed='true'] {
+/* The outline's button is pressed while its window shows. */
+.rl-outline-button[aria-pressed='true'] {
   background: var(--rl-pressed);
   color: var(--rl-ink);
 }
@@ -645,7 +645,7 @@ body {
 }
 
 .rl-sidebar-item[aria-current='page'] {
-  background: var(--rl-rule);
+  background: var(--rl-pressed);
 }
 
 .rl-sidebar-item:focus-visible {

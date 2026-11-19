@@ -12,17 +12,17 @@
 // checks here are that every element of the sheet is there; that siblings agree in their styles is
 // the journey's (it needs real hovers, key presses and drags, which a page can't make).
 //
-// It leaves `window.__REDLINES_SHEET__ = { prepare, notify }` on the page.
+// It leaves `window.__REDLINES_SHEET__ = { run, notify }` on the page.
 
 import type { Editor } from '@redlines/editor';
 import type { Notification, NotificationOptions } from './ui/notifications.ts';
 
 /** The document of the sheet: one of each thing the editor draws as an element. */
-export const SHEET_DOC = `# The sheet
+export const SHEET_DOC = `# The sheet {#sec-intro}
 
 A paragraph with a <!--cmt c3k9-->commented word<!--/c3k9-->, an <!--ins k3x9-->insertion<!--/k3x9--> and <!--del m2bd a deletion-->.
 
-![A red square](sheet.png)
+![A red square](sheet.png){#fig-x}
 
 | A | B |
 | - | - |
@@ -32,7 +32,13 @@ A paragraph with a <!--cmt c3k9-->commented word<!--/c3k9-->, an <!--ins k3x9-->
 > [!NOTE]
 > A callout.
 
+See @sec-intro, @fig-x and [@knuth1984].
+
 <div class="sheet">An HTML block</div>
+
+## The end
+
+The last paragraph, so that the outline has two headings.
 
 <!-- redlines
 version: 1
@@ -93,7 +99,11 @@ export async function prepareSheet(editor: Editor): Promise<void> {
   await savePicture();
   editor.setTracking(false, { inFile: false });
   editor.setViewMode('redlines');
-  editor.setDoc(SHEET_DOC);
+  // As a file of the page's own folder, a Quarto file, so that it holds what a .qmd draws (the chips) beside everything a .md does.
+  const hook = window.__redlines;
+  if (hook) await hook.openFile('sheet.qmd', SHEET_DOC);
+  else editor.setDoc(SHEET_DOC);
+  editor.setViewMode('redlines');
   for (let waited = 0; waited < 4000; waited += 25) {
     const img = document.querySelector<HTMLImageElement>('.rl-image img');
     if (img && img.getBoundingClientRect().width > 50) return;

@@ -33,6 +33,7 @@ pub mod relay;
 mod setup;
 mod skills;
 pub mod tailscale;
+pub mod tailscale_setup;
 mod which;
 
 use std::path::{Path, PathBuf};

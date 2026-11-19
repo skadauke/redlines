@@ -325,7 +325,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     maxWidth: `min(${notePx(360)}, ${WINDOW})`,
     padding: `${notePx(6)} ${notePx(6)} ${notePx(9)} ${notePx(12)}`,
     border: '1px solid var(--rl-rule)',
-    borderRadius: notePx(10),
+    borderRadius: 'calc(var(--rl-radius-card) * var(--rl-note-scale, 1))',
     backgroundColor: 'var(--rl-card)',
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
