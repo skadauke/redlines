@@ -96,6 +96,17 @@ describe('the sidebar edge', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('ends a drag whose capture is lost, so that later widths are drawn', () => {
+    const { resize, pointer, width, app, onResize } = setUp();
+    pointer('pointerdown', 240);
+    pointer('pointermove', 400);
+    pointer('lostpointercapture', 400);
+    expect(app.hasAttribute('data-sidebar-drag')).toBe(false);
+    expect(onResize).not.toHaveBeenCalled();
+    resize.setWidth(300);
+    expect(width()).toBe('300px');
+  });
+
   it('resizes with the arrow keys, within the range', () => {
     const { handle, width, onResize } = setUp();
     const key = (name: string) =>

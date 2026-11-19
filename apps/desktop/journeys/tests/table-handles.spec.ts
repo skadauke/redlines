@@ -255,7 +255,7 @@ test.describe('table handles @tables', () => {
     await expect(j.page.locator('.rl-tbl')).toHaveCount(1);
   });
 
-  test('with Track Changes on a table moves only past the block above or below it', async ({
+  test('with Track Changes on a table moves to a far gap, as one tracked move that reads as a table', async ({
     start,
   }) => {
     const long = `One.\n\n${TABLE}\nThree.\n\nFour.\n\nFive.\n`;
@@ -264,7 +264,7 @@ test.describe('table handles @tables', () => {
     await j.hover('1');
     await expect(j.page.locator('.rl-table-select')).toBeVisible();
     await j.page.locator('.rl-table-select').hover();
-    await expect(j.page.locator('.rl-grip-hint')).toContainText('above or below');
+    await expect(j.page.locator('.rl-grip-hint')).toContainText('Select the table, or drag it');
     const handle = (await j.page.locator('.rl-table-select').boundingBox())!;
     const five = (await j.page
       .locator('.cm-content .cm-line', { hasText: 'Five.' })
@@ -274,11 +274,14 @@ test.describe('table handles @tables', () => {
     await j.page.mouse.move(handle.x + 10, handle.y + 60, { steps: 6 });
     await j.page.mouse.move(five.x + 40, five.y + five.height + 8, { steps: 10 });
     await j.page.mouse.up();
+    const file = await j.text();
+    expect(file, 'the table is written whole at the far end, its rows unsplit').not.toMatch(
+      /\|<!--split/,
+    );
     await j.page.evaluate(() => window.__redlines!.editor.setViewMode('clean'));
     const shown = await j.page.locator('.cm-content').innerText();
-    // Dropped at the far end, it lands one block down: after Three., before Four.
-    expect(shown.indexOf('Three.')).toBeLessThan(shown.indexOf('A'));
-    expect(shown.indexOf('A')).toBeLessThan(shown.indexOf('Four.'));
-    await expect(j.page.locator('.rl-tbl')).toHaveCount(1);
+    // Dropped at the far end: after Five.
+    expect(shown.indexOf('Five.')).toBeLessThan(shown.indexOf('A'));
+    await expect(j.page.locator('.rl-tbl'), 'drawn as a table').toHaveCount(1);
   });
 });

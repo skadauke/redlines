@@ -19,7 +19,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, TryLockError};
 
@@ -71,6 +71,24 @@ pub fn bridge_of(program: &str, args: &[String]) -> Result<Option<Bridge>, Strin
         .file_name()
         .is_some_and(|name| name == "openclaw");
     if !is_openclaw {
+        // A program of another name that is OpenClaw's bridge all the same (`oc acp --url ... `, a
+        // wrapper) is not held to the whole rule, but it never carries a secret on its line.
+        // (`oc --profile p acp --url …` and `oc acp --token x` are such lines too: `acp` anywhere,
+        // and no `--url` needed.)
+        let wraps = args.iter().any(|arg| arg == "acp");
+        if wraps
+            && args.iter().any(|arg| {
+                ["--token", "--password", "--password-file"]
+                    .iter()
+                    .any(|flag| arg == flag || arg.starts_with(&format!("{flag}=")))
+            })
+        {
+            return Err(
+                "Redlines keeps no token or password: give the token file's path with \
+                 --token-file, and OpenClaw reads it."
+                    .to_owned(),
+            );
+        }
         return Ok(None);
     }
     let mut words = args.iter().map(String::as_str);
@@ -220,6 +238,10 @@ fn agent_of_session(key: &str) -> Result<String, String> {
 /// Why a token file can't be used as it is, if it can't: it has to be there, and be a file of its
 /// own and not a link (OpenClaw refuses a link), with something in it and no more than a token
 /// holds. Only what the file system says of it is looked at: nothing in it is read.
+///
+/// It is asked when the agent is added and again before each run, so that a file swapped for a
+/// link, a hard link or another user's file in between is refused. A swap between this look and
+/// OpenClaw's own open of the file can't be closed from the host.
 fn token_file_problem(path: &str) -> Option<String> {
     let looked = fs::symlink_metadata(path);
     match looked {
@@ -236,8 +258,48 @@ fn token_file_problem(path: &str) -> Option<String> {
             "The token file is larger than a token file can be (16 KiB): is it the right file?"
                 .to_owned(),
         ),
-        Ok(_) => None,
+        // A file that is someone else's (`/etc/passwd`) is no token file of the person's.
+        Ok(found) if found.uid() != unsafe { libc::geteuid() } => Some(format!(
+            "The token file at {path} isn't yours: a token file is the person's own, so give \
+             one of your own."
+        )),
+        // A second name for a file (a hard link) may be the other's, changed under this one.
+        Ok(found) if found.nlink() > 1 => Some(
+            "The token file has more than one name (a hard link): give a file with only its own."
+                .to_owned(),
+        ),
+        Ok(_) => match fs::canonicalize(path) {
+            Ok(real) if !same_place(path, &real) => Some(format!(
+                "The token file's path goes through a link: give where it really is, {}.",
+                real.display()
+            )),
+            _ => None,
+        },
     }
+}
+
+/// Whether a path is where it really leads: the same, but for the case of its letters (a file
+/// system that doesn't tell them apart gives the name it holds) and the system's own links
+/// (`/tmp`, `/var` and `/etc` are in `/private`), which are no one's doing.
+fn same_place(path: &str, real: &Path) -> bool {
+    let real = real.to_string_lossy().to_lowercase();
+    let path = path.to_lowercase();
+    // Where the system keeps them, on a Mac (and plainly there on other systems).
+    let system = ["/tmp", "/var", "/etc"]
+        .iter()
+        .any(|link| path == *link || path.starts_with(&format!("{link}/")))
+        .then(|| format!("/private{path}"));
+    real == path || system.is_some_and(|private| real == private)
+}
+
+/// What is wrong with the token file on a stored bridge's line, if anything: the same words as
+/// when it was added. It is looked at again before each run.
+pub fn bridge_token_problem(args: &[String]) -> Option<String> {
+    let file = args
+        .iter()
+        .skip_while(|arg| *arg != "--token-file")
+        .nth(1)?;
+    token_file_problem(file)
 }
 
 /// Whether other people on this Mac can read a file, from its mode alone.
@@ -375,12 +437,7 @@ impl AcpAgents {
             bridge,
         };
         if agent.bridge.is_some()
-            && let Some(file) = agent
-                .args
-                .iter()
-                .skip_while(|arg| *arg != "--token-file")
-                .nth(1)
-            && let Some(problem) = token_file_problem(file)
+            && let Some(problem) = bridge_token_problem(&agent.args)
         {
             return Err(problem);
         }
@@ -1053,7 +1110,145 @@ mod tests {
         fs::write(&file, "not-a-real-token\n").unwrap();
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
-        file.to_str().unwrap().to_owned()
+        // As it really is: the temp folder's own path goes through a link on a Mac.
+        fs::canonicalize(&file)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// A token file that is not the person's own, that has a second name, or that is reached
+    /// through a link, is refused, and nothing in it is read.
+    #[test]
+    fn a_token_file_that_isnt_the_persons_own_is_refused() {
+        let temp = TempFolder::new("acp-token-own");
+        let own = token_in(&temp);
+        assert_eq!(token_file_problem(&own), None);
+        // Someone else's: a file of the system's.
+        let problem = token_file_problem("/etc/passwd").expect("not the person's");
+        assert!(problem.contains("isn't yours"), "{problem}");
+        // A hard link: a second name for the file.
+        let second = temp.path().join("second-name");
+        fs::hard_link(&own, &second).unwrap();
+        let problem = token_file_problem(&own).expect("two names");
+        assert!(problem.contains("hard link"), "{problem}");
+        fs::remove_file(&second).unwrap();
+        assert_eq!(token_file_problem(&own), None);
+        // A path through a link to a folder.
+        let real = temp.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("token"), "not-a-real-token\n").unwrap();
+        std::os::unix::fs::symlink(&real, temp.path().join("through")).unwrap();
+        let through = fs::canonicalize(temp.path())
+            .unwrap()
+            .join("through/token")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let problem = token_file_problem(&through).expect("a link in the path");
+        assert!(problem.contains("goes through a link"), "{problem}");
+    }
+
+    /// The file the agent was added with can be swapped later: it is looked at again before a run,
+    /// and refused in the same words.
+    #[test]
+    fn a_token_file_swapped_after_the_agent_was_added_is_refused_at_the_run() {
+        let temp = TempFolder::new("acp-token-swap");
+        let agents = store(&temp);
+        let token = token_in(&temp);
+        let command = format!("openclaw acp --url wss://gateway.example.org --token-file {token}");
+        agents.add("Moby", &command, openclaw, |_| true).unwrap();
+        let line = agents.get("moby").unwrap().args;
+        assert_eq!(bridge_token_problem(&line), None);
+        // Swapped for a link to a file of another's, and then for a hard link.
+        fs::remove_file(&token).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", &token).unwrap();
+        let problem = bridge_token_problem(&line).expect("a link");
+        assert!(problem.contains("link"), "{problem}");
+        fs::remove_file(&token).unwrap();
+        let other = temp.path().join("other");
+        fs::write(&other, "not-a-real-token\n").unwrap();
+        fs::hard_link(&other, &token).unwrap();
+        let problem = bridge_token_problem(&line).expect("a hard link");
+        assert!(problem.contains("hard link"), "{problem}");
+        // Gone is refused too.
+        fs::remove_file(&token).unwrap();
+        fs::remove_file(&other).unwrap();
+        assert!(bridge_token_problem(&line).is_some());
+    }
+
+    /// A real file of the person's own is not refused for how its path is written: the case of
+    /// its letters on a file system that doesn't tell them apart, and the system's own links.
+    #[test]
+    fn a_real_file_is_not_refused_for_the_case_of_its_path_or_the_systems_links() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = TempFolder::new("acp-token-case");
+        let own = token_in(&temp);
+        // The case of the name: only where the file system doesn't tell cases apart.
+        let shouted = own.replace("moby-token", "MOBY-Token");
+        if fs::metadata(&shouted).is_ok() {
+            assert_eq!(token_file_problem(&shouted), None, "{shouted}");
+        }
+        // `/tmp` is in `/private`.
+        let in_tmp = format!("/tmp/redlines-token-{}", std::process::id());
+        fs::write(&in_tmp, "not-a-real-token\n").unwrap();
+        fs::set_permissions(&in_tmp, fs::Permissions::from_mode(0o600)).unwrap();
+        let problem = token_file_problem(&in_tmp);
+        fs::remove_file(&in_tmp).unwrap();
+        assert_eq!(problem, None);
+        // A link of the person's own making is still refused.
+        let real = temp.path().join("real-folder");
+        fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, temp.path().join("linked")).unwrap();
+        fs::write(real.join("t"), "x\n").unwrap();
+        let through = fs::canonicalize(temp.path()).unwrap().join("linked/t");
+        assert!(token_file_problem(through.to_str().unwrap()).is_some());
+    }
+
+    /// A program of another name that is OpenClaw's bridge (a wrapper) never carries a secret.
+    #[test]
+    fn a_wrapped_bridge_is_refused_a_token_or_password_on_its_line() {
+        let args = |text: &str| -> Vec<String> { text.split(' ').map(str::to_owned).collect() };
+        // `acp` anywhere on the line, and no `--url` needed.
+        for line in [
+            "--profile p acp --url wss://gateway.example.org --token x",
+            "acp --token x",
+            "--profile p acp --password-file /Users/ada/.pw",
+        ] {
+            assert!(
+                bridge_of("/usr/local/bin/oc", &args(line)).is_err(),
+                "{line}"
+            );
+        }
+        for secret in [
+            "--token not-a-real-token",
+            "--token=not-a-real-token",
+            "--password hunter2",
+            "--password-file /Users/ada/.pw",
+        ] {
+            let line = args(&format!("acp --url wss://gateway.example.org {secret}"));
+            assert!(
+                bridge_of("/usr/local/bin/oc", &line).is_err(),
+                "{secret} on a wrapper"
+            );
+        }
+        // Without a secret it is any other agent, as before; and a line that isn't `acp --url`
+        // is none of this.
+        assert_eq!(
+            bridge_of(
+                "/usr/local/bin/oc",
+                &args("acp --url wss://gateway.example.org --token-file /Users/ada/t")
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            bridge_of(
+                "/usr/local/bin/gemini",
+                &args("--token abc --experimental-acp")
+            ),
+            Ok(None)
+        );
     }
 
     fn openclaw(_: &str) -> Option<Found> {

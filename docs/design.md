@@ -667,7 +667,7 @@ them) and emails written as autolinks (opened as `mailto:`; in `[x](logo@2x.png)
 space in the path of a `<...>` destination opens as `%20`, and an image that is a link's text opens it too: the limit of a copy, which turns `javascript:` and its kin into plain
 text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
 the address again before it runs the system's opener, and the website's demos open a new tab. A
-link that doesn't open is left to the editor like any text, with no hint. A relative link to
+link that doesn't open is left to the editor like any text, with no hint. A link that wraps over two lines is one link to the hint: moving the pointer from one half to the other goes on with its pause and its hint. The hint doesn't show while another tooltip does, as a change's card over a link in the full markup. A relative link to
 another document doesn't open yet.
 
 ### 5.3 Views: Clean, Redlines, Plain
@@ -1223,9 +1223,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   letting go moves it there as one step (tracked as a move with Track Changes on), and Escape lets it
   go. The press must go 24 px before the table can drop anywhere, so that a shaking hand moves
   nothing. A Quarto or Pandoc caption (a `:` paragraph after the table) moves with it. With Track
-  Changes on a table moves only past the block above or below it, as ⌥↑ and ⌥↓ take it, since a
-  tracked move to a gap further away is not yet written so that it reads as a table in every order of
-  decisions; the hint says so. It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
+  Changes on it goes to any gap too: a tracked move of a table is written with its rows unsplit
+  (format §3.14, #1279). It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
   A grip's menu is used from the keyboard: Down, Up and Tab choose an item, which looks as one under
   the pointer, Return runs it and Escape closes the menu.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
@@ -1408,6 +1407,12 @@ paragraph of its own and not an item of the bullet list above it, a table 6.5 in
 shaded gray, and a quote's paragraphs in `class=MsoQuote`, which Word reads as its "Quote" style,
 #1181); File › Print and Export as PDF are built.
 
+- **A picture copied in Word** reaches a web view at the size it has on the page; Word's own drawing
+  format on the pasteboard (`com.microsoft.Art--GVML-ClipFormat`, an Office package) holds the
+  original, so the app reads it natively when it is there (`read_office_picture`, only for the window
+  that has the keys, up to 50 MB), takes the largest picture under `clipboard/media/` of the
+  package when it is the picture that was pasted (larger, of its shape), and saves it in its own
+  format; without the package, or with another picture, the paste is the one the page has (#1182).
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
@@ -2482,7 +2487,11 @@ differences:
   exactly a key of that shape (`acp_gate.rs`), and a toolbox is refused to it as an empty list is
   to any other agent. Without an agent named in the form, the key is bare, and a Gateway with more
   than one agent says so (`Use an agent-prefixed session key or select an agent explicitly`), in the
-  line the run fails with: name the agent then.
+  line the run fails with: name the agent then. A thread longer than 60,000 characters is cut
+  from its start, and says so (the newest words are what the request answers), so that a prompt
+  stays far inside the bridge's 2 MiB. The bridge runs with `OPENCLAW_HIDE_BANNER=1` and
+  `OPENCLAW_SUPPRESS_NOTES=1`, which the app adds to its environment, so that the last line of its
+  error stream is the failure and not a note.
 - **A turn the Gateway cut short is a failure.** The bridge says it as a message of the agent's own
   that begins `[OpenClaw interruption]` and then ends the turn as it ends one that was answered; the
   provider reads it as the run's error (`Moby stopped: …`), not as a reply to post.
@@ -2491,8 +2500,14 @@ differences:
   a user name, a password, a query, a fragment or a port that isn't a number, where a token could
   ride, is refused (a path is allowed, since a Gateway may be mounted at one, and the address is
   shown in lists of programs: put nothing secret in it); and the file has to be there, be a file
-  and not a link (OpenClaw refuses one) and hold from one byte to 16 KiB, which is looked at
-  without reading it. The question says where the document and the thread go, warns of a `ws://`
+  and not a link (OpenClaw refuses one), be the person's own (a file of the system's, or of
+  another user, is refused), have no second name (a hard link) and be reached by a path with no
+  link in it, and hold from one byte to 16 KiB, which is looked at without reading it. A program
+  of another name with `acp` among its arguments (a wrapper) is never held to the whole shape, but
+  a `--token` or `--password` on its line is refused all the same. The file is looked at again
+  before each run, in the same words (a swap between that look and OpenClaw's own open of the file
+  can't be closed from the host); the case of its letters and the system's own links (`/tmp`,
+  `/var`, `/etc` are in `/private`) are no reason to refuse it. The question says where the document and the thread go, warns of a `ws://`
   address, which isn't encrypted, unless it is on this Mac (`localhost`, `127.0.0.1`, `[::1]`: what
   goes there stays on it, or goes through a tunnel its owner made), and of a token file that other
   people on the Mac can read.

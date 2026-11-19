@@ -578,6 +578,85 @@
         }
       ],
       "allowed": true
+    },
+    {
+      "what": "OpenClaw's approval of a command, as its bridge offers it (allow-once, allow-always, deny)",
+      "toolCall": {
+        "toolCallId": "x",
+        "title": "Command approval requested",
+        "kind": "execute",
+        "status": "pending"
+      },
+      "options": [
+        {
+          "optionId": "allow-once",
+          "name": "Allow once",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "allow-always",
+          "name": "Allow always",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "deny",
+          "name": "Deny",
+          "kind": "reject_once"
+        }
+      ],
+      "allowed": false
+    },
+    {
+      "what": "a read inside the folder, with OpenClaw's option names: allow-once, never allow-always",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read notes.md",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/Users/ada/project/notes.md"
+          }
+        ]
+      },
+      "options": [
+        {
+          "optionId": "allow-once",
+          "name": "Allow once",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "allow-always",
+          "name": "Allow always",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "deny",
+          "name": "Deny",
+          "kind": "reject_once"
+        }
+      ],
+      "allowed": true
+    },
+    {
+      "what": "OpenClaw's approval of a command with nothing but allow-always to give",
+      "toolCall": {
+        "toolCallId": "x",
+        "title": "Command approval requested",
+        "kind": "execute"
+      },
+      "options": [
+        {
+          "optionId": "allow-always",
+          "name": "Allow always",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "deny",
+          "name": "Deny",
+          "kind": "reject_once"
+        }
+      ],
+      "allowed": false
     }
   ]
 }

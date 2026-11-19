@@ -121,16 +121,7 @@ export interface KnownCase {
  * longer shows": delete the entry in that PR (and nothing else). A case that comes back after that
  * is then a failure of this check, with no entry to hide behind.
  */
-export const KNOWN: readonly KnownCase[] = [
-  {
-    issue: 1169,
-    doc: 'Build 21.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'marker',
-    text: /<!--/,
-    why: 'a callout whose title holds an insertion shows its marker',
-  },
-];
+export const KNOWN: readonly KnownCase[] = [];
 
 export interface Found {
   doc: string;

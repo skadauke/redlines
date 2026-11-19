@@ -12,8 +12,7 @@ import {
   ViewPlugin,
   WidgetType,
 } from '@codemirror/view';
-import { type BlockGap, type BlockRun, neighbourGap } from '@redlines/format';
-import { trackingField } from '../tracked/typing.ts';
+import type { BlockGap, BlockRun } from '@redlines/format';
 import { asFile, type FileRead, moveRunTo, runOfSelection } from './move.ts';
 
 /** The pointer must move this far from the press before it is a drag and not a click. */
@@ -172,19 +171,6 @@ export class BlockDrag {
     return this.target;
   }
 
-  /**
-   * The places the run may go. A table with Track Changes on goes only to the gaps beside it, one
-   * block up or down, as ⌥↑ and ⌥↓ take it: a tracked move of a table to a gap further away is not
-   * written so that every order of decisions reads it as a table (#1271).
-   */
-  private gaps(): BlockGap[] {
-    const { run, view } = this;
-    if (run.kind !== 'table' || !view.state.field(trackingField, false)) return run.gaps;
-    return [neighbourGap(run, true), neighbourGap(run, false)].filter(
-      (gap): gap is BlockGap => gap !== undefined,
-    );
-  }
-
   /** The pointer is at client `y`: the line goes to the nearest gap. */
   move(y: number): void {
     const { view, geometry } = this;
@@ -197,7 +183,7 @@ export class BlockDrag {
       open && position >= open.pos
         ? y - (half && position === open.pos ? open.height / 2 : open.height)
         : y;
-    this.places = this.gaps().map((gap) => {
+    this.places = this.run.gaps.map((gap) => {
       const here = shown(gap);
       return { gap, y: natural(here.at, geometry.gapY(view, here), true) };
     });
