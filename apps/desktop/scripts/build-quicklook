@@ -477,7 +477,7 @@ def fixture_checks(checks: Checks) -> None:
     lacks(page, "redlines.md", "March", "The old exporter", "k3x9", "Who signs off", "<!--")
 
     page = render(FIXTURES / "frontmatter.qmd")
-    has(page, "frontmatter.qmd", '<pre class="rl-frontmatter">---', "title: &quot;Penguin bills&quot;", 'data-chunk="r setup, include=FALSE"', 'data-chunk="python"', "#| label: fig-bills")
+    has(page, "frontmatter.qmd", '<pre class="rl-frontmatter">---', "title: &quot;Penguin bills&quot;", 'data-chunk="r setup, include=FALSE"', 'data-chunk="python"', "#| label: fig-bills", '<span class="rl-xref">Figure 1</span>')
     page = render(FIXTURES / "analysis.Rmd")
     has(page, "analysis.Rmd", 'data-chunk="r, echo=FALSE, message=FALSE"', "<h1>Summary</h1>")
 
