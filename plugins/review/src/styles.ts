@@ -310,7 +310,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
 
   // A change's card, floating over the page above or below the change's lines. It replaces the
   // look of the tooltip that holds it.
-  '&light .cm-tooltip.cm-tooltip-hover:has(> .rl-card), &dark .cm-tooltip.cm-tooltip-hover:has(> .rl-card)':
+  '&light .cm-tooltip.cm-tooltip-hover:has(> .rl-card), &dark .cm-tooltip.cm-tooltip-hover:has(> .rl-card), &light .cm-tooltip.cm-tooltip-hover:has(> .rl-bubble-card), &dark .cm-tooltip.cm-tooltip-hover:has(> .rl-bubble-card)':
     { border: 'none', backgroundColor: 'transparent' },
   '.rl-card': {
     boxSizing: 'border-box',

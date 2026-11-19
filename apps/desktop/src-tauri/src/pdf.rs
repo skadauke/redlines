@@ -92,8 +92,8 @@ mod imp {
             let key = NSString::from_str("NSJobSavingURL");
             let _: () = msg_send![dictionary, setObject: &*url, forKey: &*key];
             let _: () = msg_send![&*info, setJobDisposition: &*disposition];
-            // Three quarters of an inch all round, in points.
-            let margin: f64 = 54.0;
+            // An inch all round, in points, as Word's default and the page's `@page` (print.css).
+            let margin: f64 = 72.0;
             let _: () = msg_send![&*info, setTopMargin: margin];
             let _: () = msg_send![&*info, setBottomMargin: margin];
             let _: () = msg_send![&*info, setLeftMargin: margin];
