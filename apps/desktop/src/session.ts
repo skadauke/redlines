@@ -65,6 +65,7 @@ export const EVENTS = {
   left: 'session-left',
   save: 'session-save',
   saved: 'session-saved',
+  tracking: 'session-tracking',
 } as const;
 
 export interface SessionOptions {
@@ -84,6 +85,10 @@ export interface SessionOptions {
   onState?(state: SyncState): void;
   /** The other windows of the session changed. */
   onPeers?(peers: readonly Peer[]): void;
+  /** Another window of the document turned Track Changes on or off: it is the document's. */
+  onTracking?(on: boolean): void;
+  /** Whether Track Changes is on in this window now: the leader tells it to a window that joins. */
+  tracking?(): boolean;
   notice?(message: string): void;
   /**
    * The window has no text of its own and joins a session that is there: if there is none, it
@@ -97,12 +102,16 @@ export interface SessionOptions {
 export interface Session {
   readonly path: string;
   readonly binding: SyncBinding;
+  /** The number this window is known by among the document's windows: 1 for the first; none for a tab with no number of its own. */
+  readonly number: number | null;
   /** Whether this window leads: it runs the authority and writes the file. */
   readonly leading: boolean;
   /** How many windows are in the session, for the leader; one for any other window. */
   readonly members: number;
   /** Whether everything this window made is confirmed by the authority. */
   readonly confirmed: boolean;
+  /** Tells every other window of the document that Track Changes is now on or off. */
+  shareTracking(on: boolean): Promise<void>;
   /** Has the file written, by the leader, and resolves to the text it holds or null. */
   save(): Promise<string | null>;
   /** Leaves the session. The editor keeps its text. */
@@ -265,6 +274,19 @@ export class PortLog implements DurableLog {
 export function ordinalOf(label: string): number {
   const found = /(\d+)$/.exec(label);
   return label === 'main' || !found ? 1 : Number(found[1]) + 1;
+}
+
+/**
+ * The number a window says it is, as Word numbers the windows of one document: the main window is
+ * "Window 1", `doc-<n>` is the one after it, and a tab a page named (`tab-<n>`) is its own number.
+ * A tab with a random name has none.
+ */
+export function windowNumberOf(label: string): number | null {
+  if (label === 'main') return 1;
+  const doc = /^doc-(\d+)$/.exec(label);
+  if (doc) return Number(doc[1]) + 1;
+  const tab = /^tab-(\d+)$/.exec(label);
+  return tab ? Number(tab[1]) : null;
 }
 
 /**
@@ -476,6 +498,9 @@ export async function joinSession(
     remote = new Remote(ports, leader);
     transport = new Switch(remote);
   }
+  await listen(EVENTS.tracking, (payload) => {
+    options.onTracking?.((payload as { on: boolean }).on);
+  });
   await listen(EVENTS.saved, (payload) => {
     const { id, text } = payload as { id?: number; text: string | null };
     if (id !== undefined) {
@@ -485,6 +510,7 @@ export async function joinSession(
     if (text !== null) options.onSaved?.(text);
   });
 
+  let knownPeers = 0;
   const binding = syncEditor(editor, {
     transport,
     clientID,
@@ -493,7 +519,14 @@ export async function joinSession(
     ...(leading && hub ? { version: hub.authority.version } : {}),
     notice: (message) => options.notice?.(message),
     onState: (state) => options.onState?.(state),
-    onPeers: (peers) => options.onPeers?.(peers),
+    onPeers: (peers) => {
+      // A window joined: the leader tells it, and the others, whether Track Changes is on.
+      if (leading && peers.length > knownPeers && options.tracking) {
+        void session.shareTracking(options.tracking());
+      }
+      knownPeers = peers.length;
+      options.onPeers?.(peers);
+    },
     onLoaded: () => options.onLoaded?.(),
     retryMs: 500,
   });
@@ -558,6 +591,7 @@ export async function joinSession(
   const session: Session = {
     path,
     binding,
+    number: windowNumberOf(ports.label),
     get leading() {
       return leading;
     },
@@ -566,6 +600,10 @@ export async function joinSession(
     },
     get confirmed() {
       return binding.replica.pending.length === 0 && binding.client.state === 'synced';
+    },
+    shareTracking: async (on) => {
+      const others = (await ports.members(path).catch(() => [])).filter((l) => l !== ports.label);
+      await Promise.all(others.map((l) => ports.send(l, EVENTS.tracking, { on }).catch(() => {})));
     },
     save: () => {
       if (leading) return saveNow();

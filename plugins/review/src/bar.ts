@@ -786,10 +786,9 @@ class Panel {
 /**
  * What a click on a change bar does while the review bar is open (the core's `barClickHandlers`):
  * the card of the change on that line opens, in place of the switch between Redlines' two looks,
- * which the review bar would leave to the person who has stopped deciding. In the simple look, a
- * click on the bar of a change opens its card as well, bar open or not (#664): the card is what says
- * what the hidden text was; a click on a bar with no change at it still switches the looks.
- * Nothing otherwise.
+ * which the review bar would leave to the person who has stopped deciding. With the bar closed it
+ * does nothing, in the simple look too, where the switch is the way back to the full markup
+ * (#1156); a click on a change's own text there still opens its card (#664).
  * `pos` is where the bar's line starts, and `piece` the part of a line that wraps which the piece
  * of the bar that was clicked stands beside: the change there is the one.
  */
@@ -799,12 +798,13 @@ export function barClickHandler(
 ): (view: EditorView, pos: number, mark?: string, span?: { from: number; to: number }) => boolean {
   return (view, pos, mark, piece) => {
     const open = isBarOpen(view.state);
-    const simple = view.state.field(viewModeField) === 'simple';
-    if (!open && !simple) return false;
+    // Bar closed: the click is the core's, which switches the looks. In the simple look it is the
+    // way back to the full markup, with the line where it was (#1156).
+    if (!open) return false;
     // The bar of a struck block is its change's own: found by its id, not by its place.
     if (mark !== undefined) {
       if (changesOf(ctx).some((change) => change.id === mark)) pin(view, mark);
-      return open || changesOf(ctx).some((change) => change.id === mark);
+      return true;
     }
     const line = view.state.doc.lineAt(pos);
     const changes = changesOf(ctx);
@@ -835,19 +835,14 @@ export function barClickHandler(
         const at = segmentSpan(segment);
         return at.to <= piece.from && at.to >= line.from;
       });
-    // In the simple look, with the review bar closed, only a change drawn on that line or beside
-    // that piece: a bar beside a comment, or beside text a hidden deletion left, opens no card of a
-    // change the person did not point at.
-    const found = !open
-      ? (changes.find(beside) ?? changes.find(onLine))
-      : (changes.find(beside) ??
-        changes.findLast(before) ??
-        changes.find(onLine) ??
-        changes.findLast(above));
+    const found =
+      changes.find(beside) ??
+      changes.findLast(before) ??
+      changes.find(onLine) ??
+      changes.findLast(above);
     if (found) pin(view, found.id);
-    // The bar is open: a click never switches the view. In the simple look it does only where it
-    // found no change to open.
-    return open || !!found;
+    // The bar is open: a click never switches the view.
+    return true;
   };
 }
 
