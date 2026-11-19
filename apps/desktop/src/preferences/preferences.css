@@ -78,7 +78,8 @@ body {
   height: calc(20 * var(--rl-frame));
 }
 
-.rl-pref-tab:hover {
+.rl-pref-tab:hover,
+.rl-pref-tab:focus-visible {
   color: var(--rl-ink);
 }
 
@@ -87,14 +88,9 @@ body {
   color: var(--rl-ink);
 }
 
+/* The keyboard's choice looks as the pointer's does: no ring (#1191). */
 .rl-pref-tab:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
-}
-
-/* After a click the tab has the focus and no ring: the ring is for the keyboard (tabs.ts). */
-.rl-pref-tab[data-by-pointer]:focus-visible {
-  box-shadow: none;
 }
 
 .rl-pref-pane {

@@ -12,7 +12,7 @@
 
 import { Authority, Hub, memoryTransport } from '@redlines/collab';
 import type { Identity } from '@redlines/collab';
-import { createEditor } from '@redlines/editor';
+import { colorsOf, createEditor } from '@redlines/editor';
 import type { Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { syncEditor, type SyncBinding } from '@redlines/sync';
@@ -39,8 +39,8 @@ const DOCUMENT = [
 ].join('\n');
 
 const PEOPLE: Record<string, Identity> = {
-  ada: { handle: 'ada', name: 'Ada (window 1)', role: 'owner', color: 'p1' },
-  bo: { handle: 'bo', name: 'Bo (window 2)', role: 'editor', color: 'p2' },
+  ada: { handle: 'ada', name: 'Ada (window 1)', role: 'owner' },
+  bo: { handle: 'bo', name: 'Bo (window 2)', role: 'editor' },
 };
 
 interface Pane {
@@ -234,9 +234,16 @@ export async function runSyncCheck(): Promise<void> {
     el ? getComputedStyle(el).borderLeftColor : null;
   const adaInBo = colorOf(rightCaret);
   const boInAda = colorOf(leftCaret);
+  // A person's caret is in the author color that their changes have in that window (#1168).
+  const tokenOf = (editor: Editor, handle: string) =>
+    `var(--rl-author-${colorsOf(editor.view.state).get(handle)})`;
   report(
-    'a window has one color in every window, and the two differ',
-    !!adaInBo && !!boInAda && adaInBo !== boInAda && adaInBo === 'rgb(47, 107, 208)',
+    'a person’s caret has the color of their own changes, and the two differ',
+    !!adaInBo &&
+      !!boInAda &&
+      adaInBo !== boInAda &&
+      rightCaret?.style.getPropertyValue('--rl-presence-color') === tokenOf(right.editor, 'ada') &&
+      leftCaret?.style.getPropertyValue('--rl-presence-color') === tokenOf(left.editor, 'bo'),
     { adaInBo, boInAda },
   );
   console.log(`SYNC-CHECK done ${passed} passed, ${failed} failed`);

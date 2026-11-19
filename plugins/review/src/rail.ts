@@ -487,6 +487,15 @@ export function railCompact(at: {
     (at.compact ? COMPACT_MARGIN : 0);
   return at.width < keeps;
 }
+/**
+ * Whether the editor, `width` px wide, is too narrow for the column at `textScale` with the rail and
+ * the margins beside it: the rail would then take width from the column, and from what is as wide as
+ * the column, a picture. They grow with the text size above 100%, and the column with all of it.
+ */
+export function railSqueezes(at: { width: number; column: number; textScale: number }): boolean {
+  const noteScale = Math.max(1, at.textScale);
+  return at.width < at.column * at.textScale + RAIL_SPACE * noteScale + 2 * (MARGIN * noteScale);
+}
 /** How far a note is raised from the top of its anchor's text, so that their first lines align. */
 const NOTE_LIFT = 5;
 /** A dot's size, the least space between two dots, and how far right of the text they sit. */
