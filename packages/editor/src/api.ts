@@ -30,6 +30,12 @@ export interface IncludeHost {
   read(path: string): Promise<string | null>;
   /** Opens the included file, as a document of its own. */
   open(path: string): void;
+  /**
+   * The path of the open document, as the host has it, for what Quarto leaves beside a document and
+   * above it (`_freeze/`, `keep-md`, `keep-ipynb`; read through `read`, which stays inside the
+   * project). Without it, no outputs are shown.
+   */
+  documentPath?(): string | null;
 }
 
 /** The dialect of a Markdown file (format §9.1): GitHub's, or pandoc's in `.qmd` and `.Rmd`. */

@@ -96,6 +96,7 @@ import { markdownPreview } from './preview/decorations.ts';
 import { quartoCites } from './preview/quarto-cites.ts';
 import { quartoRefs } from './preview/quarto-refs.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
+import { quartoOutputs } from './preview/quarto-output.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -481,6 +482,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     options.openImage ? imageOpening(options.openImage) : [],
     options.includes ? includeFacet.of(options.includes) : [],
     quartoIncludes(),
+    quartoOutputs(),
     imageSelection(),
     undoHistory(),
     trackingBack,

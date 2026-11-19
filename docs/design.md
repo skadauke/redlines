@@ -517,6 +517,41 @@ Redlines covers everything in the Markdown Guide's
   which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
+- **Quarto outputs, read-only under each chunk** (#1174): Redlines never runs code, and a reviewer
+  still sees what a reader sees, from what Quarto left with the document. For a `.qmd`, beside the
+  document and in the folders above it up to the project's, it looks, in this order, for the
+  project's freeze file (`_freeze/<path of the document from the project's folder, with no
+  extension>/execute-results/<format>.json`, whose `result.markdown` is the executed document as
+  pandoc Markdown and whose `hash` is the MD5 of the file that was run), the Markdown file that
+  `keep-md` leaves (`<name>.md`) and the notebook that `keep-ipynb` leaves (`<name>.ipynb`), through
+  the same reader as the includes, so only inside the project the window may read. The first
+  file that reads and is Quarto's is the one used; a file whose format is not understood is
+  no file, since Quarto's own formats are not promised to stay.
+  - **Matching.** The executable chunks of the document (a fence whose info is an engine in braces:
+    `{r}`, `{python}`, `{julia}`; not `{ojs}`, `{mermaid}` or `{dot}`, nor a plain code block) are
+    paired in order with the cells of the file, by the chunk's label (`#| label:`) or else by its
+    code text with the `#|` lines and trailing blanks left out. A cell is given to one chunk only.
+    A chunk with no match, such as one edited since it ran or one never run, has no output drawn.
+  - **Drawn.** Under the chunk's closing fence, a block set apart by a rule at its left, in the grays
+    of the page: a small label, "Output from the last run", and the output as the file has it: text
+    in a code block, a table as a table, a figure as a picture (a freeze file's pictures are in
+    `_freeze/<document>/figure-<format>/`, which the picture's `<name>_files/` path is mapped to;
+    a notebook's are in the cell). It cannot be edited, is not a part of the file and is never
+    saved, copied as text of the document or exported: Word export draws the chunk, as before.
+    HTML widgets and anything but Markdown, text and pictures are left out.
+  - **Stale.** When the freeze file's `hash` is not the MD5 of the document as it reads now, the
+    label says "Output from the last run, stale" (and its hint says the document has changed since
+    it ran). Every edit, a change or a comment included, makes the hash differ, so the label is
+    what a reviewer will mostly see; the chunks that still match by code keep their output, since
+    the code is what the output answers to. A `keep-md` or `keep-ipynb` file has no hash and is not
+    labeled stale.
+  - **Nothing.** No file, no match, a file that can't be read, a Markdown file (`.md`), or the Plain
+    view: nothing is drawn, no message, and no space is kept.
+  - **Read again** when the window is looked at again (a render that happened meanwhile shows up),
+    not on each keystroke.
+  - Not done: reading the rendered HTML, Word or PDF of a document, `<name>_files/` of a live render
+    and `.quarto/` (the research found nothing documented to rely on); showing outputs in the
+    included files.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
 - **Emoji:** the character itself in every file type, because shortcodes don't render in pandoc,
   Quarto or VS Code. Typing `:` and two letters lists the emoji whose names (gemoji's, GitHub's
