@@ -272,12 +272,14 @@ its case; each is a bug. The list is what has been found, not a count of what is
   the seam of a paragraph made of their insertion, or a deletion's, is written as the replacement of
   the paragraph where the fine form leaves other texts in some orders (`ordersDifferNear`); a run
   pasted next to their bold with an HTML tag in it is replaced where its orders read otherwise. Left,
-  and each a limit of the oracle, not of the write: (1) a run pasted next to their insertion `_f_`
-  between letters (`x ca<ins _f_>é`), whose own file reads the underscores as emphasis where its
-  view does not, so that rejecting the paste gives that file back; (2) a `*` typed in front of a word
-  that ends in their italic (`x ‸ca<fmt +italic>_f_`), where the view spells the italic with `*` and
-  pairs it with the typed one, which no file with `_f_` reads alike: it is written as the fine form
-  reads, and the person is not told.
+  and a limit of the oracle, not of the write: a run pasted next to their insertion `_f_` between
+  letters (`x ca<ins _f_>é`), whose own file reads the underscores as emphasis where its view does
+  not (the marker is punctuation to the run), so that rejecting the paste gives that file back
+  (filed on its own). A delimiter beside their pending italic (`x ca<fmt +italic>_f_`) is replaced
+  as the paragraph at the ten positions of the review, its new text spelling the italic with `*` as
+  the view does; typed inside their italic or right after it, the key is refused as before ("This
+  would change how their format change reads"), and a pasted `</sub>*` just before its closing `_`
+  is still written as the fine form, which reads otherwise.
 - A comment over a backtick can make another person's table change undecidable (#376; left out of
   `table-align-random.test.ts`).
 - Return at the start of a nested first item, tracked, fails in four more shapes (#395).

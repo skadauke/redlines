@@ -533,7 +533,14 @@ function tryRung(
 ): Widened | undefined {
   // The new text: the unit as the newest view has it, with the edits made.
   const viewFrom = view.map.fromSource(rung.from);
-  const viewTo = view.map.fromSource(rung.to);
+  let viewTo = view.map.fromSource(rung.to);
+  // A unit that ends the body, whose last mark is another person's format change spelled in the view
+  // with a delimiter of its own (`_f_` as `*f*`): the map ends the unit in front of that delimiter,
+  // and the new text would lose it (#1136). The unit then runs to the end of the view's text.
+  const bodyEnd = parsed.ledgerRange?.from ?? text.length;
+  if (text.slice(rung.to, bodyEnd).trim() === '') {
+    viewTo = Math.max(viewTo, view.text.replace(/\s+$/, '').length);
+  }
   if (edits.some((edit) => edit.from < viewFrom || edit.to > viewTo)) return giveUp('span');
   let now = applyChanges(
     view.text.slice(viewFrom, viewTo),

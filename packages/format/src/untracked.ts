@@ -705,19 +705,24 @@ function shiftedMarkers(text: string, changes: readonly TextChange[]): TextChang
     }
   }
   const run = /[*_~]+/;
+  // Only a marker on the line of the edit is moved: a delimiter typed in the next list item or in a
+  // table's separator row pairs with nothing here, and the marker keeps its range.
+  const editLine = lineStart(file, Math.min(...changes.map((change) => change.from)));
   for (const span of spans) {
+    if (lineStart(file, span.from) !== editLine) continue;
     const marker = file.slice(span.from, span.to);
     const before = run.exec(
       file.slice(Math.max(0, span.from - 8), span.from).match(/[*_~]+$/)?.[0] ?? '',
     )?.[0];
     const after = file.slice(span.to).match(/^[*_~]+/)?.[0];
     const candidates: string[] = [];
-    if (before) {
+    const typed = changes.map((change) => change.insert).join('');
+    if (before && [...before].some((char) => typed.includes(char))) {
       candidates.push(
         file.slice(0, span.from - before.length) + marker + before + file.slice(span.to),
       );
     }
-    if (after) {
+    if (after && [...after].some((char) => typed.includes(char))) {
       candidates.push(
         file.slice(0, span.from) + after + marker + file.slice(span.to + after.length),
       );

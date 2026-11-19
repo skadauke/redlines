@@ -3258,7 +3258,9 @@ In a file with full history, such an edit is an `edit` event (§6.2).
   between the delimiter and its neighbour, so that micromark reads the file as it reads the newest
   view (`foo*<!--hl k3x9-->bar<!--/k3x9-->` typed `*` at the end gives
   `foo<!--hl k3x9-->*bar*<!--/k3x9-->`); the range of the comment or highlight takes the run in or
-  leaves it out (#1140).
+  leaves it out (#1140). Only a marker on the line of the edit is moved, and only across a run that
+  holds a character the edit typed: a delimiter typed in the next list item, or in a table's
+  separator row, leaves the marker as it was.
 - Text typed next to a pending deletion goes where it is typed, before or after the deleted text,
   which the editor shows. Text is never typed between a split and its break: it goes in front of
   the split. Text typed further into the break, on the blank line of a paragraph break, would part
@@ -3459,6 +3461,20 @@ The break follows the closer as a plain line break, or is the blank line that fo
 already, so that no blank line is added to the file. A text that ends in two or more line breaks, a
 delimiter, a risky line or an atomic block, or that is only line breaks, keeps the closer rule below
 (`widen.ts`, `tryRung`).
+
+A delimiter (`*`, `_`, `~`) typed, taken out or pasted beside another person's marks is read in every
+order of deciding the marks of its paragraph (four at most), and the unit is replaced where one of
+three things holds: the fine write reads otherwise in some order (a run pasted with an HTML tag beside
+a delimiter, `ordersReadOtherwiseNear`); two orders leave different texts, a stray blank line in one
+(a delimiter at the seam of a paragraph made of their insertion, or beside their deletion, with the
+paragraph's break written as block syntax, `ordersDifferNear`, #1136); or their pending italic is in
+the paragraph and the fine write reads otherwise than the view, which spells that italic with `*`
+and pairs it with the typed run where the file keeps `_`: the new text of the replacement is the
+view's, `x ca*f*` with the run typed, and the old text keeps their mark (#1136). A unit that ends the
+body takes the view's last delimiter into its new text. Where no unit holds it and the fine write is
+refused (a run typed inside their italic, or after it, which would change how it reads), the
+refusal stays, in words that say what to do. The three tests are read only where a delimiter stands
+in a paragraph that holds a mark.
 
 The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
 and the views read the replacements it writes, and the writers that refuse today call it one unit at

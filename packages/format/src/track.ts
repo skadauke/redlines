@@ -5662,8 +5662,23 @@ function delimiterOrdersDiffer(
 ): boolean {
   if (!atDelimiter(text, edits)) return false;
   const after = applyChanges(text, changes);
+  // A delimiter beside another person's pending italic: the newest view spells it with `*`, which
+  // pairs with the typed run in the view and not in the file, where it stays `_`: the write that
+  // micromark reads otherwise than the view is replaced as the unit, whose new text has the view's
+  // spelling (#1136).
+  const italic = edits.some((edit) => {
+    const from = Math.max(0, text.lastIndexOf('\n\n', Math.max(0, edit.from - 1)));
+    const to = text.indexOf('\n\n', edit.to);
+    return /<!--fmt [a-z0-9]{4} \+italic/.test(text.slice(from, to < 0 ? text.length : to));
+  });
   const first = Math.min(...changes.map((change) => change.from));
   const last = Math.max(...changes.map((change) => change.from + change.insert.length));
+  if (
+    italic &&
+    (readsOtherMicromark(text, changes) || ordersReadOtherwiseNear(after, first, last))
+  ) {
+    return true;
+  }
   // A pasted run that holds an HTML tag beside a delimiter reads in more ways than the file shows
   // it, in the orders of deciding the marks around it (#1135): each is read, not only compared.
   const tagged = edits.some((edit) => /<\/?[a-z]/i.test(edit.insert) && /[*_~]/.test(edit.insert));

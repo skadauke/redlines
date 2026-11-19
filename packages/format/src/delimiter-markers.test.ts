@@ -80,3 +80,63 @@ describe("a delimiter typed beside another person's change (#1135, #1136)", () =
     expectSound('paste', after);
   });
 });
+
+describe("a delimiter beside another person's pending italic (#1136, the review of #1301)", () => {
+  const body = 'x ca<!--fmt k3x9 +italic-->_f_<!--/k3x9-->';
+  const typedAt = (at: number, insert: string) => {
+    const before = file(body, { k3x9: 'bo' });
+    const changes = trackedEdits(before, [{ from: at, to: at, insert }], context(ada, IDS)).changes;
+    return applyChanges(before, changes);
+  };
+  const whole = (text: string) =>
+    `<!--sub m2bd x ca<!-\\-fmt k3x9 +italic-\\->_f_<!-\\-/k3x9-\\->-->\n\n${text}\n<!--/m2bd-->`;
+
+  it('is replaced as the paragraph, whose new text spells the italic with `*` as the view does', () => {
+    for (const [at, insert, written] of [
+      [2, '*', whole('x *ca*f*')],
+      [3, '*', whole('x c*a*f*')],
+      [4, '*', whole('x ca**f*')],
+      [27, '*', whole('x ca**f*')],
+      [28, '*', whole('x ca**f*')],
+      [4, '**', whole('x ca***f*')],
+      [4, '~~', whole('x ca~~*f*')],
+      [3, '</sub>*', whole('x c</sub>*a*f*')],
+    ] as const) {
+      const after = typedAt(at, insert);
+      expect(bodyOf(after), `${insert} at ${at}`).toBe(written);
+      expectSound(`${insert} at ${at}`, after);
+    }
+  });
+
+  it('beside the word it is written as before, which reads alike', () => {
+    for (const [at, insert] of [
+      [1, '*'],
+      [0, '**'],
+      [2, '**'],
+    ] as const) {
+      expectSound(`${insert} at ${at}`, typedAt(at, insert));
+    }
+  });
+});
+
+describe('with Track Changes off, a marker is moved only on the line of the delimiter (#1301 review)', () => {
+  it('a delimiter typed in the next list item leaves the highlight as it was', () => {
+    const body = '- foo*<!--hl k3x9-->bar<!--/k3x9-->\n- baz';
+    const before = file(body, { k3x9: 'bo' });
+    const after = applyChanges(
+      before,
+      untrackedEdit(before, { from: body.length, to: body.length, insert: '*' }),
+    );
+    expect(bodyOf(after)).toBe('- foo*<!--hl k3x9-->bar<!--/k3x9-->\n- baz*');
+  });
+
+  it('a delimiter that is not the one beside the marker leaves it as it was', () => {
+    const body = 'foo*<!--hl k3x9-->bar<!--/k3x9-->';
+    const before = file(body, { k3x9: 'bo' });
+    const after = applyChanges(
+      before,
+      untrackedEdit(before, { from: body.length, to: body.length, insert: '_' }),
+    );
+    expect(bodyOf(after)).toBe('foo*<!--hl k3x9-->bar_<!--/k3x9-->');
+  });
+});
