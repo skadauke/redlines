@@ -96,7 +96,7 @@ export const TOOLBAR_STYLE = `
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--rl-rule);
-  border-radius: var(--rl-radius-menu, 10px);
+  border-radius: var(--rl-radius-card, 12px);
   background-color: var(--rl-card, Canvas);
   box-shadow: var(--rl-shadow);
 }

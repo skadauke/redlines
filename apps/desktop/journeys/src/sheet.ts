@@ -224,7 +224,7 @@ export const SPECIMENS: readonly Specimen[] = [
   // ----- Cards: what floats over the page -----
   {
     name: 'comment-note',
-    family: 'cards',
+    family: 'notes',
     selector: '.rl-note',
     views: ['redlines', 'simple'],
     reach: {
@@ -404,6 +404,13 @@ export const FAMILIES: readonly Family[] = [
     props: ['borderTopLeftRadius', 'backgroundColor', 'boxShadow'],
   },
   {
+    name: 'card-radius',
+    rule: 'a margin note sits in the margin and stays flat, and has the corner radius of what floats (#1246)',
+    of: ['cards', 'notes'],
+    how: { across: 'rest' },
+    props: ['borderTopLeftRadius'],
+  },
+  {
     name: 'cards',
     rule: 'what floats over the page has one corner radius, one border and one shadow',
     of: ['cards'],
@@ -513,12 +520,6 @@ export const KNOWN: readonly KnownDisagreement[] = [
     family: 'handles',
     props: ['borderTopLeftRadius', 'backgroundColor', 'boxShadow'],
     why: 'the picture’s handles are white pills with an outline; the table’s grips are gray pills with a border and a bigger radius',
-  },
-  {
-    issue: 1246,
-    family: 'cards',
-    props: ['borderTopLeftRadius', 'boxShadow'],
-    why: 'a margin note has an 8 px radius and no shadow, the palette’s menu 10 px, a notification and the other menus 12 px',
   },
   {
     issue: 1247,
