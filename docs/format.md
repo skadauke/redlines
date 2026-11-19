@@ -2428,19 +2428,25 @@ Return there is the ordinary Return, a new paragraph, and the line stays a parag
 Changes on only Paragraph › Table makes a table. With Track Changes off the rows are written
 as typed.
 
-**A table inserted as a whole** (Paragraph › Table with Track Changes on) is the author's pending
-insertion, with the paragraph breaks around it as splits (§3.4): each of its lines ends with the
-marker of the break after it, and its last line with the closer of the insertion:
+**A table inserted as a whole** (Paragraph › Table with Track Changes on, and a table pasted or
+moved, §3.14) is the author's pending insertion, with the paragraph break before it as a split
+(§3.4). The rows are one line break apart, as text of the insertion, with no split on each: a row
+that ends in a marker is no delimiter row, so a plain reader would read the file as it is, every
+change pending, as a paragraph. The last row ends with the closer of the insertion:
 
 ```markdown
 One.<!--ins k3x9--><!--split s1aa-->
 
-| Name | Age |<!--split s2bb-->
-| ---- | --- |<!--split s3cc-->
+| Name | Age |
+| ---- | --- |
 | Ada  | 36  |<!--/k3x9-->
 
 Two.
 ```
+
+Files written before, with a split at the end of each row (`| Name | Age |<!--split s2bb-->`), still
+read: the reader and the editor's parse take a marker that ends a row as white space, as below, and
+deciding them reads as before.
 
 A marker of a split or the closer of an insertion that ends a line of a table is no cell of that
 row, in the reader (`blankTrailingMarkers`: the line read with the marker as white space, the
