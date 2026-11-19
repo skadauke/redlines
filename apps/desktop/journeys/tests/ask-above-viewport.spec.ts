@@ -19,7 +19,12 @@ test.describe('Ask, with the selection starting above the window', () => {
     await expect(async () => {
       // The editor measures the lines it drew; ask it to, so the page's height is the real one.
       await j.page.evaluate(() => window.__redlines!.editor.view.requestMeasure());
-      await end.scrollIntoViewIfNeeded();
+      // The editor's own scroll to the end of the selection (the browser's scrollIntoViewIfNeeded
+      // left it at 1578 px on CI for ten seconds).
+      await j.page.evaluate(() => {
+        const { view } = window.__redlines!.editor;
+        view.dispatch({ scrollIntoView: true });
+      });
       await j.settle();
       const box = await end.boundingBox();
       expect(box, 'the end of the selection is drawn').not.toBeNull();

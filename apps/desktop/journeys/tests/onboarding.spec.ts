@@ -41,6 +41,12 @@ test('the Welcome mode of Preferences: you, your agent, and set up this Mac', as
   // 2. Your agent.
   await expect(sheet).toContainText('Your agent');
   await expect(sheet.locator('select')).toBeVisible();
+  // The card focuses the select itself, and WebKit draws its ring or not as its timing falls (the
+  // runner's pictures differ): leave and enter it by key, which always draws the ring.
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await expect(sheet.locator('select')).toBeFocused();
+  expect(await sheet.locator('select').evaluate((el) => el.matches(':focus-visible'))).toBe(true);
   await shot('2-agent');
   await sheet.getByRole('button', { name: 'Continue' }).press('Enter');
 
