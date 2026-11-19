@@ -7,8 +7,14 @@
 // title bar's delay. Esc closes it, and it is reachable from the keyboard (Show Toolbar,
 // or the context menu key), where the arrow keys move among its items.
 
-import { EditorSelection } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorSelection, StateEffect } from '@codemirror/state';
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+} from '@codemirror/view';
 import type { Editor, EditorCommand } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
 import {
@@ -64,6 +70,15 @@ export interface ToolbarOptions {
    * What the palette's last line does: "Ask about “…”", for what was typed. Default: no such line.
    */
   askAbout?: (text: string) => void;
+  /**
+   * The review card of a place: asked for each time the toolbar opens, at a right-click and at ⇧⌘P
+   * alike, with the position the right-click or the caret is at and the element under the pointer
+   * (null from the keyboard). A card it returns is stacked in the toolbar's card, above the bar and
+   * under the spelling rows, and stays while the toolbar is open; a button of the card that has
+   * done its work puts the toolbar away by sending a bubbling `rl-bubble-done` event from the card.
+   * Return null where the place has none. Default: none.
+   */
+  bubbleAt?: (at: { pos: number; target: Element | null }) => HTMLElement | null;
   /** Shows a one-line message that doesn't interrupt, for what can't be done. */
   notice(message: string): void;
   /** Called when the toolbar appears or goes away, however it came to: the wrench follows it. */
@@ -90,6 +105,9 @@ export interface Toolbar {
   /** Takes the toolbar and its commands out of the page. */
   destroy(): void;
 }
+
+/** Tells the selection's holder that the toolbar opened or closed. */
+const holdChanged = StateEffect.define<null>();
 
 /** How soon, and how near, a press of the mouse comes before the menu event it is the pointer's for. */
 const PRESS_MS = 1000;
@@ -162,6 +180,8 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
   let drawn: DrawnPanel | null = null;
   /** The spelling rows the toolbar holds, and where the word they are for is. */
   let spelling: { rows: SpellingRows; from: number; to: number } | null = null;
+  /** The review card the toolbar holds, over the bar. */
+  let bubble: HTMLElement | null = null;
   /** Counts the toolbar's openings, so that an answer that comes late knows its own. */
   let opening = 0;
   let placeAgain: () => void = () => {};
@@ -219,7 +239,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
 
   /** Draws the bar as the registry has it now, with the spelling rows above it if there are any. */
   const draw = (rows: SpellingRows | null) => {
-    drawn = drawPanel(panel, bar(), rows, handlers, () => hideHint());
+    drawn = drawPanel(panel, bar(), rows, bubble, handlers, () => hideHint());
   };
 
   /** Draws the items as the registry has them now; in place when they are the ones drawn. */
@@ -412,11 +432,18 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     win.removeEventListener('resize', onResize);
   }
 
-  function open(next: Summoned, place: () => void, rows: typeof spelling = null): void {
+  function open(
+    next: Summoned,
+    place: () => void,
+    rows: typeof spelling = null,
+    card: HTMLElement | null = null,
+  ): void {
     hideHint();
     if (how === null) listen();
     how = next;
     spelling = rows;
+    bubble = card;
+    holdSelection();
     draw(rows?.rows ?? null);
     // Docked, CSS places it; elsewhere, `place` does, with a left and a top of its own.
     panel.classList.toggle('rl-toolbar-docked', next === 'docked');
@@ -490,6 +517,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     how = null;
     drawn = null;
     spelling = null;
+    bubble = null;
     searching?.element.remove();
     searching = null;
     panel.removeAttribute('data-search');
@@ -497,12 +525,18 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     panel.removeAttribute('data-writing');
     keepRoom();
     unlisten();
+    holdSelection();
     tell();
     if (takeBack) view.focus();
     const again = redock;
     redock = false;
     if (again) open('docked', () => {});
   }
+
+  // A button of the review card that did its work puts the toolbar away.
+  panel.addEventListener('rl-bubble-done', () => {
+    if (how !== 'docked') close(true);
+  });
 
   // A press on the padding or the hairlines leaves the keyboard where it is, as one on an item does.
   // (A slider in the palette takes the press, which a drag needs.)
@@ -569,7 +603,19 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     canLearn: options.spelling?.learn !== undefined,
   });
 
-  async function openContext(x: number, y: number, fromKeyboard: boolean): Promise<void> {
+  /**
+   * What a right-click at (x, y) opens, and what ⇧⌘P opens at the caret or the selection (`how`
+   * 'keyboard', `fromKeyboard`): the same bar, with the same card of the place and the same
+   * spelling rows, for the caret's word (the selection stays as it is). The menu key is a
+   * right-click at the caret.
+   */
+  async function openContext(
+    x: number,
+    y: number,
+    fromKeyboard: boolean,
+    summoned: 'context' | 'keyboard' = 'context',
+    target: Element | null = null,
+  ): Promise<void> {
     // A docked toolbar comes back when this one goes: it is the person's to put away.
     const wasDocked = how === 'docked';
     close();
@@ -577,10 +623,11 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     const mine = ++opening;
     let at = view.state.selection.main.head;
     if (!fromKeyboard) {
-      const pos = view.posAtCoords({ x, y }, false);
-      at = pos;
-      moveSelectionTo(editor, pos);
+      at = view.posAtCoords({ x, y }, false);
+      // Where the right-click is: kept inside a selection, else the word under it, else the caret.
+      moveSelectionTo(editor, at);
     }
+    const card = options.bubbleAt?.({ pos: at, target: fromKeyboard ? null : target }) ?? null;
     const found = options.spelling?.enabled() ? editor.wordAt(at) : null;
     // The text the word was found in: a suggestion is for the word where it was, and not for text
     // that moved while the checker thought.
@@ -610,7 +657,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
     }
     if (mine !== opening) return;
     open(
-      'context',
+      summoned,
       fromKeyboard
         ? () =>
             placeBelow(
@@ -618,6 +665,7 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
             )
         : () => placeAt(x, y),
       rows,
+      card,
     );
     // From the keyboard, the keyboard goes into the toolbar.
     if (fromKeyboard) drawn?.entry()?.focus();
@@ -641,13 +689,58 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
       lastPress !== null &&
       event.timeStamp - lastPress.at < PRESS_MS &&
       Math.hypot(event.clientX - lastPress.x, event.clientY - lastPress.y) <= PRESS_PX;
-    void openContext(event.clientX, event.clientY, !pressed && event.buttons === 0);
+    void openContext(
+      event.clientX,
+      event.clientY,
+      !pressed && event.buttons === 0,
+      'context',
+      event.target instanceof Element ? event.target : null,
+    );
   };
   view.contentDOM.addEventListener('contextmenu', onContextMenu);
+
+  // The selection keeps its highlight while the toolbar is open: with the keyboard in the toolbar the
+  // page draws it as the inactive one (or none), so it is drawn here, under the text's own.
+  const holder = ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(v: EditorView) {
+        this.decorations = this.build(v);
+      }
+      update(u: ViewUpdate) {
+        if (
+          u.selectionSet ||
+          u.focusChanged ||
+          u.docChanged ||
+          u.transactions.some((tr) => tr.effects.some((e) => e.is(holdChanged)))
+        ) {
+          this.decorations = this.build(u.view);
+        }
+      }
+      build(v: EditorView): DecorationSet {
+        const { from, to, empty } = v.state.selection.main;
+        if (how === null || empty || v.hasFocus) return Decoration.none;
+        return Decoration.set([Decoration.mark({ class: 'rl-toolbar-held' }).range(from, to)]);
+      }
+    },
+    { decorations: (plugin) => plugin.decorations },
+  );
+  const heldTheme = EditorView.baseTheme({
+    '.rl-toolbar-held': { backgroundColor: 'color-mix(in srgb, Highlight 40%, transparent)' },
+  });
+  function holdSelection(): void {
+    try {
+      view.dispatch({ effects: holdChanged.of(null) });
+    } catch {
+      // The view is gone.
+    }
+  }
 
   // The toolbar stays true to the selection while it is open: Bold is on inside bold text, and
   // Cut and Copy need a selection.
   const removeExtension = editor.addExtension([
+    holder,
+    heldTheme,
     EditorView.scrollMargins.of(() => ({
       bottom: how === 'docked' && !panel.hidden ? panel.offsetHeight + DOCK_BOTTOM + DOCK_GAP : 0,
     })),
@@ -656,6 +749,14 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
       if (update.geometryChanged || update.docChanged) keepRoom();
       // Suggestions are for the word where it was found: text that moves takes them away.
       if (update.docChanged && spelling) dropSpelling();
+      // The review card is for the place as it was: text that moves takes it away too.
+      if (update.docChanged && bubble) {
+        bubble = null;
+        if (!searching) {
+          draw(spelling?.rows ?? null);
+          placeAgain();
+        }
+      }
       if (update.selectionSet || update.docChanged) refresh();
     }),
   ]);
@@ -677,12 +778,9 @@ export function createToolbar(editor: Editor, options: ToolbarOptions): Toolbar 
         view.focus();
         return true;
       case 'show-at-caret':
-        open('keyboard', () =>
-          placeBelow(
-            view.coordsAtPos(view.state.selection.main.head) ?? view.dom.getBoundingClientRect(),
-          ),
-        );
-        drawn?.entry()?.focus();
+        // What a right-click at the caret or the selection opens. (It opens at once unless the
+        // spell checker is asked about a word, which it waits for a moment.)
+        void openContext(0, 0, true, 'keyboard');
         return true;
     }
   };

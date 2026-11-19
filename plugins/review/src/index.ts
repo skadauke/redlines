@@ -12,6 +12,14 @@ import {
   viewModeField,
 } from '@redlines/editor';
 import type { PluginManifest } from '@redlines/plugin-api';
+import {
+  changeBubble,
+  highlightAt,
+  highlightBubble,
+  installBubbleStyle,
+  threadAt,
+  threadBubble,
+} from './bubble.ts';
 import { barClickHandler, closeBar, isBarOpen, move, openBar, reviewBar, start } from './bar.ts';
 import { cards } from './cards.ts';
 import {
@@ -21,8 +29,8 @@ import {
   toggleHighlight,
 } from './highlight.ts';
 import { type PinnedElement, rail, type RailOptions } from './rail.ts';
-import { EditError, type MarkRange, rejectReason } from '@redlines/format';
-import { decideSuggestion, type ReviewContext, spanOf } from './shared.ts';
+import { EditError, type MarkRange, rejectReason, type Thread } from '@redlines/format';
+import { applyReview, decideSuggestion, type ReviewContext, spanOf } from './shared.ts';
 import { reviewTheme } from './styles.ts';
 
 export type { FieldAttachment, PostedComment } from './comment-box.ts';
@@ -143,6 +151,14 @@ export interface ReviewController {
    * the notes go back to their places.
    */
   pinToRail(el: HTMLElement, anchor: () => number, lost: () => void): PinnedElement | null;
+  /**
+   * The review card of a place, for the toolbar to stack above its row (#1190): the card of the
+   * change, comment or highlight at `pos`, or under `target`, the element a right-click was on (a
+   * deleted text is drawn as one). Null where there is none, and in Clean and Plain, which show
+   * none. It puts away a change's card that was open, since this is the same card. Its buttons
+   * decide, and send a bubbling `rl-bubble-done` event from the card, for the toolbar to go.
+   */
+  bubbleAt(at: { pos: number; target?: Element | null }): HTMLElement | null;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
@@ -295,6 +311,40 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     },
   ]);
 
+  const bubbleHost = {
+    renderText: (thread: Thread) => {
+      const render = options.extras?.renderText;
+      if (!render) return thread.text;
+      const person = view.state
+        .field(parsedField)
+        .ledger.people.find(({ handle }) => handle === thread.by);
+      return render({ id: thread.id, by: thread.by, text: thread.text, resized: () => {} }, person);
+    },
+    reply: (thread: string) => void notes.replyTo(thread),
+  };
+  const bubbleAt: ReviewController['bubbleAt'] = ({ pos, target = null }) => {
+    if (destroyed) return null;
+    const mode = view.state.field(viewModeField);
+    if (mode !== 'redlines' && mode !== 'simple') return null;
+    installBubbleStyle(view.dom.ownerDocument);
+    const clipped = Math.min(Math.max(pos, 0), view.state.doc.length);
+    const change = changeCards.changeAtPlace(view, clipped, target);
+    const thread = change ? null : threadAt(view, clipped);
+    const mark = change || thread ? null : highlightAt(view, clipped);
+    const card = change
+      ? changeBubble(view, ctx, change)
+      : thread
+        ? threadBubble(view, ctx, thread, bubbleHost, (how, id) =>
+            applyReview(view, ctx.author, { op: how, thread: id }, `review.${how}`),
+          )
+        : mark
+          ? highlightBubble(view, ctx, mark)
+          : null;
+    // The card is in the toolbar now; a change's own card, hovered or clicked, goes.
+    if (card) changeCards.close(view);
+    return card;
+  };
+
   return {
     openBar() {
       openBar(view, ctx);
@@ -317,6 +367,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       move(view, ctx, -1);
       report();
     },
+    bubbleAt,
     startComment: (initialText) => notes.startComment(initialText),
     hasDraft: () => notes.hasDraft(),
     saveDrafts: () => notes.saveDrafts(),

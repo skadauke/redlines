@@ -1366,3 +1366,93 @@ describe('the palette in the toolbar', () => {
     expect(toolbar.isOpen()).toBe(false);
   });
 });
+
+describe('the review card of a place (#1190)', () => {
+  const card = (text = 'A card') => {
+    const el = document.createElement('div');
+    el.className = 'the-card';
+    el.textContent = text;
+    return el;
+  };
+  const spelling = (answer: readonly string[]) => ({
+    enabled: () => true,
+    suggest: vi.fn(() => Promise.resolve(answer)),
+  });
+  /** The card's children in order, top to bottom: the spelling rows, the card, the bar. */
+  const stack = () =>
+    [...(panelOf()?.children ?? [])]
+      .filter((child) => !child.classList.contains('rl-toolbar-rule'))
+      .map((child) => child.className.split(' ')[0]);
+
+  it('stacks the card of a right-click above the bar, under the spelling rows', async () => {
+    const bubbleAt = vi.fn(() => card());
+    const { editor } = mount('Hello wrold there', { bubbleAt, spelling: spelling(['world']) });
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    rightClick(editor);
+    await settle();
+    expect(bubbleAt).toHaveBeenCalledWith({ pos: 8, target: editor.view.contentDOM });
+    expect(stack()).toEqual(['rl-toolbar-spelling', 'rl-toolbar-bubble', 'rl-toolbar-bar']);
+    expect(panelOf()?.querySelector('.rl-toolbar-bubble .the-card')).not.toBeNull();
+  });
+
+  it('opens with ⇧⌘P exactly what a right-click at the caret opens', async () => {
+    const bubbleAt = vi.fn(() => card());
+    const { editor, toolbar } = mount('Hello wrold there', {
+      bubbleAt,
+      spelling: spelling(['world']),
+    });
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(8);
+    vi.spyOn(editor.view, 'focus').mockImplementation(() => {});
+    rightClick(editor);
+    await settle();
+    const rightClicked = stack();
+    const rightWords = words().map((word) => word.textContent);
+    toolbar.show();
+    expect(toolbar.isOpen()).toBe(false);
+    editor.view.dispatch({ selection: { anchor: 8 } });
+    toolbar.show();
+    await settle();
+    expect(toolbar.isOpen()).toBe(true);
+    expect(stack()).toEqual(rightClicked);
+    expect(words().map((word) => word.textContent)).toEqual(rightWords);
+    expect(bubbleAt).toHaveBeenLastCalledWith({ pos: 8, target: null });
+    // The keyboard goes to the first suggestion.
+    expect(document.activeElement).toBe(words()[0]);
+  });
+
+  it('has no card where the place has none', () => {
+    const { editor } = mount('Hello wrold there', { bubbleAt: () => null });
+    rightClick(editor);
+    expect(panelOf()?.querySelector('.rl-toolbar-bubble')).toBeNull();
+  });
+
+  it('puts the toolbar away when the card says its work is done', () => {
+    const el = card();
+    const { editor, toolbar } = mount('Hello wrold there', { bubbleAt: () => el });
+    rightClick(editor);
+    expect(toolbar.isOpen()).toBe(true);
+    el.dispatchEvent(new CustomEvent('rl-bubble-done', { bubbles: true }));
+    expect(toolbar.isOpen()).toBe(false);
+  });
+
+  it('takes the card away when the text changes, as it does the spelling rows', () => {
+    const { editor } = mount('Hello wrold there', { bubbleAt: () => card() });
+    rightClick(editor);
+    editor.view.dispatch({ changes: { from: 0, insert: 'x' } });
+    expect(panelOf()?.querySelector('.rl-toolbar-bubble')).toBeNull();
+    expect(panelOf()?.hidden).toBe(false);
+  });
+
+  it('keeps the selection’s highlight while the toolbar is open, and not after', () => {
+    const { editor, toolbar } = mount('Hello wrold there');
+    editor.view.dispatch({ selection: { anchor: 6, head: 11 } });
+    const held = () => document.querySelectorAll('.rl-toolbar-held');
+    expect(held().length).toBe(0);
+    toolbar.show();
+    // The keyboard is in the toolbar, where the page draws the text's selection as inactive.
+    expect(editor.view.hasFocus).toBe(false);
+    expect([...held()].map((el) => el.textContent).join('')).toBe('wrold');
+    toolbar.show();
+    expect(held().length).toBe(0);
+  });
+});

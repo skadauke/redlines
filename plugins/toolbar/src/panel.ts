@@ -185,6 +185,7 @@ export function drawPanel(
   panel: HTMLElement,
   bar: ShownBar,
   spelling: SpellingRows | null,
+  bubble: HTMLElement | null,
   handlers: PanelHandlers,
   onMenu: (id: MenuId | null) => void = () => {},
 ): DrawnPanel {
@@ -192,7 +193,13 @@ export function drawPanel(
   const items = new Map<string, { button: HTMLButtonElement; paired: boolean }>();
   /** The headers of the menus, which say what the selection is where the menu is about one. */
   const heads = new Map<MenuId, HTMLElement>();
+  // Top to bottom: the spelling rows, the review card of the place (the host's `bubble`), the bar.
   if (spelling) panel.append(spellingBlock(spelling, handlers), rule(true));
+  if (bubble) {
+    const slot = element('div', 'rl-toolbar-bubble');
+    slot.append(bubble);
+    panel.append(slot, rule(true));
+  }
   const row = element('div', 'rl-toolbar-bar');
   panel.append(row);
 
@@ -326,8 +333,9 @@ export function drawPanel(
     bar: tops.map((top) => boxes.findIndex((box) => box.top === top)),
     menus: lines.map((rows) => rows.map((buttons) => buttons.length)),
   });
+  // The rows the arrow keys walk above the bar: the suggestions, and the review card's buttons.
   const words = () =>
-    [...panel.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word')].filter(
+    [...panel.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word, .rl-bubble-action')].filter(
       (word) => !word.disabled,
     );
   const here = (): Position | null => {
@@ -375,7 +383,10 @@ export function drawPanel(
       setOpen(index < 0 ? null : index);
     },
     openId: () => (open === null ? null : (boxes[open]?.id ?? null)),
-    entry: () => words()[0] ?? tops[0],
+    entry: () =>
+      [...panel.querySelectorAll<HTMLButtonElement>('.rl-toolbar-word')].find(
+        (word) => !word.disabled,
+      ) ?? tops[0],
     key(event) {
       const active = panel.ownerDocument.activeElement;
       const list = words();

@@ -771,6 +771,9 @@ const review = createReview(editor, {
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
 const toolbar = createToolbar(editor, {
   container: main,
+  // A right-click on a change, a comment or a highlight, and ⇧⌘P there, stack its review card above
+  // the bar, as one widget (#1190).
+  bubbleAt: (at) => review.bubbleAt(at),
   // The palette (type with the toolbar open) searches the app's own commands and settings beside
   // the registry's; a setting is a live control in its line (toolbar-commands.ts).
   appCommands: () => toolbarCommands(),
