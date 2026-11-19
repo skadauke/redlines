@@ -26,8 +26,9 @@ import { dialectFacet, imageOfNode } from '../image-size.ts';
 import { htmlBreak, htmlChip, htmlElement, htmlHeading, htmlWbr } from './html-draw.ts';
 import { htmlBlock, htmlBlocks, openedField } from './html-block.ts';
 import { imageDecoration, refreshImagesEffect, selectionInside } from './image.ts';
-import { quartoCallouts } from './quarto-callout.ts';
-import { readTree, spacings } from './spacing.ts';
+import { quartoCalloutBoxes, quartoCallouts } from './quarto-callout.ts';
+import { readTree, spacings, type Spacing } from './spacing.ts';
+import { space } from './theme.ts';
 import {
   inWindow,
   replaceIn,
@@ -131,6 +132,32 @@ function columns(line: Line, from: number, to: number): number {
 }
 
 /** A list marker drawn as a bullet, or as its number, in a box as wide as its source. */
+/** The space between a table and a table under it: empty, as high as the space of its kind. */
+class SpaceWidget extends WidgetType {
+  readonly spacing: Spacing;
+
+  constructor(spacing: Spacing) {
+    super();
+    this.spacing = spacing;
+  }
+
+  override eq(other: SpaceWidget): boolean {
+    return other.spacing === this.spacing;
+  }
+
+  override toDOM(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'rl-space-widget';
+    el.style.height = space(this.spacing);
+    el.setAttribute('aria-hidden', 'true');
+    return el;
+  }
+
+  override get estimatedHeight(): number {
+    return 16;
+  }
+}
+
 class ListMarkWidget extends WidgetType {
   readonly text: string;
   readonly cols: number;
@@ -706,7 +733,20 @@ export function previewDecorations(state: EditorState, window?: Window): Decorat
       return true;
     },
   });
-  for (const { line, spacing, below, apart, clip } of spacings(read.reading, leaves)) {
+  const quarto = quartoCalloutBoxes(state);
+  for (const { line, spacing, below, apart, clip, spacer } of spacings(
+    read.reading,
+    leaves,
+    quarto,
+  )) {
+    if (spacer) {
+      // A table under a table: the second has no first line to take the space (`SpaceWidget`).
+      const at = state.doc.line(line).from;
+      b.push(
+        Decoration.widget({ widget: new SpaceWidget(spacing), block: true, side: -1 }).range(at),
+      );
+      continue;
+    }
     const kind = below ? '-below' : apart ? '-apart' : clip ? '-clip' : '';
     b.lineClass(state.doc.line(line), `rl-space-${spacing}${kind}`);
   }
