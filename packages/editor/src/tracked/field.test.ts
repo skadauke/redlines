@@ -119,10 +119,15 @@ describe('the views a View menu lists', () => {
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'redlines' });
   });
 
-  it('leaves Redlines as it is, in either look, when Redlines is shown already', () => {
+  it('leaves the full markup as it is, and goes back to it from the simple look (#1156)', () => {
     const editor = load(marked, { markupView: 'simple' });
+    // Redlines chosen while the simple look shows is the way back to the full markup, and chosen.
     editor.showView('redlines');
-    expect(editor.getUiState().view).toBe('simple');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'redlines' });
+    editor.showView('redlines');
+    expect(editor.getUiState().view).toBe('redlines');
+    editor.setViewMode('simple');
+    editor.setMarkupView('simple');
     // The review bar shows the full markup without choosing it: the simple look stays the one
     // remembered, and choosing Redlines in the menu doesn't take it back to the simple look.
     editor.view.dispatch({ effects: setViewModeEffect.of('redlines') });

@@ -140,11 +140,10 @@ test.describe('the simple look @views', () => {
     await check('after a click past the end of the last line');
   });
 
-  test('a click on an insertion, or on a bar, opens the change’s card with Accept and Reject (#664)', async ({
+  test('a click on an insertion opens the change’s card with Accept and Reject (#664)', async ({
     start,
   }) => {
     const j = await open(start);
-    // The insertion's colored text.
     await j.page.locator('.rl-ins-plain').first().click();
     const card = j.page.locator('.rl-card');
     await expect(card).toBeVisible();
@@ -154,16 +153,40 @@ test.describe('the simple look @views', () => {
     expect(await j.page.evaluate(() => window.__redlines!.editor.getUiState()['view'])).toBe(
       'simple',
     );
-    // A change bar: the card of the change on its line, and the look stays.
-    await j.page.keyboard.press('Escape');
-    await expect(card).toHaveCount(0);
-    const at = await j.page.locator('.rl-bar-seg').first().boundingBox();
-    await j.page.mouse.click(at!.x + at!.width / 2, at!.y + at!.height / 2);
-    await expect(card).toBeVisible();
-    expect(await j.page.evaluate(() => window.__redlines!.editor.getUiState()['view'])).toBe(
-      'simple',
-    );
-    await j.shot('simple-card-from-bar');
+  });
+
+  test('Redlines, Simple, and back to Redlines, by a change bar and by the View menu (#1156)', async ({
+    start,
+  }) => {
+    const j = await start({ doc: DOC, tracking: false, view: 'redlines' });
+    await j.settle();
+    const view = () => j.page.evaluate(() => window.__redlines!.editor.getUiState()['view']);
+    const barClick = async () => {
+      // A second click close after the first is a double-click, which switches once and not back.
+      await j.page.waitForTimeout(600);
+      const at = await j.page.locator('.rl-bar-seg').first().boundingBox();
+      await j.page.mouse.click(at!.x + at!.width / 2, at!.y + at!.height / 2);
+      await j.settle();
+    };
+    // By the bar, both ways.
+    await j.shot('simple-journey-1-redlines');
+    await barClick();
+    expect(await view()).toBe('simple');
+    await j.shot('simple-journey-2-simple');
+    await barClick();
+    expect(await view(), 'a click on the bar in Simple goes back').toBe('redlines');
+    await expect(j.page.locator('.rl-card')).toHaveCount(0);
+    await j.shot('simple-journey-3-back');
+    // By the View menu's Redlines row.
+    await barClick();
+    expect(await view()).toBe('simple');
+    await j.page.getByRole('button', { name: 'View', exact: true }).hover();
+    const row = j.page.locator('.rl-menu-item').filter({ visible: true, hasText: /^Redlines/ });
+    await expect(row).toBeVisible();
+    await expect(row, 'Redlines is checked in Simple').toHaveAttribute('aria-checked', 'true');
+    await row.click();
+    await j.settle();
+    expect(await view(), 'the Redlines row goes back').toBe('redlines');
   });
 
   test('in dark, the insertion is readable', async ({ start }) => {
