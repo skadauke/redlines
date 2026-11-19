@@ -5691,6 +5691,9 @@ function editsWidening(
   }
 }
 
+/** A marker's closer alone on its line, and an ordered item that doesn't start at 1 on the next. */
+const CLOSER_BEFORE_ITEM = /<!--\/\w+-->[ \t]*\r?\n[ \t]*(?!0*1[.)])\d{1,9}[.)](?:[ \t]|\r?\n|$)/;
+
 /**
  * Whether `changes`, a fine write of `edits`, are at a block's boundary (`atBlockBoundary`) and
  * make a file that micromark reads otherwise than its newest view (#597, #601, #588), or whether
@@ -5707,6 +5710,16 @@ export function readsOtherAtBoundary(
   // stands and otherwise once the deletion is rejected: the unit is replaced (#1104).
   if (edits.some((edit) => afterBareDeletion(text, edit.from))) return true;
   if (hardBreakBesideDeletionReadsOtherwise(text, edits, changes)) return true;
+  // A closer's line between indented code and an item that starts at a number other than 1: micromark
+  // reads the item after the closer as a list, and as text after the code without it (#601).
+  if (
+    changes.some((change) => change.insert.includes('<!--/')) &&
+    CLOSER_BEFORE_ITEM.test(applyChanges(text, changes)) &&
+    // (The item is outside the paragraph that the change is in, so the whole file is read.)
+    readsOtherMicromark(text, changes, true)
+  ) {
+    return true;
+  }
   return (
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||

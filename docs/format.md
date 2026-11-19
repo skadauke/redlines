@@ -142,7 +142,11 @@ edit is refused as one in code, or made when none of its markers lands in the co
 around the whole block where it does around a fenced one, with its markers in the text before and
 after the block or on lines of their own, never on a line of the block or in its indentation; when
 the new text of an insertion ends with the block, or goes on after it past a blank line, its closer
-or the split after it stands alone on the line after it (§3.3). An edit that would make other
+or the split after it stands alone on the line after it (§3.3). A key in indented code that has an
+ordered item right below it that doesn't start at 1 (`2. …`) replaces the item with the block: the
+closer's line between them would make micromark read the item as a list (`<ol start="2">`), where
+the newest view, with no closer, has it as text after the code, which micromark reads as a paragraph
+(#601). An item that starts at 1 is a list in both readings and stays out. An edit that would make other
 markers code, as a blank line typed above a line that goes on a paragraph does, and a decision that
 would bring a marker onto a line of code, are refused as hiding other changes (`would-hide-marks`);
 when the markers are a comment's, which no decision takes away, the refusal says to delete that
