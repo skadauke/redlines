@@ -316,6 +316,7 @@ export function createTitleBar(
   // The toolbar's wrench: a click shows it or puts it away, and the button is pressed while it shows.
   const toolbarControl = element('div', 'rl-control');
   const toolbarButton = iconButton('Toolbar', icon('wrench', 18));
+  toolbarButton.dataset['tour'] = 'palette';
   toolbarButton.classList.add('rl-wrench-button');
   // The toolbar's own press handling leaves it to the click (plugins/toolbar).
   toolbarButton.dataset['toolbarControl'] = '';
@@ -337,6 +338,7 @@ export function createTitleBar(
   const end = element('div', 'rl-titlebar-end');
   const viewControl = element('div', 'rl-control');
   const viewButton = iconButton('View', icon(VIEW_ICONS[menuViewOf(state.view)], 18));
+  viewButton.dataset['tour'] = 'views';
   viewControl.append(viewButton);
   // What a click on each will do, which the hint under it says, and the icon's description is.
   // (A hint is not shown over its own icon's menu, which is open when the pointer has rested.)
@@ -348,6 +350,7 @@ export function createTitleBar(
   const reviewControl = element('div', 'rl-control');
   // Named for what a click on it does, and pressed while that is on; its menu is Review.
   const reviewButton = iconButton('Track Changes', icon('pen', 18));
+  reviewButton.dataset['tour'] = 'pen';
   reviewControl.append(reviewButton);
   const reviewTip = createTip(reviewControl, reviewButton, 'rl-review-tip', {
     end: true,
