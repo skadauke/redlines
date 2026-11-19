@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_FONTS } from './copy-html.ts';
 import { documentHtml, documentText } from './document-html.ts';
 
 const LEDGER = [
@@ -200,9 +201,6 @@ describe('documentHtml of a selection (clip)', () => {
     expect(html).toContain('<p style="margin:0 0 0 0.5in">☑ done</p>');
     expect(html).toContain('☐ open');
   });
-    expect(html).toContain('<li style="list-style-type:none">☑ done</li>');
-    expect(html).toContain('☐ open');
-  });
 });
 
 describe('picture sizes for Word and Docs', () => {
@@ -262,7 +260,12 @@ describe('a copy for Word (#1181)', () => {
   const office = (md: string) => documentHtml(md, 'clean', { office: true, clip: true });
 
   it('is in Arial, like the export, and keeps a face the theme chose', () => {
-    expect(office('Some text')).toMatch(/^<div data-redlines style="font-family:Arial,/);
+    const calibri = documentHtml('Some text', 'clean', {
+      office: true,
+      clip: true,
+      fonts: DEFAULT_FONTS,
+    });
+    expect(calibri).toMatch(/^<div data-redlines style="font-family:Arial,/);
     const georgia = documentHtml('Some text', 'clean', {
       office: true,
       clip: true,
@@ -271,11 +274,15 @@ describe('a copy for Word (#1181)', () => {
     expect(georgia).toContain('font-family:Georgia, Gelasio, serif');
     expect(georgia).not.toContain('Arial');
     // The page and the other targets still have Calibri.
-    expect(documentHtml('Some text', 'clean', { clip: true })).toContain('Calibri');
+    expect(documentHtml('Some text', 'clean', { clip: true, fonts: DEFAULT_FONTS })).toContain(
+      'Calibri',
+    );
   });
 
   it('keeps a checklist item apart from the bullet list above it', () => {
-    const html = office('- First item\n  - Nested item\n- [ ] A checklist item\n- [x] Done\n- Last\n');
+    const html = office(
+      '- First item\n  - Nested item\n- [ ] A checklist item\n- [x] Done\n- Last\n',
+    );
     // Two bullet lists, and the checklist between them is no item of either.
     expect(html).toMatch(
       /<ul><li>First item<ul><li>Nested item<\/li><\/ul><\/li><\/ul><div data-rl-tasks><p[^>]*>☐ A checklist item<\/p><p[^>]*>☑ Done<\/p><\/div><ul><li>Last<\/li><\/ul>/,
