@@ -1698,6 +1698,14 @@ an empty `-` right under the text, which Markdown reads as the text's underline.
 or `*`, and a number, read as text there, and keep the two changes. Backspace right after the key
 takes it back whole.
 
+**Tab under the empty item a Return just left (#1202).** Where the author's own Return made an empty
+item whose split's break holds a blank line before the next item, Tab on that next item would put
+it under an empty item that Markdown ends at the blank line: the file would read it as no child,
+the newest view as one. The blank line is part of the author's own pending break, so the Tab takes
+it with it and the item stands directly under the empty one (`+ <!--split k3x9-->\n  + alpha`). If
+the split is not the author's own, or the line above is no empty item, the key still says why it
+does nothing.
+
 **Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
 other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
 prefix of the next line) by a paragraph break, as Return on either side of it does, is written
