@@ -813,6 +813,24 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/format/src/table-rules.ts', 'PENDING_PIPE', 'widen', 'inventory #117'],
   [
     'packages/format/src/track.ts',
+    'DIV_IN_ITEM',
+    'alert',
+    "a div typed in a list item that no fine write and no replacement of the list holds (a nested item with more of the list after it): the editor asks before it is made without tracking (design §3.1), and a caller that can't ask (an agent) is refused in words that say what to do (format §9.4, #1234)",
+  ],
+  [
+    'packages/format/src/inline.ts',
+    'DIV_IN_ITEM',
+    'alert',
+    'the words of the same signal (track.ts), for a caller that cannot ask',
+  ],
+  [
+    'packages/format/src/inline.ts',
+    'DIV_IN_ITEM_ASK',
+    'info',
+    'the question the editor asks about it, the alert itself (design §3.1)',
+  ],
+  [
+    'packages/format/src/track.ts',
     'A line break at the end of this text would take ',
     'widen',
     'inventory #51',

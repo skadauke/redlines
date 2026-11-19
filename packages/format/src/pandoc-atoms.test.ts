@@ -141,3 +141,155 @@ describe('a div typed whole in a quote is one insertion (§9.4, #1234)', () => {
     });
   }
 });
+
+describe('a div typed in a list item (§9.4, #1234)', () => {
+  const D = '::: {.callout-tip}\n  A.\n  :::';
+  const deeper = (text: string, by: string) => text.replaceAll('\n  ', `\n${by}`);
+  const IDS = ['k3x9', 'm4yz', 'p5qr', 'w8nn', 'b3dn', 'c4fr', 'd5gs', 'f6hj', 'g7km', 'h8nq'];
+  // [name, document, where the typing starts (after this text of it), what is typed, the body written]
+  const cases: [string, string, string, string, string][] = [
+    [
+      'right under the text of the only item: the closer stands outside the list',
+      '- one\n\nAfter.',
+      '- one',
+      `\n  ${D}`,
+      '- one<!--ins k3x9--><!--split m4zp-->\n  ::: {.callout-tip}\n  A.\n  :::\n<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'first in an empty item',
+      '- \n\nAfter.',
+      '- ',
+      D,
+      '- <!--ins k3x9-->\n  ::: {.callout-tip}\n  A.\n  :::\n<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'under the last of two items',
+      '- one\n- two\n\nAfter.',
+      '- one\n- two',
+      `\n  ${D}`,
+      '- one\n- two<!--ins k3x9--><!--split m4zp-->\n  ::: {.callout-tip}\n  A.\n  :::\n<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'under a nested item that ends the list',
+      '- one\n  - two\n\nAfter.',
+      '- one\n  - two',
+      `\n    ${deeper(D, '    ')}`,
+      '- one\n  - two<!--ins k3x9--><!--split m4zp-->\n    ::: {.callout-tip}\n    A.\n    :::\n<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'in an item of a list in a quote that ends the list',
+      '> - one\n\nAfter.',
+      '> - one',
+      `\n>   ${deeper(D, '>   ')}`,
+      '> - one<!--ins k3x9--><!--split m4zp-->\n>   ::: {.callout-tip}\n>   A.\n>   :::\n> <!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'under the first of two items: the list is replaced, the closer after it',
+      '- one\n- two\n\nAfter.',
+      '- one',
+      `\n  ${D}`,
+      '<!--sub k3x9 - one\\n- two-->\n- one\n  ::: {.callout-tip}\n  A.\n  :::\n- two<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'in an item of a list in a quote with another item after it',
+      '> - one\n> - two\n\nAfter.',
+      '> - one',
+      `\n>   ${deeper(D, '>   ')}`,
+      '> <!--sub k3x9 - one\\n> - two-->\n>\n> - one\n>   ::: {.callout-tip}\n>   A.\n>   :::\n> - two<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'under a nested item with another after it',
+      '- one\n  - two\n  - three\n\nAfter.',
+      '- one\n  - two',
+      `\n    ${deeper(D, '    ')}`,
+      '- one\n  <!--sub k3x9 - two\\n  - three-->\n  - two\n    ::: {.callout-tip}\n    A.\n    :::\n  - three<!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'after a blank line: a second paragraph, the closer in the item',
+      '- one\n\nAfter.',
+      '- one',
+      `\n\n  ${D}`,
+      '- one<!--ins k3x9-->\n\n  ::: {.callout-tip}\n  A.\n  :::\n  <!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'after typed text and a blank line',
+      '- one\n\nAfter.',
+      '- one',
+      `\n\n  Intro.\n\n  ${D}`,
+      '- one<!--ins k3x9-->\n\n  Intro.\n\n  ::: {.callout-tip}\n  A.\n  :::\n  <!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'the same in a nested item',
+      '- one\n  - two\n\nAfter.',
+      '- one\n  - two',
+      `\n\n    Intro.\n\n    ${deeper(D, '    ')}`,
+      '- one\n  - two<!--ins k3x9-->\n\n    Intro.\n\n    ::: {.callout-tip}\n    A.\n    :::\n    <!--/k3x9-->\n\nAfter.',
+    ],
+    [
+      'after a blank line in an item of a list in a quote: the closer at the item prefix',
+      '> - one\n> - two\n\nAfter.',
+      '> - one',
+      `\n>\n>   ${deeper(D, '>   ')}`,
+      '> - one<!--ins k3x9-->\n>\n>   ::: {.callout-tip}\n>   A.\n>   :::\n>   <!--/k3x9-->\n> - two\n\nAfter.',
+    ],
+    [
+      'the same with typed text before the callout',
+      '> - one\n> - two\n\nAfter.',
+      '> - one',
+      `\n>\n>   Intro.\n>\n>   ${deeper(D, '>   ')}`,
+      '> - one<!--ins k3x9-->\n>\n>   Intro.\n>\n>   ::: {.callout-tip}\n>   A.\n>   :::\n>   <!--/k3x9-->\n> - two\n\nAfter.',
+    ],
+    [
+      'the same in a list in a quote in a quote',
+      '> > - one\n> > - two\n\nAfter.',
+      '> > - one',
+      `\n> >\n> >   ${deeper(D, '> >   ')}`,
+      '> > - one<!--ins k3x9-->\n> >\n> >   ::: {.callout-tip}\n> >   A.\n> >   :::\n> >   <!--/k3x9-->\n> > - two\n\nAfter.',
+    ],
+    [
+      'the same under the last item of a list in a quote',
+      '> - one\n> - two\n\nAfter.',
+      '> - one\n> - two',
+      `\n>\n>   ${deeper(D, '>   ')}`,
+      '> - one\n> - two<!--ins k3x9-->\n>\n>   ::: {.callout-tip}\n>   A.\n>   :::\n>   <!--/k3x9-->\n\nAfter.',
+    ],
+  ];
+  for (const [name, doc, before, typed, expected] of cases) {
+    it(`${name}: no marker on a fence line, every order reads alike`, () => {
+      const start = file(doc);
+      const at = before.length;
+      const done = trackedEdits(
+        start,
+        [{ from: at, to: at, insert: typed }],
+        context(ada, IDS, QMD),
+      );
+      const after = applyChanges(start, done.changes);
+      expect(after.split('<!-- redlines')[0]!.trimEnd()).toBe(expected);
+      const fences = bodyOf(after)
+        .split('\n')
+        .filter((line) => /^[ \t>]*:{3,}/.test(line));
+      expect(fences.length).toBeGreaterThanOrEqual(2);
+      expect(fences.filter((line) => line.includes('<!--'))).toEqual([]);
+      expectEveryOrderRead(name, after);
+      expect(bodyOf(applyChanges(after, rejectAll(after))).trimEnd()).toBe(bodyOf(start).trimEnd());
+      expect(parse(applyChanges(after, acceptAll(after))).marks).toEqual([]);
+    });
+  }
+
+  it('a lone fence line has no line to read the container from: written as before, never asked about', () => {
+    for (const [doc, before, typed] of [
+      ['- one\n\nAfter.', '- one', '\n  :::'],
+      ['- \n\nAfter.', '- ', '::: {.callout-tip}'],
+      ['- one\n- two\n\nAfter.', '- one', '\n  ::: {.callout-tip}'],
+    ] as const) {
+      const start = file(doc);
+      const at = before.length;
+      const done = trackedEdits(
+        start,
+        [{ from: at, to: at, insert: typed }],
+        context(ada, IDS, QMD),
+      );
+      expect(applyChanges(start, done.changes)).toContain('<!--ins');
+    }
+  });
+});
