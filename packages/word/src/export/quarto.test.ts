@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'vitest';
+import { partText, readParts } from '../shared/zip.ts';
+import { exportDocx } from './build.ts';
+import { isQuarto, quartoToMarkdown } from './quarto.ts';
+
+const DOC = `---
+title: "Quarto @fig-never"
+---
+
+# Introduction {#sec-intro}
+
+::: {.callout-note}
+## A note
+
+Says something. See @sec-methods.
+:::
+
+::: {.callout-important title="Important"}
+In the fence.
+:::
+
+::: {.columns}
+::: {.column width="50%"}
+Left.
+:::
+::: {.column width="50%"}
+Right.
+:::
+:::
+
+# Methods {#sec-methods}
+
+The method is in @sec-intro, then @fig-sketch, @tbl-owners and @eq-mass.
+
+![A sketch](sketch.png){#fig-sketch}
+
+| Milestone | Owner |
+|-----------|-------|
+| Review    | Ada   |
+
+: Who owns what {#tbl-owners}
+
+$$ E = mc^2 $$ {#eq-mass}
+
+Water is H~2~O, a square is x^2^, and \`code @fig-sketch x^2^\` stays. Not ~~struck~~.
+
+\`\`\`{r}
+#| label: fig-plot
+x <- c(1, 2)
+\`\`\`
+`;
+
+describe('a Quarto document for the Word export (#1215)', () => {
+  it('knows a Quarto document by its syntax, and leaves any other text alone', () => {
+    expect(isQuarto(DOC)).toBe(true);
+    expect(isQuarto('# Title\n\nSome **text** with x^2^ and H~2~O.\n')).toBe(false);
+    expect(isQuarto('::: {.callout-tip}\nHi\n:::\n')).toBe(true);
+  });
+
+  const out = quartoToMarkdown(DOC);
+
+  it('writes a callout as a quote that starts with its title', () => {
+    expect(out).toContain('> **A note**\n>\n> Says something. See Section 2.');
+    expect(out).toContain('> **Important**\n>\n> In the fence.');
+    expect(out).not.toContain(':::');
+  });
+
+  it('drops the fences of other divs and keeps their paragraphs apart', () => {
+    expect(out).toMatch(/Left\.\n\n+Right\./);
+  });
+
+  it('drops attributes, and numbers the targets in the order they are written', () => {
+    expect(out).toContain('# Introduction\n');
+    expect(out).toContain('![A sketch](sketch.png)\n');
+    expect(out).toContain('Table 1: Who owns what');
+    expect(out).toContain('The method is in Section 1, then Figure 1, Table 1 and Equation 1.');
+    expect(out).not.toMatch(/\{#/);
+  });
+
+  it('writes a display formula as its TeX with its number', () => {
+    expect(out).toContain('E = mc^2    (1)');
+    expect(out).not.toContain('$$');
+  });
+
+  it('writes a superscript and a subscript, and leaves strike and code alone', () => {
+    expect(out).toContain('H<sub>2</sub>O');
+    expect(out).toContain('x<sup>2</sup>,');
+    expect(out).toContain('`code @fig-sketch x^2^`');
+    expect(out).toContain('~~struck~~');
+  });
+
+  it('never touches the front matter, a chunk or the ledger', () => {
+    expect(out.startsWith('---\ntitle: "Quarto @fig-never"\n---')).toBe(true);
+    const chunk = '```{r}\n# @fig-sketch ::: {#sec-x} $$ x^2^\n```\n';
+    expect(quartoToMarkdown(`# H {#sec-h}\n\n${chunk}`)).toBe(`# H\n\n${chunk}`);
+    const withLedger = `${DOC}\n<!-- redlines\nversion: 1\ncomments:\n  k3x9:\n    text: |-\n      See @fig-sketch\n-->\n`;
+    expect(quartoToMarkdown(withLedger).endsWith('      See @fig-sketch\n-->\n')).toBe(true);
+  });
+
+  it('exports with no Quarto syntax in a text of the document, and says so', async () => {
+    const report: { kind: string; message: string }[] = [];
+    const parts = readParts(await exportDocx(DOC, { report }));
+    const xml = partText(parts, 'word/document.xml') ?? '';
+    const texts = [...xml.matchAll(/<w:t\b[^>]*>([^<]*)</g)].map((m) => m[1]);
+    expect(texts.join('\n').replace('code @fig-sketch x^2^', '')).not.toMatch(
+      /:::|\{#|@(?:sec|fig|tbl|eq)-|\$\$|\^2\^/,
+    );
+    expect(texts).toContain('A note');
+    expect(xml).toContain('<w:vertAlign w:val="superscript"/>');
+    expect(report.map((r) => r.kind)).toContain('quarto');
+    expect(Object.keys(parts)).not.toContain('customXml/redlines-source.xml');
+  });
+});
