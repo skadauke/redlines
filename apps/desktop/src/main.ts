@@ -253,6 +253,11 @@ async function beginSession(path: string, follow = false): Promise<void> {
       sessionPeers = peers.length;
       render();
     },
+    tracking: () => editor.getUiState().tracking,
+    onTracking: (on) => {
+      if (editor.getUiState().kind === 'plain-only' || on === editor.getUiState().tracking) return;
+      setTrackingHere(on);
+    },
     notice: (message) => notice.flash(message),
   });
   controller.enterSession(session);
@@ -1235,6 +1240,13 @@ const toggleTracking = () => {
   // A text or code file has no Track Changes: its menu item and key are disabled; this says why.
   if (editor.getUiState().kind === 'plain-only') return notice.flash(PLAIN_ONLY_TRACKING);
   const on = !editor.getUiState().tracking;
+  setTrackingHere(on);
+  // Track Changes belongs to the document: every other window of it follows.
+  void session?.shareTracking(on);
+};
+
+/** Turns Track Changes on or off in this window, and says so (design §5.4). */
+const setTrackingHere = (on: boolean) => {
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
   editor.setTracking(on);
   // The notice that a file asking for tracking opened with has done its work: the choice is made.
