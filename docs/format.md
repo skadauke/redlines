@@ -3634,6 +3634,16 @@ reads alike, like any deletion and insertion. Accepting both gives the blocks at
 rejecting both at the old. (Rows and columns of a table are moved by `move` links; they are not
 blocks of the document's own flow, §3.7.)
 
+Where the move is written as insertions and deletions (the fine form, not the widened substitution
+below), the ledger links them as it links the halves of a moved row: each insertion's entry names
+the first deletion of the group in `move`, and each deletion's names the first insertion. The link
+changes no reading and no decision: every order of deciding reads as it did, and the group still
+decides the marks together, so that a half of a move that has a group (unlike a half with none, §3.7)
+is decided like any mark. What it adds is that a reader can tell a move from an insertion and a
+deletion that happen to share text: Redlines names it `Moved block` on one card, and draws the new
+place with a double underline, as the new place of a moved row, after Word's marks for a move. A
+move written as a widened substitution is a replacement, and is drawn as one.
+
 - **The unit.** A move takes a run of siblings under one parent, as `widen-units.ts` reads them: a
   paragraph, a heading, a code block, a table, a quote or a list at the top of the file, a block of
   a quote, an item of a list. A caret in a paragraph moves the paragraph; in an item, the item with

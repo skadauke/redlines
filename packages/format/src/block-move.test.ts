@@ -249,3 +249,42 @@ describe('a block taken from between a line of text and a list (#586, block-move
     expectEveryOrderRead('html block down', out);
   });
 });
+
+describe('a move of blocks is written as a move (§3.14, #1201)', () => {
+  const BASE = file('One.\n\nTwo.\n\nThree.\n\nFour.');
+
+  it('links the insertion and the deletion with `move`, both ways, in one group', () => {
+    const after = moved(BASE, 'Two.', false);
+    const marks = parse(after).marks;
+    const insertion = marks.find((mark) => mark.kind === 'ins');
+    const deletion = marks.find((mark) => mark.kind === 'del');
+    expect(insertion?.entry.move).toBe(deletion?.id);
+    expect(deletion?.entry.move).toBe(insertion?.id);
+    expect(insertion?.entry.group).toBe(deletion?.entry.group);
+    expect(insertion?.entry.group).toBeDefined();
+  });
+
+  it('reads alike in every order of decisions, and accepts or rejects whole', () => {
+    for (const [at, up] of [
+      ['Two.', false],
+      ['Three.', true],
+      ['One.', false],
+    ] as const) {
+      const after = moved(BASE, at, up);
+      expectEveryOrderRead(`move ${at}`, after);
+    }
+  });
+
+  it('is a move in a list and in a quote too', () => {
+    for (const doc of ['- a\n- b\n- c', '> a\n>\n> b\n>\n> c']) {
+      const after = moved(file(doc), 'b', true);
+      const marks = parse(after).marks;
+      expect(
+        marks
+          .filter((mark) => mark.kind !== 'split')
+          .every((mark) => mark.entry.move !== undefined),
+      ).toBe(true);
+      expectEveryOrderRead('move in a container', after);
+    }
+  });
+});
