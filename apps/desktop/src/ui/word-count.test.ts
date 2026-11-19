@@ -107,10 +107,10 @@ describe('the lines and characters', () => {
   it('says them for the hint', () => {
     expect(
       textPartsLabel({ lines: 1, characters: 1, selectedLines: null, selectedCharacters: null }),
-    ).toBe('1 line \u00b7 1 character');
+    ).toBe('1 line\n1 character');
     expect(
       textPartsLabel({ lines: 1200, characters: 6400, selectedLines: 3, selectedCharacters: 120 }),
-    ).toBe('3 of 1,200 lines \u00b7 120 of 6,400 characters');
+    ).toBe('3 of 1,200 lines\n120 of 6,400 characters');
   });
 
   it("puts them in the label's title as the selection changes", () => {
@@ -130,12 +130,12 @@ describe('the lines and characters', () => {
     words.refresh();
     vi.advanceTimersByTime(1);
     const label = parent.querySelector<HTMLElement>('.rl-word-count');
-    expect(label?.title).toBe('2 lines \u00b7 9 characters');
+    expect(label?.title).toBe('2 lines\n9 characters');
     parts.selectedLines = 1;
     parts.selectedCharacters = 4;
     words.schedule(false);
     vi.advanceTimersByTime(SELECTION_MS);
-    expect(label?.title).toBe('1 of 2 lines \u00b7 4 of 9 characters');
+    expect(label?.title).toBe('1 of 2 lines\n4 of 9 characters');
   });
 });
 
