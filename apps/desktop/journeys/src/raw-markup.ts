@@ -178,14 +178,6 @@ export const KNOWN: readonly KnownCase[] = [
     text: /@sec-intro/,
     why: 'a reference to a section isn’t drawn as a link',
   },
-  {
-    issue: 1213,
-    doc: 'divs.qmd',
-    surfaces: ['redlines', 'clean', 'simple'],
-    rule: 'attributes',
-    text: /\{\.column/,
-    why: 'the fences of a div that isn’t a callout are drawn as source',
-  },
   // The exports read a Quarto document as Markdown with its Quarto syntax left in.
   ...(
     [
