@@ -169,8 +169,11 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   },
   // The icons are drawn at 14, 12 and 16 px; the note scale makes them grow with their boxes.
   '.rl-note-icon svg': { width: notePx(14), height: notePx(14) },
-  '.rl-note-icon:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
-  '.rl-note-icon:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
+  '.rl-note-icon:hover, .rl-note-icon:focus-visible': {
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+    color: 'var(--rl-ink)',
+    outline: 'none',
+  },
   // A button grayed with its reason as the hint (`setReason`): dimmed, still under the pointer.
   '.rl-reason-disabled[aria-disabled="true"], .rl-reason-disabled[aria-disabled="true"] svg': {
     color: 'var(--rl-ink-3)',
@@ -187,8 +190,11 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     fontSize: 'var(--rl-size-ui-scaled)',
     cursor: 'default',
   },
-  '.rl-note-button:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
-  '.rl-note-button:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
+  '.rl-note-button:hover, .rl-note-button:focus-visible': {
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+    color: 'var(--rl-ink)',
+    outline: 'none',
+  },
   '.rl-note-button:disabled': { color: 'var(--rl-ink-3)', backgroundColor: 'transparent' },
 
   // A comment or a reply being written: private until it is posted with ⌘↩.
@@ -344,8 +350,11 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     cursor: 'default',
   },
   '.rl-card-button svg': { width: notePx(16), height: notePx(16) },
-  '.rl-card-button:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
-  '.rl-card-button:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
+  '.rl-card-button:hover, .rl-card-button:focus-visible': {
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+    color: 'var(--rl-ink)',
+    outline: 'none',
+  },
   '.rl-card-what': {
     marginTop: notePx(1),
     paddingRight: notePx(6),
@@ -516,13 +525,11 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-bar-icon': { width: '30px', padding: '0' },
   '.rl-bar-text': { gap: '6px', padding: '0 11px 0 9px', color: 'var(--rl-ink)' },
   '.rl-bar-text svg': { color: 'var(--rl-ink-2)' },
-  '.rl-bar-icon:enabled:hover, .rl-bar-text:enabled:hover': {
-    backgroundColor: 'var(--rl-pressed)',
-  },
-  '.rl-bar-icon:focus-visible, .rl-bar-text:focus-visible': {
-    outline: '2px solid var(--rl-ink-3)',
-    outlineOffset: '-2px',
-  },
+  '.rl-bar-icon:enabled:hover, .rl-bar-text:enabled:hover, .rl-bar-icon:focus-visible, .rl-bar-text:focus-visible':
+    {
+      backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+      outline: 'none',
+    },
   '.rl-bar-icon:disabled, .rl-bar-text:disabled, .rl-bar-text:disabled svg': {
     color: 'var(--rl-ink-3)',
   },

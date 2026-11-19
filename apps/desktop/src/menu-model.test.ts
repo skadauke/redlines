@@ -31,6 +31,7 @@ function commands() {
     setView: vi.fn(),
     switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
+    showChat: vi.fn(),
     toggleTracking: vi.fn(),
     acceptAllAndStopTracking: vi.fn(),
     openReview: vi.fn(),
@@ -239,6 +240,7 @@ describe('the menu model', () => {
       ['Smaller Text', 'Ctrl+Cmd+-'],
       '---',
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Chat', 'Ctrl+Cmd+C'],
       ['Show Word Count', undefined],
       '---',
       ['New Window', undefined],
@@ -540,8 +542,9 @@ describe('the menu model', () => {
       ['Rename…', undefined],
     ]);
     // Enter Full Screen closes View, as it does on the Mac: what plugins register comes before it.
-    expect(readsAll(model, 'View').slice(-9)).toEqual([
+    expect(readsAll(model, 'View').slice(-10)).toEqual([
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Chat', 'Ctrl+Cmd+C'],
       ['Show Word Count', undefined],
       '---',
       ['New Window', undefined],

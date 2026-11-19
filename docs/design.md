@@ -524,6 +524,44 @@ Redlines covers everything in the Markdown Guide's
   which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
+- **Quarto outputs, read-only under each chunk** (#1174): Redlines never runs code, and a reviewer
+  still sees what a reader sees, from what Quarto left with the document. For a `.qmd`, beside the
+  document and in the folders above it up to the project's, it looks, in this order, for the
+  project's freeze file (`_freeze/<path of the document from the project's folder, with no
+  extension>/execute-results/<format>.json`, whose `result.markdown` is the executed document as
+  pandoc Markdown and whose `hash` is the MD5 of the file that was run), the Markdown file that
+  `keep-md` leaves (`<name>.md`) and the notebook that `keep-ipynb` leaves (`<name>.ipynb`), through
+  the same reader as the includes, so only inside the project the window may read. The first
+  file that reads and is Quarto's is the one used; a file whose format is not understood is
+  no file, since Quarto's own formats are not promised to stay.
+  - **Matching.** The executable chunks of the document (a fence whose info is an engine in braces:
+    `{r}`, `{python}`, `{julia}`; not `{ojs}`, `{mermaid}` or `{dot}`, nor a plain code block) are
+    paired in order with the cells of the file, by the chunk's label (`#| label:`) or else by its
+    code text with the `#|` lines and trailing blanks left out. A cell is given to one chunk only.
+    A chunk with no match, such as one edited since it ran or one never run, has no output drawn.
+  - **Drawn.** Under the chunk's closing fence, a block set apart by a rule at its left, in the grays
+    of the page: a small label, "Output from the last run", and the output as the file has it: text
+    in a code block, a table as a table, a figure as a picture (a freeze file's pictures are in
+    `_freeze/<document>/figure-<format>/`, which the picture's `<name>_files/` path is mapped to;
+    a notebook's are in the cell). It cannot be edited, is not a part of the file and is never
+    saved, copied as text of the document or exported: Word export draws the chunk, as before.
+    HTML widgets and anything but Markdown, text and pictures are left out.
+  - **Stale, for each chunk.** An output is stale when its chunk's code is not the code of the saved
+    cell it came from, compared with the `#|` lines and trailing blanks left out: the label then
+    says "Output from the last run, stale" (its hint: the chunk's code has changed since it ran), in
+    the page's italic gray. Every other output says "Output from the last run". It is the chunk's own
+    code that decides, not the document's: Redlines' marks and comments live in the file, so a
+    comment or a tracked change anywhere would change the file's hash and make every output stale.
+    A chunk matched by its code is the same code by definition; only a chunk matched by its label and
+    edited since can be stale (a chunk with no label whose code changed has no match, and no output).
+    A freeze file's `hash` is not compared; it is read and kept as a note.
+  - **Nothing.** No file, no match, a file that can't be read, a Markdown file (`.md`), or the Plain
+    view: nothing is drawn, no message, and no space is kept.
+  - **Read again** when the window is looked at again (a render that happened meanwhile shows up),
+    not on each keystroke.
+  - Not done: reading the rendered HTML, Word or PDF of a document, `<name>_files/` of a live render
+    and `.quarto/` (the research found nothing documented to rely on); showing outputs in the
+    included files.
 - **Heading attributes:** in `.qmd` and `.Rmd`, the `{#sec-intro}` after a heading's text is a small gray chip
   (the interface's small size, never the heading's), with its source shown while the caret is in it.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
@@ -1321,6 +1359,7 @@ key the person chose beats a binding of the editor's or a plugin's own.
 | Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
 | Larger, smaller, actual text size | ⌃⌘=, ⌃⌘- and ⌃⌘0, or a pinch                                                               | a pinch                   |
 | Show or hide the file sidebar  | ⌃⌘S                                                                                           | —                         |
+| Show or hide the chat          | ⌃⌘C (the sidebar at its Chat view)                                                            | —                         |
 | Preferences                    | ⌘,                                                                                            | —                         |
 | With the review bar or rail in focus | J and K for next and previous, A to accept and go on, X to reject and go on, R to reply, E to resolve, U to undo | the same |
 
@@ -1549,6 +1588,7 @@ same Welcome mode and then runs the tour, at any time.
 - captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's, Obsidian's and Quarto's are built); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (citations are drawn as chips);
+  citations are drawn as chips; when the front matter names a bibliography (`bibliography:`, a BibTeX or CSL JSON file beside the document) a chip says what the style prints, Chicago author-date by default, `(Knuth 1984)`, and APA's or numbers when `csl:` names one of those (`packages/citations`, loaded only by the app, #1171); the Word export writes the same text. Other CSL styles are drawn as the default, and nothing prints a list of references;
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
   step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
@@ -2608,10 +2648,10 @@ across turns, windows, restarts and days. It is attached to a document, or to no
 conversation, and a file is shared and stays clean (§8.5). One file per chat in the app's data
 folder (`chats/<id>.json`), with an index that maps a document's path to its chat's id, so that
 reading the index never reads the chats. A chat holds its messages (who wrote each, when, the
-words, the agent and model that wrote it, what it failed with), and what is needed to go on: the
-agent's own session, where it has one. Only the person's own words and the agent's final answers
-are kept: a run's status lines are drawn live and then dropped, and a failed turn keeps its one
-line.
+words, the agent and model that wrote it), and what is needed to go on: the agent's own session,
+where it has one (not in the first version). Only the person's own words and the agent's final
+answers are kept: a run's status lines are drawn live and then dropped, and a failed turn is
+shown on its line and not kept.
 
 - **A move or a rename in Redlines** carries the chat with it (the index is updated with the
   file). A file moved by another program is a path the index doesn't know: its chat stays where it
@@ -2721,15 +2761,18 @@ bubble does ("Claude", the capitalized handle, §8.6), with the model beside it 
   but the Luna models also ultra). Redlines should ask `codex debug models` for the list instead of
   holding one, and offer the newest of each family (Sol, Astra, Terra, Luna) with the efforts as a
   submenu, through `-m <id>` and `-c model_reasoning_effort=<effort>`; `AgentModel` gains an
-  optional list of `efforts`. 
+  optional list of `efforts`. The first version lists the models only: Codex's list in
+  `plugins/agent-codex` is now GPT-6.2 Sol, GPT-6.2 Astra, GPT-6.1 Terra and GPT-6 Luna, and the
+  efforts, and reading the list from `codex debug models`, are for a later change. An agent's models
+  open under its name in the menu, in place, as the sidebar is too narrow for a flyout.
 - **Ask's bubble uses the same menu,** replacing its model list: one picker, one place to learn.
 
 **The sidebar's foot.** A bar at the bottom of the sidebar, in both views, in the sidebar's own
 type (`--rl-size-ui`) and grays, with three things:
 
 - **The person's name** at the left, as the app knows it (the Git identity, §5.4), with the color
-  dot their changes have; a click opens a small menu with the name and the handle agents write
-  under, and Preferences.
+  dot their changes have; the first version draws an initial, and a click opens Preferences, where
+  the name is set.
 - **A settings button** (a gear), which opens Preferences at the pane the view is about: Agents from
   the Chat view, General from the Files view.
 - **A report-a-bug button,** which opens the same report as Help › Report a Problem…: what happened
