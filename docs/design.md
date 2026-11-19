@@ -1345,7 +1345,10 @@ reads a `.docx` with its revisions and comments (#840) and maps the result to Ma
 marks and ledger (#866), and has Google Docs' differences (#838). File › Export to Word… calls
 the writer (#841) and File › Open .docx… the reader (#881; pictures are carried into the images folder after a save panel, #885); the full Word
 round trip is still to be wired in, and Copy for Word as a command of its own is not built (an
-ordinary copy writes the HTML that Word and Docs draw well); File › Print and Export as PDF are built.
+ordinary copy writes the HTML that Word and Docs draw well: Arial like the export, a task item as a
+paragraph of its own and not an item of the bullet list above it, a table 6.5 in wide, a code block
+shaded gray, and a quote's paragraphs in `class=MsoQuote`, which Word reads as its "Quote" style,
+#1181); File › Print and Export as PDF are built.
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
