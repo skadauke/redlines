@@ -11,7 +11,10 @@ import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { invariantProblems, runScript, type Step } from './script.ts';
 
-const MARKERS = ['-', '+', '*', '1.', '1)'];
+// All five markers pair with all five (about 2,000 scripts, over a minute) in the depth run
+// (`REDLINES_FUZZ` set); the default run takes three that differ in kind: the hyphen (a heading's
+// underline and a rule use it too), the star, and a number with a parenthesis.
+const MARKERS = process.env['REDLINES_FUZZ'] ? ['-', '+', '*', '1.', '1)'] : ['-', '*', '1)'];
 const pad = (marker: string) => ' '.repeat(marker.length + 1);
 
 /** The shapes: `a` the list above, `b` the list whose first item the caret is at the start of. */

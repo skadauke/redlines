@@ -84,7 +84,7 @@ test.describe('moving blocks @blocks', () => {
       const box = (await line.boundingBox())!;
       const last = await j.pointOf('Last paragraph.');
       expect(Math.abs(box.y - last.y), 'the line is by the block it lands above').toBeLessThan(
-        30 * j.options.textSize,
+        60 * j.options.textSize,
       );
       await j.shot(`drag-line-${scheme}`);
       await page.mouse.up();

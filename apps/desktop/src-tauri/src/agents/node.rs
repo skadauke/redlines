@@ -679,10 +679,10 @@ pub trait TokenStore: Send {
     fn keep(&mut self, token: Secret);
     /// The token the Gateway gave this device (sent as `auth.deviceToken`).
     fn get(&self) -> Option<Secret>;
-    /// A shared token, which the person typed or an older build kept without saying which it was
-    /// (sent as `auth.token`, as before). Nothing is ever deleted to make room for a new code:
-    /// what a connection earns replaces it.
-    fn shared(&self) -> Option<Secret> {
+    /// The `skip`th shared token (sent as `auth.token`): the one the person typed, then what an
+    /// older build kept without saying which it was. Nothing is ever deleted to make room for a
+    /// new code: what a connection earns replaces it.
+    fn shared(&self, _skip: usize) -> Option<Secret> {
         None
     }
 }
@@ -710,7 +710,11 @@ pub fn start(
             other => (None, Some(other)),
         };
         let mut skip_device = false;
-        let mut skip_shared = false;
+        // How many shared tokens were refused: the next is `tokens.shared(skip_shared)`.
+        let mut skip_shared = 0usize;
+        // What became of a setup code that did not connect, to say if the kept tokens fail too.
+        let mut code_outcome: Option<Failure> = None;
+        let mut code_drops = 0u32;
         let mut wait = timing.backoff_start;
         let mut pairing_since: Option<Instant> = None;
         emit(Event::Status(Status::Connecting));
@@ -720,13 +724,15 @@ pub fn start(
             } else if let Some(token) = tokens.get().filter(|_| !skip_device) {
                 other = None;
                 Credential::DeviceToken(token)
-            } else if let Some(token) = tokens.shared().filter(|_| !skip_shared) {
+            } else if let Some(token) = tokens.shared(skip_shared) {
                 other = None;
                 Credential::Token(token)
             } else if let Some(credential) = other.take() {
                 credential
             } else {
-                emit(Event::Status(Status::Failed(Failure::BadToken)));
+                emit(Event::Status(Status::Failed(
+                    code_outcome.take().unwrap_or(Failure::BadToken),
+                )));
                 return;
             };
             let began = Instant::now();
@@ -745,11 +751,12 @@ pub fn start(
             let ended = session(&config, &credential, &host, &mut report, &mut keep, &flag);
             if connected {
                 skip_device = false;
-                skip_shared = false;
+                skip_shared = 0;
+                code_outcome = None;
             }
             // What is tried again when the connection ends without an answer to the credential:
             // a setup code until it has given a token, and what `first` was.
-            let nothing_kept = tokens.get().is_none() && tokens.shared().is_none();
+            let nothing_kept = tokens.get().is_none() && tokens.shared(0).is_none();
             let mut again = |credential: Credential| match credential {
                 Credential::SetupCode(_) if kept_now => {}
                 Credential::SetupCode(_) => code = Some(credential),
@@ -765,7 +772,12 @@ pub fn start(
             // What is kept, after this connection: the next thing to try when a credential is
             // refused.
             let device_left = !skip_device && tokens.get().is_some();
-            let shared_left = !skip_shared && tokens.shared().is_some();
+            let shared_left = tokens.shared(skip_shared).is_some();
+            let shared_next = tokens.shared(skip_shared + 1).is_some();
+            let is_code = matches!(credential, Credential::SetupCode(_));
+            // A setup code that has gone on for as long as it may (a few dropped connections, or
+            // the pairing window) is given up when a kept token can be tried instead.
+            let give_up_code = is_code && (device_left || shared_left);
             match ended {
                 Ended::Stopped => {
                     emit(Event::Status(Status::Stopped));
@@ -775,7 +787,19 @@ pub fn start(
                     emit(Event::Status(Status::Reconnecting { detail }));
                     nap(&flag, wait);
                     wait = (wait * 2).min(timing.backoff_max);
-                    again(credential);
+                    code_drops += u32::from(is_code);
+                    if give_up_code && code_drops >= 3 {
+                        code_drops = 0;
+                    } else {
+                        again(credential);
+                    }
+                }
+                // A device token that needs approval again, with a shared token kept: that one
+                // is tried first, as OpenClaw's clients keep an explicit shared token.
+                Ended::Refused(Refusal::ApproveAgain { .. })
+                    if matches!(credential, Credential::DeviceToken(_)) && shared_left =>
+                {
+                    skip_device = true;
                 }
                 Ended::Refused(
                     refusal @ (Refusal::PairingRequired { .. } | Refusal::ApproveAgain { .. }),
@@ -787,6 +811,12 @@ pub fn start(
                     };
                     let since = *pairing_since.get_or_insert_with(Instant::now);
                     if since.elapsed() >= timing.pairing_window {
+                        if give_up_code {
+                            // Nobody approved the code in time: the token that worked is next.
+                            code_outcome = Some(Failure::NotApproved);
+                            pairing_since = None;
+                            continue;
+                        }
                         emit(Event::Status(Status::Failed(Failure::NotApproved)));
                         return;
                     }
@@ -799,9 +829,14 @@ pub fn start(
                     again(credential);
                 }
                 // A new code that is refused leaves what worked in place, and that is tried next.
-                Ended::Refused(Refusal::CodeUsed | Refusal::BadToken | Refusal::Other(_))
-                    if matches!(credential, Credential::SetupCode(_))
-                        && (device_left || shared_left) => {}
+                Ended::Refused(
+                    refusal @ (Refusal::CodeUsed | Refusal::BadToken | Refusal::Other(_)),
+                ) if give_up_code => {
+                    code_outcome = Some(match refusal {
+                        Refusal::Other(message) => Failure::Other { message },
+                        _ => Failure::CodeUsed,
+                    });
+                }
                 // A device token the Gateway no longer knows (an approval replaced it) is not the
                 // end when a shared token was typed: OpenClaw's clients keep that one, and the
                 // Gateway gives a new device token to the connection it opens.
@@ -814,8 +849,17 @@ pub fn start(
                     emit(Event::Status(Status::Failed(Failure::CodeUsed)));
                     return;
                 }
+                // A shared token the Gateway refuses: the next one kept, if any.
+                Ended::Refused(Refusal::BadToken)
+                    if matches!(credential, Credential::Token(_)) && shared_next =>
+                {
+                    skip_shared += 1;
+                }
+                // The end: as what the new code ended in, when that is what began it.
                 Ended::Refused(Refusal::BadToken) => {
-                    emit(Event::Status(Status::Failed(Failure::BadToken)));
+                    emit(Event::Status(Status::Failed(
+                        code_outcome.take().unwrap_or(Failure::BadToken),
+                    )));
                     return;
                 }
                 Ended::Refused(Refusal::TooNew { protocol }) => {
@@ -1008,8 +1052,11 @@ mod tests {
     struct Memory(Arc<Mutex<Option<String>>>, Option<String>);
 
     impl TokenStore for Memory {
-        fn shared(&self) -> Option<Secret> {
-            self.1.as_deref().and_then(|text| Secret::new(text).ok())
+        fn shared(&self, skip: usize) -> Option<Secret> {
+            self.1
+                .as_deref()
+                .filter(|_| skip == 0)
+                .and_then(|text| Secret::new(text).ok())
         }
         fn keep(&mut self, token: Secret) {
             *self.0.lock().unwrap() = Some(token.expose().to_owned());
@@ -1392,6 +1439,190 @@ mod tests {
                 .iter()
                 .any(|status| matches!(status, Status::Failed(_)))
         );
+    }
+
+    /// What a Gateway does with a connect, by what it carries.
+    enum Reply {
+        Hello(Option<&'static str>),
+        Refuse(&'static str, &'static str, Value),
+        Drop,
+        Pairing,
+    }
+
+    /// A Gateway that takes any number of connections and answers each by `decide`, until one is
+    /// let in.
+    fn fake_decide(decide: impl Fn(&Value) -> Reply + Send + 'static) -> Fake {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let frames: Frames = Arc::default();
+        let seen = Arc::clone(&frames);
+        let thread = std::thread::spawn(move || {
+            for n in 0.. {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                let Ok(mut socket) = tungstenite::accept(stream) else {
+                    continue;
+                };
+                let nonce = format!("n{n}");
+                greet(&mut socket, &nonce);
+                let params = take_connect(&mut socket, &seen, &nonce);
+                match decide(&params) {
+                    Reply::Hello(token) => {
+                        hello(&mut socket, token);
+                        read_frame(&mut socket, &seen);
+                        drain(&mut socket, &seen);
+                        return;
+                    }
+                    Reply::Refuse(code, message, details) => {
+                        refuse(&mut socket, code, message, details)
+                    }
+                    Reply::Pairing => refuse(
+                        &mut socket,
+                        "NOT_PAIRED",
+                        "pairing required",
+                        json!({"requestId": "req-1"}),
+                    ),
+                    Reply::Drop => {}
+                }
+            }
+        });
+        Fake {
+            target: target(&format!("ws://127.0.0.1:{port}"), None).unwrap(),
+            frames,
+            thread,
+        }
+    }
+
+    /// A setup code that never connects (the network keeps dropping it) is given up after a few
+    /// tries, and the token that worked is used, not the code again for ever.
+    #[test]
+    fn a_code_that_never_connects_gives_way_to_the_kept_token() {
+        let gateway = fake_decide(|params| {
+            if params["auth"]["bootstrapToken"].is_string() {
+                Reply::Drop
+            } else {
+                Reply::Hello(None)
+            }
+        });
+        let mut run = Run::start(&gateway, Credential::SetupCode(secret(CODE)), Some(TOKEN));
+        run.wait("connected", |event| {
+            matches!(event, Event::Status(Status::Connected { .. }))
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+        let sent = gateway.frames.lock().unwrap().join(" ");
+        assert!(sent.contains(&format!("\"deviceToken\":\"{TOKEN}\"")));
+    }
+
+    /// A code nobody approves in the pairing window gives way to the kept token as well, and if
+    /// that is stale too, the card says what happened to the code.
+    #[test]
+    fn a_code_nobody_approves_gives_way_to_the_kept_token() {
+        let gateway = fake_decide(|params| {
+            if params["auth"]["bootstrapToken"].is_string() {
+                Reply::Pairing
+            } else {
+                Reply::Hello(None)
+            }
+        });
+        let mut run = Run::start(&gateway, Credential::SetupCode(secret(CODE)), Some(TOKEN));
+        run.wait("connected", |event| {
+            matches!(event, Event::Status(Status::Connected { .. }))
+        });
+        run.stop();
+        gateway.thread.join().unwrap();
+        assert!(
+            !run.statuses()
+                .iter()
+                .any(|status| matches!(status, Status::Failed(_)))
+        );
+
+        let stale = fake_decide(|params| {
+            if params["auth"]["bootstrapToken"].is_string() {
+                Reply::Pairing
+            } else {
+                Reply::Refuse(
+                    "INVALID_REQUEST",
+                    "unauthorized: device token mismatch",
+                    json!({"code": "AUTH_DEVICE_TOKEN_MISMATCH"}),
+                )
+            }
+        });
+        let run = Run::start(&stale, Credential::SetupCode(secret(CODE)), Some(TOKEN));
+        run.wait("not approved", |event| {
+            *event == Event::Status(Status::Failed(Failure::NotApproved))
+        });
+        // (The Gateway thread waits for a connection that is let in, and there is none.)
+    }
+
+    /// A refused code, and a device token the Gateway no longer knows, and nothing else kept: the
+    /// card says the code was refused, and not that "the token" was.
+    #[test]
+    fn a_refused_code_and_a_stale_token_say_the_code_was_refused() {
+        let gateway = fake_decide(|params| {
+            if params["auth"]["bootstrapToken"].is_string() {
+                Reply::Refuse("UNAUTHORIZED", "bootstrap token expired", json!({}))
+            } else {
+                Reply::Refuse(
+                    "INVALID_REQUEST",
+                    "unauthorized: device token mismatch",
+                    json!({"code": "AUTH_DEVICE_TOKEN_MISMATCH"}),
+                )
+            }
+        });
+        let run = Run::start(&gateway, Credential::SetupCode(secret(CODE)), Some(TOKEN));
+        run.wait("the code's end", |event| {
+            *event == Event::Status(Status::Failed(Failure::CodeUsed))
+        });
+        assert!(!run.statuses().contains(&Status::Failed(Failure::BadToken)));
+    }
+
+    /// A typed token that is wrong does not hide the token an older build kept.
+    #[test]
+    fn the_next_shared_token_is_tried_when_one_is_refused() {
+        let gateway = fake_decide(|params| match params["auth"]["token"].as_str() {
+            Some("legacy") => Reply::Hello(Some("dt-new")),
+            _ => Reply::Refuse("UNAUTHORIZED", "invalid token", json!({})),
+        });
+        struct Two(Arc<Mutex<Option<String>>>);
+        impl TokenStore for Two {
+            fn keep(&mut self, token: Secret) {
+                *self.0.lock().unwrap() = Some(token.expose().to_owned());
+            }
+            fn get(&self) -> Option<Secret> {
+                None
+            }
+            fn shared(&self, skip: usize) -> Option<Secret> {
+                ["typed-wrong", "legacy"]
+                    .get(skip)
+                    .and_then(|text| Secret::new(text).ok())
+            }
+        }
+        let kept = Arc::new(Mutex::new(None));
+        let events: Arc<Mutex<Vec<Event>>> = Arc::default();
+        let sink = Arc::clone(&events);
+        let node = start(
+            Config {
+                target: gateway.target.clone(),
+                identity: Identity::from_seed(SEED).unwrap(),
+                display_name: "Redlines on Ada's MacBook".into(),
+                version: "0.2.0".into(),
+                timing: timing(),
+            },
+            Credential::Token(secret("unused")),
+            Arc::new(Tools),
+            Box::new(Two(Arc::clone(&kept))),
+            Box::new(move |event| sink.lock().unwrap().push(event)),
+        );
+        let started = Instant::now();
+        while kept.lock().unwrap().is_none() {
+            assert!(started.elapsed() < Duration::from_secs(5), "{events:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        node.stop();
+        gateway.thread.join().unwrap();
+        assert_eq!(kept.lock().unwrap().as_deref(), Some("dt-new"));
     }
 
     /// With nothing kept, a refused code is the end, as before.
