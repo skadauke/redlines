@@ -13,8 +13,19 @@ test.describe('Ask, with the selection starting above the window', () => {
     // From the start of paragraph 3 to the end of paragraph 45: the caret, and the view, at the end.
     await j.place(text.indexOf('Paragraph 3 of'), text.indexOf('Paragraph 45 of') + 16);
     // The view follows the end of the selection, as it does for a person who dragged down.
-    await j.page.getByText('Paragraph 45 of the plan.').scrollIntoViewIfNeeded();
-    await j.settle();
+    // Lines far down are drawn at estimated heights until they are measured, so the first scroll can
+    // stop short (387 px on CI): scroll until the end of the selection is in the window.
+    const end = j.page.getByText('Paragraph 45 of the plan.');
+    await expect(async () => {
+      await end.scrollIntoViewIfNeeded();
+      await j.settle();
+      const box = await end.boundingBox();
+      expect(box, 'the end of the selection is drawn').not.toBeNull();
+      expect(box!.y + box!.height, 'the end is below the top of the window').toBeGreaterThan(0);
+      expect(box!.y, 'the end is above the bottom of the window').toBeLessThan(
+        j.page.viewportSize()!.height,
+      );
+    }).toPass({ timeout: 10_000 });
     // The pane the text scrolls in: the nearest ancestor of the editor that scrolls.
     const scrolled = () =>
       j.page.evaluate(() => {
