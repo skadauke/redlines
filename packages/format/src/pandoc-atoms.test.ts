@@ -225,6 +225,34 @@ describe('a div typed in a list item (§9.4, #1234)', () => {
       `\n\n    Intro.\n\n    ${deeper(D, '    ')}`,
       '- one\n  - two<!--ins k3x9-->\n\n    Intro.\n\n    ::: {.callout-tip}\n    A.\n    :::\n    <!--/k3x9-->\n\nAfter.',
     ],
+    [
+      'after a blank line in an item of a list in a quote: the closer at the item prefix',
+      '> - one\n> - two\n\nAfter.',
+      '> - one',
+      `\n>\n>   ${deeper(D, '>   ')}`,
+      '> - one<!--ins k3x9-->\n>\n>   ::: {.callout-tip}\n>   A.\n>   :::\n>   <!--/k3x9-->\n> - two\n\nAfter.',
+    ],
+    [
+      'the same with typed text before the callout',
+      '> - one\n> - two\n\nAfter.',
+      '> - one',
+      `\n>\n>   Intro.\n>\n>   ${deeper(D, '>   ')}`,
+      '> - one<!--ins k3x9-->\n>\n>   Intro.\n>\n>   ::: {.callout-tip}\n>   A.\n>   :::\n>   <!--/k3x9-->\n> - two\n\nAfter.',
+    ],
+    [
+      'the same in a list in a quote in a quote',
+      '> > - one\n> > - two\n\nAfter.',
+      '> > - one',
+      `\n> >\n> >   ${deeper(D, '> >   ')}`,
+      '> > - one<!--ins k3x9-->\n> >\n> >   ::: {.callout-tip}\n> >   A.\n> >   :::\n> >   <!--/k3x9-->\n> > - two\n\nAfter.',
+    ],
+    [
+      'the same under the last item of a list in a quote',
+      '> - one\n> - two\n\nAfter.',
+      '> - one\n> - two',
+      `\n>\n>   ${deeper(D, '>   ')}`,
+      '> - one\n> - two<!--ins k3x9-->\n>\n>   ::: {.callout-tip}\n>   A.\n>   :::\n>   <!--/k3x9-->\n\nAfter.',
+    ],
   ];
   for (const [name, doc, before, typed, expected] of cases) {
     it(`${name}: no marker on a fence line, every order reads alike`, () => {
@@ -247,4 +275,21 @@ describe('a div typed in a list item (§9.4, #1234)', () => {
       expect(parse(applyChanges(after, acceptAll(after))).marks).toEqual([]);
     });
   }
+
+  it('a lone fence line has no line to read the container from: written as before, never asked about', () => {
+    for (const [doc, before, typed] of [
+      ['- one\n\nAfter.', '- one', '\n  :::'],
+      ['- \n\nAfter.', '- ', '::: {.callout-tip}'],
+      ['- one\n- two\n\nAfter.', '- one', '\n  ::: {.callout-tip}'],
+    ] as const) {
+      const start = file(doc);
+      const at = before.length;
+      const done = trackedEdits(
+        start,
+        [{ from: at, to: at, insert: typed }],
+        context(ada, IDS, QMD),
+      );
+      expect(applyChanges(start, done.changes)).toContain('<!--ins');
+    }
+  });
 });

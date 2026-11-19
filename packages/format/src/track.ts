@@ -1235,7 +1235,9 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
   };
   if (linePrefix === '' ? tails.some((tail) => tail !== '') : false) return false;
   if (linePrefix !== '') {
-    if (tails.length === 0 || tails.some((tail) => tail !== container)) return bail();
+    // A lone fence line has no line after it that the container could be read from: the old form.
+    if (tails.length === 0) return false;
+    if (tails.some((tail) => tail !== container)) return bail();
     if (continuationPrefix(container) !== container) return bail();
     // In a list item the closer alone on its line inside the item is an HTML block after the div's
     // text, which a tight item reads with a line break that the view lacks (#1234). Two forms read
@@ -1251,6 +1253,8 @@ function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boole
       if (lastBreak && 'brk' in lastBreak && BLANK_IN_BREAK.test(lastBreak.brk)) {
         rest = tokens.slice(0);
         first = 0;
+        // The closer stands at the item's own prefix, which in a quote is more than the quote's.
+        closer = continuationPrefix(linePrefix);
       } else {
         // The prefix of the outermost list's parent: the quote markers before its lists, or none.
         const parent = /^(?:[ \t]*>[ ]?)*/.exec(linePrefix)?.[0] ?? '';
