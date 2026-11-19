@@ -663,6 +663,35 @@ body {
   color: var(--rl-ink-2);
 }
 
+/* An image dragged out of the sidebar (#1198): its name follows the pointer, in a small card. */
+.rl-sidebar-image {
+  touch-action: none;
+  user-select: none;
+}
+
+.rl-sidebar-drag {
+  position: fixed;
+  z-index: 1000;
+  max-width: 240px;
+  padding: 3px 10px;
+  overflow: hidden;
+  border: 1px solid var(--rl-rule);
+  border-radius: 6px;
+  background: var(--rl-card);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
+  font-size: var(--rl-size-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+body.rl-image-dragging,
+body.rl-image-dragging * {
+  cursor: copy !important;
+  user-select: none;
+}
+
 .rl-sidebar-folder svg {
   flex: none;
   margin-left: -4px;
