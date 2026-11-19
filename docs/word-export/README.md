@@ -166,6 +166,7 @@ export's `report` (an option, a list of `{kind, message}`) names the ones that n
 | Move (a deletion and an insertion of the same text in one `group`, or named by `move`) | `w:moveFrom` and `w:moveTo` with one range name | A move that was widened into one substitution is exported as a substitution; a move whose two texts differ is a deletion and an insertion |
 | Image                                 | An inline picture (PNG, JPEG, GIF, BMP) of its own size, at most 6.5 inches wide, with alt text and title; an inserted image is a tracked insertion | Pictures whose bytes are not given (a `data:` address carries them; others through the `images` option), SVG and WebP: the description stands in, `[Image: alt]`. Reported |
 | Comment on deleted text (`about` a deletion) | A comment range around the deleted runs                       | Word drops such a comment when the deletion is accepted                           |
+| Space between blocks, code shading | The block after a table opens with 6 pt (`w:spacing w:before="120"`); a code block's last line closes with 6 pt, its other lines touch; a code block has light gray paragraph shading (`F2F2F2`) and inline code the same gray as run shading (`w:shd`) | A table has no space of its own in Word (#1179) |
 | Task item                             | A box, `☐` or `☒`, and no bullet; a checked or unchecked box is the old box deleted and the new inserted | Word has no tracked checkbox: a task is only text                       |
 
 ## Proof of concept
