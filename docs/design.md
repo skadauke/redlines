@@ -930,7 +930,10 @@ mode has no counterpart in the desktop app.
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
     to dots. The rail grows with the text size above 100%, and so does the width at which it
-    shrinks. During a pinch the rail keeps its state until the fingers lift.
+    shrinks. During a pinch the rail keeps its state until the fingers lift. Where the window has
+    room, the notes and margins grow with the fingers; from the frame in which they would take the
+    column's width (and a picture's, which is as wide as the column) they keep the size they had,
+    and take the new one when the fingers lift.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
@@ -1921,7 +1924,7 @@ own). The text below is the design they follow.
 
 ### 7.1a One document in several windows
 
-File › Open in Another Window shows the document in a second window of the app, and the two are
+View › New Window (Word's name and place) shows the document in a second window of the app, and the two are
 one session on one Mac, with no network, no account and no invitation.
 
 - **One window leads.** It runs the authority (the TypeScript in `packages/collab`) and is the
@@ -1934,11 +1937,13 @@ one session on one Mac, with no network, no account and no invitation.
 - **Save is once, after a pause.** The leader saves when the log has been quiet for a second and
   its own edits are confirmed. Save in another window asks the leader. A window closes without a
   question when the authority has everything it made; the leader that closes writes the file first.
-- **Each window is a person to the others.** It has a name ("Ada (window 2)") and a color of its own,
-  chosen by the authority and the same in every window, which follow the window through a
-  handover. The others show its caret with its name on a flag that fades after five seconds, and
-  its selection tinted, in that color. A caret is sent as a position in the confirmed text at a
-  version, and every window places it again among its own text, so it stays among the same words
+- **Each window is a person to the others.** It has a name ("Ada (window 2)"); its color is its
+  person's author color in the document (§5.5), the color their changes are drawn in, the same in
+  every window of that person and never one that another person has in that document (a person
+  the document doesn't know yet is gray). The others show its caret with its name on a flag that
+  fades after five seconds, and its selection tinted, in that color; while a selection lasts, its
+  caret and flag stay (#1168), so that it is clear who marked what. A caret is sent as a
+  position in the confirmed text at a version, and every window places it again among its own text, so it stays among the same words
   while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
   windows", or that edits are kept while the session can't be reached.
 - **Undo is each window's own.** A step knows whose it is, and a change that came from another window
@@ -2108,8 +2113,8 @@ Agent edits are animated, like a streaming chat answer.
 
 ### 8.5 Chat
 
-- **A chat panel** next to the comment rail. Its scope is the selection, the document, or the
-  folder (a project or repository).
+- **A chat panel** in the sidebar (§8.7). Its scope is the document it is attached to or, for a
+  chat with none, the folder (a project or repository). The selection is what Ask is about.
 - **Answers cite the text,** with links to ranges in the document. Chat never shows raw markers.
 - **Edits follow the agent's level** (§8.2). In Propose, the panel shows each proposal as a diff
   with Apply and Suggest. A chat answer can also be posted to the document as a comment thread.
@@ -2172,7 +2177,7 @@ Agent edits are animated, like a streaming chat answer.
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and
   context. Requests that span documents ("update every doc that mentions the importer") produce
   edits in each file, each file its own run.
-- **Chat history** is kept by the app, not in the document.
+- **Chat history** is kept by the app, not in the document (§8.7).
 
 ### 8.6 AI engines and sign-in
 
@@ -2486,6 +2491,192 @@ Syrus runs agents on its server with API keys or enterprise agreements.
   turned off for the run, so the question is about consent, not about code in the folder.
 - An image's address inside a pending change isn't fetched until the change is accepted, so an
   agent misled by text it read can't leak what it read through an image URL.
+
+### 8.7 Chat as a session
+
+Talking to the agent about a document is part of working on it, so the chat is a first-class part of
+Redlines (#1194), not a corner of the comments. It starts rudimentary: one column of messages and a
+composer, in the look of the chat apps people already know, with the document's own words, comments
+and changes on the agent's side of it.
+
+**A chat is a session.** It is a continuous conversation with one agent at a time, which goes on
+across turns, windows, restarts and days. It is attached to a document, or to none:
+
+- **A document's chat** is the one the sidebar shows while that document is open. Every document has
+  one, made empty the first time it is opened; there is nothing to create. Closing and opening the
+  document, or the app, finds it again.
+- **A chat with none** is a conversation about no document, or about a folder: the agent has no
+  document to read, and its reach is the folder's, as a comment's run in a folder has (§8.5, Folder
+  chat). It is reached from the sidebar's chat list (below), and is for later: the first version
+  has the document's chat only.
+- **A new document with no file** has its chat in the window while it is open and gives it to the
+  file when it is saved for the first time. Closing it unsaved ends it.
+- **Start Over** (in the chat's menu) begins a fresh session in the same place and keeps the old one
+  in the chat's history, readable and never sent to the agent again; it is how a long chat that has
+  lost the thread is cleared. Nothing deletes a chat but Delete Chat, which asks, and which is the
+  only way to remove what was said.
+
+**Where it is kept.** In the app's own data, never in the Markdown file: a chat is a private
+conversation, and a file is shared and stays clean (§8.5). One file per chat in the app's data
+folder (`chats/<id>.json`), with an index that maps a document's path to its chat's id, so that
+reading the index never reads the chats. A chat holds its messages (who wrote each, when, the
+words, the agent and model that wrote it, what it failed with), and what is needed to go on: the
+agent's own session, where it has one. Only the person's own words and the agent's final answers
+are kept: a run's status lines are drawn live and then dropped, and a failed turn keeps its one
+line.
+
+- **A move or a rename in Redlines** carries the chat with it (the index is updated with the
+  file). A file moved by another program is a path the index doesn't know: its chat stays where it
+  was, and the sidebar lists it as the chat of a document that moved, since there is no honest way
+  to know it is the same document.
+- **Windows.** Two windows of one document are one chat (§7.3, the session's leader): only the
+  window that leads runs the turn, and the others draw the same messages as they are written.
+- **Size.** A chat is kept whole while it is under a limit (about 2 MB, thousands of turns), and
+  past it the oldest turns are folded into a short summary that the agent is given, while the chat
+  still shows them, which is also what keeps a turn's prompt short. Not in the first version.
+- **Privacy.** Nothing in a chat leaves the Mac but what the agent's own program sends, as for any
+  run. A chat is deleted with Delete Chat; moving its document to the Trash leaves it, and the
+  chat list offers to delete it.
+
+**What the agent sees.** What a comment's run sees, and no more:
+
+- **The document,** through the six tools (§8.3): `view` for the text as a reader sees it, `status`
+  for who is on it, and its comments and changes through the review view (`review/…`). The document
+  is read afresh by each turn, so that a chat across a week of edits is about the document as it is
+  now, never as it was when the chat began. It sees the selection only when the person says so: a
+  message can hold quoted text (a "Quote selection" chip in the composer), which is passed to the
+  agent as quoted data.
+- **The conversation** so far: the earlier turns go with each new one as quoted data, as an Ask's
+  follow-ups do (§8.5), because an agent's earlier answer read a document that may say anything.
+  Where the agent keeps a session of its own (Claude Code and Codex can resume one), a later version
+  may use that for the history, falling back to the quoted text when the agent has lost it or was
+  changed in the middle.
+- **Its reach** is a comment's: the document, or the folder after the first-run question (§8.5),
+  and a chat in a folder the person said no to is a chat about the document alone.
+- **Never:** other chats, another document's text, or what the app keeps in Preferences. Text in
+  the document, and the agent's own earlier answers, are data and never an instruction (§8.1).
+- **Edits.** The first version is read-only, as Ask is: the agent answers. Asking it in a message to
+  make a comment or a suggestion is for a later version, which gives the turn the toolbox at the
+  document's level (§8.2). Every edit is then in the agent's name with the person as its principal,
+  as any run's is, and the answer says what it changed, with "Review · Undo" as an Auto run's does.
+  A reviewer's chat can only suggest (§8.2, Limits).
+
+**The chat panel.** The sidebar has two views, **Files** and **Chat**, switched by a small segmented
+control at its head (⌃⌘S still shows and hides the sidebar; ⌃⌘C opens it at Chat). It is the
+sidebar's column, in the sidebar's width, so it never covers the page; in a narrow window it covers
+the page, as the file list does.
+
+- **The column of messages.** The person's own message is a subtle bubble, aligned to the right and
+  tinted in the theme's gray. The agent's is plain text on the sidebar's ground with no bubble,
+  rendered as Markdown (paragraphs, lists, code, links), never as raw marks. A message has a hover
+  row with Copy and, for the agent's, **Make Comment** (it posts the answer as a thread on the
+  quoted passage, §8.5) and Retry; its time is a hover hint. Answers cite the text with links that
+  select the passage (§8.5). While it works, the agent's place shows its live line (what it is
+  doing, with Stop); today's providers hand over the answer whole when it is complete, and the
+  panel shows it whole, and a provider that streams text shows it growing, with no other change.
+  The column stays at the end while the person is at the end, and stops following when they scroll
+  up, with a "Jump to latest" button.
+- **The composer** is a rounded box at the foot: a field that grows to about six lines, Return to
+  send, ⇧Return for a new line, and a Send button that is Stop while a turn runs. Under the text,
+  the picker (below) at the left, and the Quote selection chip. An empty chat shows a few
+  suggestions the document makes (summarize it, find what is unclear, list the open comments),
+  which are only words that the person could have typed.
+- **The chat list.** A chevron by the chat's title opens a short list: this document's chat and its
+  earlier sessions, and the chats with none. It is for finding a conversation again, which is also
+  what the history of asks is (below).
+- **Looks.** Chat uses the theme's tokens only (its grays, its accent for focus, `--rl-size-ui` and
+  `--rl-size-ui-small`, never a size of its own), reads in Redlines and in Clean, in the light and
+  the dark theme, and moves nothing of the page.
+
+**How Ask relates to it.** Ask is a turn in the document's chat that the writer asks without leaving
+the text:
+
+- An Ask writes its question and its answer into the document's chat, as one turn marked "Asked
+  about", with the selected passage quoted, so the chat is the full record of every question put to
+  an agent about the document, and an answer that was only glanced at can be found again.
+- **The answer shows briefly in the main window,** in Ask's bubble (§8.5), so that the writer keeps
+  their focus: the bubble is a short view of the turn, and it goes by itself some seconds after
+  the answer is complete, unless the pointer is on it or it holds a follow-up. **Open in Chat** (the
+  bubble's action, beside Open in New Window) opens the sidebar at that turn. Make Comment and Copy
+  stay as they are.
+- **A follow-up in the bubble is the chat's next turn,** and the chat's next message is a follow-up
+  of the Ask: one conversation, and the agent sees the earlier turns whichever started them.
+- **Read-only holds.** An Ask's turn is read-only whatever the chat's level becomes, and the chat
+  marks it so.
+- Esc or a press elsewhere closes the bubble, and stops a run still going, as before; the turn
+  stays in the chat, with "Stopped" as its answer.
+- With the panel open at the document's chat, the bubble still shows: the bubble is for the text,
+  the panel for the conversation.
+
+**The agent and model picker.** At the composer's left it names the agent that answers, as the Ask
+bubble does ("Claude", the capitalized handle, §8.6), with the model beside it in a lighter weight
+("Claude · Sonnet"):
+
+- **Clicking the agent's name** opens a menu of the agents that are connected: those found on this
+  Mac and signed in, and the OpenClaw agents. An agent that is found but not ready is listed gray
+  with its reason (signed out, too old) and a button to Preferences › Agents. The default agent
+  (§8.6) is marked.
+- **Each agent opens a submenu of its models or efforts** where it has them: Claude's **Opus**,
+  **Sonnet** and **Haiku**; Codex's models (below). An agent that lists none (an OpenClaw agent,
+  whose Gateway chooses) is a plain item. The first item of each submenu is **Default**, which
+  names none, so Preferences' choice for the agent applies (§8.6).
+- **A pick holds for the chat,** not for the app: it is kept with the chat, and a new chat starts
+  at the default agent with Preferences' model. Changing the agent in the middle is allowed: each
+  answer stays the reply of the agent that wrote it, as in Ask (§8.5), and the new agent is given
+  the conversation as quoted data. The picker is disabled while a turn runs.
+- **What it offers** comes from the providers (`AgentInfo.models`), so a model added to a provider
+  appears with no change to the menu. Claude's list is Opus, Sonnet and Haiku, the aliases of its
+  newest of each. Codex's is not what `codex exec` offers: the list in `plugins/agent-codex` holds
+  two models of an older generation, while `codex debug models` on Codex 0.166.0 lists GPT-6.2-Sol,
+  GPT-6.2-Astra, GPT-6.1 Terra, GPT-6.1-Sol, GPT-6-Astra, GPT-6-Sol, GPT-6-Luna, GPT-5.6-Sol,
+  GPT-5.6-Terra and GPT-5.6-Luna, each taking the efforts low, medium, high, xhigh and max (all
+  but the Luna models also ultra). Redlines should ask `codex debug models` for the list instead of
+  holding one, and offer the newest of each family (Sol, Astra, Terra, Luna) with the efforts as a
+  submenu, through `-m <id>` and `-c model_reasoning_effort=<effort>`; `AgentModel` gains an
+  optional list of `efforts`. 
+- **Ask's bubble uses the same menu,** replacing its model list: one picker, one place to learn.
+
+**The sidebar's foot.** A bar at the bottom of the sidebar, in both views, in the sidebar's own
+type (`--rl-size-ui`) and grays, with three things:
+
+- **The person's name** at the left, as the app knows it (the Git identity, §5.4), with the color
+  dot their changes have; a click opens a small menu with the name and the handle agents write
+  under, and Preferences.
+- **A settings button** (a gear), which opens Preferences at the pane the view is about: Agents from
+  the Chat view, General from the Files view.
+- **A report-a-bug button,** which opens the same report as Help › Report a Problem…: what happened
+  in words and numbers, to be reviewed and sent as a GitHub issue, never the document's text and
+  never a chat's.
+
+Each is a button with a label for assistive technology and a hover hint, as the title bar's icons
+are (§5.1).
+
+**The history of asks** (#1194) is not a separate feature: every Ask is a turn in the document's
+chat, so the history is the chat, with Ask's turns marked by the passage they were about. The chat
+list's search finds a question again by its words.
+
+**What the first version has,** in this order, each its own change:
+
+1. The sidebar's Chat view with the document's chat: the column, the composer, answers rendered as
+   Markdown, the picker with the agents and their models, the live line, history kept per document
+   in the app's data, Stop, Retry and Copy. Read-only.
+2. Ask writing its turn into the chat, with the bubble that goes by itself and Open in Chat.
+3. The sidebar's foot.
+4. Later: edits at the document's level, chats with none, the chat list, Start Over, folding old
+   turns, answers that cite with links to ranges, Codex's efforts.
+
+**Decided 2026-11-19** (Stephan's direction on #1194):
+
+- **Where:** the left sidebar, Files and Chat, with the history and the foot in it.
+- **Edits:** read-only in the first version. Make Comment posts an answer as a thread; suggestions
+  come later.
+- **Codex:** the newest of each family (Sol, Astra, Terra, Luna), each with its efforts as a
+  submenu, read from `codex debug models`.
+- **A document moved by another program:** its chat is not followed, as written above.
+- **One continuous chat per document,** with Start Over keeping the earlier sessions.
+- **Ask's bubble goes by itself** once the answer is complete, after a time that follows the
+  answer's length (a base plus about 200 words a minute, the rule of #1185), never while the
+  pointer is on it or it holds a follow-up.
 
 ## 9. Integrations
 
