@@ -31,6 +31,25 @@ describe('⌥↑ on code with no closing fence', () => {
       expect: { file: '> ```js⏎> x⏎> ```⏎>⏎> One.⏎' },
     },
     {
+      name: 'the Test Drive’s Unclosed fence.md: no line break at the end, Track Changes off',
+      doc: 'A paragraph above.⏎⏎```js⏎const total = items.length;⏎console.log(total);‸',
+      keys: ['Alt-ArrowUp'],
+      tc: false,
+      expect: {
+        file: '```js⏎const total = items.length;⏎console.log(total);⏎```⏎⏎A paragraph above.',
+      },
+    },
+    {
+      name: 'the same, Track Changes on',
+      doc: 'A paragraph above.⏎⏎```js⏎const total = items.length;⏎console.log(total);‸',
+      keys: ['Alt-ArrowUp'],
+      tc: true,
+      expect: {
+        caret:
+          '<sub A paragraph above.⏎⏎```js⏎const total = items.length;⏎console.log(total);>⏎⏎```js⏎const total = items.length;⏎console.log(total);⏎```‸⏎⏎A paragraph above.⏎</sub>',
+      },
+    },
+    {
       name: 'the only block: nothing to move, nothing written',
       doc: '```js⏎x‸⏎',
       keys: ['Alt-ArrowUp'],

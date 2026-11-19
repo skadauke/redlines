@@ -3641,6 +3641,11 @@ blocks of the document's own flow, §3.7.)
   covers a whole list, quote or item moves it, and one across several siblings moves them all. A
   block moves among its own siblings only: an item stays in its list, and a block in its quote.
   Nothing moves above the first sibling or below the last, and the command says so.
+  A fenced code block that nothing closes holds the rest of its container, so it has nowhere to go
+  as it is: the move writes its closing fence first (on the block's last line when that is empty,
+  and on a new line under it otherwise, in the opening fence's container syntax), tracked with
+  Track Changes on, and moves the closed block, in one step to undo (#1203). Where the closed block
+  would have nowhere to go either (it is the only block), nothing is written.
 - **The text.** The moved text is the newest view of the blocks, with the break that the siblings
   have between them. Another person's pending changes in the blocks are not carried: they stay in
   the deleted text at the old place, as in any deletion (§3.4), and the copy at the new place has the
