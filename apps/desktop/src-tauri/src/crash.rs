@@ -147,7 +147,7 @@ pub fn scrub(text: &str, home: Option<&str>) -> String {
     out
 }
 
-fn cut(text: &str, most: usize) -> String {
+pub(crate) fn cut(text: &str, most: usize) -> String {
     match text.char_indices().nth(most) {
         Some((end, _)) => format!("{}…", &text[..end]),
         None => text.to_owned(),
@@ -175,7 +175,7 @@ pub fn iso(seconds: u64) -> String {
     )
 }
 
-fn now_seconds() -> u64 {
+pub(crate) fn now_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
@@ -299,7 +299,7 @@ pub fn entry_text(p: &Problem) -> String {
 // ---- the files ----
 
 /// Appends to a log, starting over (and keeping the old one as `<name>.old`) past its limit.
-fn append(folder: &Path, name: &str, text: &str) -> std::io::Result<()> {
+pub(crate) fn append(folder: &Path, name: &str, text: &str) -> std::io::Result<()> {
     fs::create_dir_all(folder)?;
     let path = folder.join(name);
     if fs::metadata(&path).is_ok_and(|m| m.len() > LOG_LIMIT) {

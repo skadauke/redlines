@@ -31,7 +31,7 @@ use super::node::{
     Config, Credential, Event, Identity, Running, Status, Timing, TokenStore, ToolHost, start,
 };
 use super::openclaw_agent::Talk;
-use super::openclaw_chat::{Outcome, ask_seen, connect_operator, run_key};
+use super::openclaw_chat::{Outcome, ask_seen, connect_operator, connect_operator_with, run_key};
 use super::openclaw_protocol as protocol;
 use super::openclaw_tools::RunTools;
 
@@ -74,14 +74,109 @@ impl TokenStore for Tokens {
         let _ = self
             .app
             .state::<Connections>()
-            .keep(&self.handle, Kind::NodeToken, &token);
+            .keep(&self.handle, Kind::NodeDeviceToken, &token);
     }
 
     fn get(&self) -> Option<Secret> {
         self.app
             .state::<Connections>()
-            .secret(&self.handle, Kind::NodeToken)
+            .secret(&self.handle, Kind::NodeDeviceToken)
     }
+
+    fn shared(&self, skip: usize) -> Option<Secret> {
+        shared_tokens(&self.app.state::<Connections>(), &self.handle, Role::Node)
+            .into_iter()
+            .nth(skip)
+    }
+}
+
+/// Which of the two connections of a device a token is for.
+#[derive(Clone, Copy)]
+pub(super) enum Role {
+    Node,
+    Operator,
+}
+
+impl Role {
+    fn device(self) -> Kind {
+        match self {
+            Role::Node => Kind::NodeDeviceToken,
+            Role::Operator => Kind::OperatorDeviceToken,
+        }
+    }
+
+    fn legacy(self) -> Kind {
+        match self {
+            Role::Node => Kind::NodeToken,
+            Role::Operator => Kind::OperatorToken,
+        }
+    }
+}
+
+/// The tokens that go in `auth.token`, in the order to try them: the one the person typed, then
+/// what an older build kept without saying where it came from (as that build sent it). A typed
+/// token that is wrong does not hide the older one.
+fn shared_tokens(store: &Connections, handle: &str, role: Role) -> Vec<Secret> {
+    let typed = store.secret(handle, Kind::SharedToken);
+    let legacy = store.secret(handle, role.legacy()).filter(|legacy| {
+        typed
+            .as_ref()
+            .is_none_or(|typed| typed.expose() != legacy.expose())
+    });
+    typed.into_iter().chain(legacy).collect()
+}
+
+/// What a connection can prove itself with, in the order to try them: the token the Gateway gave
+/// this device (`true`, sent as `auth.deviceToken`), then a shared one (`false`, `auth.token`).
+pub(super) fn stored_secrets(store: &Connections, handle: &str, role: Role) -> Vec<(bool, Secret)> {
+    let device = store
+        .secret(handle, role.device())
+        .map(|token| (true, token));
+    let shared = shared_tokens(store, handle, role)
+        .into_iter()
+        .map(|token| (false, token));
+    device.into_iter().chain(shared).collect()
+}
+
+fn credential_of(device: bool, secret: Secret) -> Credential {
+    if device {
+        Credential::DeviceToken(secret)
+    } else {
+        Credential::Token(secret)
+    }
+}
+
+/// What the node of a connection starts with: the setup code if there is one (a new code starts a
+/// fresh pairing, and nothing is deleted for it: if it is refused, the token that worked is tried
+/// next), else what it kept.
+pub(super) fn first_credential(
+    store: &Connections,
+    handle: &str,
+    setup_code: Option<Secret>,
+) -> Result<Credential, String> {
+    match setup_code {
+        Some(code) => {
+            let token = protocol::bootstrap_token(code.expose())
+                .and_then(|token| Secret::new(&token).ok())
+                .ok_or("That setup code has no token in it. Ask for a new one.")?;
+            Ok(Credential::SetupCode(token))
+        }
+        None => stored_secrets(store, handle, Role::Node)
+            .into_iter()
+            .next()
+            .map(|(device, secret)| credential_of(device, secret))
+            .ok_or_else(|| "There is no setup code or token to connect with.".to_owned()),
+    }
+}
+
+/// Keeps a token the person typed: a shared token, for both roles. It replaces nothing: what the
+/// Gateway gave this device is tried first, and this one when that is refused.
+pub(super) fn keep_typed_token(
+    store: &Connections,
+    handle: &str,
+    token: &Secret,
+) -> Result<(), String> {
+    store.keep(handle, Kind::SharedToken, token)
 }
 
 struct Entry {
@@ -148,18 +243,7 @@ impl Nodes {
             .get(handle)
             .ok_or("That connection isn’t there any more.")?;
         let gateway = target(&connection.url, None)?;
-        let first = match setup_code {
-            Some(code) => {
-                let token = protocol::bootstrap_token(code.expose())
-                    .and_then(|token| Secret::new(&token).ok())
-                    .ok_or("That setup code has no token in it. Ask for a new one.")?;
-                Credential::SetupCode(token)
-            }
-            None => match store.secret(handle, Kind::NodeToken) {
-                Some(token) => Credential::Token(token),
-                None => return Err("There is no setup code or token to connect with.".to_owned()),
-            },
-        };
+        let first = first_credential(&store, handle, setup_code)?;
         let seed = store.device_key(handle)?;
         let identity = Identity::from_seed(seed.expose()).ok_or("The device key is damaged.")?;
         // A setup code is good for both roles of a device when the operator goes first (a live
@@ -178,7 +262,7 @@ impl Nodes {
             if let Ok((mut socket, Some(token))) =
                 connect_operator(&operator, &offered, &AtomicBool::new(false))
             {
-                let _ = store.keep(handle, Kind::OperatorToken, &token);
+                let _ = store.keep(handle, Kind::OperatorDeviceToken, &token);
                 let _ = socket.close(None);
                 let _ = app.emit(super::ACP_AGENTS_CHANGED, ());
             }
@@ -244,7 +328,11 @@ pub fn chat_agents(app: &AppHandle) -> Vec<AcpAgent> {
 pub fn chat_for(app: &AppHandle, handle: &str) -> Option<(Bridge, Talk)> {
     let store = app.state::<Connections>();
     let connection = store.get(handle)?;
-    let token = store.secret(handle, Kind::OperatorToken)?;
+    // The device's own operator token, then a shared one the person typed.
+    let secrets = stored_secrets(&store, handle, Role::Operator);
+    if secrets.is_empty() {
+        return None;
+    }
     let seed = store.device_key(handle).ok()?;
     let gateway = target(&connection.url, None).ok()?;
     let (owner, name) = (app.clone(), handle.to_owned());
@@ -257,18 +345,17 @@ pub fn chat_for(app: &AppHandle, handle: &str) -> Option<(Bridge, Talk)> {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
                 timing: Timing::default(),
             };
-            let credential = Credential::Token(
-                Secret::new(token.expose()).map_err(|_| "The token is damaged.")?,
-            );
             let (mut socket, issued) =
-                connect_operator(&config, &credential, stop).map_err(|error| error.message())?;
+                connect_operator_with(&config, &secrets, stop).map_err(|error| error.message())?;
             // A Gateway that rotates the device's token says so in the answer to connect.
             if let Some(fresh) = issued
-                && fresh.expose() != token.expose()
+                && !secrets
+                    .iter()
+                    .any(|(device, kept)| *device && kept.expose() == fresh.expose())
             {
                 let _ = owner
                     .state::<Connections>()
-                    .keep(&name, Kind::OperatorToken, &fresh);
+                    .keep(&name, Kind::OperatorDeviceToken, &fresh);
             }
             let outcome = ask_seen(&mut socket, &config, session, text, &run_key(), stop, seen);
             let _ = socket.close(None);
@@ -345,6 +432,145 @@ mod tests {
         assert_eq!(call["result"]["isError"], true);
         assert!(tools().mcp("not json").is_none());
         assert!(tools().mcp(r#"{"method":"shutdown"}"#).is_none());
+    }
+
+    /// A store with one connection, in a folder of its own.
+    fn store_with(name: &str) -> (Connections, std::path::PathBuf) {
+        use super::super::connections::NewConnection;
+        let root =
+            std::env::temp_dir().join(format!("redlines-nodes-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = Connections::new(root.join("openclaw"));
+        store
+            .add(
+                NewConnection {
+                    handle: "moby-ada".into(),
+                    name: "Moby".into(),
+                    computer: "studio-mini".into(),
+                    url: "wss://studio-mini.example.ts.net".into(),
+                    agent: None,
+                    folders: Vec::new(),
+                },
+                1,
+                |_| true,
+            )
+            .unwrap();
+        (store, root)
+    }
+
+    fn kinds(store: &Connections, role: Role) -> Vec<(bool, String)> {
+        stored_secrets(store, "moby-ada", role)
+            .into_iter()
+            .map(|(device, secret)| (device, secret.expose().to_owned()))
+            .collect()
+    }
+
+    /// What `Nodes::connect` and chat start with: a new code first, and nothing deleted for it;
+    /// else the device's token, then a shared one. What an older build kept, of unknown origin,
+    /// is sent as `auth.token`, as that build sent it, until a `hello-ok` replaces it.
+    #[test]
+    fn what_a_connection_starts_with_and_what_it_keeps() {
+        let (store, root) = store_with("starts");
+        let handle = "moby-ada";
+        assert!(first_credential(&store, handle, None).is_err());
+        // A legacy file: origin unknown, sent as `auth.token`.
+        store
+            .keep(handle, Kind::NodeToken, &Secret::new("legacy").unwrap())
+            .unwrap();
+        store
+            .keep(
+                handle,
+                Kind::OperatorToken,
+                &Secret::new("legacy-op").unwrap(),
+            )
+            .unwrap();
+        assert!(matches!(
+            first_credential(&store, handle, None).unwrap(),
+            Credential::Token(token) if token.expose() == "legacy"
+        ));
+        assert_eq!(
+            kinds(&store, Role::Operator),
+            [(false, "legacy-op".to_owned())]
+        );
+        // The Gateway's token (what `hello-ok` gives) goes in the new files and wins; the legacy
+        // one is kept and is next.
+        store
+            .keep(
+                handle,
+                Kind::NodeDeviceToken,
+                &Secret::new("dt-node").unwrap(),
+            )
+            .unwrap();
+        store
+            .keep(
+                handle,
+                Kind::OperatorDeviceToken,
+                &Secret::new("dt-op").unwrap(),
+            )
+            .unwrap();
+        assert!(matches!(
+            first_credential(&store, handle, None).unwrap(),
+            Credential::DeviceToken(token) if token.expose() == "dt-node"
+        ));
+        assert_eq!(
+            kinds(&store, Role::Operator),
+            [(true, "dt-op".to_owned()), (false, "legacy-op".to_owned())]
+        );
+        // A typed token (#1219): shared, kept beside the rest, and tried after the device's.
+        keep_typed_token(&store, handle, &Secret::new("typed").unwrap()).unwrap();
+        assert_eq!(
+            kinds(&store, Role::Node),
+            [
+                (true, "dt-node".to_owned()),
+                (false, "typed".to_owned()),
+                (false, "legacy".to_owned())
+            ]
+        );
+        assert!(store.views()[0].node_token && store.views()[0].operator_token);
+        // A new code is the first thing sent, and nothing was deleted for it.
+        let code = Secret::new("code-1").unwrap();
+        assert!(matches!(
+            first_credential(&store, handle, Some(code)).unwrap(),
+            Credential::SetupCode(token) if token.expose() == "code-1"
+        ));
+        assert_eq!(kinds(&store, Role::Node).len(), 3);
+        assert!(store.has(handle, Kind::NodeDeviceToken));
+        assert!(store.has(handle, Kind::OperatorDeviceToken));
+        // A code with no token in it is no code.
+        assert!(first_credential(&store, handle, Some(Secret::new("e30").unwrap())).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A typed token alone is the whole of a connection that has no device token yet.
+    #[test]
+    fn a_typed_token_alone_is_a_shared_token_for_both_roles() {
+        let (store, root) = store_with("typed");
+        keep_typed_token(&store, "moby-ada", &Secret::new("typed-1").unwrap()).unwrap();
+        assert_eq!(kinds(&store, Role::Node), [(false, "typed-1".to_owned())]);
+        assert_eq!(
+            kinds(&store, Role::Operator),
+            [(false, "typed-1".to_owned())]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A typed token that is wrong does not hide what an older build kept: that is tried last.
+    #[test]
+    fn a_typed_token_does_not_hide_the_older_file() {
+        let (store, root) = store_with("legacy-last");
+        let handle = "moby-ada";
+        store
+            .keep(handle, Kind::NodeToken, &Secret::new("legacy").unwrap())
+            .unwrap();
+        keep_typed_token(&store, handle, &Secret::new("typed").unwrap()).unwrap();
+        assert_eq!(
+            kinds(&store, Role::Node),
+            [(false, "typed".to_owned()), (false, "legacy".to_owned())]
+        );
+        // The same token twice is tried once.
+        keep_typed_token(&store, handle, &Secret::new("legacy").unwrap()).unwrap();
+        assert_eq!(kinds(&store, Role::Node), [(false, "legacy".to_owned())]);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -499,7 +725,7 @@ mod tests {
         let open = |config: &Config| {
             connect_operator(
                 config,
-                &Credential::Token(Secret::new(token.expose()).unwrap()),
+                &Credential::DeviceToken(Secret::new(token.expose()).unwrap()),
                 &stop,
             )
             .unwrap()

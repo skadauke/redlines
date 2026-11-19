@@ -1501,11 +1501,10 @@ const CHECKS: Check[] = [
       editor.view.scrollDOM.dispatchEvent(mouse('mousedown', x));
       document.dispatchEvent(mouse('mouseup', x));
       await frames();
-      // In the simple look a bar click opens the change's card and the look stays (#716).
-      if (editor.getUiState().markupView !== 'simple') {
+      // In the simple look a bar click switches back to Redlines (#1156).
+      if (editor.getUiState().markupView !== 'redlines') {
         problems['switched'] = editor.getUiState().markupView;
       }
-      if (!editor.view.dom.querySelector('.rl-card-what')) problems['card'] = 'none opened';
       // Beside the bar: nothing.
       editor.setViewMode('simple');
       await frames();

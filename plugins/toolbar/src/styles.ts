@@ -78,10 +78,7 @@ export const TOOLBAR_STYLE = `
   color: var(--rl-ink);
 }
 .rl-toolbar-top-open { background: var(--rl-pressed); }
-.rl-toolbar-top:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
-}
+.rl-toolbar-top:focus-visible { outline: none; }
 .rl-toolbar-top[aria-disabled='true'] { color: var(--rl-ink-3); opacity: 0.55; }
 .rl-toolbar-top svg { flex: none; }
 
@@ -151,16 +148,14 @@ export const TOOLBAR_STYLE = `
   background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
 }
 .rl-toolbar-item[aria-checked='true'] { background: var(--rl-pressed); }
-.rl-toolbar-item:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
-}
+.rl-toolbar-item:focus-visible { outline: none; }
 /* Grayed: dimmed, and its hint says why. */
 .rl-toolbar-item[aria-disabled='true'] { opacity: 0.5; }
 
 /* The palette: the search box and its lines take the bar's place in the card. */
 .rl-toolbar[data-search] .rl-toolbar-bar,
 .rl-toolbar[data-search] .rl-toolbar-spelling,
+.rl-toolbar[data-search] .rl-toolbar-bubble,
 .rl-toolbar[data-search] .rl-toolbar-rule-under { display: none; }
 .rl-toolbar[data-search] { width: min(440px, calc(100vw - 16px)); }
 .rl-toolbar-search { display: flex; flex-direction: column; gap: 4px; }
@@ -207,6 +202,7 @@ export const TOOLBAR_STYLE = `
   cursor: default;
 }
 .rl-toolbar-result svg { flex: none; color: var(--rl-ink-2); }
+.rl-toolbar-result:hover,
 .rl-toolbar-result[aria-selected='true'] {
   background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
 }
@@ -298,10 +294,7 @@ export const TOOLBAR_STYLE = `
 .rl-toolbar-word:focus-visible {
   background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
 }
-.rl-toolbar-word:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
-}
+.rl-toolbar-word:focus-visible { outline: none; }
 .rl-toolbar-word:disabled { color: var(--rl-ink-3); }
 
 /* The hint: an item's name and its keys, under the pointer, after the title bar's delay. */

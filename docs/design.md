@@ -226,6 +226,11 @@ The window, on the desktop:
   written to a crash log in the app's log folder, and a gray notification offers Report…, a
   filled-in GitHub issue for the person to read and send (the build, the system, the trace and the
   document's shape, never its text), and Reveal Log; Help has both (Report a Problem…, Reveal Log).
+  A build that isn't a release also keeps a dev log (`dev.log`, beside the crash log): a rolling line
+  for each refusal, alert, error, agent run and keystroke that took over 100 ms, never a document's
+  text or a secret, and Help › Write to Log… adds the person's note with a snapshot (the document's
+  hash, the selection, the last keys by name, never the letters). A release build has no dev log and
+  no such rows (`redlines_release`, as for the updater).
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits. A
@@ -321,7 +326,14 @@ The window, on the desktop:
   title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
   puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
   in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
-  at the pointer, where it takes the place of the system's context menu. A docked toolbar stays
+  at the pointer, where it takes the place of the system's context menu. Both open the same bar: on
+  a change, a comment or a highlight, that place's review card (who, what, and Accept and Reject,
+  Resolve and Reply, or Remove) is stacked above the bar in the same card, under the spelling rows;
+  a click on a highlight opens its card alone, and ⇧⌘P at the caret or selection opens what a
+  right-click there opens. The card is the place's at the caret, which is the selection's head
+  (a right-click's is the point clicked), and the selection keeps its highlight while the bar is
+  open. With the keys, the card's first button is where the keyboard enters, and ← and → move
+  along its row. A docked toolbar stays
   while you write, scroll, resize the window or click in the text (Esc, with the keyboard in
   it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
   elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›
@@ -646,9 +658,11 @@ no ledger, and no view or tracking recorded. An agent reads and writes the file 
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
   with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
-  text. In the simple look, a click on a change, on its colored text or on its bar, opens that
+  text. In the simple look, a click on a change's colored text opens that
   change's card with Accept and Reject (the card says what a hidden deletion was: #664); a click on
-  a bar in the full markup, and the switch, switch from the one look to the other, with the line where it was (a
+  a bar, in either look, and the switch, switch from the one look to the other, so that Simple is
+  never a place with no way back (#1156): the Redlines row of the title bar's View menu and ⌥⌘2 go
+  back from it too, each with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
@@ -933,7 +947,10 @@ mode has no counterpart in the desktop app.
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
     to dots. The rail grows with the text size above 100%, and so does the width at which it
-    shrinks. During a pinch the rail keeps its state until the fingers lift.
+    shrinks. During a pinch the rail keeps its state until the fingers lift. Where the window has
+    room, the notes and margins grow with the fingers; from the frame in which they would take the
+    column's width (and a picture's, which is as wide as the column) they keep the size they had,
+    and take the new one when the fingers lift.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
@@ -1924,7 +1941,7 @@ own). The text below is the design they follow.
 
 ### 7.1a One document in several windows
 
-File › Open in Another Window shows the document in a second window of the app, and the two are
+View › New Window (Word's name and place) shows the document in a second window of the app, and the two are
 one session on one Mac, with no network, no account and no invitation.
 
 - **One window leads.** It runs the authority (the TypeScript in `packages/collab`) and is the
@@ -1937,13 +1954,21 @@ one session on one Mac, with no network, no account and no invitation.
 - **Save is once, after a pause.** The leader saves when the log has been quiet for a second and
   its own edits are confirmed. Save in another window asks the leader. A window closes without a
   question when the authority has everything it made; the leader that closes writes the file first.
-- **Each window is a person to the others.** It has a name ("Ada (window 2)") and a color of its own,
-  chosen by the authority and the same in every window, which follow the window through a
-  handover. The others show its caret with its name on a flag that fades after five seconds, and
-  its selection tinted, in that color. A caret is sent as a position in the confirmed text at a
-  version, and every window places it again among its own text, so it stays among the same words
-  while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
-  windows", or that edits are kept while the session can't be reached.
+- **Each window is a person to the others.** It has a name ("Ada (window 2)"); its color is its
+  person's author color in the document (§5.5), the color their changes are drawn in, the same in
+  every window of that person and never one that another person has in that document (a person
+  the document doesn't know yet is gray). The others show its caret with its name on a flag that
+  fades after five seconds, and its selection tinted, in that color; while a selection lasts, its
+  caret and flag stay (#1168), so that it is clear who marked what. A caret is sent as a
+  position in the confirmed text at a version, and every window places it again among its own text, so it stays among the same words
+  while text moves; nothing of it is stored. Beside the document's name, set apart from it in
+  regular italic where the name is bold, the title bar says which window this is, "Window 2", as
+  Word numbers the windows of one document (a tab with no number of its own says "In 2 windows"),
+  or that edits are kept while the session can't be reached.
+- **Track Changes is the document's.** Turning it on or off in one window turns it on or off in
+  every window of the document, with the toggle and the "Track Changes on" notice in each. A window
+  that joins takes the leader's setting. The window says it to the others as an event between
+  windows (`session-tracking`), never through the text.
 - **Undo is each window's own.** A step knows whose it is, and a change that came from another window
   is never undone by this one (§5.13): a tracked step is taken back by rejecting its own marks, and
   an untracked step that the other window changed since is left alone, with the name of the window

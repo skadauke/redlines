@@ -941,10 +941,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         view.dispatch({ effects: chooseViewEffects(menuView) });
         return;
       }
-      // Redlines shown already, in either look, stays as it is: only a click on a change bar
-      // chooses a look. Otherwise it comes back in the look that was shown last, which chooses
+      // Redlines shown in its full markup stays as it is. Chosen from the simple look, which the
+      // menus check as Redlines too, it is the way back: the full markup, the line kept where it
+      // was (#1156). Otherwise it comes back in the look that was shown last, which chooses
       // nothing: the look chosen stays the one a click made.
-      if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
+      const now = view.state.field(viewModeField);
+      if (now === 'simple') {
+        const at = lookedAt(view);
+        switchLookAt(view, at.pos, undefined, undefined, at.row);
+        return;
+      }
+      if (menuViewOf(now) === 'redlines') return;
       view.dispatch({ effects: setViewModeEffect.of(shownLook ?? markupView) });
     },
     switchLook: () => {
