@@ -276,12 +276,14 @@ same script builds, signs and checks both, and `bundle.macOS.files` copies both.
   architectures, is signed with a Developer ID, a timestamp and the hardened runtime, by the team
   that signed the app, with the sandbox, the compiler and the read-only exception for files and no other entitlement, and that the
   app's seal holds with it inside.
-- **Types.** The extension lists `net.daringfireball.markdown` and `public.markdown`, and the
-  dynamic types of `.qmd` and `.rmd`, which macOS makes for a file whose extension no app declares
-  (`dyn.` and the extension's bytes in base 32; `build-quicklook` computes them, and `--check` asks
+- **Types.** The extension lists `net.daringfireball.markdown` and `public.markdown`, `md.redlines.quarto`,
+  the type that the app exports for `.qmd` (`document-types.plist`, `QUARTO_TYPE` in `build-quicklook`;
+  #1177), and the dynamic type of `.rmd`, which macOS makes for a file whose extension no app declares
+  (`dyn.` and the extension's bytes in base 32; `build-quicklook` computes it, and `--check` asks
   the Mac for the type of an extension nobody declares to see that it agrees). Quick Look matches
-  these exactly, and the types of a subtype aren't matched: where another app declares `.qmd` or
-  `.Rmd` as its own type, Quick Look chooses by that type, and Redlines' extension isn't asked.
+  these exactly, and the types of a subtype aren't matched: where another app also declares `.qmd`
+  or `.Rmd` as its own type and macOS gives the file that type, Quick Look chooses by it, and
+  Redlines' extension isn't asked (accepted).
 - It needs macOS 13.3: the format library's patterns use regular-expression lookbehind, which the
   JavaScriptCore before it (Safari 16.3 and earlier) can't read, so that it couldn't load the
   renderer at all and every preview would be the file's text. Array methods such as `toSorted`
@@ -301,9 +303,8 @@ qlmanage -p quicklook/fixtures/redlines.md
 ```
 
 An app in `/Applications` is registered by macOS itself, and the extension with it; the commands
-above are for a build somewhere else. `qlmanage -p -c <type> file` forces a type, to see a `.qmd`
-that another app owns on your Mac (`dyn.ah62d4rv4ge81c5pe` is `.qmd`, `dyn.ah62d4rv4ge81e5pe` is
-`.rmd`). The preview's window is blank while it is behind other windows, since the web view
+above are for a build somewhere else. `qlmanage -p -c <type> file` forces a type, to see a file that
+another app owns on your Mac (`md.redlines.quarto` is `.qmd`, `dyn.ah62d4rv4ge81e5pe` is `.rmd`). The preview's window is blank while it is behind other windows, since the web view
 stops drawing: bring it to the front. What the extension did is in the log (`/usr/bin/log`, since
 `log` in zsh is something else):
 
