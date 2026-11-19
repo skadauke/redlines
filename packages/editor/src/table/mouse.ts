@@ -75,8 +75,18 @@ function selectionIn(
   return EditorSelection.single(anchor ?? here, here);
 }
 
+/** Whether the point is in the box of any table. */
+function inATable(view: EditorView, x: number, y: number): boolean {
+  for (const table of view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl')) {
+    if (contains(table.getBoundingClientRect(), x, y)) return true;
+  }
+  return false;
+}
+
 /** The selection from `anchor` to the place the pointer is at: in the cell under it when that is a
- * cell of `table`, else in `fallback`'s text (the pointer is out of the table: at the cell's edge). */
+ * cell of `table`; out of every table, where the pointer is (a selection that reaches out of the
+ * table, so that a drag past the window's edge goes on selecting as the document scrolls, #1159);
+ * else in `fallback`'s text (on the table's lines between its cells: at the cell's edge). */
 function reaching(
   view: EditorView,
   table: Table,
@@ -89,6 +99,8 @@ function reaching(
   if (over && over.table.id === table.id) {
     return EditorSelection.single(anchor, placeIn(view, over.cell, x, y));
   }
+  if (!inATable(view, x, y))
+    return EditorSelection.single(anchor, view.posAtCoords({ x, y }, false));
   return EditorSelection.single(anchor, placeIn(view, fallback, x, y));
 }
 
