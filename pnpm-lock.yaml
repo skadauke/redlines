@@ -113,6 +113,9 @@ importers:
       fflate:
         specifier: 0.8.3
         version: 0.8.3
+      temml:
+        specifier: 0.14.0
+        version: 0.14.0
     devDependencies:
       '@codemirror/language':
         specifier: ^6.13.1
@@ -1717,6 +1720,10 @@ packages:
   style-mod@4.1.4:
     resolution: {integrity: sha512-XXWIQt633/EpAFx8aZDOTjBzrCaGmhvEQlQo6MVPfa2OzO2cWo+4hV9h+6UkHYlXGfy+ODXKUdP7Pthmcu5ATw==}
 
+  temml@0.14.0:
+    resolution: {integrity: sha512-tz1LW/5IZpThK8c7ZpdTSH/n56eAj+ThirLieErtKxYC3EKCIiB4sKdRUehAgH+fQmvIKqMfP3gqTLBdLpy9zw==}
+    engines: {node: '>=18.13.0'}
+
   tinybench@6.2.2:
     resolution: {integrity: sha512-nIZ2N2dFpjBsg2hgitKu7mA+FvsIJuGJOwysRngmVRRmWgR/UyPjwJj8c/fT/dhm8EkHnF5EOogRf+0Z2qrimA==}
     engines: {node: '>=20.0.0'}
@@ -3221,6 +3228,8 @@ snapshots:
   std-env@4.3.0: {}
 
   style-mod@4.1.4: {}
+
+  temml@0.14.0: {}
 
   tinybench@6.2.2: {}
 

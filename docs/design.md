@@ -115,8 +115,9 @@ from this table.
 
 The Mac app is built; Windows and Linux are planned (§10). Live collaboration with people is built between windows of one Mac and planned across networks (§7). The editor is not yet published as a
 package others can embed: the packages are private, and the website's embed is a demo. R Markdown
-and Quarto files are edited with their divs, callouts, citations, cross-references and includes
-drawn; running their code cells is not what Redlines does. Several windows of one document on one
+and Quarto files are edited with their divs, callouts, citations, cross-references, includes and
+math (`$x^2$`, `$$ … $$`, in Markdown files too, drawn as MathML by Temml, which the app loads when a
+document has a formula, #1173) drawn; running their code cells is not what Redlines does. Several windows of one document on one
 Mac work, but live collaboration with people means people on different computers.
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
@@ -2320,10 +2321,20 @@ copy only, never the plugin, and the Claude Code row says to keep one. Publishin
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks
-a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a sheet
+a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a window of
+its own, larger than Preferences and resizable, which Preferences › Agents and the @ picker (its
+last row, while no OpenClaw agent is connected) open
 ([research note](research/openclaw-connection.md), screens 1 to 7, and a gray card for every
 failure): whether this Mac has Tailscale installed, is signed in and sees other computers
-(`tailscale status --json`, read only: Redlines never starts, stops or changes Tailscale); which
+(`tailscale status --json`, read only), and, where something is missing, does most of the setting up itself,
+only from that window and only when the person presses the button: it downloads Tailscale's
+package from pkgs.tailscale.com, checks that Tailscale signed it (Apple team W5364U7YZB) and Apple
+notarized it, refuses in plain words if either fails, and installs it with macOS's own
+administrator prompt (never a password field of Redlines'; the App Store page for a person who is
+not an administrator); opens the app and waits for its network extension, saying where in System
+Settings to allow it; starts the sign-in and opens its page; and restarts Tailscale's app once
+after a fresh install, and when the sign-in hangs (the app started before its extension and never
+connected to it). Which
 computer, found by opening its WebSocket and reading its greeting (nothing is sent); a prompt to
 send the person's agent, which holds no secret and asks for the private road only (Tailscale
 Serve, auth on, one command, the tools for one agent); a secure field for the setup code the agent
