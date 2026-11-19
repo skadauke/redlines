@@ -115,7 +115,7 @@ describe('the tour (#1206)', () => {
   it('opens the Welcome document and points at the pen, the views button and the palette', async () => {
     const container = document.createElement('div');
     document.body.append(container);
-    for (const key of ['pen', 'views', 'palette']) {
+    for (const key of ['pen', 'views']) {
       const anchor = document.createElement('button');
       anchor.dataset['tour'] = key;
       container.append(anchor);
@@ -126,7 +126,7 @@ describe('the tour (#1206)', () => {
       anchors: {
         pen: () => container.querySelector('[data-tour="pen"]'),
         views: () => container.querySelector('[data-tour="views"]'),
-        palette: () => container.querySelector('[data-tour="palette"]'),
+        palette: () => null,
       },
       restoreFocus: vi.fn(),
     };
@@ -135,10 +135,10 @@ describe('the tour (#1206)', () => {
     const ended = runTour(deps);
     await tick();
     expect(deps.openWelcome).toHaveBeenCalledOnce();
-    const titles = ['The Redlines pen', 'Views', 'The toolbar and its commands'];
+    const titles = ['The Redlines pen', 'Views', 'The command palette'];
     for (const [at, title] of titles.entries()) {
       expect(container.querySelector('.rl-tour-card')?.getAttribute('aria-label')).toBe(title);
-      expect(container.querySelectorAll('.rl-tour-target')).toHaveLength(1);
+      expect(container.querySelectorAll('.rl-tour-target')).toHaveLength(at < 2 ? 1 : 0);
       click(at === titles.length - 1 ? 'Done' : 'Next');
     }
     await ended;

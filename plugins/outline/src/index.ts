@@ -5,7 +5,7 @@ import type { Editor } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
 import { createOutline } from './outline.ts';
 
-export { createOutline } from './outline.ts';
+export { createOutline, FLOATING_EVENT } from './outline.ts';
 export type { OutlineGeometry, OutlineOptions, PaneBox } from './outline.ts';
 export { headingsOf, type Heading } from './headings.ts';
 
@@ -16,7 +16,10 @@ export const plugin: Plugin = {
     version: '0.0.0',
     needs: ['document:read'],
     contributes: {
-      commands: [{ id: 'outline.focus', title: 'Show Outline', shortcut: 'Mod-Ctrl-o' }],
+      commands: [
+        { id: 'outline.focus', title: 'Show Outline', shortcut: 'Mod-Ctrl-o' },
+        { id: 'outline.toggle', title: 'Outline' },
+      ],
     },
   },
   activate: (context) =>

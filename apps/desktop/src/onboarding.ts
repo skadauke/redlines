@@ -2,7 +2,7 @@
 // of the Preferences window runs the first three screens, which need the app's install commands:
 // you (name and handle), your agent, and set up this Mac (three installs, each the app's own command
 // and each skippable). The document window then runs the tour, a short walk through the Welcome to
-// Redlines document that points at the pen, the views button and the toolbar's command palette.
+// Redlines document that points at the pen, the views button and the command palette (⇧⌘P).
 // Neither owns storage or a command: everything goes through `WelcomeDeps` and `TourDeps`, so the
 // windows and the tests give them theirs.
 
@@ -46,7 +46,7 @@ export interface TourDeps {
   container: HTMLElement;
   /** Opens the Welcome to Redlines document in this window. */
   openWelcome(): Promise<void>;
-  /** What the tour points at, when it is drawn. */
+  /** What the tour points at, when it is drawn; a card with no anchor (the palette has no button) hangs under the title. */
   anchors: Record<'pen' | 'views' | 'palette', () => HTMLElement | null>;
   /** Gives the keyboard back to the editor. */
   restoreFocus(): void;
@@ -88,8 +88,8 @@ const TOUR = [
   },
   {
     key: 'palette',
-    title: 'The toolbar and its commands',
-    text: 'Open it and type to find any command or setting by name: the command palette.',
+    title: 'The command palette',
+    text: 'Press ⇧⌘P and type to find any command or setting by name. It has no button: it opens at the caret.',
   },
 ] as const;
 
@@ -398,7 +398,7 @@ export async function runTour(deps: TourDeps): Promise<void> {
       // Under the anchor, the card's arrow over its middle.
       const rect = anchor?.getBoundingClientRect();
       const width = cardEl.offsetWidth || 300;
-      const middle = rect ? rect.left + rect.width / 2 : window.innerWidth - 60;
+      const middle = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
       const left = Math.max(12, Math.min(middle - width / 2, window.innerWidth - width - 12));
       cardEl.style.left = `${left}px`;
       cardEl.style.top = `${(rect?.bottom ?? 40) + 12}px`;

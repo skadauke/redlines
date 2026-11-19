@@ -79,7 +79,7 @@ test('the tour: the pen, the views button and the command palette', async ({ pag
   await expect(card).toContainText('Views');
   await shot('4b-views');
   await card.getByRole('button', { name: 'Next' }).click();
-  await expect(card).toContainText('command palette');
+  await expect(card).toContainText('⇧⌘P');
   await shot('4c-palette');
   await card.getByRole('button', { name: 'Done' }).click();
   await expect(page.locator('.rl-tour-card')).toHaveCount(0);

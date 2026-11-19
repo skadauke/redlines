@@ -55,6 +55,23 @@
         "trafficLightPosition": { "x": 20, "y": 22 }
       },
       {
+        "label": "openclaw-setup",
+        "create": false,
+        "url": "openclaw-setup.html",
+        "title": "Connect OpenClaw",
+        "width": 780,
+        "height": 720,
+        "minWidth": 560,
+        "minHeight": 480,
+        "resizable": true,
+        "minimizable": false,
+        "center": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 20, "y": 22 }
+      },
+      {
         "label": "about",
         "create": false,
         "url": "about.html",

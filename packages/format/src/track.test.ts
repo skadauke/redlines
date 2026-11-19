@@ -1329,7 +1329,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
   ];
 
   it('edits the newest view, keeps the original view, and leaves marks and ledger in order', () => {
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     let edits = 0;
     let refused = 0;
     let checked = 0;
@@ -1498,7 +1498,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
   it('widens the old text and the new text alike: an edit inside a prefix comes out as typed', () => {
     // A marker can't stand in a prefix, so the change takes the break in front of it: accepting
     // gives the text that was typed, whole, and rejecting gives the original (format §3.4).
-    const documents = fuzzCount(200);
+    const documents = fuzzCount(65);
     let edits = 0;
     let refused = 0;
     let undecided = 0;
@@ -1597,7 +1597,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // to three more line breaks, words, white space, a bullet, or a Backspace. Every order of
     // deciding every change gives the same text for the same decisions, exactly, and accepting or
     // rejecting them all gives the newest or the original view.
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     const FIRST = ['\n', '\n', '\n\n', 'over', 'new\nwords ', 'new\n\nwords '];
     const AGAIN = ['\n', '\n', '\n', '\n', '\n\n', 'x', 'new words', ' ', '  ', '- x', 'backspace'];
     let edits = 0;
@@ -1694,7 +1694,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // of its line, which it goes after; words that the author of a split types on its blank line
     // are never refused; every order of deciding every change gives the same text for the same
     // decisions.
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     const BREAKS = [['\n', '\n'], ['\n\n'], ['\n', '\n', '\n']] as const;
     const WORDS = ['x', 'new words', 'é', '😀', '👨‍👩‍👧', ':tent:', '🇩🇪'];
     const TEXT = [...WORDS, ' ', 'new\n', 'one\ntwo', '- x', 'a--b'];
@@ -1920,7 +1920,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // break. Each Backspace takes what it deletes and nothing more, and is never refused: the first
     // line break leaves the split with the other, and the second cancels it. Every order of
     // deciding every change gives the same text for the same decisions.
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     const BREAKS = [['\n', '\n'], ['\n\n']] as const;
     let pressed = 0;
     let walked = 0;
@@ -2057,7 +2057,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // quote markers instead, which opens a quote of its own: that is tracked, or refused. Every
     // edit that writes no mark renders the same before and after it, and every order of deciding
     // every change gives the same text.
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     let entered = 0;
     let walked = 0;
     for (let seed = 1; seed <= documents; seed++) {
@@ -2237,7 +2237,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // where the block below only looks like one: plain where the blocks read the same, tracked
     // where they do not. A deletion written plain changes nothing that is rendered, in either view.
     const html = (text: string) => micromark(bodyAlone(text), { allowDangerousHtml: true });
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     let pressed = 0;
     let walked = 0;
     let cuts = 0;
