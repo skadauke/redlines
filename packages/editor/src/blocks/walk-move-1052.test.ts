@@ -100,6 +100,18 @@ describe('walk seed 159: ⌥↓, Return, then Tab on an item with a sublist', ()
       },
     },
     {
+      name: 'a task list, the item moved down, Return, Tab',
+      doc: '+ [ ] ‸alpha review⏎  - plan ship⏎⏎+ [ ] text alpha⏎',
+      keys: ['Alt-ArrowDown', 'Enter', 'Tab'],
+      tc: true,
+      expect: {
+        // The box keeps the empty item a task item whose line the format reads alike with the blank
+        // line, so the Tab is written as it is (the regex of `closeBlankAbove` takes a box too).
+        caret:
+          '+ [ ] <del alpha review⏎  - plan ship⏎⏎+ [ ] >⏎  text alpha<ins><split>⏎⏎+ [ ] <split>⏎⏎  + [ ] ‸alpha review<split>⏎    - plan ship</ins>',
+      },
+    },
+    {
       name: 'a plain list, the item moved down, Return, Tab',
       doc: '- ‸a⏎- b⏎',
       keys: ['Alt-ArrowDown', 'Enter', 'Tab'],

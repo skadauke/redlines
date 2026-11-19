@@ -275,7 +275,12 @@ function closeBlankAbove(
   const blank = doc.line(line.number - 1);
   const empty = doc.line(line.number - 2);
   if (!/^[ \t>]*$/.test(blank.text)) return null;
-  if (!/^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]*(?:<!--[^]*?-->)*[ \t]*$/.test(empty.text)) return null;
+  if (
+    !/^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]*(?:\[[ xX]\][ \t]*)?(?:<!--[^]*?-->)*[ \t]*$/.test(
+      empty.text,
+    )
+  )
+    return null;
   const me = state.facet(authorFacet)?.handle;
   const own = state
     .field(parsedField)
