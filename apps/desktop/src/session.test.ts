@@ -7,7 +7,7 @@
 import { createEditor, type Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { EVENTS, joinSession, ordinalOf, PortLog } from './session.ts';
+import { EVENTS, joinSession, ordinalOf, PortLog, windowNumberOf } from './session.ts';
 import type { Joined, Moved, Session, SessionPorts } from './session.ts';
 
 const BASE = 'First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.\n';
@@ -407,6 +407,10 @@ describe('a document in two windows', () => {
 
 describe('what the windows are called', () => {
   it('numbers a window by its label, the same whichever window leads', () => {
+    expect(windowNumberOf('main')).toBe(1);
+    expect(windowNumberOf('doc-1')).toBe(2);
+    expect(windowNumberOf('tab-2')).toBe(2);
+    expect(windowNumberOf('tab-9f3c1a2b')).toBeNull();
     expect(ordinalOf('main')).toBe(1);
     expect(ordinalOf('doc-1')).toBe(2);
     expect(ordinalOf('doc-12')).toBe(13);

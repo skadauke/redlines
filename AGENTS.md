@@ -128,6 +128,9 @@ repo root.
   written to `crash.log` in the app's log folder (`~/Library/Logs/md.redlines.editor/crash/`, slow
   timers in `slow.log`), and a gray notification offers **Report…** (a filled-in GitHub issue with the
   build, system, trace and the document's shape, never its text) and **Reveal Log**; Help has both.
+  Builds that aren't releases (no `redlines_release` cfg) also keep `dev.log` there
+  (`src-tauri/src/dev_log.rs`, `src/dev-log.ts`): refusals, alerts, errors, agent runs, slow
+  keystrokes, and Help › Write to Log… (a note and a snapshot, no document text, no secrets).
   In `pnpm tauri dev`, `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')` in
   the page's console makes each happen
 - Recovery (`apps/desktop/src-tauri/src/recovery.rs`, `src/recovery.ts`): while a document has

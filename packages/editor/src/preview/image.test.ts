@@ -71,6 +71,52 @@ describe('an image under the selection (#675)', () => {
     expect(image?.querySelectorAll('.rl-image-handle')).toHaveLength(2);
   });
 
+  it('is the same drawn picture when selected, with one set of handles, not drawn again (#1195)', () => {
+    const editor = editorWith(DOC, local, 0);
+    const before = editor.view.contentDOM.querySelector('.rl-image');
+    expect(before, 'the picture is drawn').not.toBeNull();
+    expect(before?.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+    editor.view.dispatch({ selection: { anchor: from, head: to } });
+    const all = editor.view.contentDOM.querySelectorAll('.rl-image');
+    expect(all, 'one picture, not two').toHaveLength(1);
+    expect(all[0], 'the same element, so that its handles stay where they are').toBe(before);
+    expect(all[0]?.classList.contains('rl-image-selected')).toBe(true);
+    expect(editor.view.contentDOM.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+    editor.view.dispatch({ selection: { anchor: 0 } });
+    expect(editor.view.contentDOM.querySelector('.rl-image')).toBe(before);
+    expect(before?.classList.contains('rl-image-selected')).toBe(false);
+    expect(editor.view.contentDOM.querySelectorAll('.rl-image-handle')).toHaveLength(2);
+  });
+
+  it('is still drawn again when its alt text, source or width changes, selected or not', () => {
+    const editor = editorWith('![A cat](cat.png)', local, 0);
+    const first = () => editor.view.contentDOM.querySelector<HTMLElement>('.rl-image');
+    const before = first();
+    expect(before).not.toBeNull();
+    // The alt text.
+    editor.view.dispatch({ changes: { from: 4, to: 5, insert: 'dog' } });
+    const alt = first();
+    expect(alt, 'a new alt text draws a new picture').not.toBe(before);
+    expect(alt?.querySelector('img')?.getAttribute('alt')).toBe('A dogat');
+    // The source.
+    const text = editor.view.state.doc.toString();
+    editor.view.dispatch({
+      changes: { from: text.indexOf('cat.png'), to: text.indexOf('cat.png') + 3, insert: 'bat' },
+    });
+    const src = first();
+    expect(src, 'a new source draws a new picture').not.toBe(alt);
+    expect(src?.querySelector('img')?.getAttribute('src')).toBe('app://bat.png');
+    // The width, through the selection that holds the image as well.
+    const all = editor.view.state.doc.length;
+    editor.view.dispatch({
+      changes: { from: 0, to: all, insert: '<img src="bat.png" alt="A dogat" width="120">' },
+    });
+    editor.view.dispatch({ selection: { anchor: 0, head: editor.view.state.doc.length } });
+    const wide = first();
+    expect(wide, 'a width draws a new picture').not.toBe(src);
+    expect(wide?.querySelector('img')?.style.width).not.toBe('');
+  });
+
   it('shows its source only when the selection has an end inside it', () => {
     expect(drawn(editorWith(DOC, local, from + 4))).toHaveLength(0);
     const editor = editorWith(DOC, local, 0);
