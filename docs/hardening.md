@@ -266,10 +266,20 @@ its case; each is a bug. The list is what has been found, not a count of what is
   digits or markers is seen (#418). A deletion inside a blank line of a break, and a replacement
   inside the blank line of the break of the author's own pending split, are written as a
   substitution that keeps the break, so that every order of decisions reads as typed (#447, #419).
-- Delimiters beside another person's marks still read otherwise in some order of decisions in three
-  shapes, which the random suites leave out: a run pasted next to a tag or across a letter (#1135),
-  one typed at the seam of a paragraph made of their insertion (#1136), and, with Track Changes off,
-  one beside a comment or highlight marker (#1140), all three found while closing #265.
+- Delimiters beside another person's marks (#265, #1135, #1136, #1140). A delimiter beside a
+  comment's or a highlight's marker, with Track Changes off, is written with the marker moved across
+  the run, so that the delimiter stands against its word in the file as in the view; a run typed at
+  the seam of a paragraph made of their insertion, or a deletion's, is written as the replacement of
+  the paragraph where the fine form leaves other texts in some orders (`ordersDifferNear`); a run
+  pasted next to their bold with an HTML tag in it is replaced where its orders read otherwise. Left,
+  and a limit of the oracle, not of the write: a run pasted next to their insertion `_f_` between
+  letters (`x ca<ins _f_>é`), whose own file reads the underscores as emphasis where its view does
+  not (the marker is punctuation to the run), so that rejecting the paste gives that file back
+  (filed on its own). A delimiter beside their pending italic (`x ca<fmt +italic>_f_`) is replaced
+  as the paragraph at the ten positions of the review, its new text spelling the italic with `*` as
+  the view does; typed inside their italic or right after it, the key is refused as before ("This
+  would change how their format change reads"), and a pasted `</sub>*` just before its closing `_`
+  is still written as the fine form, which reads otherwise.
 - A comment over a backtick can make another person's table change undecidable (#376; left out of
   `table-align-random.test.ts`).
 - Return at the start of a nested first item, tracked, fails in four more shapes (#395).

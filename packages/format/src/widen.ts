@@ -558,7 +558,14 @@ function tryRung(
 ): Widened | undefined {
   // The new text: the unit as the newest view has it, with the edits made.
   const viewFrom = view.map.fromSource(rung.from);
-  const viewTo = view.map.fromSource(rung.to);
+  let viewTo = view.map.fromSource(rung.to);
+  // A unit that ends the body, whose last mark is another person's format change spelled in the view
+  // with a delimiter of its own (`_f_` as `*f*`): the map ends the unit in front of that delimiter,
+  // and the new text would lose it (#1136). The unit then runs to the end of the view's text.
+  const bodyEnd = parsed.ledgerRange?.from ?? text.length;
+  if (text.slice(rung.to, bodyEnd).trim() === '') {
+    viewTo = Math.max(viewTo, view.text.replace(/\s+$/, '').length);
+  }
   if (edits.some((edit) => edit.from < viewFrom || edit.to > viewTo)) return giveUp('span');
   let now = applyChanges(
     view.text.slice(viewFrom, viewTo),
@@ -1116,6 +1123,64 @@ function readHtml(source: string): string {
  * either the unit is replaced, which is safe (#265). */
 const MOST_NEAR_MARKS = 4;
 const MOST_STATES = 100;
+
+/**
+ * Whether the marks of the paragraphs from `first` to `last` of `file` (four at most) give another
+ * text in one order of deciding them than in another, each decision the same: a change that is
+ * written with its block breaks as syntax (a deletion of a paragraph, an insertion of one) leaves a
+ * blank line behind in some orders and not in others (#1136). Each state is read exactly, not by
+ * micromark; the file is cut to the stretch with the ledger after it.
+ */
+export function ordersDifferNear(file: string, first: number, last: number): boolean {
+  const parsed = parse(file);
+  const end = parsed.ledgerRange?.from ?? file.length;
+  const from = Math.max(0, file.lastIndexOf('\n\n', Math.max(0, first - 1)) + 2);
+  const after = file.indexOf('\n\n', Math.min(last, end));
+  const to = after < 0 || after > end ? end : after;
+  const ids = [
+    ...new Set(
+      parsed.marks
+        .filter(
+          (mark) =>
+            mark.kind !== 'cmt' &&
+            mark.kind !== 'hl' &&
+            mark.segments.some((g) => g.open.from >= from && (g.close?.to ?? g.open.to) <= to),
+        )
+        .map((mark) => mark.id),
+    ),
+  ];
+  if (ids.length === 0 || ids.length > 4) return false;
+  const orders = (list: string[]): string[][] =>
+    list.length <= 1
+      ? [list]
+      : list.flatMap((id, i) =>
+          orders([...list.slice(0, i), ...list.slice(i + 1)]).map((rest) => [id, ...rest]),
+        );
+  const every = orders(ids);
+  for (let mask = 0; mask < 1 << ids.length; mask++) {
+    const results = new Set<string>();
+    for (const order of every) {
+      let current = file;
+      let refused = false;
+      for (const id of order) {
+        if (!parse(current).marks.some((mark) => mark.id === id)) continue;
+        try {
+          current = applyChanges(
+            current,
+            ((mask >> ids.indexOf(id)) & 1 ? accept : reject)(current, id),
+          );
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          refused = true;
+          break;
+        }
+      }
+      if (!refused) results.add(current);
+    }
+    if (results.size > 1) return true;
+  }
+  return false;
+}
 
 /**
  * Whether `file`, a write that took in text of another person's format change, reads otherwise than
