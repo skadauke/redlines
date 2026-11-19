@@ -1,0 +1,53 @@
+// A selection that starts above the viewport (#384): where the Ask bubble goes, and whether the
+// page jumps to it.
+
+import { expect, test } from '../src/journey.ts';
+
+test.describe('Ask, with the selection starting above the window', () => {
+  test('puts the bubble in view and keeps the page where the person is reading', async ({
+    start,
+  }) => {
+    const paragraphs = Array.from({ length: 90 }, (_, i) => `Paragraph ${i + 1} of the plan.`);
+    const j = await start({ doc: `${paragraphs.join('\n\n')}\n`, tracking: false, view: 'clean' });
+    const text = await j.text();
+    // From the start of paragraph 3 to the end of paragraph 45: the caret, and the view, at the end.
+    await j.place(text.indexOf('Paragraph 3 of'), text.indexOf('Paragraph 45 of') + 16);
+    // The view follows the end of the selection, as it does for a person who dragged down.
+    await j.page.getByText('Paragraph 45 of the plan.').scrollIntoViewIfNeeded();
+    await j.settle();
+    // The pane the text scrolls in: the nearest ancestor of the editor that scrolls.
+    const scrolled = () =>
+      j.page.evaluate(() => {
+        for (
+          let el = document.querySelector('.cm-editor')?.parentElement;
+          el;
+          el = el.parentElement
+        ) {
+          if (
+            el.scrollHeight > el.clientHeight + 10 &&
+            /auto|scroll/.test(getComputedStyle(el).overflowY)
+          ) {
+            return el.scrollTop;
+          }
+        }
+        return -1;
+      });
+    const before = await scrolled();
+    expect(before, 'the view is down the page').toBeGreaterThan(500);
+    await j.press('Alt+Meta+a');
+    const bubble = j.page.locator('.rl-qa');
+    await expect(bubble).toBeVisible();
+    await j.settle();
+    const box = await bubble.boundingBox();
+    const view = j.page.viewportSize();
+    expect(box, 'the bubble has a place').not.toBeNull();
+    expect(box!.y + box!.height, 'the bubble is not above the window').toBeGreaterThan(0);
+    expect(box!.y, 'the bubble is not below the window').toBeLessThan(view!.height);
+    const after = await scrolled();
+    expect(
+      Math.abs(after - before),
+      `the page did not jump (${before} -> ${after}, bubble at ${box!.y})`,
+    ).toBeLessThan(400);
+    await j.shot('ask-selection-above-viewport');
+  });
+});

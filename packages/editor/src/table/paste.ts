@@ -43,7 +43,7 @@ import { cellOfRef, cellsOfRect, clearedCells, headCell, rectOf } from './cells.
 import { type Table, cellAtCol, tablesField } from './model.ts';
 import { planned } from './ops.ts';
 import { fillRows } from './paste-intent.ts';
-import { intentAnnotation, newIntentId } from '../tracked/intent.ts';
+import { newIntentId, recordedAs } from '../tracked/intent.ts';
 import type { StepsIntent, TypingIntent, Unnamed } from '../tracked/intent.ts';
 import type { TableIntent } from './intent.ts';
 import { type WidenedPasteIntent, writeWidenedPaste } from './widened-paste.ts';
@@ -332,7 +332,7 @@ function write(view: EditorView, plan: Plan): boolean {
     trackedEditAnnotation.of(true),
     clearedCells.of(true),
     isolateHistory.of('full'),
-    ...(intent ? [intentAnnotation.of(intent)] : []),
+    ...(intent ? [recordedAs(intent)] : []),
   ];
   if (untracked) {
     const asker = state.facet(untrackedAskFacet);

@@ -7,6 +7,7 @@ import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { deleteTable } from './ops.ts';
+import { isWidenedNotice } from '../tracked/intent.ts';
 
 const open: Editor[] = [];
 const notices: string[] = [];
@@ -23,7 +24,9 @@ function mount(doc: string, tracking: boolean): Editor {
     doc,
     author: { handle: 'ada', name: 'Ada Lovelace' },
     tracking,
-    onNotice: (message) => notices.push(message),
+    onNotice: (message) => {
+      if (!isWidenedNotice(message)) notices.push(message);
+    },
   });
   open.push(editor);
   forceParsing(editor.view, editor.view.state.doc.length, 10_000);
