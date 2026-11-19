@@ -194,8 +194,12 @@ describe('documentHtml of a selection (clip)', () => {
     expect(html).not.toContain('rl-callout');
   });
 
-  it('draws a task item as its box with no bullet', () => {
+  it('draws a task item as its box with no bullet, a paragraph that no list draws a bullet for', () => {
     const html = documentHtml('- [x] done\n- [ ] open', 'clean', { office: true, clip: true });
+    expect(html).not.toContain('<li');
+    expect(html).toContain('<p style="margin:0 0 0 0.5in">☑ done</p>');
+    expect(html).toContain('☐ open');
+  });
     expect(html).toContain('<li style="list-style-type:none">☑ done</li>');
     expect(html).toContain('☐ open');
   });
@@ -251,5 +255,49 @@ describe('JPEG sizes', () => {
     ];
     const html = documentHtml(`![a](${jpeg(exif)})`, 'clean', { office: true });
     expect(html).not.toContain('height=');
+  });
+});
+
+describe('a copy for Word (#1181)', () => {
+  const office = (md: string) => documentHtml(md, 'clean', { office: true, clip: true });
+
+  it('is in Arial, like the export, and keeps a face the theme chose', () => {
+    expect(office('Some text')).toMatch(/^<div data-redlines style="font-family:Arial,/);
+    const georgia = documentHtml('Some text', 'clean', {
+      office: true,
+      clip: true,
+      fonts: { body: 'Georgia, Gelasio, serif', heading: 'Georgia, Gelasio, serif', mono: 'mono' },
+    });
+    expect(georgia).toContain('font-family:Georgia, Gelasio, serif');
+    expect(georgia).not.toContain('Arial');
+    // The page and the other targets still have Calibri.
+    expect(documentHtml('Some text', 'clean', { clip: true })).toContain('Calibri');
+  });
+
+  it('keeps a checklist item apart from the bullet list above it', () => {
+    const html = office('- First item\n  - Nested item\n- [ ] A checklist item\n- [x] Done\n- Last\n');
+    // Two bullet lists, and the checklist between them is no item of either.
+    expect(html).toMatch(
+      /<ul><li>First item<ul><li>Nested item<\/li><\/ul><\/li><\/ul><div data-rl-tasks><p[^>]*>☐ A checklist item<\/p><p[^>]*>☑ Done<\/p><\/div><ul><li>Last<\/li><\/ul>/,
+    );
+  });
+
+  it('has a table at the text width of a new document, 6.5 in', () => {
+    const html = office('| a | b |\n| - | - |\n| 1 | 2 |\n');
+    expect(html).toMatch(/<table width="624" style="[^"]*width:6\.5in/);
+    expect(documentHtml('| a |\n| - |\n| 1 |\n')).not.toContain('6.5in');
+  });
+
+  it('shades a code block gray', () => {
+    const html = office('```js\nlet a = 1;\n```\n');
+    expect(html).toMatch(/<pre style="[^"]*background:#f2f2f2;mso-shading:#f2f2f2/);
+  });
+
+  it('gives each paragraph of a quote the Word "Quote" style', () => {
+    const html = office('> One\n>\n> Two\n');
+    expect(html).toContain('<p class="MsoQuote" style="mso-style-name:Quote">One</p>');
+    expect(html).toContain('<p class="MsoQuote" style="mso-style-name:Quote">Two</p>');
+    expect(html).toContain('<blockquote');
+    expect(documentHtml('> One\n')).not.toContain('MsoQuote');
   });
 });
