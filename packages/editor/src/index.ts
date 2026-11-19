@@ -94,7 +94,6 @@ import { FileView } from './tracked/file-view.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { math, mathFacet } from './preview/math.ts';
-import { quartoCites } from './preview/quarto-cites.ts';
 import { quartoDivs } from './preview/quarto-div.ts';
 import { citationsFacet, quartoCites } from './preview/quarto-cites.ts';
 import { quartoHeadingAttributes } from './preview/quarto-heading-attrs.ts';
