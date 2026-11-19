@@ -1518,26 +1518,12 @@ shaded gray, and a quote's paragraphs in `class=MsoQuote`, which Word reads as i
 
 ### 5.11 First run (desktop)
 
-The desktop app asks a few questions the first time it starts, one per screen. Every change and
-comment needs an author, and Redlines has no accounts.
-
-1. **Who you are:** your name and email, filled in from git (`user.name`, `user.email`) or the
-   system account where possible. The name is required. The email is optional but recommended,
-   because it recognizes you across machines and in Word. The screen says plainly that your name
-   and email are saved in the documents you change, so collaborators see who made each change, and
-   that a work or no-reply address is fine.
-2. **Your color** for changes, comments and your cursor.
-3. **AI, optional.** Redlines looks for Claude Code, Codex and GitHub Copilot on the machine and
-   offers: use Claude through Claude Code, sign in with ChatGPT, an API key, a local model, or not
-   now (§8.6).
-4. **Defaults:** follow the system's light or dark appearance, offer to open `.md` files with
-   Redlines, and open a welcome document that shows an edit, a suggestion, a comment and an agent
-   at work.
-
-The app's first run is what §5.11a describes; it lives in the desktop app, not in a plugin. In an app that embeds Redlines, the identity comes from that
-app's login and there is no first run. Changing your name or email later never rewrites old files;
-a new email under the same name becomes an alias in the ledger
-([format §5.3](format.md#53-people)).
+The desktop app asks a few questions the first time it starts. Every change and comment needs an
+author, and Redlines has no accounts; the first screen asks who you are, and the rest set up the
+agents and the Mac and show a short tour. What is built, screen by screen, is §5.11a. In an app
+that embeds Redlines, the identity comes from that app's login and there is no first run. Changing
+your name or email later never rewrites old files; a new email under the same name becomes an
+alias in the ledger ([format §5.3](format.md#53-people)).
 
 #### 5.11a The first-launch onboarding (#1206)
 
@@ -1865,7 +1851,7 @@ Where the desktop app's own features live:
   printing capability: the desktop app prints and writes PDF files through its webview (WebKit on
   macOS, WebView2 on Windows, WebKitGTK on Linux), and a browser host uses the browser's print.
 - **The first run** is the desktop app's own onboarding (§5.11a), which no other host has.
-- **The AI chat panel** is the `ai` plugin. Running agents is a host capability: the desktop app
+- **The AI chat panel** is written in the `agents` plugin (§8.7), the first part of the `ai` plugin's plan. Running agents is a host capability: the desktop app
   runs them as local processes (§8.6), Syrus runs them on its server, and a web app offers them
   only if it supplies its own.
 - **Styling** is split: the token system is core, and themes are plugins (§6.6).
