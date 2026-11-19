@@ -18,13 +18,20 @@ export interface Formula {
 
 const FENCE = /^[ \t]*(`{3,}|~{3,})/;
 const LABEL = /^[ \t]*\{[^}\n]*#(eq-[\w][\w:.-]*)[^}\n]*\}/;
-/** The word that stands in for formula `n`: letters only (its digits as a to j), so that nothing
- * reads it as markup. */
-const word = (n: number) =>
-  `RLMATHQX${String(n).replace(/\d/g, (digit) => String.fromCharCode(97 + Number(digit)))}XQ`;
-const WORD = /RLMATHQX([a-j]+)XQ/g;
+/** The word that stands in for formula `n` under `mark`: letters only (its digits as a to j), so that
+ * nothing reads it as markup. */
+const word = (mark: string, n: number) =>
+  `${mark}${String(n).replace(/\d/g, (digit) => String.fromCharCode(97 + Number(digit)))}XQ`;
 const unword = (letters: string) =>
   Number(letters.replace(/[a-j]/g, (letter) => String(letter.charCodeAt(0) - 97)));
+
+/** A prefix for the stand-in words that is in no part of `source`, so that a text which happens to
+ * hold one is never taken for a formula. */
+function markFor(source: string): string {
+  let mark = 'RLMATHQX';
+  while (source.includes(mark)) mark += 'Q';
+  return mark;
+}
 
 function closingDisplay(text: string, from: number): number {
   for (let i = from; i < text.length - 1; i++) {
@@ -48,15 +55,17 @@ function closingInline(text: string, from: number): number {
 }
 
 /** One line's formulas outside its code spans, replaced by words; `line` is returned changed. */
-function inLine(line: string, formulas: Formula[]): string {
+function inLine(line: string, formulas: Formula[], mark: string): string {
   // Code spans are kept: only the stretches between them are read.
   return line
     .split(/(`+[^`]*`+)/)
-    .map((part, index) => (index % 2 === 1 || !part.includes('$') ? part : stretch(part, formulas)))
+    .map((part, index) =>
+      index % 2 === 1 || !part.includes('$') ? part : stretch(part, formulas, mark),
+    )
     .join('');
 }
 
-function stretch(text: string, formulas: Formula[]): string {
+function stretch(text: string, formulas: Formula[], mark: string): string {
   let out = '';
   let from = 0;
   for (let i = 0; i < text.length; i++) {
@@ -75,7 +84,7 @@ function stretch(text: string, formulas: Formula[]): string {
       let to = close + 2;
       const label = LABEL.exec(text.slice(to));
       if (label) to += label[0].length;
-      out += text.slice(from, i) + word(formulas.length);
+      out += text.slice(from, i) + word(mark, formulas.length);
       formulas.push({ tex, display: true, ...(label?.[1] ? { label: label[1] } : {}) });
       from = to;
       i = to - 1;
@@ -84,7 +93,7 @@ function stretch(text: string, formulas: Formula[]): string {
     if (/[\s$]/.test(text[i + 1] ?? ' ')) continue;
     const close = closingInline(text, i + 1);
     if (close < 0) continue;
-    out += text.slice(from, i) + word(formulas.length);
+    out += text.slice(from, i) + word(mark, formulas.length);
     formulas.push({ tex: text.slice(i + 1, close), display: false });
     from = close + 1;
     i = close;
@@ -92,11 +101,20 @@ function stretch(text: string, formulas: Formula[]): string {
   return out + text.slice(from);
 }
 
+/** What was taken out of a text: the text, the formulas, and the prefix of the words in their place. */
+export interface TakenMath {
+  text: string;
+  formulas: Formula[];
+  mark: string;
+}
+
 /** `source` with its formulas taken out, and the formulas. */
-export function takeMath(source: string): { text: string; formulas: Formula[] } {
-  if (!source.includes('$')) return { text: source, formulas: [] };
+export function takeMath(source: string): TakenMath {
+  const mark = markFor(source);
+  if (!source.includes('$')) return { text: source, formulas: [], mark };
   const formulas: Formula[] = [];
-  const lines = source.split('\n');
+  // Line ends are read as any Markdown reader reads them: LF, CRLF and CR.
+  const lines = source.split(/\r\n|\r|\n/);
   const out: string[] = [];
   let code: string | null = null;
   for (let n = 0; n < lines.length; n++) {
@@ -130,15 +148,15 @@ export function takeMath(source: string): { text: string; formulas: Formula[] } 
               .trim();
       if (close > 0 && tex) {
         const label = /#(eq-[\w][\w:.-]*)/.exec(lines[close] ?? '')?.[1];
-        out.push(word(formulas.length));
+        out.push(word(mark, formulas.length));
         formulas.push({ tex, display: true, ...(label ? { label } : {}) });
         n = close;
         continue;
       }
     }
-    out.push(line.includes('$') ? inLine(line, formulas) : line);
+    out.push(line.includes('$') ? inLine(line, formulas, mark) : line);
   }
-  return { text: out.join('\n'), formulas };
+  return { text: out.join('\n'), formulas, mark };
 }
 
 const escape = (text: string): string =>
@@ -165,12 +183,12 @@ function drawn(formula: Formula, targets: ReadonlyMap<string, string>): string {
 /** `html` with the words that stand for formulas put back as the formulas, typeset. */
 export function putMath(
   html: string,
-  formulas: readonly Formula[],
+  taken: Pick<TakenMath, 'formulas' | 'mark'>,
   targets: ReadonlyMap<string, string>,
 ): string {
-  if (formulas.length === 0) return html;
-  return html.replace(WORD, (whole, letters: string) => {
-    const formula = formulas[unword(letters)];
+  if (taken.formulas.length === 0) return html;
+  return html.replace(new RegExp(`${taken.mark}([a-j]+)XQ`, 'g'), (whole, letters: string) => {
+    const formula = taken.formulas[unword(letters)];
     return formula ? drawn(formula, targets) : whole;
   });
 }

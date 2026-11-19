@@ -22,6 +22,17 @@ const OPEN_DIV = /^(:{3,})\s*(\{[^}]*\}|[\w-]+)\s*$/;
 const CLOSE_DIV = /^:{3,}\s*$/;
 const ATTRIBUTES = /\s*\{[#.][^{}]*\}\s*$/;
 const ID = /\{[^{}]*#((?:sec|fig|tbl|eq|lst)-[\w:.-]*\w)[^{}]*\}/;
+/**
+ * `text` as a Markdown code span: its fence is one backtick longer than any run in it, and a text
+ * that starts or ends with a backtick is padded with a space, which a reader takes off again.
+ */
+export function codeSpan(text: string): string {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((run) => run[0].length));
+  const fence = '`'.repeat(longest + 1);
+  const pad = /^`|`$/.test(text) ? ' ' : '';
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
 /** `$x^2$`, as pandoc reads it: no space inside the dollars, no digit after the closing one. */
 const INLINE_MATH = /(?<![\\$])\$(?![\s$])((?:\\.|[^$\\\n])*?)(?<![\s\\])\$(?![\d$])/g;
 const CALLOUT = /\.callout-(note|tip|warning|important|caution)\b/;
@@ -110,7 +121,7 @@ export function quartoToMarkdown(text: string): string {
   const prose = (line: string) =>
     outsideSpans(line, (plain) =>
       plain
-        .replace(INLINE_MATH, (_all, tex: string) => `\`${tex}\``)
+        .replace(INLINE_MATH, (_all, tex: string) => codeSpan(tex))
         .replace(REFERENCE, (_all, id: string) => label(id))
         .replace(/(?<![\\^])\^([^\s^]+)\^/g, '<sup>$1</sup>')
         .replace(/(?<![\\~])~([^\s~]+)~(?!~)/g, '<sub>$1</sub>'),
@@ -185,8 +196,7 @@ export function quartoToMarkdown(text: string): string {
       const id = ID.exec(attributes)?.[1];
       const number = id ? numbers.get(id)?.replace(/^\D+/, '') : undefined;
       // The TeX is code, so that Markdown reads none of it (`\,` an escape, `_` and `*` emphasis).
-      const fence = tex.includes('`') ? '``' : '`';
-      put(`${fence}${tex.trim()}${fence}${number ? `    (${number})` : ''}`);
+      put(`${codeSpan(tex.trim())}${number ? `    (${number})` : ''}`);
       continue;
     }
     // A table's caption, after its rows.

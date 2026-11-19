@@ -38,12 +38,12 @@ describe('formulas taken out of the text', () => {
       'x <- "$a$ and $$b$$"',
       '```',
     ].join('\n');
-    expect(takeMath(source)).toEqual({ text: source, formulas: [] });
+    expect(takeMath(source)).toMatchObject({ text: source, formulas: [] });
   });
 
   it('puts a formula back as MathML, with the number of its equation', () => {
-    const { text, formulas } = takeMath('$$ a^2 $$ {#eq-sq}');
-    const html = putMath(`<p>${text}</p>`, formulas, new Map([['eq-sq', 'Equation 3']]));
+    const taken = takeMath('$$ a^2 $$ {#eq-sq}');
+    const html = putMath(`<p>${taken.text}</p>`, taken, new Map([['eq-sq', 'Equation 3']]));
     expect(html).toContain('<math');
     expect(html).toContain('class="rl-math rl-math-display"');
     expect(html).toContain('<span class="rl-math-number">(3)</span>');
@@ -88,5 +88,39 @@ describe('the preview of a .qmd file with math', () => {
     const html = renderPreview('A $x^2$ here.\n', 'plain.md');
     expect(bodyOf(html)).not.toContain('<math');
     expect(textOf(html)).toContain('$x^2$');
+  });
+
+  it('reads a display across lines in a file with CRLF line ends', () => {
+    const { formulas } = takeMath('Intro\r\n\r\n$$\r\nx_1\r\n$$ {#eq-c}\r\n');
+    expect(formulas).toEqual([{ tex: 'x_1', display: true, label: 'eq-c' }]);
+    const html = renderPreview('Intro\r\n\r\n$$\r\nx_1\r\n$$ {#eq-c}\r\n', 'crlf.qmd');
+    expect(bodyOf(html)).toContain('class="rl-math rl-math-display"');
+    expect(textOf(html)).not.toContain('$$');
+    // A lone CR ends a line too.
+    expect(takeMath('A\r$$\rx\r$$\r').formulas).toHaveLength(1);
+  });
+
+  it('never takes a stand-in word that the text itself holds for a formula', () => {
+    const own = 'The word RLMATHQXaXQ is the text’s own, and so is RLMATHQXQaXQ. Also $x$ here.';
+    const html = renderPreview(own, 'own.qmd');
+    expect(textOf(html)).toContain('RLMATHQXaXQ is the text’s own');
+    expect(textOf(html)).toContain('RLMATHQXQaXQ');
+    expect(bodyOf(html).match(/<math/g)).toHaveLength(1);
+  });
+
+  it('writes no live address, whatever a formula asks for (Temml’s trust stays off)', () => {
+    const tex = [
+      '$\\href{javascript:alert(1)}{x}$',
+      '$\\url{https://example.com}$',
+      '$\\href{https://example.com}{y}$',
+      '$\\includegraphics{a.png}$',
+      '$\\htmlId{a}{x}$',
+      '$\\style{color:red}{x}$',
+    ].join(' and ');
+    const body = bodyOf(renderPreview(`${tex}\n`, 'trust.qmd'));
+    expect(body).not.toMatch(/href\s*=/i);
+    expect(body).not.toMatch(/\ssrc\s*=/i);
+    expect(body).not.toMatch(/<(?:a|img|script|iframe)\b/i);
+    expect(body).not.toContain('javascript:alert(1)}');
   });
 });

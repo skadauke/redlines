@@ -99,7 +99,7 @@ export function renderPreview(
     frontMatter,
     // A Quarto or R Markdown file has what Quarto draws (quarto.ts); Markdown has no such syntax.
     body: pandoc
-      ? putMath(quartoHtml(drawn, whole), math?.formulas ?? [], targetsOf(whole))
+      ? putMath(quartoHtml(drawn, whole), math ?? { formulas: [], mark: '' }, targetsOf(whole))
       : drawn,
     after: more ? CUT_SHORT : null,
   });

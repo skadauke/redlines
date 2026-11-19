@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { partText, readParts } from '../shared/zip.ts';
 import { exportDocx } from './build.ts';
-import { isQuarto, quartoToMarkdown } from './quarto.ts';
+import { codeSpan, isQuarto, quartoToMarkdown } from './quarto.ts';
 
 const DOC = `---
 title: "Quarto @fig-never"
@@ -126,5 +126,22 @@ describe('math in the Word export (#1173)', () => {
     );
     expect(out).toContain('`\\int_0^1 x\\,dx`    (1)');
     expect(out).toContain('See Equation 1.');
+  });
+});
+
+describe('TeX in a code span (#1173)', () => {
+  it('fences a text with a backtick by a longer fence, and pads one that starts or ends with it', () => {
+    expect(codeSpan('x')).toBe('`x`');
+    expect(codeSpan('a`b')).toBe('``a`b``');
+    expect(codeSpan('`x`')).toBe('`` `x` ``');
+    expect(codeSpan('x`')).toBe('`` x` ``');
+    expect(codeSpan('a``b`')).toBe('``` a``b` ```');
+  });
+
+  it('writes a display with backticks at its ends as a span, never a fence', () => {
+    const out = quartoToMarkdown('# T {#sec-t}\n\n$$ `x` $$\n\n$$ y` $$ {#eq-y}\n');
+    expect(out).toContain('\n`` `x` ``\n');
+    expect(out).toContain('`` y` ``    (1)');
+    expect(out).not.toMatch(/^```/m);
   });
 });
