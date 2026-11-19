@@ -53,6 +53,18 @@ export const REFUSALS: readonly RefusalEntry[] = [
     "a marker can't stand on a `:::` line (rule 9): the edit is a replacement of the paragraph or div that holds the fence (§3.12), written by the widened path (Q0)",
   ],
   [
+    'packages/editor/src/images.ts',
+    'NO_FOLDER',
+    'disable',
+    "a document that is not saved has no folder to link a project picture from: the sidebar's picture drag is not offered to it (no line, no drop), and a drop that comes says to save it first (#681 review)",
+  ],
+  [
+    'packages/editor/src/images.ts',
+    'NO_LINK',
+    'alert',
+    'a project picture on another drive from the document has no relative path to it: nothing is written, and the notice says why (#681 review)',
+  ],
+  [
     'packages/editor/src/image-crop.ts',
     'CROP_RAW',
     'disable',

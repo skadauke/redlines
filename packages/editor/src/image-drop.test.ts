@@ -4,7 +4,7 @@ import { newestView } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from './index.ts';
 import { blockGaps, PROJECT_IMAGE_TYPE } from './image-drop.ts';
-import { NO_LINK } from './images.ts';
+import { NO_FOLDER, NO_LINK, overProjectImage } from './images.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -144,6 +144,19 @@ describe('an image file dragged from the sidebar', () => {
     });
     drag(editor, 'drop', 30);
     expect(notices).toEqual([NO_LINK]);
+    expect(editor.view.state.doc.toString()).toBe('One\n\nTwo\n');
+  });
+
+  it('is not offered by a document with no folder, and a drop that comes says to save it', () => {
+    const notices: string[] = [];
+    const { editor } = load('One\n\nTwo\n', {
+      projectImageLink: () => 'a.png',
+      projectImageFolder: () => false,
+      onNotice: (message) => notices.push(message),
+    });
+    expect(overProjectImage(editor.view, 30)).toBe(false);
+    drag(editor, 'drop', 30);
+    expect(notices).toEqual([NO_FOLDER]);
     expect(editor.view.state.doc.toString()).toBe('One\n\nTwo\n');
   });
 

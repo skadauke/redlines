@@ -408,6 +408,12 @@ export interface EditorOptions {
    */
   projectImageLink?: (dragged: string) => string | null;
   /**
+   * Whether the document has a folder that a project image is linked from (it is saved). Where it
+   * says no, the document takes no such drag: no line, no drop, and a drop that comes anyway says
+   * to save the document first. Default: yes.
+   */
+  projectImageFolder?: () => boolean;
+  /**
    * The people this machine has met, in the order of meeting, each with their author color
    * (design §5.5): a person keeps their color in every document. Default: none, and colors come
    * from handles alone, so the same people look the same in a document wherever it is opened.

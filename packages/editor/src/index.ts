@@ -454,7 +454,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
-    images(options.onImageFiles, options.onNotice, options.projectImageLink),
+    images(options.onImageFiles, options.onNotice, options.projectImageLink, options.projectImageFolder),
     imageFetcherFacet.of(options.onFetchImage),
     noticeFacet.of(options.onNotice),
     options.onError
