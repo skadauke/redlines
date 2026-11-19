@@ -416,6 +416,26 @@ describe('opening an image', () => {
     expect(opened).toEqual(['img/a cat.png']);
   });
 
+  it('opens on a double-click on the picture itself, whatever the first press did (#1196)', () => {
+    const opened: string[] = [];
+    const editor = editorOpening();
+    const press = pressed(
+      imagePress((src) => opened.push(src)),
+      editor,
+    );
+    const [cat] = editor.view.dom.querySelectorAll('.rl-image');
+    // No first press was seen (it was late, or another handler took it): the second is still taken.
+    expect(press(cat!, 2)).toBe(true);
+    expect(opened).toEqual(['img/a cat.png']);
+    // A third press selects no paragraph of its source, and opens nothing again.
+    expect(press(cat!, 3)).toBe(true);
+    expect(opened).toHaveLength(1);
+    // Nor a double-click on a remote one: nothing to open, and no word selected.
+    const web = editor.view.dom.querySelectorAll('.rl-image')[1];
+    expect(press(web!, 2)).toBe(true);
+    expect(opened).toHaveLength(1);
+  });
+
   it('does nothing for a remote image, and selects no word either', () => {
     const opened: string[] = [];
     const editor = editorOpening();
