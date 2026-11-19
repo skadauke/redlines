@@ -71,7 +71,8 @@ export function normalizeLedger(textAfter: string, ledger: Ledger): Ledger {
   // is dropped with the half: it points at nothing (format §3.14).
   for (const [id, entry] of Object.entries(marks)) {
     if (entry.move !== undefined && !Object.hasOwn(marks, entry.move)) {
-      const { move: _gone, ...rest } = entry;
+      const rest = { ...entry };
+      delete rest.move;
       marks[id] = rest;
     }
   }
