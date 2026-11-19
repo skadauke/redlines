@@ -58,6 +58,7 @@ import { tabItems } from './blocks/tab-items.ts';
 import { tableMarkers } from './table/markers.ts';
 import { imageFetcherFacet, images, imageSpot } from './images.ts';
 export { PROJECT_IMAGE_TYPE } from './image-drop.ts';
+export { dropProjectImage, leaveProjectImage, overProjectImage } from './images.ts';
 import { blockKeys } from './blocks/keys.ts';
 import { blankRun, openBlock, openBlocks, takeBackChanges, throughOpen } from './blocks/open.ts';
 import { emptyLineTyping } from './blocks/shift-line.ts';
@@ -92,13 +93,20 @@ import {
 import { FileView } from './tracked/file-view.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
-import { quartoCites } from './preview/quarto-cites.ts';
+import { math, mathFacet } from './preview/math.ts';
+import { quartoDivs } from './preview/quarto-div.ts';
+import { citationsFacet, quartoCites } from './preview/quarto-cites.ts';
+import { quartoHeadingAttributes } from './preview/quarto-heading-attrs.ts';
 import { quartoRefs } from './preview/quarto-refs.ts';
+import { quartoScripts } from './preview/quarto-script.ts';
+import { quartoTableCaptions } from './preview/quarto-table-caption.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
+import { quartoOutputs } from './preview/quarto-output.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
 import { tableMouse } from './table/mouse.ts';
+import { longSelection } from './long-selection.ts';
 import { tableReach } from './table/reach.ts';
 import { tableWidths } from './table/widths.ts';
 import { tableGhosts } from './table/ghosts.ts';
@@ -150,7 +158,7 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
-import { intentOf, plainIntent, recordedAs } from './tracked/intent.ts';
+import { intentOf, plainIntent, recordedAs, widenedNotice } from './tracked/intent.ts';
 import { guardDecision, seenOf, writeReview } from './tracked/review-intent.ts';
 import { DecidedLog, skippedMessage } from './tracked/decided.ts';
 import type { DecisionOutcome } from './tracked/decided.ts';
@@ -281,6 +289,7 @@ export { editSourceFacet } from './tracked/typing.ts';
 export {
   intentAnnotation,
   intentOf,
+  isWidenedNotice,
   newIntentId,
   plainIntent,
   recordedAs,
@@ -449,7 +458,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     // Before the clipboard's, so that an image pasted or dropped is the host's before it is text.
-    images(options.onImageFiles, options.onNotice, options.projectImageLink),
+    images(
+      options.onImageFiles,
+      options.onNotice,
+      options.projectImageLink,
+      options.projectImageFolder,
+    ),
     imageFetcherFacet.of(options.onFetchImage),
     noticeFacet.of(options.onNotice),
     options.onError
@@ -470,16 +484,25 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     // After the stops, whose guard it runs ahead of.
     tableFill(),
     tableMouse(),
+    longSelection,
     tableReach(),
     tableWidths(),
     quartoRefs(),
+    quartoDivs(),
+    quartoScripts(),
+    quartoHeadingAttributes(),
+    quartoTableCaptions(),
     quartoCites(),
+    math(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     options.imageData ? imageReader.of(options.imageData) : [],
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     options.includes ? includeFacet.of(options.includes) : [],
+    options.citations ? citationsFacet.of(options.citations) : [],
+    options.math ? mathFacet.of(options.math) : [],
     quartoIncludes(),
+    quartoOutputs(),
     imageSelection(),
     undoHistory(),
     trackingBack,
@@ -500,6 +523,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       for (const tr of update.transactions) {
         for (const effect of tr.effects) {
           if (effect.is(refusedEditEffect)) options.onNotice?.(effect.value);
+        }
+        // An edit that was widened to keep the file and the document alike says so, once (#1188).
+        const widened = intentOf(tr)?.widened;
+        if (widened?.length && !tr.annotation(Transaction.remote)) {
+          options.onNotice?.(widenedNotice(widened));
         }
       }
       const { startState, state } = update;
@@ -936,10 +964,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         view.dispatch({ effects: chooseViewEffects(menuView) });
         return;
       }
-      // Redlines shown already, in either look, stays as it is: only a click on a change bar
-      // chooses a look. Otherwise it comes back in the look that was shown last, which chooses
+      // Redlines shown in its full markup stays as it is. Chosen from the simple look, which the
+      // menus check as Redlines too, it is the way back: the full markup, the line kept where it
+      // was (#1156). Otherwise it comes back in the look that was shown last, which chooses
       // nothing: the look chosen stays the one a click made.
-      if (menuViewOf(view.state.field(viewModeField)) === 'redlines') return;
+      const now = view.state.field(viewModeField);
+      if (now === 'simple') {
+        const at = lookedAt(view);
+        switchLookAt(view, at.pos, undefined, undefined, at.row);
+        return;
+      }
+      if (menuViewOf(now) === 'redlines') return;
       view.dispatch({ effects: setViewModeEffect.of(shownLook ?? markupView) });
     },
     switchLook: () => {
@@ -1189,3 +1224,4 @@ function pasteIntoField(view: EditorView, text: string): boolean {
 }
 
 export { moveBlocks, moveBlocksReason, moveRunTo, runOfSelection } from './blocks/move.ts';
+export { dragBlockAt } from './blocks/drag.ts';

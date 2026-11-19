@@ -4,12 +4,7 @@
 
 import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
-import {
-  renderAgentsPane,
-  type GuidedDeps,
-  type OpenClawDeps,
-  type SheetStep,
-} from '@redlines/agents';
+import { renderAgentsPane, type GuidedDeps, type OpenClawDeps } from '@redlines/agents';
 import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -19,14 +14,12 @@ import {
   agentSetup,
   agentSkills,
   createDetectionProcesses,
-  gateway,
   homeAccess,
-  openClawConnections,
+  openClawChanges,
   openClawEdits,
-  openClawNode,
   openFilesAndFoldersSettings,
-  tailscale,
 } from '../agent-preferences.ts';
+import { openClawConnections, openClawNode } from '../openclaw-commands.ts';
 import { copyText } from '../copy-text.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { currentIdentity } from '../identity.ts';
@@ -39,9 +32,11 @@ import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import { applyZoom, followZoom, initialZoom, tauriZoomLink } from '../zoom.ts';
 import { startsFilter } from './filter-key.ts';
-import { noRingOnClick } from './tabs.ts';
 import { takePaneRequest, watchPaneRequests } from './pane-request.ts';
-import { devGuided, failureGallery } from './dev-openclaw.ts';
+import { runWelcome, type InstallResult } from '../onboarding.ts';
+import { noteFinished } from '../onboarding-state.ts';
+import { reportWelcome, takeWelcomeRequest, watchWelcomeRequests } from '../welcome-request.ts';
+import { devGuided } from './dev-openclaw.ts';
 import { createSetupRegistry } from './setup-registry.ts';
 import { forgetShortcutsFilter } from './shortcuts-pane.ts';
 import {
@@ -62,6 +57,7 @@ import '@redlines/themes/tokens.css';
 import '../zoom.css';
 import './preferences.css';
 import './openclaw-sheet.css';
+import '../ui/welcome-sheet.css';
 import '../ui/title-hints.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
@@ -140,40 +136,20 @@ const defaultAppCommand = <T>(command: string) =>
  */
 const hasQuickLook = isTauri && (await invoke<boolean>('quick_look_available').catch(() => false));
 
-/** The names of the connections the guided sheet knows, for its check that a name is free. */
-let connectionHandles: string[] = [];
-
-/** What the OpenClaw setup sheet asks of the app (plugins/agents/src/openclaw/sheet.ts). */
+/**
+ * What the agent cards ask of the app (plugins/agents/src/openclaw/guided.ts). The setup itself
+ * is a window of its own, opened by the app (`open_openclaw_setup`), which asks the app for what it
+ * needs: nothing of Tailscale, the Gateway probe or adding a connection is asked here.
+ */
 function guidedDeps(): GuidedDeps {
-  const remember = <T extends { handle: string }[]>(list: T): T => {
-    connectionHandles = list.map(({ handle }) => handle);
-    return list;
-  };
   return {
-    owner: settings.identity?.handle ?? git?.handle ?? 'me',
-    taken: () => [
-      ...providers.map(({ id }) => `${id}-${settings.identity?.handle ?? git?.handle ?? 'me'}`),
-      ...connectionHandles,
-    ],
-    thisMac: openClawNode.thisMac,
-    tailscale: {
-      status: tailscale.status,
-      openApp: tailscale.openApp,
-      download: tailscale.download,
-      // Tailscale's own app opens its sign-in page, so no address passes through this window.
-      signIn: tailscale.openApp,
-    },
-    probe: gateway.probe,
-    copy: copyText,
-    paste: () => navigator.clipboard.readText(),
-    connections: {
-      list: () => openClawConnections.list().then(remember),
-      add: (connection) => openClawConnections.add(connection).then(remember),
-      change: (handle, change) => openClawConnections.change(handle, change).then(remember),
-      remove: (handle) => openClawConnections.remove(handle).then(remember),
-      useToken: (handle, token) => openClawConnections.useToken(handle, token).then(remember),
-    },
+    connections: { ...openClawConnections, ...openClawChanges },
     node: openClawNode,
+    openSetup: () => {
+      void invoke('open_openclaw_setup').catch((error: unknown) => {
+        console.error('Could not open the OpenClaw setup', error);
+      });
+    },
     chooseFolder: () =>
       appCommand<string | null>('choose_folder', 'Folders are chosen in the app.', {
         start: null,
@@ -181,11 +157,10 @@ function guidedDeps(): GuidedDeps {
   };
 }
 
-/** In a plain browser, `?oc=<screen>` shows the setup sheet with scripted answers (dev-openclaw.ts). */
+/** In a plain browser, `?oc=card` shows the agent's card with scripted answers (dev-openclaw.ts). */
 function devOpenClaw(): { openclaw?: OpenClawDeps } {
   const query = new URLSearchParams(location.search);
-  const screen = query.get('oc');
-  if (!import.meta.env.DEV || screen === null) return {};
+  if (!import.meta.env.DEV || query.get('oc') === null) return {};
   const refuse = () => Promise.reject(new Error('Only the app adds agents.'));
   return {
     openclaw: {
@@ -193,19 +168,6 @@ function devOpenClaw(): { openclaw?: OpenClawDeps } {
       add: refuse,
       remove: refuse,
       guided: devGuided(query),
-      ...(screen === 'card' || screen === 'failures'
-        ? {}
-        : {
-            guidedStart: {
-              step: screen as SheetStep,
-              ...(query.get('where') === 'this-mac' ? { where: 'this-mac' as const } : {}),
-              ...(screen === 'computer' || screen === 'prompt'
-                ? { computer: 'studio-mini.yak-bebop.ts.net' }
-                : {}),
-              agent:
-                query.get('agent') ?? (screen === 'approve' || screen === 'test' ? 'Moby' : ''),
-            },
-          }),
     },
   };
 }
@@ -397,7 +359,6 @@ for (const { id, label } of PANES) {
   button.id = `rl-pref-tab-${id}`;
   button.setAttribute('role', 'tab');
   button.append(icon(ICONS[id], 20), label);
-  noRingOnClick(button);
   button.addEventListener('click', () => {
     clearFilter();
     show(id);
@@ -494,7 +455,7 @@ window.addEventListener('keydown', (event) => {
   showFilter();
 });
 
-// In development, `?oc=` is a look at the OpenClaw sheet (dev-openclaw.ts), in the Agents pane.
+// In development, `?oc=card` is a look at the OpenClaw agent's card (dev-openclaw.ts), in the Agents pane.
 show(
   takePaneRequest() ??
     (import.meta.env.DEV && location.search.includes('oc=') ? 'agents' : 'general'),
@@ -523,7 +484,67 @@ if (isTauri) {
   await getCurrentWindow().show();
 }
 
-// In development, `?oc=failures` is every failure card of the OpenClaw sheet in one frame.
-if (import.meta.env.DEV && new URLSearchParams(location.search).get('oc') === 'failures') {
-  document.getElementById('pane')?.replaceChildren(failureGallery());
+/**
+ * The Welcome mode (#1206, design §5.11a): the first three screens of the first-launch onboarding,
+ * over this window, asked for by the document window through the page's storage (welcome-request.ts).
+ * It is here because this window holds the app's install commands; the document window has none.
+ * Its end is left for the document window, which then runs the tour.
+ */
+let welcoming = false;
+async function startWelcome(): Promise<void> {
+  if (welcoming) return;
+  welcoming = true;
+  try {
+    const pretend = async (line: string): Promise<InstallResult> => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return { ok: true, line };
+    };
+    const installs = isTauri
+      ? (await import('../onboarding-tauri.ts')).tauriInstalls
+      : {
+          skills: () => pretend('Installed for Claude Code and Codex.'),
+          quickLook: () => pretend('System Settings is open: turn on Redlines under Quick Look.'),
+          commandLine: () => pretend('Installed: type redlines in Terminal.'),
+        };
+    const found = async () => {
+      const states = await Promise.all(
+        providers.map(async (provider) => {
+          const state = await (!isTauri && import.meta.env.DEV
+            ? import('./dev-detect.ts').then(({ devDetect }) => devDetect(provider.id))
+            : provider.detect());
+          return { provider, state };
+        }),
+      );
+      return states
+        .filter(({ state }) => state.found)
+        .map(({ provider }) => ({
+          id: provider.id,
+          name: provider.id === 'claude' ? 'Claude Code' : provider.name,
+        }));
+    };
+    const ended = await runWelcome({
+      container: document.body,
+      identity: settings.identity ?? git ?? { name: '', handle: '' },
+      saveIdentity: (name, handle) => {
+        settings = updateSettings({ identity: { name, handle } });
+      },
+      agents: found,
+      defaultAgent: settings.defaultAgent,
+      saveDefaultAgent: (id) => {
+        settings = updateSettings({ defaultAgent: id });
+      },
+      quickLook: hasQuickLook || !isTauri,
+      install: installs,
+      restoreFocus: () => {},
+    });
+    // The onboarding is done with its questions, and the document window runs the tour.
+    noteFinished(localStorage);
+    reportWelcome(ended);
+  } finally {
+    welcoming = false;
+  }
 }
+if (takeWelcomeRequest() || (import.meta.env.DEV && location.search.includes('welcome'))) {
+  void startWelcome();
+}
+watchWelcomeRequests(() => void startWelcome());

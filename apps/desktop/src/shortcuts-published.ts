@@ -4,7 +4,7 @@
 
 import type { ShortcutEntry } from './shortcuts.ts';
 
-export const SHORTCUT_ENTRIES_KEY = 'redlines.shortcut-entries';
+const SHORTCUT_ENTRIES_KEY = 'redlines.shortcut-entries';
 
 export function publishShortcutEntries(entries: readonly ShortcutEntry[]): void {
   try {

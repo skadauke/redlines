@@ -89,7 +89,7 @@ export interface DocumentSession {
 /** Line breaks as the session keeps them, for a window that has only the session's text. */
 const lf = (text: string): string => text.replace(/\r\n?/g, '\n');
 
-export interface DocumentOptions {
+interface DocumentOptions {
   /**
    * Whether an agent's run is live in this window. Its tools act on this document, so nothing may
    * replace it meanwhile: a file to open goes to a new window, as for a window in use.

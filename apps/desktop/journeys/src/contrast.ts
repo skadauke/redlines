@@ -3,7 +3,7 @@
 
 import type { Locator } from '@playwright/test';
 
-export interface Rgba {
+interface Rgba {
   r: number;
   g: number;
   b: number;
@@ -11,7 +11,7 @@ export interface Rgba {
 }
 
 /** What the page says about one element: its text colour and the layers behind it, nearest first. */
-export interface Paint {
+interface Paint {
   color: string;
   /** The background colours from the element out to the root, then the page's, as CSS strings. */
   backgrounds: string[];
@@ -30,7 +30,7 @@ export function parseColor(css: string): Rgba {
 }
 
 /** `top` laid over `under`, as the screen composes them. */
-export function over(top: Rgba, under: Rgba): Rgba {
+function over(top: Rgba, under: Rgba): Rgba {
   const a = top.a + under.a * (1 - top.a);
   if (a === 0) return { r: 0, g: 0, b: 0, a: 0 };
   const mix = (t: number, u: number) => (t * top.a + u * under.a * (1 - top.a)) / a;
@@ -60,7 +60,7 @@ export function flatten(
 }
 
 /** Reads an element's paint in the page. */
-export function paintOf(locator: Locator): Promise<Paint> {
+function paintOf(locator: Locator): Promise<Paint> {
   return locator.evaluate((element) => {
     const backgrounds: string[] = [];
     let opacity = 1;

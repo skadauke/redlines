@@ -6,7 +6,7 @@
 export const PLUS_REACH = 8;
 
 /** The vertical extent of a row. */
-export interface RowEdges {
+interface RowEdges {
   top: number;
   bottom: number;
 }
@@ -41,7 +41,7 @@ export function plusBoundary(y: number, boundaries: readonly number[]): number |
 }
 
 /** The horizontal extent of a column. */
-export interface ColEdges {
+interface ColEdges {
   left: number;
   right: number;
 }

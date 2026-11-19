@@ -64,6 +64,8 @@ import {
   untrackedEdit,
   readsOtherAtBoundary,
   widenedFirstEdits,
+  DIV_IN_ITEM,
+  DIV_IN_ITEM_ASK,
 } from '@redlines/format';
 import type { SyntaxNode } from '@lezer/common';
 import { dialectFacet } from '../dialect.ts';
@@ -84,15 +86,7 @@ import {
   type UntrackedWords,
 } from './ask.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
-import {
-  intentAnnotation,
-  newIntentId,
-  recordedAs,
-  recording,
-  replaying,
-  type TypingIntent,
-  type Unnamed,
-} from './intent.ts';
+import { recordedAs, recording, replaying, type TypingIntent, type Unnamed } from './intent.ts';
 import { type FormatIntent, writeFormat } from './format-intent.ts';
 import { atomsOf, onlyHidden, pastHidden } from './decorations.ts';
 import {
@@ -166,7 +160,7 @@ function rawAsks(state: EditorState): boolean {
 }
 
 /** Where tracked edits take their time and the random bytes of new ids from. */
-export interface EditSource {
+interface EditSource {
   now: () => Date;
   random?: (n: number) => Uint8Array;
 }
@@ -188,23 +182,6 @@ export function contextFor(state: EditorState): EditContext {
     dialect: state.facet(dialectFacet),
   };
 }
-
-/**
- * A block change (`FormatOp`) of `range`, as the format writes it: tracked with Track Changes on,
- * written directly with it off, as the Paragraph menu's commands do. The changes are final,
- * markers and all, for a transaction marked `trackedEditAnnotation`.
- *
- * @throws EditError when the format refuses it.
- */
-export function blockFormatChanges(
-  state: EditorState,
-  range: Range,
-  op: FormatOp,
-  widening = false,
-): TextChange[] {
-  return blockFormat(state, range, op, widening).changes;
-}
-
 /** `blockFormatChanges`, with the intent that wrote them, for the transaction that makes them. */
 export function blockFormat(
   state: EditorState,
@@ -992,10 +969,7 @@ function rewritten(
     changes,
     selection: caret === null ? tr.newSelection.map(mapping) : EditorSelection.cursor(caret),
     effects: [...StateEffect.mapEffects(tr.effects, mapping), ...effects],
-    annotations: [
-      ...annotationsOf(tr),
-      ...(intent ? [intentAnnotation.of({ ...intent, id: newIntentId() })] : []),
-    ],
+    annotations: [...annotationsOf(tr), ...(intent ? [recordedAs(intent)] : [])],
     scrollIntoView: tr.scrollIntoView,
   };
 }
@@ -1040,18 +1014,6 @@ export function authoredWrite(
     : untrackEdits(state, text, parsed, made, false);
   return { changes: done.changes, intent: done.intent! };
 }
-
-/** The same edits as `authoredChanges`, made without tracking whatever the setting is: what a
- * question to the person answered Make Edit asks for (`ask.ts`). */
-export function untrackedChanges(
-  state: EditorState,
-  text: string,
-  parsed: Parsed,
-  edits: readonly TextChange[],
-): ChangeSet {
-  return untrackedWrite(state, text, parsed, edits).changes;
-}
-
 /** `untrackedChanges`, with the typing intent that wrote them. */
 export function untrackedWrite(
   state: EditorState,
@@ -1108,6 +1070,17 @@ function trackedSpec(
         !tr.isUserEvent(AUTOCORRECTION)
       ) {
         return askedAbout(tr, edits, backward);
+      }
+      // A div that no fine write and no list holds (format §9.4, #1234): asked about, as an edit that
+      // can't be tracked is, and made without tracking on Make Edit.
+      if (
+        error.message === DIV_IN_ITEM &&
+        start.facet(untrackedAskFacet) &&
+        !tr.isUserEvent(AUTOCORRECTION)
+      ) {
+        return holdEdit(tr, 'accept-pending', annotationsOfTransaction(tr), {
+          title: DIV_IN_ITEM_ASK,
+        });
       }
       return refused(tr, error);
     }
@@ -1296,7 +1269,7 @@ function untrackedSpec(
       {
         annotations: [
           trackedEditAnnotation.of(true),
-          ...(result.intent ? [intentAnnotation.of({ ...result.intent, id: newIntentId() })] : []),
+          ...(result.intent ? [recordedAs(result.intent)] : []),
         ],
         sequential: true,
       },

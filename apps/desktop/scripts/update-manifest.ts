@@ -81,7 +81,7 @@ export function signedVersion(trustedComment: string): string | null {
   return null;
 }
 
-export interface Release {
+interface Release {
   version: string;
   notes: string;
   /** When it was published, in RFC 3339. */

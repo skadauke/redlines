@@ -4,13 +4,25 @@
 // doesn't move is a click, which puts the caret there as ever. Escape lets the blocks go where they
 // were.
 
-import { EditorSelection, type Extension } from '@codemirror/state';
-import { EditorView, ViewPlugin } from '@codemirror/view';
+import { EditorSelection, type Extension, StateEffect, StateField } from '@codemirror/state';
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  WidgetType,
+} from '@codemirror/view';
 import type { BlockGap, BlockRun } from '@redlines/format';
 import { asFile, type FileRead, moveRunTo, runOfSelection } from './move.ts';
 
 /** The pointer must move this far from the press before it is a drag and not a click. */
-export const DRAG_SLOP = 4;
+const DRAG_SLOP = 4;
+/**
+ * How far from the press a drag from a block's handle goes before it can drop anywhere: the handle is
+ * beside the block, so every gap is a place the pointer is nearest to, and a few pixels of a shaking
+ * hand would otherwise move the block.
+ */
+const HANDLE_ARM = 24;
 /** The editor's edge, in pixels, where a drag scrolls. */
 const SCROLL_EDGE = 36;
 
@@ -22,7 +34,7 @@ export interface DragGeometry {
   extent(view: EditorView, run: BlockRun): { top: number; bottom: number };
 }
 
-export const pageGeometry: DragGeometry = {
+const pageGeometry: DragGeometry = {
   gapY(view, gap) {
     // The text's own edges: a block's line block holds the space above it too.
     const top = (pos: number) =>
@@ -76,9 +88,63 @@ export function draggableRead(view: EditorView): { run: BlockRun; read: FileRead
   return run && sel.from <= run.textFrom && sel.to >= run.to ? { run, read } : undefined;
 }
 
-/** A drag of blocks in progress: the line, and the gap it is at. */
+/** The room that opens at the drop place, in px at the theme's own text size (#1200). */
+const DROP_SPACE = 24;
+
+/** Where the drop place is: the position and the side of it the room opens on, or null for none. */
+const setDropSpace = StateEffect.define<{ pos: number; side: -1 | 1 } | null>();
+
+/**
+ * The room that opens between blocks where the dragged ones would land: it grows from nothing to
+ * `DROP_SPACE` (at once with reduced motion), and holds the drop line, in the middle of it, so that
+ * line and room are one thing. Every widget is alike, so that moving the pointer along does not draw
+ * it again and start the opening over.
+ */
+class DropSpace extends WidgetType {
+  override eq(): boolean {
+    return true;
+  }
+  override toDOM(): HTMLElement {
+    const space = document.createElement('div');
+    space.className = 'rl-drop-space';
+    space.setAttribute('aria-hidden', 'true');
+    const line = document.createElement('div');
+    line.className = 'rl-drop-line';
+    space.append(line);
+    return space;
+  }
+  override get estimatedHeight(): number {
+    return DROP_SPACE;
+  }
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
+const dropSpaceField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (!effect.is(setDropSpace)) continue;
+      return effect.value
+        ? Decoration.set([
+            Decoration.widget({
+              widget: new DropSpace(),
+              block: true,
+              side: effect.value.side,
+            }).range(effect.value.pos),
+          ])
+        : Decoration.none;
+    }
+    return value.map(tr.changes);
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+/** A drag of blocks in progress: the room and the line at the gap it is at. */
 export class BlockDrag {
-  private line: HTMLElement | undefined;
+  /** The place the room is open at, as `pos:side`, so that it is changed only when it moves. */
+  private spaceAt: string | undefined;
   private target: BlockGap | undefined;
   private places: { gap: BlockGap; y: number }[] = [];
   private readonly view: EditorView;
@@ -108,23 +174,55 @@ export class BlockDrag {
   /** The pointer is at client `y`: the line goes to the nearest gap. */
   move(y: number): void {
     const { view, geometry } = this;
-    // The page lays out the view's text, which has the open paragraph in it.
+    // The page lays out the view's text, which has the open paragraph in it. The room open at the
+    // target moves what is below it, and the line stands in it: the gaps are measured as they would be
+    // with no room, or the pointer would be chasing what it opens.
     const shown = this.shown.bind(this);
-    this.places = this.run.gaps.map((gap) => ({ gap, y: geometry.gapY(view, shown(gap)) }));
+    const open = this.openSpace();
+    const natural = (position: number, y: number, half = false) =>
+      open && position >= open.pos
+        ? y - (half && position === open.pos ? open.height / 2 : open.height)
+        : y;
+    this.places = this.run.gaps.map((gap) => {
+      const here = shown(gap);
+      return { gap, y: natural(here.at, geometry.gapY(view, here), true) };
+    });
     // The run's extent is measured now, not at the press: the editor may have scrolled since.
-    this.target = pickGap(this.places, geometry.extent(view, this.shownRun()), y);
-    const at = this.places.find((place) => place.gap === this.target);
-    if (!at) {
-      this.line?.remove();
-      this.line = undefined;
-      return;
-    }
-    const line = (this.line ??= this.makeLine());
-    const scroller = view.scrollDOM.getBoundingClientRect();
-    const content = view.contentDOM.getBoundingClientRect();
-    line.style.top = `${at.y - scroller.top + view.scrollDOM.scrollTop - 1.5}px`;
-    line.style.left = `${content.left - scroller.left + view.scrollDOM.scrollLeft}px`;
-    line.style.width = `${content.width}px`;
+    const shownRun = this.shownRun();
+    const measured = geometry.extent(view, shownRun);
+    const extent =
+      open && shownRun.from >= open.pos
+        ? { top: measured.top - open.height, bottom: measured.bottom - open.height }
+        : measured;
+    this.target = pickGap(this.places, extent, y);
+    this.showSpace(this.target ? shown(this.target) : undefined);
+  }
+
+  /** The room that is open now: where, and how tall it is just now (it grows). */
+  private openSpace(): { pos: number; height: number } | undefined {
+    const el = this.view.dom.querySelector<HTMLElement>('.rl-drop-space');
+    if (!el || this.spaceAt === undefined) return undefined;
+    return { pos: Number(this.spaceAt.split(':')[0]), height: el.offsetHeight };
+  }
+
+  /** Opens the room where `gap` is, closes it where there is no gap. */
+  private showSpace(gap: BlockGap | undefined): void {
+    if (!gap) return this.closeSpace();
+    // A block widget stands at a line's edge: above the line the gap's text begins on, or below the
+    // one a gap at the end of a block ends.
+    const line = this.view.state.doc.lineAt(gap.at);
+    const side = gap.after ? 1 : -1;
+    const pos = side === 1 ? line.to : line.from;
+    const key = `${pos}:${side}`;
+    if (key === this.spaceAt) return;
+    this.spaceAt = key;
+    this.view.dispatch({ effects: setDropSpace.of({ pos, side }) });
+  }
+
+  private closeSpace(): void {
+    if (this.spaceAt === undefined) return;
+    this.spaceAt = undefined;
+    this.view.dispatch({ effects: setDropSpace.of(null) });
   }
 
   private place(pos: number): number {
@@ -144,14 +242,6 @@ export class BlockDrag {
   private shownRun(): BlockRun {
     if (!this.read?.back) return this.run;
     return { ...this.run, from: this.place(this.run.from), to: this.place(this.run.to) };
-  }
-
-  private makeLine(): HTMLElement {
-    const line = document.createElement('div');
-    line.className = 'rl-drop-line';
-    line.setAttribute('aria-hidden', 'true');
-    this.view.scrollDOM.append(line);
-    return line;
   }
 
   /** Scrolls the editor a step when the pointer is at its top or bottom edge, and says whether it
@@ -178,8 +268,7 @@ export class BlockDrag {
   }
 
   private end(): void {
-    this.line?.remove();
-    this.line = undefined;
+    this.closeSpace();
     this.view.dom.classList.remove('rl-block-dragging');
   }
 }
@@ -190,6 +279,7 @@ const ending = new WeakMap<EditorView, () => void>();
 /** The press, the drag and the drop of selected blocks, and the look of the line. */
 export function blockDrag(): Extension {
   return [
+    dropSpaceField,
     ViewPlugin.fromClass(
       class {
         private readonly view: EditorView;
@@ -281,16 +371,118 @@ export function blockDrag(): Extension {
       },
     }),
     EditorView.baseTheme({
+      // The room that opens where the blocks would land, and the line in it (#1200).
+      '.rl-drop-space': {
+        position: 'relative',
+        height: `calc(${DROP_SPACE}px * var(--rl-text-scale, 1))`,
+        animation: 'rl-drop-open 0.14s ease-out',
+        pointerEvents: 'none',
+      },
+      '@media (prefers-reduced-motion: reduce)': { '.rl-drop-space': { animation: 'none' } },
+      '@keyframes rl-drop-open': { from: { height: '0' } },
+      '.rl-drop-space .rl-drop-line': {
+        position: 'absolute',
+        left: '0',
+        right: '0',
+        top: '50%',
+        height: '3px',
+        marginTop: '-1.5px',
+      },
+      // A faint blue, the one marker of where a drop will land: the blocks', the table's and the
+      // pictures' (`--rl-drop` in the theme).
       '.rl-drop-line': {
         position: 'absolute',
         height: '3px',
         borderRadius: '2px',
-        // The theme's gray, never red: the table and image drop lines share this class.
-        backgroundColor: 'var(--rl-ink-2, #6a6a6f)',
+        backgroundColor: 'var(--rl-drop, rgba(10, 100, 255, 0.45))',
         pointerEvents: 'none',
         zIndex: '5',
       },
       '&.rl-block-dragging, &.rl-block-dragging .cm-content': { cursor: 'grabbing' },
     }),
   ];
+}
+
+/**
+ * A press at the handle of a block that is drawn apart from its text, such as a table's (#1199), and
+ * the drag from it: past `HANDLE_ARM`, which is clearly away from the handle, the block (`range`, its text) is dragged as selected blocks are,
+ * with the line between blocks, and letting go moves it there (one step to undo, tracked with Track
+ * Changes on); Escape lets it go where it was. A press that doesn't move calls `onClick`. False
+ * where the press is no drag at all (a document that can't be edited): `onClick` is then the
+ * caller's to run.
+ */
+export function dragBlockAt(
+  view: EditorView,
+  range: { from: number; to: number },
+  event: MouseEvent,
+  onClick: () => void,
+): boolean {
+  if (view.state.readOnly || !view.contentDOM.isContentEditable) return false;
+  const doc = view.dom.ownerDocument;
+  const win = doc.defaultView;
+  const start = { x: event.clientX, y: event.clientY };
+  const pressed = view.state.doc;
+  let drag: BlockDrag | undefined;
+  let y = event.clientY;
+  let frame = 0;
+  const finish = () => {
+    doc.removeEventListener('mousemove', onMove, true);
+    doc.removeEventListener('mouseup', onUp, true);
+    doc.removeEventListener('keydown', onKey, true);
+    win?.removeEventListener('blur', abandon);
+    if (frame) win?.cancelAnimationFrame(frame);
+    frame = 0;
+    ending.delete(view);
+  };
+  function abandon() {
+    finish();
+    drag?.cancel();
+  }
+  const tick = () => {
+    frame = 0;
+    if (!drag) return;
+    if (!view.state.doc.eq(pressed)) return abandon();
+    if (drag.scrollFor(y)) {
+      drag.move(y);
+      frame = win?.requestAnimationFrame(tick) ?? 0;
+    }
+  };
+  const onMove = (e: MouseEvent) => {
+    y = e.clientY;
+    if (!drag) {
+      // Clearly away from the handle first: a press that shakes a little is a click.
+      if (Math.hypot(e.clientX - start.x, y - start.y) < HANDLE_ARM) return;
+      if (!view.state.doc.eq(pressed)) return abandon();
+      // The block is the selection, as it is for a drag of selected blocks.
+      view.dispatch({
+        selection: EditorSelection.range(range.from, range.to),
+        userEvent: 'select',
+      });
+      const found = draggableRead(view);
+      if (!found) return abandon();
+      drag = new BlockDrag(view, found.run, pageGeometry, found.read);
+    }
+    drag.move(y);
+    if (!frame && win) frame = win.requestAnimationFrame(tick);
+  };
+  const onUp = () => {
+    finish();
+    // The selection that made the drag is the document's; the text is what was pressed on.
+    if (drag) {
+      if (view.state.doc.eq(pressed)) drag.drop();
+      else drag.cancel();
+    } else if (view.state.doc.eq(pressed)) onClick();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    abandon();
+  };
+  doc.addEventListener('mousemove', onMove, true);
+  doc.addEventListener('mouseup', onUp, true);
+  doc.addEventListener('keydown', onKey, true);
+  win?.addEventListener('blur', abandon);
+  ending.set(view, abandon);
+  return true;
 }

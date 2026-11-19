@@ -160,7 +160,7 @@ describe('a press in a cell', () => {
     expect(rectOf(editor.view.state)).toBeNull();
   });
 
-  it('stays at the edge of the first cell’s text when dragged out of the table', () => {
+  it('goes on to where the pointer is when dragged out of the table (#1159)', () => {
     const editor = load();
     hitTest(editor, at('one two', 4));
     const { style } = press(editor, 40, 45);
@@ -170,7 +170,7 @@ describe('a press in a cell', () => {
       false,
       false,
     );
-    expect([out.main.anchor, out.main.head]).toEqual([at('one two', 4), at('one two') + 7]);
+    expect([out.main.anchor, out.main.head]).toEqual([at('one two', 4), at('dd', 1)]);
   });
 
   it('makes a rectangle of a shift-press into another cell, from the selection’s anchor', () => {

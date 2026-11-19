@@ -115,8 +115,9 @@ from this table.
 
 The Mac app is built; Windows and Linux are planned (§10). Live collaboration with people is built between windows of one Mac and planned across networks (§7). The editor is not yet published as a
 package others can embed: the packages are private, and the website's embed is a demo. R Markdown
-and Quarto files are edited with their divs, callouts, citations, cross-references and includes
-drawn; running their code cells is not what Redlines does. Several windows of one document on one
+and Quarto files are edited with their divs, callouts, citations, cross-references, includes and
+math (`$x^2$`, `$$ … $$`, in Markdown files too, drawn as MathML by Temml, which the app loads when a
+document has a formula, #1173) drawn; running their code cells is not what Redlines does. Several windows of one document on one
 Mac work, but live collaboration with people means people on different computers.
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
@@ -203,7 +204,8 @@ The window, on the desktop:
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
   its types (`net.daringfireball.markdown`, which macOS gives `.md` files, and `public.markdown`,
-  which other apps declare), R Markdown, Quarto and the text and code files by their extensions, so Finder's Open With offers
+  which other apps declare), Quarto by a type of its own (`md.redlines.quarto`, exported for `.qmd`),
+  R Markdown and the text and code files by their extensions, so Finder's Open With offers
   Redlines for each, and for no other kind of text. Where the
   person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
   Redlines. R Markdown, Quarto, text and code files it never takes, even where nothing else owns them:
@@ -226,6 +228,11 @@ The window, on the desktop:
   written to a crash log in the app's log folder, and a gray notification offers Report…, a
   filled-in GitHub issue for the person to read and send (the build, the system, the trace and the
   document's shape, never its text), and Reveal Log; Help has both (Report a Problem…, Reveal Log).
+  A build that isn't a release also keeps a dev log (`dev.log`, beside the crash log): a rolling line
+  for each refusal, alert, error, agent run and keystroke that took over 100 ms, never a document's
+  text or a secret, and Help › Write to Log… adds the person's note with a snapshot (the document's
+  hash, the selection, the last keys by name, never the letters). A release build has no dev log and
+  no such rows (`redlines_release`, as for the updater).
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits. A
@@ -317,16 +324,29 @@ The window, on the desktop:
   has its notice, §5.4). Escape takes a hint away wherever the focus is, and one hint shows at a
   time. The pen is named Track Changes and pressed (`aria-pressed`) while Track Changes is on; its
   menu is Review.
-- **A toolbar, shown only when summoned** (#504). It is summoned three ways. The wrench in the
-  title bar, left of the eye (#685), shows it docked at the bottom center of the window, and
-  puts it away; the wrench is pressed while the toolbar shows, however it came to. ⇧⌘P (Show Toolbar,
-  in the View menu) shows it at the caret and puts it away, with the keyboard in it. A right-click shows it
-  at the pointer, where it takes the place of the system's context menu. A docked toolbar stays
+- **The outline button** (#1193). The first of the three icons at the right of the title bar, left
+  of the eye, opens the outline as a window under the button, over the page, and puts it away
+  (pressed while it shows). It lists every heading, goes to one on a click and then goes away, and
+  goes away on Esc or a press elsewhere. It reaches the outline at every text size: the outline in
+  the left margin has no room at the largest sizes, and the window does not depend on the margin.
+  (It took the place of the wrench, which showed the toolbar docked: the toolbar is summoned as
+  below, and Preferences keeps it docked.)
+- **A toolbar, shown only when summoned** (#504). It is summoned two ways, and Preferences can keep
+  it docked. ⇧⌘P (Show Toolbar, in the View menu) shows it at the caret and puts it away, with the
+  keyboard in it. A right-click shows it
+  at the pointer, where it takes the place of the system's context menu. Both open the same bar: on
+  a change, a comment or a highlight, that place's review card (who, what, and Accept and Reject,
+  Resolve and Reply, or Remove) is stacked above the bar in the same card, under the spelling rows;
+  a click on a highlight opens its card alone, and ⇧⌘P at the caret or selection opens what a
+  right-click there opens. The card is the place's at the caret, which is the selection's head
+  (a right-click's is the point clicked), and the selection keeps its highlight while the bar is
+  open. With the keys, the card's first button is where the keyboard enters, and ← and → move
+  along its row. A docked toolbar stays
   while you write, scroll, resize the window or click in the text (Esc, with the keyboard in
   it, gives the keyboard back to the text); one at the caret or the pointer goes away on a press
   elsewhere, a scroll, a resize or Esc, and one at the pointer also when you type. Preferences ›
   Editor › Show the toolbar at the bottom keeps it docked from the start, for those who want it
-  always shown; the wrench still puts it away for that window. Nothing else is drawn at the bottom
+  always shown. Nothing else is drawn at the bottom
   of the window to summon it (the handle that was there is gone, decided on 2026-11-15). It is a
   small card in one row: **Ask | Insert · Review · [List] · [Table] · [Image] · Format · Edit**, a vertical line after
   Ask. Each name opens a menu on a click (hovering from one open menu to another switches menus),
@@ -505,6 +525,46 @@ Redlines covers everything in the Markdown Guide's
   which the toolbar's Image menu draws.
 - **Image captions:** Quarto and bookdown figures with numbering and cross-references, and an HTML
   figure in `.md`. Word export writes real caption and cross-reference fields.
+- **Quarto outputs, read-only under each chunk** (#1174): Redlines never runs code, and a reviewer
+  still sees what a reader sees, from what Quarto left with the document. For a `.qmd`, beside the
+  document and in the folders above it up to the project's, it looks, in this order, for the
+  project's freeze file (`_freeze/<path of the document from the project's folder, with no
+  extension>/execute-results/<format>.json`, whose `result.markdown` is the executed document as
+  pandoc Markdown and whose `hash` is the MD5 of the file that was run), the Markdown file that
+  `keep-md` leaves (`<name>.md`) and the notebook that `keep-ipynb` leaves (`<name>.ipynb`), through
+  the same reader as the includes, so only inside the project the window may read. The first
+  file that reads and is Quarto's is the one used; a file whose format is not understood is
+  no file, since Quarto's own formats are not promised to stay.
+  - **Matching.** The executable chunks of the document (a fence whose info is an engine in braces:
+    `{r}`, `{python}`, `{julia}`; not `{ojs}`, `{mermaid}` or `{dot}`, nor a plain code block) are
+    paired in order with the cells of the file, by the chunk's label (`#| label:`) or else by its
+    code text with the `#|` lines and trailing blanks left out. A cell is given to one chunk only.
+    A chunk with no match, such as one edited since it ran or one never run, has no output drawn.
+  - **Drawn.** Under the chunk's closing fence, a block set apart by a rule at its left, in the grays
+    of the page: a small label, "Output from the last run", and the output as the file has it: text
+    in a code block, a table as a table, a figure as a picture (a freeze file's pictures are in
+    `_freeze/<document>/figure-<format>/`, which the picture's `<name>_files/` path is mapped to;
+    a notebook's are in the cell). It cannot be edited, is not a part of the file and is never
+    saved, copied as text of the document or exported: Word export draws the chunk, as before.
+    HTML widgets and anything but Markdown, text and pictures are left out.
+  - **Stale, for each chunk.** An output is stale when its chunk's code is not the code of the saved
+    cell it came from, compared with the `#|` lines and trailing blanks left out: the label then
+    says "Output from the last run, stale" (its hint: the chunk's code has changed since it ran), in
+    the page's italic gray. Every other output says "Output from the last run". It is the chunk's own
+    code that decides, not the document's: Redlines' marks and comments live in the file, so a
+    comment or a tracked change anywhere would change the file's hash and make every output stale.
+    A chunk matched by its code is the same code by definition; only a chunk matched by its label and
+    edited since can be stale (a chunk with no label whose code changed has no match, and no output).
+    A freeze file's `hash` is not compared; it is read and kept as a note.
+  - **Nothing.** No file, no match, a file that can't be read, a Markdown file (`.md`), or the Plain
+    view: nothing is drawn, no message, and no space is kept.
+  - **Read again** when the window is looked at again (a render that happened meanwhile shows up),
+    not on each keystroke.
+  - Not done: reading the rendered HTML, Word or PDF of a document, `<name>_files/` of a live render
+    and `.quarto/` (the research found nothing documented to rely on); showing outputs in the
+    included files.
+- **Heading attributes:** in `.qmd` and `.Rmd`, the `{#sec-intro}` after a heading's text is a small gray chip
+  (the interface's small size, never the heading's), with its source shown while the caret is in it.
 - **Symbols:** HTML entities, shown as the character, with a symbol palette and `&` autocomplete.
 - **Emoji:** the character itself in every file type, because shortcodes don't render in pandoc,
   Quarto or VS Code. Typing `:` and two letters lists the emoji whose names (gemoji's, GitHub's
@@ -607,7 +667,7 @@ them) and emails written as autolinks (opened as `mailto:`; in `[x](logo@2x.png)
 space in the path of a `<...>` destination opens as `%20`, and an image that is a link's text opens it too: the limit of a copy, which turns `javascript:` and its kin into plain
 text, so that a link in a document, or in an agent's suggestion, never runs anything. The app checks
 the address again before it runs the system's opener, and the website's demos open a new tab. A
-link that doesn't open is left to the editor like any text, with no hint. A relative link to
+link that doesn't open is left to the editor like any text, with no hint. A link that wraps over two lines is one link to the hint: moving the pointer from one half to the other goes on with its pause and its hint. The hint doesn't show while another tooltip does, as a change's card over a link in the full markup. A relative link to
 another document doesn't open yet.
 
 ### 5.3 Views: Clean, Redlines, Plain
@@ -646,9 +706,11 @@ no ledger, and no view or tracking recorded. An agent reads and writes the file 
   line that has a pending change (§5.5), in its author's color, and the comments with their notes:
   deletions are hidden (deleted table rows and columns too), inserted text is in its author's color
   with no underline, and reformatted text is plain (Word's Simple Markup). The caret never lands in the hidden
-  text. In the simple look, a click on a change, on its colored text or on its bar, opens that
+  text. In the simple look, a click on a change's colored text opens that
   change's card with Accept and Reject (the card says what a hidden deletion was: #664); a click on
-  a bar in the full markup, and the switch, switch from the one look to the other, with the line where it was (a
+  a bar, in either look, and the switch, switch from the one look to the other, so that Simple is
+  never a place with no way back (#1156): the Redlines row of the title bar's View menu and ⌥⌘2 go
+  back from it too, each with the line where it was (a
   click's line is the one under the pointer; the switch's, the one with the caret when it is on the
   screen, else the first on it), and the look becomes the one remembered. The simple look is no view
   of its own, so the menu says "Redlines" in both looks; it is a switch below the three views,
@@ -725,7 +787,10 @@ mode has no counterpart in the desktop app.
   value an older version stored is ignored.
 - **An edit that can't be tracked asks first** (#714, #730; [format §3.13](format.md#313-untracked-edits)).
   Redlines widens an edit to the smallest unit that holds it, written as a replacement, rather than
-  refuse it ([format §3.12](format.md#312-widened-replacements)). Where no unit can hold the edit,
+  refuse it ([format §3.12](format.md#312-widened-replacements)), and says so once, in a passing
+  notice that never takes the focus: "Tracked as a replacement of the whole table, so that the file
+  and the document read alike." (the unit named is the table, list, quote, code block, list item or
+  paragraph; #1188). Code is written as a replacement of its block by rule, and says nothing. Where no unit can hold the edit,
   or it is in the YAML front matter or in Plain while Track Changes is on, a sheet asks "This edit
   can't be tracked. Make it without tracking?", with a line that says why, Cancel, Make Edit and
   "Don't ask again in this document" (Return and Esc are Cancel; the answer is the app's, kept by
@@ -930,7 +995,10 @@ mode has no counterpart in the desktop app.
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
     to dots. The rail grows with the text size above 100%, and so does the width at which it
-    shrinks. During a pinch the rail keeps its state until the fingers lift.
+    shrinks. During a pinch the rail keeps its state until the fingers lift. Where the window has
+    room, the notes and margins grow with the fingers; from the frame in which they would take the
+    column's width (and a picture's, which is as wide as the column) they keep the size they had,
+    and take the new one when the fingers lift.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
@@ -1077,9 +1145,11 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   cells: every cell in the rows and columns between, both included. It is the ordinary selection and
   keeps no state of its own, so a drag that enters a second cell, a ⇧-press, ⇧ with an arrow (text
   in the cell first, then cells, then a cell at a time, growing or shrinking), and Undo making one
-  all work. The cells are drawn in the system's selection color with the text highlight hidden;
-  Both looks of Redlines draw them the same. Esc puts the caret in the cell where the selection
-  ended; Tab goes on from there; ↩ does nothing. ⌘A is the cell's text, then the whole table,
+  all work. A drag that leaves the table goes on selecting the text outside it, over another table
+  too, and scrolls the document at the window's edge as in any text (#1159). The cells are drawn in
+  the system's selection color with the text highlight hidden; both looks of Redlines draw them the
+  same. Esc puts the caret in the cell where the selection ended; Tab goes on from there; ↩ does
+  nothing. ⌘A is the cell's text, then the whole table,
   then the document. Select Cell, Row (⌃L), Column and Table are in the Table menu. A selected
   rectangle is not dragged anywhere (cells move by copy and paste). ⌫ and ⌦ clear every selected
   cell as one change (tracked, a deletion in each, in one group and one step to undo, the cells
@@ -1121,7 +1191,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   menu (Insert Above and Below, Delete, Delete Table, Move Up and Down, Clear Contents), Esc closes
   it and keeps the selection; a drag moves the rows, and the others selected with it, to any
   boundary, the last included: nothing is highlighted while it lasts, the rows dim, a copy follows
-  the pointer, a 3 px gray line (the theme's `--rl-ink-2`) marks the drop and shows only where the
+  the pointer, a 3 px faint blue line (the theme's `--rl-drop`, the one drop marker of the blocks, the table, the rows and the pictures) marks the drop and shows only where the
   rows would go, never at their own place, the page scrolls near its edges, Esc cancels. A + shows
   within 8 px of a row boundary in the strip beside the table, with a thin line across it, and a
   press inserts a row there.
@@ -1130,7 +1200,7 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
   new column, in its row. Delete Table (no default key) follows Delete Column in the menu and
   deletes the whole table the caret or the selection is in. A column's handle is the same pill, turned
-  (16 × 5 px, growing to 22 × 8), just above the column at the table's top edge; a click selects the column (⇧ extends)
+  (22 × 6 px, growing to 28 × 9), drawn as the picture's resize handles are: white, with a dark hairline and a soft shadow, in both themes, just above the column at the table's top edge; a click selects the column (⇧ extends)
   when it is released, and a right-click selects it and opens its menu (Insert Left and Right, Delete, Delete Table, Move Left and Right, the four
   alignments with the caret's column checked, Clear Contents); a drag moves the columns, and the
   others selected with them, to any boundary, the last included, with a vertical drop line and the
@@ -1147,9 +1217,16 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   or the strip; **Add row** is a strip as wide as the table, 4 px below it, while the pointer is
   over the bottom row or the strip. A click adds a column (or a row) at the end: the same insertion
   as the + between columns and rows and the Table menu, so with Track Changes on it is the tracked
-  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it,
-  selects the whole table, as Select Table does; it stands aside while a + is where it would be. Each
-  has a hint after the title bar's delay.
+  insertion, with its bars, tint and card. A small square at the table's top-left corner, 2 px off it, drawn
+  as the handles are and with a move icon (four arrows), selects the whole table, as Select Table
+  does, and a drag from it moves the whole table: a line shows between blocks where it will land,
+  letting go moves it there as one step (tracked as a move with Track Changes on), and Escape lets it
+  go. The press must go 24 px before the table can drop anywhere, so that a shaking hand moves
+  nothing. A Quarto or Pandoc caption (a `:` paragraph after the table) moves with it. With Track
+  Changes on it goes to any gap too: a tracked move of a table is written with its rows unsplit
+  (format §3.14, #1279). It stands aside while a + is where it would be. Each has a hint after the title bar's delay.
+  A grip's menu is used from the keyboard: Down, Up and Tab choose an item, which looks as one under
+  the pointer, Return runs it and Escape closes the menu.
 - **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
   Word's keys align the paragraph) are in the Table menu and the column grip's menu, the caret's
   column checked, and align the columns the selection touches, one step to undo with the selection
@@ -1277,7 +1354,7 @@ key the person chose beats a binding of the editor's or a plugin's own.
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Check item (task list)         | ⇧⌘U (checks or unchecks the task items in the selection; it replaces CodeMirror's "redo selection" on the Mac, which Redlines no longer binds there) | Ctrl+Shift+U              |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
-| Show the toolbar               | ⇧⌘P (at the caret; the title bar's wrench docks it)                                           | Ctrl+Shift+P              |
+| Show the toolbar               | ⇧⌘P (at the caret; Preferences can dock it)                                           | Ctrl+Shift+P              |
 | Show the outline               | ⌃⌘O (View › Show Outline: opens the list and puts the focus on the heading you are reading)  | —                         |
 | Ask about the selection        | ⌥⌘A (the box opens at the selection; Return asks, Esc closes)                                 | Ctrl+Alt+A                |
 | In a table: next, previous cell | Tab and ⇧Tab (Tab in the last cell adds a row)                                              | Tab and Shift+Tab         |
@@ -1293,6 +1370,7 @@ key the person chose beats a binding of the editor's or a plugin's own.
 | Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
 | Larger, smaller, actual text size | ⌃⌘=, ⌃⌘- and ⌃⌘0, or a pinch                                                               | a pinch                   |
 | Show or hide the file sidebar  | ⌃⌘S                                                                                           | —                         |
+| Show or hide the chat          | ⌃⌘C (the sidebar at its Chat view)                                                            | —                         |
 | Preferences                    | ⌘,                                                                                            | —                         |
 | With the review bar or rail in focus | J and K for next and previous, A to accept and go on, X to reject and go on, R to reply, E to resolve, U to undo | the same |
 
@@ -1324,8 +1402,17 @@ reads a `.docx` with its revisions and comments (#840) and maps the result to Ma
 marks and ledger (#866), and has Google Docs' differences (#838). File › Export to Word… calls
 the writer (#841) and File › Open .docx… the reader (#881; pictures are carried into the images folder after a save panel, #885); the full Word
 round trip is still to be wired in, and Copy for Word as a command of its own is not built (an
-ordinary copy writes the HTML that Word and Docs draw well); File › Print and Export as PDF are built.
+ordinary copy writes the HTML that Word and Docs draw well: Arial like the export, a task item as a
+paragraph of its own and not an item of the bullet list above it, a table 6.5 in wide, a code block
+shaded gray, and a quote's paragraphs in `class=MsoQuote`, which Word reads as its "Quote" style,
+#1181); File › Print and Export as PDF are built.
 
+- **A picture copied in Word** reaches a web view at the size it has on the page; Word's own drawing
+  format on the pasteboard (`com.microsoft.Art--GVML-ClipFormat`, an Office package) holds the
+  original, so the app reads it natively when it is there (`read_office_picture`, only for the window
+  that has the keys, up to 50 MB), takes the largest picture under `clipboard/media/` of the
+  package when it is the picture that was pasted (larger, of its shape), and saves it in its own
+  format; without the package, or with another picture, the paste is the one the page has (#1182).
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
@@ -1431,26 +1518,56 @@ ordinary copy writes the HTML that Word and Docs draw well); File › Print and 
 
 ### 5.11 First run (desktop)
 
-The desktop app asks a few questions the first time it starts, one per screen. Every change and
-comment needs an author, and Redlines has no accounts.
+The desktop app asks a few questions the first time it starts. Every change and comment needs an
+author, and Redlines has no accounts; the first screen asks who you are, and the rest set up the
+agents and the Mac and show a short tour. What is built, screen by screen, is §5.11a. In an app
+that embeds Redlines, the identity comes from that app's login and there is no first run. Changing
+your name or email later never rewrites old files; a new email under the same name becomes an
+alias in the ledger ([format §5.3](format.md#53-people)).
 
-1. **Who you are:** your name and email, filled in from git (`user.name`, `user.email`) or the
-   system account where possible. The name is required. The email is optional but recommended,
-   because it recognizes you across machines and in Word. The screen says plainly that your name
-   and email are saved in the documents you change, so collaborators see who made each change, and
-   that a work or no-reply address is fine.
-2. **Your color** for changes, comments and your cursor.
-3. **AI, optional.** Redlines looks for Claude Code, Codex and GitHub Copilot on the machine and
-   offers: use Claude through Claude Code, sign in with ChatGPT, an API key, a local model, or not
-   now (§8.6).
-4. **Defaults:** follow the system's light or dark appearance, offer to open `.md` files with
-   Redlines, and open a welcome document that shows an edit, a suggestion, a comment and an agent
-   at work.
+#### 5.11a The first-launch onboarding (#1206)
 
-The first run is a plugin (§6.4). In an app that embeds Redlines, the identity comes from that
-app's login and there is no first run. Changing your name or email later never rewrites old files;
-a new email under the same name becomes an alias in the ledger
-([format §5.3](format.md#53-people)).
+The first time the app starts it shows an onboarding of about five minutes in four screens, in two
+windows. The first three are the **Welcome mode of the Preferences window**: the first window asks
+for it (through the page's storage, as it asks Preferences for a pane) and opens Preferences, which
+shows a sheet over its panes, in the alert's look (§3.1), with the step's place above the title
+("1 of 4"), **Continue** as the default button and **Skip** beside it. Preferences is where it runs
+because it holds the app's install commands, which the window that draws documents is never granted.
+The fourth is the **tour**, which the document window runs when Preferences says the first three
+are done.
+
+1. **You.** Your name and handle, filled in from git where it can (the same fields as Preferences ›
+   General). Continue saves them as Preferences would.
+2. **Your agent.** The agents found on this Mac, and which one answers an Ask that names none
+   (Preferences › Agents › Default agent). With none found it says so and points to Preferences ›
+   Agents.
+3. **Set up this Mac.** Three rows, each with a checkbox and a line on what it does: the Redlines
+   skill for the agents found (what Preferences › Agents installs, for Claude Code and Codex), the
+   Quick Look preview (the app's extension: the row opens System Settings, where macOS turns it
+   on), and the command line (`redlines` in `/usr/local/bin`, as Preferences › General installs
+   it). Nothing is installed before **Install and Continue**; a row left unchecked is skipped, and
+   a row that fails says why and where Preferences can try it another way. Each install is the
+   app's own command: the onboarding writes nothing itself.
+4. **A short tour,** in the document window, which comes forward. It opens a "Welcome to Redlines"
+   document in the first window, if nothing else is open in it, and points, one card at a time
+   with **Next**, at the Redlines pen (Track Changes) and the views button (Clean, Redlines, Plain),
+   and then says how to reach the command palette (⇧⌘P, which has no button, so its card hangs
+   under the title). The last card says **Done**.
+
+**Skip and resume.** Skip on a screen goes on to the next; **Skip Setup**, a link under the
+buttons, ends the Welcome mode from any screen, and the tour with it (Preferences tells the
+document window "skipped", and no tour starts). A step's answer is kept when it is
+made. The app notes that the onboarding began, and that it finished when Preferences' three screens do
+(`redlines.onboarding` in the page's storage); quitting or closing Preferences in the middle starts
+it again at the first screen at the next launch,
+with the answers so far filled in. An app that already has settings from an earlier build is not
+on a first launch and never shows it. Only the first window of a launch shows it, never a window
+opened for a document or for text.
+
+**Afterwards, in Preferences.** Name and handle: General. Default agent and the skill: Agents.
+The command line and Quick Look: General. The tour has no place there; a dev build (no
+`redlines_release`, as for the dev log in §5.11) has Help › Replay Onboarding, which opens the
+same Welcome mode and then runs the tour, at any time.
 
 ### 5.12 Feature list
 
@@ -1464,7 +1581,7 @@ a new email under the same name becomes an alias in the ledger
 **Should (v1 if time allows):**
 
 - a selection toolbar: Comment, Suggest, Ask, and formatting. Written as the toolbar (§5.1), which
-  opens from the title bar's wrench, on ⇧⌘P and on right-click rather than floating over a
+  opens on ⇧⌘P and on right-click rather than floating over a
   selection by itself, with Ask (§8.5); Suggest and the agent's fix, shorten and rephrase are not in
   it yet;
 - a slash menu that opens only at the start of a line or after a space, and can be turned off;
@@ -1473,7 +1590,7 @@ a new email under the same name becomes an alias in the ledger
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
 - captions of images (resizing and alt text are built, §5.2); callouts (§5.2: GitHub's, Obsidian's and Quarto's are built); Mermaid editing with a live preview;
 - a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
-- a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (citations are drawn as chips);
+- a list of the document's bibliography to pick a citation from in `.qmd` and `.Rmd` (not built; citations are drawn as chips, and when the front matter names a bibliography (`bibliography:`, a BibTeX or CSL JSON file beside the document) a chip says what the style prints, Chicago author-date by default, `(Knuth 1984)`, and APA's or numbers when `csl:` names one of those (`packages/citations`, loaded only by the app, #1171); the Word export writes the same text. Other CSL styles are drawn as the default, and nothing prints a list of references);
 - find and replace under tracking: each replacement is a substitution. Written: Replace All is one
   step to undo, with one change per match. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
@@ -1619,6 +1736,7 @@ without the editor.
 | `@redlines/render`     | Static HTML rendering and pagination, for print, PDF, HTML export and previews                                                              | Browsers, Node          |
 | `@redlines/clipboard`  | HTML-to-Markdown conversion for paste, and the copy formats: Redlines' own, Word's HTML, generic HTML, Markdown, plain text                 | Browsers                |
 | `@redlines/word`       | Word (`.docx`) export (`exportDocx`), import (a reader that turns a `.docx` into blocks and runs with its revisions and comments, and a mapper from that model to Markdown with its marks and ledger) and the Google Docs differences (§5.10; [export](word-export/README.md)). File › Export to Word… and Open .docx… call it; it is kept out of the editor's bundle | Browsers, Node          |
+| `@redlines/citations`  | Citations of a Quarto or pandoc document, formatted from its bibliography (BibTeX or CSL JSON) as author-date or numbers (§5.12) | Anywhere (no DOM, no Node APIs) |
 | `@redlines/collab`     | The session authority that orders every edit and decision of a live session, with its hub, the window client, the write-ahead log and the transports (memory, and the app's events). A server that hosts sessions across networks is not built (§7.2) | Anywhere (the authority runs in a window of the app) |
 | `@redlines/collab-sim` | The session simulation harness: seeded live sessions over the real format library, with an oracle that checks every run. Research tooling, not shipped | Node                    |
 | `@redlines/mcp`        | The MCP server, for agents outside Redlines                                                                                                | Node                    |
@@ -1629,7 +1747,7 @@ without the editor.
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
 
-Written so far: `format`, `editor`, `plugin-api`, `agent-tools`, `agent-process`, `collab`,
+Written so far: `format`, `editor`, `plugin-api`, `agent-tools`, `agent-process`, `citations`, `collab`,
 `collab-sim`, `word` and `redlines`. `@redlines/react` and `@redlines/render` are not written. The paste
 converter and the copy formats that `@redlines/clipboard` names are in `@redlines/editor`
 (`clipboard/`), the MCP server that `@redlines/mcp` names is in `@redlines/agent-tools`, and print
@@ -1683,8 +1801,9 @@ the same identity and the sandbox entitlement that an app extension must have
 
 **The core** (`@redlines/editor`) holds:
 
-- display and editing of all the Markdown in §5.2; code, math and diagrams appear as formatted
-  source until their plugins render them;
+- display and editing of all the Markdown in §5.2; math is drawn by the core (inline and display,
+  by Temml, loaded only when a document has a formula, #1173), while code and diagrams appear as
+  formatted source until their plugins render them;
 - the tracked-change layer: showing marks, editing with Track Changes on, accepting and
   rejecting, the views and Track Changes;
 - comment anchors and the ledger;
@@ -1695,8 +1814,8 @@ the same identity and the sandbox entitlement that an app extension must have
 table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `outline`, `tables` (the Table menu and the grips), `emoji`,
 `toolbar`, `agents`, the three providers and `sync` (a window's side of a live session, §7.1a; the
 `collab` row below is the invitations and presence across networks, still to come) (`plugins/`). The `ai` row is what
-`agents` is growing toward: its chat panel isn't
-written. The `word` row is a library so far, `@redlines/word` (§6.3), and no plugin: the app's File ›
+`agents` is growing toward: its chat panel is written (§8.7, `plugins/agents/src/chat`), and
+the rest of the row is not. The `math` row is the core's today (above), and `onboarding` is the desktop app's own (§5.11a). The `word` row is a library so far, `@redlines/word` (§6.3), and no plugin: the app's File ›
 Export to Word… and Open .docx… call it, and neither `print` nor `export` is written as a plugin (the
 app's File › Print and Export as PDF are its own).
 
@@ -1721,7 +1840,7 @@ app's File › Print and Export as PDF are its own).
 | `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `emoji`      | Emoji shortcodes drawn as their emoji, and the list of emoji after a colon (§5.2) | —                    |
-| `toolbar`    | The toolbar: the title bar's wrench, right-click and ⇧⌘P (§5.1) | —               |
+| `toolbar`    | The toolbar: right-click and ⇧⌘P (§5.1) | —               |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 
@@ -1731,8 +1850,8 @@ Where the desktop app's own features live:
   Export as PDF are the desktop app's own. The host supplies the
   printing capability: the desktop app prints and writes PDF files through its webview (WebKit on
   macOS, WebView2 on Windows, WebKitGTK on Linux), and a browser host uses the browser's print.
-- **The first run** is the `onboarding` plugin, which only the desktop app turns on.
-- **The AI chat panel** is the `ai` plugin. Running agents is a host capability: the desktop app
+- **The first run** is the desktop app's own onboarding (§5.11a), which no other host has.
+- **The AI chat panel** is written in the `agents` plugin (§8.7), the first part of the `ai` plugin's plan. Running agents is a host capability: the desktop app
   runs them as local processes (§8.6), Syrus runs them on its server, and a web app offers them
   only if it supplies its own.
 - **Styling** is split: the token system is core, and themes are plugins (§6.6).
@@ -1921,7 +2040,7 @@ own). The text below is the design they follow.
 
 ### 7.1a One document in several windows
 
-File › Open in Another Window shows the document in a second window of the app, and the two are
+View › New Window (Word's name and place) shows the document in a second window of the app, and the two are
 one session on one Mac, with no network, no account and no invitation.
 
 - **One window leads.** It runs the authority (the TypeScript in `packages/collab`) and is the
@@ -1934,13 +2053,21 @@ one session on one Mac, with no network, no account and no invitation.
 - **Save is once, after a pause.** The leader saves when the log has been quiet for a second and
   its own edits are confirmed. Save in another window asks the leader. A window closes without a
   question when the authority has everything it made; the leader that closes writes the file first.
-- **Each window is a person to the others.** It has a name ("Ada (window 2)") and a color of its own,
-  chosen by the authority and the same in every window, which follow the window through a
-  handover. The others show its caret with its name on a flag that fades after five seconds, and
-  its selection tinted, in that color. A caret is sent as a position in the confirmed text at a
-  version, and every window places it again among its own text, so it stays among the same words
-  while text moves; nothing of it is stored. Beside the document's name the title bar says "In 2
-  windows", or that edits are kept while the session can't be reached.
+- **Each window is a person to the others.** It has a name ("Ada (window 2)"); its color is its
+  person's author color in the document (§5.5), the color their changes are drawn in, the same in
+  every window of that person and never one that another person has in that document (a person
+  the document doesn't know yet is gray). The others show its caret with its name on a flag that
+  fades after five seconds, and its selection tinted, in that color; while a selection lasts, its
+  caret and flag stay (#1168), so that it is clear who marked what. A caret is sent as a
+  position in the confirmed text at a version, and every window places it again among its own text, so it stays among the same words
+  while text moves; nothing of it is stored. Beside the document's name, set apart from it in
+  regular italic where the name is bold, the title bar says which window this is, "Window 2", as
+  Word numbers the windows of one document (a tab with no number of its own says "In 2 windows"),
+  or that edits are kept while the session can't be reached.
+- **Track Changes is the document's.** Turning it on or off in one window turns it on or off in
+  every window of the document, with the toggle and the "Track Changes on" notice in each. A window
+  that joins takes the leader's setting. The window says it to the others as an event between
+  windows (`session-tracking`), never through the text.
 - **Undo is each window's own.** A step knows whose it is, and a change that came from another window
   is never undone by this one (§5.13): a tracked step is taken back by rejecting its own marks, and
   an untracked step that the other window changed since is left alone, with the name of the window
@@ -2108,8 +2235,8 @@ Agent edits are animated, like a streaming chat answer.
 
 ### 8.5 Chat
 
-- **A chat panel** next to the comment rail. Its scope is the selection, the document, or the
-  folder (a project or repository).
+- **A chat panel** in the sidebar (§8.7). Its scope is the document it is attached to or, for a
+  chat with none, the folder (a project or repository). The selection is what Ask is about.
 - **Answers cite the text,** with links to ranges in the document. Chat never shows raw markers.
 - **Edits follow the agent's level** (§8.2). In Propose, the panel shows each proposal as a diff
   with Apply and Suggest. A chat answer can also be posted to the document as a comment thread.
@@ -2172,7 +2299,7 @@ Agent edits are animated, like a streaming chat answer.
   reads the folder's `AGENTS.md` and `README.md` first, when they exist, for instructions and
   context. Requests that span documents ("update every doc that mentions the importer") produce
   edits in each file, each file its own run.
-- **Chat history** is kept by the app, not in the document.
+- **Chat history** is kept by the app, not in the document (§8.7).
 
 ### 8.6 AI engines and sign-in
 
@@ -2278,10 +2405,20 @@ copy only, never the plugin, and the Claude Code row says to keep one. Publishin
 owner's, and the steps are written down (`integrations/README.md`), not done.
 
 **OpenClaw, connected as a node (guided setup).** Preferences › Agents › Connect OpenClaw walks
-a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a sheet
+a person through reaching an OpenClaw Gateway on another computer, or on this Mac, in a window of
+its own, larger than Preferences and resizable, which Preferences › Agents and the @ picker (its
+last row, while no OpenClaw agent is connected) open
 ([research note](research/openclaw-connection.md), screens 1 to 7, and a gray card for every
 failure): whether this Mac has Tailscale installed, is signed in and sees other computers
-(`tailscale status --json`, read only: Redlines never starts, stops or changes Tailscale); which
+(`tailscale status --json`, read only), and, where something is missing, does most of the setting up itself,
+only from that window and only when the person presses the button: it downloads Tailscale's
+package from pkgs.tailscale.com, checks that Tailscale signed it (Apple team W5364U7YZB) and Apple
+notarized it, refuses in plain words if either fails, and installs it with macOS's own
+administrator prompt (never a password field of Redlines'; the App Store page for a person who is
+not an administrator); opens the app and waits for its network extension, saying where in System
+Settings to allow it; starts the sign-in and opens its page; and restarts Tailscale's app once
+after a fresh install, and when the sign-in hangs (the app started before its extension and never
+connected to it). Which
 computer, found by opening its WebSocket and reading its greeting (nothing is sent); a prompt to
 send the person's agent, which holds no secret and asks for the private road only (Tailscale
 Serve, auth on, one command, the tools for one agent); a secure field for the setup code the agent
@@ -2337,7 +2474,11 @@ differences:
   exactly a key of that shape (`acp_gate.rs`), and a toolbox is refused to it as an empty list is
   to any other agent. Without an agent named in the form, the key is bare, and a Gateway with more
   than one agent says so (`Use an agent-prefixed session key or select an agent explicitly`), in the
-  line the run fails with: name the agent then.
+  line the run fails with: name the agent then. A thread longer than 60,000 characters is cut
+  from its start, and says so (the newest words are what the request answers), so that a prompt
+  stays far inside the bridge's 2 MiB. The bridge runs with `OPENCLAW_HIDE_BANNER=1` and
+  `OPENCLAW_SUPPRESS_NOTES=1`, which the app adds to its environment, so that the last line of its
+  error stream is the failure and not a note.
 - **A turn the Gateway cut short is a failure.** The bridge says it as a message of the agent's own
   that begins `[OpenClaw interruption]` and then ends the turn as it ends one that was answered; the
   provider reads it as the run's error (`Moby stopped: …`), not as a reply to post.
@@ -2346,8 +2487,14 @@ differences:
   a user name, a password, a query, a fragment or a port that isn't a number, where a token could
   ride, is refused (a path is allowed, since a Gateway may be mounted at one, and the address is
   shown in lists of programs: put nothing secret in it); and the file has to be there, be a file
-  and not a link (OpenClaw refuses one) and hold from one byte to 16 KiB, which is looked at
-  without reading it. The question says where the document and the thread go, warns of a `ws://`
+  and not a link (OpenClaw refuses one), be the person's own (a file of the system's, or of
+  another user, is refused), have no second name (a hard link) and be reached by a path with no
+  link in it, and hold from one byte to 16 KiB, which is looked at without reading it. A program
+  of another name with `acp` among its arguments (a wrapper) is never held to the whole shape, but
+  a `--token` or `--password` on its line is refused all the same. The file is looked at again
+  before each run, in the same words (a swap between that look and OpenClaw's own open of the file
+  can't be closed from the host); the case of its letters and the system's own links (`/tmp`,
+  `/var`, `/etc` are in `/private`) are no reason to refuse it. The question says where the document and the thread go, warns of a `ws://`
   address, which isn't encrypted, unless it is on this Mac (`localhost`, `127.0.0.1`, `[::1]`: what
   goes there stays on it, or goes through a tunnel its owner made), and of a token file that other
   people on the Mac can read.
@@ -2487,6 +2634,203 @@ Syrus runs agents on its server with API keys or enterprise agreements.
 - An image's address inside a pending change isn't fetched until the change is accepted, so an
   agent misled by text it read can't leak what it read through an image URL.
 
+### 8.7 Chat as a session
+
+Talking to the agent about a document is part of working on it, so the chat is a first-class part of
+Redlines (#1194), not a corner of the comments. It starts rudimentary: one column of messages and a
+composer, in the look of the chat apps people already know, with the document's own words, comments
+and changes on the agent's side of it.
+
+**A chat is a session.** It is a continuous conversation with one agent at a time, which goes on
+across turns, windows, restarts and days. It is attached to a document, or to none:
+
+- **A document's chat** is the one the sidebar shows while that document is open. Every document has
+  one, made empty the first time it is opened; there is nothing to create. Closing and opening the
+  document, or the app, finds it again.
+- **A chat with none** is a conversation about no document, or about a folder: the agent has no
+  document to read, and its reach is the folder's, as a comment's run in a folder has (§8.5, Folder
+  chat). It is reached from the sidebar's chat list (below), and is for later: the first version
+  has the document's chat only.
+- **A new document with no file** has its chat in the window while it is open and gives it to the
+  file when it is saved for the first time. Closing it unsaved ends it.
+- **Start Over** (in the chat's menu) begins a fresh session in the same place and keeps the old one
+  in the chat's history, readable and never sent to the agent again; it is how a long chat that has
+  lost the thread is cleared. Nothing deletes a chat but Delete Chat, which asks, and which is the
+  only way to remove what was said.
+
+**Where it is kept.** In the app's own data, never in the Markdown file: a chat is a private
+conversation, and a file is shared and stays clean (§8.5). One file per chat in the app's data
+folder (`chats/<id>.json`), with an index that maps a document's path to its chat's id, so that
+reading the index never reads the chats. A chat holds its messages (who wrote each, when, the
+words, the agent and model that wrote it), and what is needed to go on: the agent's own session,
+where it has one (not in the first version). Only the person's own words and the agent's final
+answers are kept: a run's status lines are drawn live and then dropped, and a failed turn is
+shown on its line and not kept.
+
+- **A move or a rename in Redlines** carries the chat with it (the index is updated with the
+  file). A file moved by another program is a path the index doesn't know: its chat stays where it
+  was, and the sidebar lists it as the chat of a document that moved, since there is no honest way
+  to know it is the same document.
+- **Windows.** Two windows of one document are one chat (§7.3, the session's leader): only the
+  window that leads runs the turn, and the others draw the same messages as they are written.
+- **Size.** A chat is kept whole while it is under a limit (about 2 MB, thousands of turns), and
+  past it the oldest turns are folded into a short summary that the agent is given, while the chat
+  still shows them, which is also what keeps a turn's prompt short. Not in the first version.
+- **Privacy.** Nothing in a chat leaves the Mac but what the agent's own program sends, as for any
+  run. A chat is deleted with Delete Chat; moving its document to the Trash leaves it, and the
+  chat list offers to delete it.
+
+**What the agent sees.** What a comment's run sees, and no more:
+
+- **The document,** through the six tools (§8.3): `view` for the text as a reader sees it, `status`
+  for who is on it, and its comments and changes through the review view (`review/…`). The document
+  is read afresh by each turn, so that a chat across a week of edits is about the document as it is
+  now, never as it was when the chat began. It sees the selection only when the person says so: a
+  message can hold quoted text (a "Quote selection" chip in the composer), which is passed to the
+  agent as quoted data.
+- **The conversation** so far: the earlier turns go with each new one as quoted data, as an Ask's
+  follow-ups do (§8.5), because an agent's earlier answer read a document that may say anything.
+  Where the agent keeps a session of its own (Claude Code and Codex can resume one), a later version
+  may use that for the history, falling back to the quoted text when the agent has lost it or was
+  changed in the middle.
+- **Its reach** is a comment's: the document, or the folder after the first-run question (§8.5),
+  and a chat in a folder the person said no to is a chat about the document alone.
+- **Never:** other chats, another document's text, or what the app keeps in Preferences. Text in
+  the document, and the agent's own earlier answers, are data and never an instruction (§8.1).
+- **Edits.** The first version is read-only, as Ask is: the agent answers. Asking it in a message to
+  make a comment or a suggestion is for a later version, which gives the turn the toolbox at the
+  document's level (§8.2). Every edit is then in the agent's name with the person as its principal,
+  as any run's is, and the answer says what it changed, with "Review · Undo" as an Auto run's does.
+  A reviewer's chat can only suggest (§8.2, Limits).
+
+**The chat panel.** The sidebar has two views, **Files** and **Chat**, switched by a small segmented
+control at its head (⌃⌘S still shows and hides the sidebar; ⌃⌘C opens it at Chat). It is the
+sidebar's column, in the sidebar's width, so it never covers the page; in a narrow window it covers
+the page, as the file list does.
+
+- **The column of messages.** The person's own message is a subtle bubble, aligned to the right and
+  tinted in the theme's gray. The agent's is plain text on the sidebar's ground with no bubble,
+  rendered as Markdown (paragraphs, lists, code, links), never as raw marks. A message has a hover
+  row with Copy and, for the agent's, **Make Comment** (it posts the answer as a thread on the
+  quoted passage, §8.5) and Retry; its time is a hover hint. Answers cite the text with links that
+  select the passage (§8.5). While it works, the agent's place shows its live line (what it is
+  doing, with Stop); today's providers hand over the answer whole when it is complete, and the
+  panel shows it whole, and a provider that streams text shows it growing, with no other change.
+  The column stays at the end while the person is at the end, and stops following when they scroll
+  up, with a "Jump to latest" button.
+- **The composer** is a rounded box at the foot: a field that grows to about six lines, Return to
+  send, ⇧Return for a new line, and a Send button that is Stop while a turn runs. Under the text,
+  the picker (below) at the left, and the Quote selection chip. An empty chat shows a few
+  suggestions the document makes (summarize it, find what is unclear, list the open comments),
+  which are only words that the person could have typed.
+- **The chat list.** A chevron by the chat's title opens a short list: this document's chat and its
+  earlier sessions, and the chats with none. It is for finding a conversation again, which is also
+  what the history of asks is (below).
+- **Looks.** Chat uses the theme's tokens only (its grays, its accent for focus, `--rl-size-ui` and
+  `--rl-size-ui-small`, never a size of its own), reads in Redlines and in Clean, in the light and
+  the dark theme, and moves nothing of the page.
+
+**How Ask relates to it.** Ask is a turn in the document's chat that the writer asks without leaving
+the text:
+
+- An Ask writes its question and its answer into the document's chat, as one turn marked "Asked
+  about", with the selected passage quoted, so the chat is the full record of every question put to
+  an agent about the document, and an answer that was only glanced at can be found again.
+- **The answer shows briefly in the main window,** in Ask's bubble (§8.5), so that the writer keeps
+  their focus: the bubble is a short view of the turn, and it goes by itself once the answer is
+  complete, after 4 seconds and the answer's words at 200 a minute (at most 90 seconds), the rule
+  of a notification's time on screen (#1185). The pointer on it holds it, and a second after the
+  pointer leaves it goes; a follow-up being typed holds it, and a field emptied again lets it go;
+  a failure or the first-run question on its line holds it. Only an answer starts the time, so a
+  follow-up's answer starts it again. **Open in Chat** (the bubble's action, first of its four)
+  closes it and opens the sidebar at the chat's newest message, with the keyboard in the
+  composer. Make Comment, Open in New Window and Copy stay as they are.
+- **A follow-up in the bubble is the chat's next turn,** and the chat's next message is a follow-up
+  of the Ask: one conversation, and the agent sees the earlier turns whichever started them.
+- **Read-only holds.** An Ask's turn is read-only whatever the chat's level becomes, and the chat
+  marks it so.
+- Esc or a press elsewhere closes the bubble, and stops a run still going, as before. An Ask that
+  was never answered has no turn in the chat; a chat message that is stopped or fails stays in the
+  history as an unanswered turn ("Stopped", or the failure's one line), is never sent to an agent
+  as an answer, and is in the column with the words the person wrote.
+- **The turn in the chat** has the passage quoted above the question ("Asked about"), the answer
+  as the agent wrote it with its Sources apart, and is kept like any other turn.
+- With the panel open at the document's chat, the bubble still shows: the bubble is for the text,
+  the panel for the conversation.
+
+**The agent and model picker.** At the composer's left it names the agent that answers, as the Ask
+bubble does ("Claude", the capitalized handle, §8.6), with the model beside it in a lighter weight
+("Claude · Sonnet"):
+
+- **Clicking the agent's name** opens a menu of the agents that are connected: those found on this
+  Mac and signed in, and the OpenClaw agents. An agent that is found but not ready is listed gray
+  with its reason (signed out, too old) and a button to Preferences › Agents. The default agent
+  (§8.6) is marked.
+- **Each agent opens a submenu of its models or efforts** where it has them: Claude's **Opus**,
+  **Sonnet** and **Haiku**; Codex's models (below). An agent that lists none (an OpenClaw agent,
+  whose Gateway chooses) is a plain item. The first item of each submenu is **Default**, which
+  names none, so Preferences' choice for the agent applies (§8.6).
+- **A pick holds for the chat,** not for the app: it is kept with the chat, and a new chat starts
+  at the default agent with Preferences' model. Changing the agent in the middle is allowed: each
+  answer stays the reply of the agent that wrote it, as in Ask (§8.5), and the new agent is given
+  the conversation as quoted data. The picker is disabled while a turn runs.
+- **What it offers** comes from the providers (`AgentInfo.models`), so a model added to a provider
+  appears with no change to the menu. Claude's list is Opus, Sonnet and Haiku, the aliases of its
+  newest of each. Codex's is not what `codex exec` offers: the list in `plugins/agent-codex` holds
+  two models of an older generation, while `codex debug models` on Codex 0.166.0 lists GPT-6.2-Sol,
+  GPT-6.2-Astra, GPT-6.1 Terra, GPT-6.1-Sol, GPT-6-Astra, GPT-6-Sol, GPT-6-Luna, GPT-5.6-Sol,
+  GPT-5.6-Terra and GPT-5.6-Luna, each taking the efforts low, medium, high, xhigh and max (all
+  but the Luna models also ultra). Redlines should ask `codex debug models` for the list instead of
+  holding one, and offer the newest of each family (Sol, Astra, Terra, Luna) with the efforts as a
+  submenu, through `-m <id>` and `-c model_reasoning_effort=<effort>`; `AgentModel` gains an
+  optional list of `efforts`. The first version lists the models only: Codex's list in
+  `plugins/agent-codex` is now GPT-6.2 Sol, GPT-6.2 Astra, GPT-6.1 Terra and GPT-6 Luna, and the
+  efforts, and reading the list from `codex debug models`, are for a later change. An agent's models
+  open under its name in the menu, in place, as the sidebar is too narrow for a flyout.
+- **Ask's bubble uses the same menu,** replacing its model list: one picker, one place to learn.
+
+**The sidebar's foot.** A bar at the bottom of the sidebar, in both views, in the sidebar's own
+type (`--rl-size-ui`) and grays, with three things:
+
+- **The person's name** at the left, as the app knows it (the Git identity, §5.4), with the color
+  dot their changes have; the first version draws an initial, and a click opens Preferences, where
+  the name is set.
+- **A settings button** (a gear), which opens Preferences at the pane the view is about: Agents from
+  the Chat view, General from the Files view.
+- **A report-a-bug button,** which opens the same report as Help › Report a Problem…: what happened
+  in words and numbers, to be reviewed and sent as a GitHub issue, never the document's text and
+  never a chat's.
+
+Each is a button with a label for assistive technology and a hover hint, as the title bar's icons
+are (§5.1).
+
+**The history of asks** (#1194) is not a separate feature: every Ask is a turn in the document's
+chat, so the history is the chat, with Ask's turns marked by the passage they were about. The chat
+list's search finds a question again by its words.
+
+**What the first version has,** in this order, each its own change:
+
+1. The sidebar's Chat view with the document's chat: the column, the composer, answers rendered as
+   Markdown, the picker with the agents and their models, the live line, history kept per document
+   in the app's data, Stop, Retry and Copy. Read-only.
+2. Ask writing its turn into the chat, with the bubble that goes by itself and Open in Chat (written).
+3. The sidebar's foot.
+4. Later: edits at the document's level, chats with none, the chat list, Start Over, folding old
+   turns, answers that cite with links to ranges, Codex's efforts.
+
+**Decided 2026-11-19** (Stephan's direction on #1194):
+
+- **Where:** the left sidebar, Files and Chat, with the history and the foot in it.
+- **Edits:** read-only in the first version. Make Comment posts an answer as a thread; suggestions
+  come later.
+- **Codex:** the newest of each family (Sol, Astra, Terra, Luna), each with its efforts as a
+  submenu, read from `codex debug models`.
+- **A document moved by another program:** its chat is not followed, as written above.
+- **One continuous chat per document,** with Start Over keeping the earlier sessions.
+- **Ask's bubble goes by itself** once the answer is complete, after a time that follows the
+  answer's length (a base plus about 200 words a minute, the rule of #1185), never while the
+  pointer is on it or it holds a follow-up.
+
 ## 9. Integrations
 
 | Integration                         | What it is                                                                                                                                                                                         | Phase                             |
@@ -2544,7 +2888,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   matter is shown plainly, dimmed, and so are the options of an R Markdown or Quarto chunk, as a
   line over its code. HTML is drawn from the same allowed list as Clean (§5.2), never live: no script,
   no style, and nothing the document can make load. Quarto divs are drawn too (a `.callout-*` div is a
-  quiet labelled box, any other div its text). An image that is a file in the
+  quiet labelled box, any other div its text). In a `.qmd` or `.Rmd` file the preview draws what the editor
+  draws of Quarto's syntax (`quarto.ts`): the attributes of a heading, a figure or a formula as a small
+  gray chip, a table's caption with its label ("Table 1:"), a cross-reference as its target's label
+  ("Figure 1") with a fine dotted underline, and `H~2~O` and `x^2^` as a subscript and a superscript. An image that is a file in the
   document's project is drawn, an `<img>` tag at its `width` and `height` when these are digits; any other is its alt text, and one from a server is never loaded.
   - **One renderer.** The extension is a Quick Look *preview extension* (`QLPreviewProvider`, an
     `.appex` in `Contents/PlugIns`), the supported way since macOS 15 stopped loading generators.
@@ -2558,13 +2905,14 @@ format operations run as a small Node service next to Syrus's Ruby backend.
     (its array methods came with 13.0). System Settings lists it with the other Quick Look
     extensions, on, and turns it off; Preferences › General › Quick Look previews of Markdown
     files has a button that opens that list (§5.1).
-  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. macOS has
-    no type for R Markdown and Quarto: a file of either gets a type made from its extension
-    (`dyn.…`), which the extension lists, with no type declared by Redlines, which could take the
-    extension from the app that declares it. Where another app declares them, the file has that
-    app's type, and Quick Look matches an extension's types exactly, never by what a type conforms
-    to, so Redlines' extension isn't asked: those files preview in that app's extension, or as
-    plain text. Where two extensions claim one type, macOS chooses one, and the settings pane
+  - **Types.** Markdown files are `net.daringfireball.markdown` and `public.markdown`. Quarto files
+    have a type of Redlines' own, `md.redlines.quarto`, which the app exports for `.qmd` (it
+    conforms to Markdown and plain text), so that Quick Look previews them and Finder opens them
+    with Redlines (#1177). macOS has no type for R Markdown: its files get a type made from the
+    extension (`dyn.…`), which the extension lists, with none declared by Redlines. Quick Look
+    matches an extension's types exactly, never by what a type conforms to: where another app
+    also claims `.qmd` or `.Rmd` and macOS gives the file that app's type, Redlines' extension
+    isn't asked, and the file previews in that app's extension, or as plain text, which is accepted. Where two extensions claim one type, macOS chooses one, and the settings pane
     turns either off: that is the one extension per type that Quick Look has.
   - **Large files.** The first 4 MB are read, and the first 300,000 characters of the document are
     drawn, to its last paragraph under that, with a line that says so. The count of what waits is

@@ -60,7 +60,7 @@ export class Clock {
   }
 }
 
-export type Direction = 'up' | 'down';
+type Direction = 'up' | 'down';
 
 /** One connection between a client and the authority (or between two replicas). */
 export class Link {

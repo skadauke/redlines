@@ -119,7 +119,23 @@ export function widen(
    * holds the mark whole, is tried before the unit is given with the mark left out (#265). */
   beside = false,
 ): Widened {
-  return withDialect(ctx.dialect, () => widenIn(text, edits, ctx, beside));
+  const done = withDialect(ctx.dialect, () => widenIn(text, edits, ctx, beside));
+  heard.push(done.unit);
+  // What nobody took in this turn of the event loop was a try that was not written: it is dropped.
+  if (heard.length === 1) queueMicrotask(() => (heard.length = 0));
+  return done;
+}
+
+/** The units `widen` wrote since the last `drainWidenings`, in this turn of the event loop. */
+const heard: WidenedUnit[] = [];
+
+/**
+ * The units that edits were widened to since the last call, for the editor to say so (#1188): the
+ * writer that makes a transaction takes them as it records the edit. Only what `widen` wrote in
+ * this turn of the event loop is there, so that a try made long ago is not told as an edit's.
+ */
+export function drainWidenings(): WidenedUnit[] {
+  return heard.splice(0, heard.length);
 }
 
 function widenIn(
@@ -265,8 +281,17 @@ function widenIn(
       sorted.some(
         (edit) => edit.insert.includes('\n') || text.slice(edit.from, edit.to).includes('\n'),
       ) && /^(?: {4,}|\t)\S|^[ \t>]*(?:`{3,}|~{3,})/m.test(text.slice(closed.lineFrom, closed.to));
+    // Indented code with a list line close below it: the code's replacement puts its closer's line
+    // between them, and micromark reads an item that doesn't start at 1 as one after it, and as text
+    // after the code without it (#601). The item is outside the paragraph that the change is in, so
+    // the whole file is read.
+    const codeAboveItem = boundary && closed.kind === 'code';
     const kept =
-      done && !((fromSpare || fenced || broken) && readsOtherMicromark(text, done.changes))
+      done &&
+      !(
+        (fromSpare || fenced || broken || codeAboveItem) &&
+        readsOtherMicromark(text, done.changes, codeAboveItem)
+      )
         ? done
         : undefined;
     if (kept && (!beside || kept.touchingOthers.length === 0)) return kept;
@@ -533,7 +558,14 @@ function tryRung(
 ): Widened | undefined {
   // The new text: the unit as the newest view has it, with the edits made.
   const viewFrom = view.map.fromSource(rung.from);
-  const viewTo = view.map.fromSource(rung.to);
+  let viewTo = view.map.fromSource(rung.to);
+  // A unit that ends the body, whose last mark is another person's format change spelled in the view
+  // with a delimiter of its own (`_f_` as `*f*`): the map ends the unit in front of that delimiter,
+  // and the new text would lose it (#1136). The unit then runs to the end of the view's text.
+  const bodyEnd = parsed.ledgerRange?.from ?? text.length;
+  if (text.slice(rung.to, bodyEnd).trim() === '') {
+    viewTo = Math.max(viewTo, view.text.replace(/\s+$/, '').length);
+  }
   if (edits.some((edit) => edit.from < viewFrom || edit.to > viewTo)) return giveUp('span');
   let now = applyChanges(
     view.text.slice(viewFrom, viewTo),
@@ -920,13 +952,15 @@ export function atBlockBoundary(text: string, edits: readonly TextChange[]): boo
       /^(?: {4}|\t)/.test(edit.insert) &&
       prefix === '' &&
       /^[ \t]*(?:<!--[^]*?-->[ \t]*)*(?:\r?\n|$)/.test(text.slice(edit.to));
-    // Text typed in indented code or an item's text never changes the blocks: only a line break can.
-    if (!startsCode && !edit.insert.includes('\n') && edit.from === edit.to) return false;
+    // (Text typed in indented code is written as the whole code block, whose closer's line then
+    // stands between the code and a list line below it: that is read too, #601.)
     if (!startsCode && !/^(?: {4}|\t)/.test(text.slice(start))) return false;
     let at = lineEnd(text, edit.to);
     for (let i = 0; i < 4 && at < text.length; i++) {
-      const next = lineEnd(text, at + 1);
-      if (LIST_LINE.test(text.slice(at + 1, next))) return true;
+      // (A line's end is at its CR in a file with CRLF line breaks: the next line starts after both.)
+      const from = at + (text[at] === '\r' ? 2 : 1);
+      const next = lineEnd(text, from);
+      if (LIST_LINE.test(text.slice(from, next))) return true;
       at = next;
     }
     return false;
@@ -1089,6 +1123,64 @@ function readHtml(source: string): string {
  * either the unit is replaced, which is safe (#265). */
 const MOST_NEAR_MARKS = 4;
 const MOST_STATES = 100;
+
+/**
+ * Whether the marks of the paragraphs from `first` to `last` of `file` (four at most) give another
+ * text in one order of deciding them than in another, each decision the same: a change that is
+ * written with its block breaks as syntax (a deletion of a paragraph, an insertion of one) leaves a
+ * blank line behind in some orders and not in others (#1136). Each state is read exactly, not by
+ * micromark; the file is cut to the stretch with the ledger after it.
+ */
+export function ordersDifferNear(file: string, first: number, last: number): boolean {
+  const parsed = parse(file);
+  const end = parsed.ledgerRange?.from ?? file.length;
+  const from = Math.max(0, file.lastIndexOf('\n\n', Math.max(0, first - 1)) + 2);
+  const after = file.indexOf('\n\n', Math.min(last, end));
+  const to = after < 0 || after > end ? end : after;
+  const ids = [
+    ...new Set(
+      parsed.marks
+        .filter(
+          (mark) =>
+            mark.kind !== 'cmt' &&
+            mark.kind !== 'hl' &&
+            mark.segments.some((g) => g.open.from >= from && (g.close?.to ?? g.open.to) <= to),
+        )
+        .map((mark) => mark.id),
+    ),
+  ];
+  if (ids.length === 0 || ids.length > 4) return false;
+  const orders = (list: string[]): string[][] =>
+    list.length <= 1
+      ? [list]
+      : list.flatMap((id, i) =>
+          orders([...list.slice(0, i), ...list.slice(i + 1)]).map((rest) => [id, ...rest]),
+        );
+  const every = orders(ids);
+  for (let mask = 0; mask < 1 << ids.length; mask++) {
+    const results = new Set<string>();
+    for (const order of every) {
+      let current = file;
+      let refused = false;
+      for (const id of order) {
+        if (!parse(current).marks.some((mark) => mark.id === id)) continue;
+        try {
+          current = applyChanges(
+            current,
+            ((mask >> ids.indexOf(id)) & 1 ? accept : reject)(current, id),
+          );
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          refused = true;
+          break;
+        }
+      }
+      if (!refused) results.add(current);
+    }
+    if (results.size > 1) return true;
+  }
+  return false;
+}
 
 /**
  * Whether `file`, a write that took in text of another person's format change, reads otherwise than

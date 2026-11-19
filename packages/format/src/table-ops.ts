@@ -1316,7 +1316,7 @@ export function rowMarkIds(table: TableRead): Set<string> {
 }
 
 /** What deciding rows comes to: the changes, and the marks that are decided with them. */
-export interface RowDecision {
+interface RowDecision {
   changes: TextChange[];
   /** Every mark decided, the other half of a move among them. */
   decided: string[];

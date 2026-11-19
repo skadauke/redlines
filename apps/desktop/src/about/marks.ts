@@ -32,7 +32,7 @@ export function markOrCaret(name: string): Mark {
 }
 
 /** What a running animation lets its owner do: wait for its end, and cut it short. */
-export interface Animation {
+interface Animation {
   finished: Promise<unknown>;
   cancel(): void;
 }
@@ -51,14 +51,14 @@ const webAnimate: Animator = (element, keyframes, options) => {
   return { finished: animation.finished.catch(() => undefined), cancel: () => animation.cancel() };
 };
 
-export interface IconCycler {
+interface IconCycler {
   /** The mark the icon shows, or is changing to. */
   current(): Mark;
   /** Changes to the next mark, finishing a change that is going first. */
   click(): void;
 }
 
-export interface CyclerOptions {
+interface CyclerOptions {
   /** The file of each mark. */
   urls: Record<Mark, string>;
   /** The mark the icon starts on: the one the app's icon shows. */

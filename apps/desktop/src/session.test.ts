@@ -7,7 +7,7 @@
 import { createEditor, type Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { EVENTS, joinSession, ordinalOf, PortLog } from './session.ts';
+import { EVENTS, joinSession, ordinalOf, PortLog, windowNumberOf } from './session.ts';
 import type { Joined, Moved, Session, SessionPorts } from './session.ts';
 
 const BASE = 'First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.\n';
@@ -120,6 +120,8 @@ interface Window {
   /** What it was told the file holds. */
   told: string[];
   notices: string[];
+  /** What other windows told it about Track Changes. */
+  heardTracking: boolean[];
 }
 
 async function windowOn(app: FakeApp, label: string, doc: string): Promise<Window> {
@@ -127,6 +129,7 @@ async function windowOn(app: FakeApp, label: string, doc: string): Promise<Windo
   const saved: string[] = [];
   const told: string[] = [];
   const notices: string[] = [];
+  const heardTracking: boolean[] = [];
   let disk: string | null = doc === '' ? null : doc;
   const session = await joinSession(app.ports(label), editor, {
     path: PATH,
@@ -140,9 +143,14 @@ async function windowOn(app: FakeApp, label: string, doc: string): Promise<Windo
       return text;
     },
     notice: (message) => notices.push(message),
+    onTracking: (on) => {
+      heardTracking.push(on);
+      editor.setTracking(on, { inFile: false });
+    },
+    tracking: () => editor.getUiState().tracking,
     saveDelayMs: 20,
   });
-  return { label, editor, session, saved, told, notices };
+  return { label, editor, session, saved, told, notices, heardTracking };
 }
 
 function type(editor: Editor, after: string, text: string): void {
@@ -165,6 +173,20 @@ async function settle(...windows: Window[]): Promise<void> {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Waits until `done` holds, for as long as it takes (the test's own timeout ends a wait that never does). */
+async function until(done: () => boolean): Promise<void> {
+  while (!done()) await wait(2);
+}
+
+/**
+ * Waits until the leader has seen the other window, which is when it tells that window its Track
+ * Changes setting: the peers are known when each says where its caret is, a moment after it joins.
+ */
+async function joinedAndTold(leader: Window, joiner: Window): Promise<void> {
+  for (const w of [leader, joiner]) w.editor.view.dispatch({ selection: { anchor: 2 } });
+  await until(() => joiner.heardTracking.length > 0);
+}
+
 describe('a document in two windows', () => {
   it('shows the leader’s text in the window that joins, and both type at once', async () => {
     const app = new FakeApp();
@@ -184,6 +206,40 @@ describe('a document in two windows', () => {
     expect(parse(text).warnings).toEqual([]);
     expect(text).toContain('ONE');
     expect(text).toContain('TWO');
+  });
+
+  it('turns Track Changes on and off in every window of the document (#1166)', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    const two = await windowOn(app, 'doc-2', '');
+    await settle(one, two);
+    // The leader tells a window that joins its setting once the peers are known, which is later
+    // than the join: let that be over, so that it can't land in the middle of the toggles.
+    await joinedAndTold(one, two);
+    two.heardTracking.length = 0;
+    const tracking = () => [one, two].map((w) => w.editor.getUiState().tracking);
+    const turn = async (w: Window, on: boolean) => {
+      w.editor.setTracking(on, { inFile: false });
+      await w.session.shareTracking(on);
+    };
+    expect(tracking()).toEqual([false, false]);
+    await turn(one, true);
+    await until(() => tracking().every(Boolean));
+    await turn(two, false);
+    await until(() => tracking().every((on) => !on));
+    expect(two.heardTracking).toEqual([true]);
+    expect(one.heardTracking).toEqual([false]);
+  });
+
+  it('gives a window that joins the leader’s Track Changes setting (#1166)', async () => {
+    const app = new FakeApp();
+    const one = await windowOn(app, 'doc-1', BASE);
+    one.editor.setTracking(true, { inFile: false });
+    const two = await windowOn(app, 'doc-2', '');
+    await settle(one, two);
+    await joinedAndTold(one, two);
+    expect(two.editor.getUiState().tracking).toBe(true);
+    expect(two.heardTracking).toEqual([true]);
   });
 
   it('keeps a file with CRLF line breaks as it is, in both windows, with no edit taken back (#1057)', async () => {
@@ -345,14 +401,18 @@ describe('a document in two windows', () => {
 
 describe('what the windows are called', () => {
   it('numbers a window by its label, the same whichever window leads', () => {
+    expect(windowNumberOf('main')).toBe(1);
+    expect(windowNumberOf('doc-1')).toBe(2);
+    expect(windowNumberOf('tab-2')).toBe(2);
+    expect(windowNumberOf('tab-9f3c1a2b')).toBeNull();
     expect(ordinalOf('main')).toBe(1);
     expect(ordinalOf('doc-1')).toBe(2);
     expect(ordinalOf('doc-12')).toBe(13);
   });
 
-  it('gives each window a name and a color that every window shows it in, through a handover', async () => {
+  it('gives each window a name that every window shows it by, through a handover', async () => {
     const app = new FakeApp();
-    const peers: Record<string, { name: string; color?: string }[]> = {};
+    const peers: Record<string, { name: string }[]> = {};
     const named = async (label: string, doc: string) => {
       const editor = editorFor(doc);
       const session = await joinSession(app.ports(label), editor, {
@@ -360,7 +420,7 @@ describe('what the windows are called', () => {
         person: { handle: 'ada', name: 'Ada' },
         save: () => Promise.resolve(editor.view.state.doc.toString()),
         onPeers: (list) => {
-          peers[label] = list.map(({ name, color }) => ({ name, color }));
+          peers[label] = list.map((peer) => ({ name: peer.name }));
         },
         saveDelayMs: 20,
       });
@@ -374,22 +434,15 @@ describe('what the windows are called', () => {
     for (const w of [one, two, three]) w.editor.view.dispatch({ selection: { anchor: 2 } });
     await wait(250);
     expect(peers['doc-1']).toEqual(
-      expect.arrayContaining([
-        { name: 'Ada (window 3)', color: 'p3' },
-        { name: 'Ada (window 4)', color: 'p4' },
-      ]),
+      expect.arrayContaining([{ name: 'Ada (window 3)' }, { name: 'Ada (window 4)' }]),
     );
     // The leader closes; the next one hosts. Window 3 is still window 3, in the same color.
     await one.session.stop();
     await wait(400);
     for (const w of [two, three]) w.editor.view.dispatch({ selection: { anchor: 3 } });
     await wait(250);
-    expect(peers['doc-2']).toEqual(
-      expect.arrayContaining([{ name: 'Ada (window 4)', color: 'p4' }]),
-    );
-    expect(peers['doc-3']).toEqual(
-      expect.arrayContaining([{ name: 'Ada (window 3)', color: 'p3' }]),
-    );
+    expect(peers['doc-2']).toEqual(expect.arrayContaining([{ name: 'Ada (window 4)' }]));
+    expect(peers['doc-3']).toEqual(expect.arrayContaining([{ name: 'Ada (window 3)' }]));
   });
 });
 

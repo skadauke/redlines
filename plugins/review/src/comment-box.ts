@@ -26,7 +26,7 @@ export interface BoxOptions {
   attachToField?: FieldAttachment;
 }
 
-export interface BoxActions {
+interface BoxActions {
   /**
    * Posts the text, and returns its thread and what was posted: the thread's id for a new comment,
    * the reply's for a reply. Throws an `EditError` when it can't.

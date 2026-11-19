@@ -44,7 +44,7 @@ import { imageResolver, sourceOf } from './image.ts';
 import { readTag } from './html-inline.ts';
 
 /** A source longer than this many lines opens in Plain, at the spot, rather than in the page. */
-export const LONG_SOURCE_LINES = 60;
+const LONG_SOURCE_LINES = 60;
 
 /** The most a drawn block holds: past either, the rest is left out. */
 const MAX_NODES = 5000;
@@ -53,7 +53,7 @@ const MAX_DEPTH = 100;
 const MAX_TEXT = 500;
 
 /** A block of HTML that is drawn rendered, or would be: whole lines. */
-export interface HtmlBlock {
+interface HtmlBlock {
   from: number;
   to: number;
 }
@@ -80,7 +80,7 @@ function linesOf(state: EditorState, node: SyntaxNode): HtmlBlock {
 }
 
 /** Whether a node's block is one that is drawn rendered. Reads the state, never the view. */
-export function isRenderedBlock(state: EditorState, node: SyntaxNode): boolean {
+function isRenderedBlock(state: EditorState, node: SyntaxNode): boolean {
   if (node.name !== 'HTMLBlock' || node.parent?.name !== 'Document') return false;
   if (state.field(viewModeField, false) === 'raw') return false;
   const { from, to } = linesOf(state, node);
@@ -321,7 +321,7 @@ interface Opened {
 const NOTHING: Opened = { keys: new Set(), found: null };
 
 /** Opens the source of the HTML block that starts at `from`. The caret goes in with it. */
-export const openHtmlSource = StateEffect.define<number>();
+const openHtmlSource = StateEffect.define<number>();
 
 interface Sel {
   from: number;
@@ -402,7 +402,7 @@ export const openedField = StateField.define<Opened>({
 });
 
 /** Whether the source of the block shows: it was opened, Find holds it, or the selection is in it. */
-export function isSourceOpen(state: EditorState, block: HtmlBlock): boolean {
+function isSourceOpen(state: EditorState, block: HtmlBlock): boolean {
   const opened = state.field(openedField, false);
   if (opened && (opened.keys.has(block.from) || opened.found === block.from)) return true;
   return state.selection.ranges.some((range) => insideBlock(range, block));
@@ -411,7 +411,7 @@ export function isSourceOpen(state: EditorState, block: HtmlBlock): boolean {
 // ------------------------------------------------------------------- drawing
 
 /** What the drawing needs of the preview's builder. */
-export interface BlockSink {
+interface BlockSink {
   readonly state: EditorState;
   push(range: Range<Decoration>): void;
 }

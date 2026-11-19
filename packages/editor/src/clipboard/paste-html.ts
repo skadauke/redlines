@@ -251,7 +251,7 @@ function formatOf(el: Element, parent: Format): Format {
 }
 
 /** A picture that came with its bytes in the HTML, as the clipboard held it. */
-export interface PastedPicture {
+interface PastedPicture {
   bytes: Uint8Array<ArrayBuffer>;
   /** The type of the bytes themselves (sniffed: Word labels a JPEG `image/png`). */
   type: string;
@@ -268,7 +268,7 @@ export interface PastedPicture {
  * Whether a picture's address is one the host fetches for a paste: Google Docs' pictures, `https`
  * on Google's image servers. The host holds the same list (`remote_image.rs`) and refuses any other.
  */
-export function isFetchablePicture(src: string): boolean {
+function isFetchablePicture(src: string): boolean {
   try {
     const url = new URL(src.trim());
     return (
@@ -849,7 +849,10 @@ function points(value: string | undefined): number {
  */
 function quoted(el: Element, tag: string): boolean {
   if (tag !== 'p') return false;
-  if (/(?:^|\s)Mso(?:Intense)?Quote(?:\s|$)/.test(el.getAttribute('class') ?? '')) return true;
+  if (/(?:^|\s)Mso(?:Intense)?Quote(?:\s|$)/.test(el.getAttribute('class') ?? '')) {
+    // Redlines' own copy marks a quote's paragraphs so, inside the `<blockquote>` that is the quote.
+    return !el.parentElement?.closest('blockquote');
+  }
   // A hanging indent (a bibliography), a table of contents, and a paragraph inside a list item or a
   // quote are indented for another reason.
   if (
@@ -1066,6 +1069,7 @@ class Converter {
   block(el: Element, tag: string, format: Format, ctx: Context): string[] {
     const alert = this.alert(el, format, ctx);
     if (alert) return [alert];
+    if (tag === 'div' && el.hasAttribute('data-rl-tasks')) return this.taskRun(el, format, ctx);
     const level = /^h[1-6]$/.test(tag) ? Number(tag[1]) : tag === 'p' ? wordHeading(el) : 0;
     if (level) {
       const runs: Run[] = [];
@@ -1207,6 +1211,26 @@ class Converter {
         .join('\n');
     });
     return lines.join('\n');
+  }
+
+  /** A run of task items that Redlines' copy for Word wrote as paragraphs, as a task list. */
+  taskRun(el: Element, format: Format, ctx: Context): string[] {
+    const lines: string[] = [];
+    for (const child of Array.from(el.children)) {
+      if (child.tagName.toLowerCase() === 'p') {
+        const text = this.blocks(child, format, ctx).join(' ');
+        const glyph = /^([\u2610\u2611\u2612])\s*/.exec(text);
+        lines.push(
+          glyph
+            ? `- ${glyph[1] === '\u2610' ? '[ ]' : '[x]'} ${text.slice(glyph[0].length)}`
+            : `- ${text}`,
+        );
+      } else {
+        const nested = this.blocks(child, format, ctx).join('\n');
+        for (const line of nested.split('\n')) lines.push(line ? `  ${line}` : line);
+      }
+    }
+    return [lines.join('\n')];
   }
 
   item(li: Element, format: Format, ctx: Context): string[] {

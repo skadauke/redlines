@@ -20,6 +20,7 @@ import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugi
 import { createProcesses, createRelay } from './agent-host.ts';
 import { DOCUMENT_EXTENSIONS, extension, isDocument } from './file-names.ts';
 import { savedImageName } from './image-add.ts';
+import { originalFile } from './office-picture.ts';
 import sample from './sample.md?raw';
 
 export type { FileEntry, ProjectRoot };
@@ -410,6 +411,12 @@ async function appCommand<T>(
   }
 }
 
+/** Word's drawing package from the pasteboard (src-tauri/src/office_picture.rs), or null. */
+async function readOfficePackage(): Promise<Uint8Array | null> {
+  const bytes = await invoke<ArrayBuffer>('read_office_picture');
+  return bytes.byteLength > 0 ? new Uint8Array(bytes) : null;
+}
+
 /**
  * Sends the image files the page holds, a paste's or a drop's in a window that gets them itself, to
  * the app, one after another so that two of a name never meet. Each goes as its bytes, with the
@@ -424,7 +431,12 @@ async function sendImageData(
 ): Promise<AddedImages> {
   const now = new Date();
   const added: AddedImages = { paths: [], refused: [] };
-  for (const file of files) {
+  for (const given of files) {
+    // A picture copied in Word comes at the size it has on the page; Word's own drawing format on the
+    // pasteboard holds the original (#1182). The paste is the picture alone, and the original has to
+    // be that picture, or the picture stays as it came.
+    const file =
+      (pasted && files.length === 1 ? await originalFile(given, readOfficePackage) : null) ?? given;
     const name = savedImageName(file, pasted, now);
     if (name === null) {
       added.refused.push(notAnImage(file.name));
@@ -672,6 +684,8 @@ export interface DevImages {
 declare global {
   interface Window {
     __redlinesImages?: DevImages;
+    /** The development page's folder in memory: puts a file beside the document (a journey's). */
+    __redlinesFiles?: { write(path: string, text: string): void };
   }
 }
 
@@ -697,6 +711,8 @@ function createBrowserHost(): Host {
       }
     : null;
   if (dev) window.__redlinesImages = dev;
+  if (import.meta.env.DEV)
+    window.__redlinesFiles = { write: (path, text) => void files.set(path, text) };
   const read = (path: string) => {
     const text = files.get(path);
     return text === undefined

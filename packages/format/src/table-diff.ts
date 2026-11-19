@@ -21,7 +21,7 @@ import type { TrackedEdits } from './track.ts';
 import type { DocView, EditContext, TextChange } from './types.ts';
 
 /** A cell whose text is to change, in a row that stays. */
-export interface CellChange {
+interface CellChange {
   /** The row's index in the old table, the header 0. */
   row: number;
   column: number;
@@ -32,7 +32,7 @@ export interface CellChange {
 /** What turns one table into another. The operations are in the order they are made: rows (or
  * columns) that go, then those that move, then those that come, each counted in the table as the ones
  * before left it. */
-export interface TableChanges {
+interface TableChanges {
   cells: CellChange[];
   ops: TableOp[];
 }

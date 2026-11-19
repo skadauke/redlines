@@ -4,7 +4,6 @@
 // ignores, and reads a folder only when it is opened. Documents come first and open in this window,
 // or in a new one with ⌘-click or while a run is live. Hidden by default.
 
-import { PROJECT_IMAGE_TYPE } from '@redlines/editor';
 import { documentKind } from '../file-names.ts';
 import {
   basename,
@@ -42,20 +41,58 @@ export interface SidebarOptions {
   showPlainOnly?: () => boolean;
   /** Tells the person what went wrong, in one line. */
   notice(message: string): void;
+  /**
+   * Where an image dragged out of the sidebar goes (#681, #1198): the pointer is over the page at
+   * the client point (`over`), is let go there (`drop`, with the image's path), or leaves (`leave`).
+   * The row is dragged with the pointer, not as an HTML drag, which the app's web view never
+   * delivers to the page. Default: none, and the rows can't be dragged.
+   */
+  imageDrag?: {
+    over(at: { x: number; y: number }): void;
+    drop(at: { x: number; y: number }, path: string): void;
+    leave(): void;
+  };
   /** The edge was dragged: keep the width (#680). */
   onResize?(width: number): void;
   /** The edge was dragged shut: close the sidebar, as ⌃⌘S does. */
   onClose?(): void;
+  /**
+   * The chat panel (#1194): with it the sidebar has a second view, Chat, beside Files, switched by
+   * a control at its head. Without it the sidebar has only the file list, as it did.
+   */
+  chat?: HTMLElement;
+  /** The view changed, from the control or from `setView`. */
+  onView?(view: SidebarView): void;
+  /**
+   * The foot (#1194): the person's name, a settings button and a report-a-bug button. Without it
+   * the sidebar has no foot.
+   */
+  foot?: {
+    /** The name to show, as the app knows the person. */
+    name(): string;
+    /** Opens Preferences. */
+    settings(): void;
+    /** Opens the problem report. */
+    report(): void;
+  };
 }
 
+/** What the sidebar lists: the project's files, or the document's chat. */
+type SidebarView = 'files' | 'chat';
+
 /** A saved document, and the project it is in. */
-export interface SidebarDocument {
+interface SidebarDocument {
   path: string;
   root: ProjectRoot;
 }
 
-export interface Sidebar {
+interface Sidebar {
   setOpen(open: boolean): void;
+  /** Shows the file list or the chat (ignored without a chat panel). */
+  setView(view: SidebarView): void;
+  readonly view: SidebarView;
+  /** Draws the foot's name again, after Preferences changed it. */
+  refreshFoot(): void;
   /** The width to draw, in CSS px (a stored one is made right). */
   setWidth(width: number): void;
   /**
@@ -113,7 +150,104 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   label.className = 'rl-sidebar-label';
   const list = document.createElement('ul');
   list.className = 'rl-sidebar-list';
-  aside.append(head, label, list);
+  aside.append(head);
+  const tabs = document.createElement('div');
+  const filesTab = document.createElement('button');
+  const chatTab = document.createElement('button');
+  let view: SidebarView = 'files';
+  if (options.chat) {
+    tabs.className = 'rl-sidebar-tabs';
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Sidebar');
+    for (const [button, name, which] of [
+      [filesTab, 'Files', 'files'],
+      [chatTab, 'Chat', 'chat'],
+    ] as const) {
+      button.type = 'button';
+      button.className = 'rl-sidebar-tab';
+      button.setAttribute('role', 'tab');
+      button.id = `rl-sidebar-tab-${which}`;
+      button.setAttribute('aria-controls', `rl-sidebar-panel-${which}`);
+      button.textContent = name;
+      button.addEventListener('click', () => show(which));
+      tabs.append(button);
+    }
+    tabs.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      show(view === 'files' ? 'chat' : 'files', true);
+    });
+    aside.append(tabs);
+  }
+  aside.append(label, list);
+  if (options.chat) {
+    // Each tab names the panel it shows, and each panel the tab that shows it.
+    list.id = 'rl-sidebar-panel-files';
+    list.setAttribute('role', 'tabpanel');
+    list.setAttribute('aria-labelledby', 'rl-sidebar-tab-files');
+    options.chat.id = 'rl-sidebar-panel-chat';
+    options.chat.setAttribute('role', 'tabpanel');
+    options.chat.setAttribute('aria-labelledby', 'rl-sidebar-tab-chat');
+    options.chat.hidden = true;
+    aside.append(options.chat);
+  }
+  const foot = document.createElement('div');
+  const footName = document.createElement('button');
+  if (options.foot) {
+    foot.className = 'rl-sidebar-foot';
+    footName.type = 'button';
+    footName.className = 'rl-sidebar-foot-name';
+    footName.title = 'Your name, in Preferences';
+    footName.addEventListener('click', () => options.foot?.settings());
+    const settings = document.createElement('button');
+    settings.type = 'button';
+    settings.className = 'rl-sidebar-foot-button';
+    settings.title = 'Preferences';
+    settings.setAttribute('aria-label', 'Preferences');
+    settings.append(icon('general', 16));
+    settings.addEventListener('click', () => options.foot?.settings());
+    const report = document.createElement('button');
+    report.type = 'button';
+    report.className = 'rl-sidebar-foot-button';
+    report.title = 'Report a problem';
+    report.setAttribute('aria-label', 'Report a problem');
+    report.append(icon('bug', 16));
+    report.addEventListener('click', () => options.foot?.report());
+    foot.append(footName, settings, report);
+    aside.append(foot);
+  }
+  const drawFoot = () => {
+    if (!options.foot) return;
+    const name = options.foot.name();
+    const initial = document.createElement('span');
+    initial.className = 'rl-sidebar-foot-initial';
+    initial.textContent = [...name.trim()][0]?.toUpperCase() ?? '';
+    initial.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.className = 'rl-sidebar-foot-text';
+    text.textContent = name;
+    footName.replaceChildren(initial, text);
+    footName.setAttribute('aria-label', `${name}: Preferences`);
+  };
+  /** Shows a view: the file list under its label, or the chat. */
+  function show(next: SidebarView, focus = false): void {
+    if (!options.chat) return;
+    view = next;
+    label.hidden = list.hidden = next !== 'files';
+    options.chat.hidden = next !== 'chat';
+    for (const [button, which] of [
+      [filesTab, 'files'],
+      [chatTab, 'chat'],
+    ] as const) {
+      const on = which === next;
+      button.setAttribute('aria-selected', String(on));
+      button.tabIndex = on ? 0 : -1;
+      if (on && focus) button.focus();
+    }
+    options.onView?.(next);
+  }
+  show('files');
+  drawFoot();
   const resize = createSidebarResize({
     aside,
     app: container,
@@ -249,13 +383,11 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     if (entry.path === current) button.setAttribute('aria-current', 'page');
     if (!entry.isDir && !isDocument(entry.name)) {
       // An image is not opened: it is dragged into the document, which links it by its path (#681).
-      button.draggable = true;
       button.classList.add('rl-sidebar-image');
-      button.title = 'Drag into the document to insert it';
-      button.addEventListener('dragstart', (event) => {
-        event.dataTransfer?.setData(PROJECT_IMAGE_TYPE, entry.path);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
-      });
+      if (options.imageDrag) {
+        button.title = 'Drag into the document to insert it';
+        button.addEventListener('pointerdown', (event) => beginImageDrag(event, button, entry));
+      }
     } else {
       button.addEventListener('click', (event) => {
         if (entry.isDir) toggle(entry.path);
@@ -264,6 +396,68 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     }
     item.append(button);
     return item;
+  };
+
+  /** Ends the image drag that is going on, if any. */
+  let endDrag: (() => void) | null = null;
+
+  /**
+   * A press on an image row, and the pointer's drag from it (#1198): past a few pixels a label
+   * follows the pointer, the document shows where the image would go, and letting go there writes
+   * the link. A press that goes nowhere does nothing, and Escape gives the drag up.
+   */
+  const beginImageDrag = (press: PointerEvent, button: HTMLElement, entry: FileEntry) => {
+    const target = options.imageDrag;
+    if (!target || press.button !== 0 || endDrag) return;
+    const start = { x: press.clientX, y: press.clientY };
+    let label: HTMLElement | null = null;
+    const at = (event: PointerEvent) => ({ x: event.clientX, y: event.clientY });
+    const move = (event: PointerEvent) => {
+      if (!label) {
+        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) return;
+        label = document.createElement('div');
+        label.className = 'rl-sidebar-drag';
+        label.textContent = entry.name;
+        label.setAttribute('aria-hidden', 'true');
+        document.body.append(label);
+        document.body.classList.add('rl-image-dragging');
+      }
+      label.style.left = `${event.clientX + 12}px`;
+      label.style.top = `${event.clientY + 12}px`;
+      target.over(at(event));
+    };
+    const finish = (event: PointerEvent | null) => {
+      const dragged = label !== null;
+      cleanup();
+      if (!dragged) return;
+      if (event) target.drop(at(event), entry.path);
+      else target.leave();
+    };
+    const up = (event: PointerEvent) => finish(event);
+    const cancel = () => finish(null);
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cancel();
+    };
+    // A click after a drag is no click: the row does nothing either way.
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', key, true);
+      label?.remove();
+      label = null;
+      document.body.classList.remove('rl-image-dragging');
+      endDrag = null;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', key, true);
+    endDrag = () => {
+      cleanup();
+      target.leave();
+    };
+    button.focus();
   };
 
   const toggle = (folder: string) => {
@@ -301,6 +495,13 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     setWidth(width) {
       resize.setWidth(width);
     },
+    setView(next) {
+      if (next !== view) show(next);
+    },
+    get view() {
+      return view;
+    },
+    refreshFoot: drawFoot,
     setOpen(next) {
       if (next === open) return;
       open = next;
@@ -330,6 +531,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     },
     destroy() {
       epoch++;
+      endDrag?.();
       resize.destroy();
       aside.remove();
     },

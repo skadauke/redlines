@@ -1,7 +1,7 @@
 // What the parts of the review interface share: the editor they work on and its changes, how they
 // write to the ledger, and how a refused action shows.
 
-import type { EditorView, Rect } from '@codemirror/view';
+import { EditorView, type Rect } from '@codemirror/view';
 import {
   calloutName,
   dialectFacet,
@@ -20,6 +20,7 @@ import {
   type FormatOp,
   alignLabel,
   deletedTable,
+  describePictureChange,
   formatChange,
   type InlineFormat,
   type MarkRange,
@@ -28,7 +29,6 @@ import {
   type Range,
   type Segment,
   suggestions,
-  type TextChange,
   type Time,
   plainPayload,
 } from '@redlines/format';
@@ -109,7 +109,7 @@ export function spanOf(mark: MarkRange): Range {
  * The text of `ranges` as it reads, without the markers of any marks inside them, or what carries
  * an opener on a line of its own.
  */
-export function textOf(parsed: Parsed, ranges: readonly Range[]): string {
+function textOf(parsed: Parsed, ranges: readonly Range[]): string {
   const markers = parsed.marks
     .flatMap(({ segments }) =>
       segments.flatMap((segment) => {
@@ -133,7 +133,7 @@ export function textOf(parsed: Parsed, ranges: readonly Range[]): string {
 }
 
 /** The text a change put in, as it reads: an insertion's, or a substitution's new text. */
-export function insertedText(parsed: Parsed, change: MarkRange): string {
+function insertedText(parsed: Parsed, change: MarkRange): string {
   return textOf(
     parsed,
     change.segments.map(({ content }) => content),
@@ -150,7 +150,7 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
  * Characters are what a reader sees as one, so an emoji is never cut in half. Empty for white
  * space alone.
  */
-export function shorten(text: string): string {
+function shorten(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   const chars = [...graphemes.segment(flat)].map(({ segment }) => segment);
   if (chars.length <= QUOTE_LIMIT) return flat;
@@ -177,7 +177,7 @@ export function readable(text: string): string {
 }
 
 /** What a change took out and what it put in. */
-export interface ChangeTexts {
+interface ChangeTexts {
   /** A deletion's text, or the text a substitution replaced; empty for the other kinds. */
   old: string;
   /** An insertion's text, or a substitution's new text; a split's line break; else empty. */
@@ -189,30 +189,22 @@ export interface ChangeTexts {
 /** Whether a change is an inserted table row (format §3.7). */
 export const isRowInsertion = (change: MarkRange) =>
   change.kind === 'ins' && change.payload === 'row';
-
-/** What rows inserted together did, in the words of a card and a note: `Inserted 2 rows`. */
-export const insertedRows = (count: number) =>
-  count === 1 ? 'Inserted row' : `Inserted ${count} rows`;
-
 /** Whether a change is a deleted table row (format §3.7). */
-export const isRowDeletion = (change: MarkRange) =>
+const isRowDeletion = (change: MarkRange) =>
   change.kind === 'del' && /^row=/.test(change.payload ?? '');
 
 /** Whether a change is a row moved: the row at its new place. */
-export const isRowMove = (change: MarkRange) =>
-  isRowInsertion(change) && change.entry.move !== undefined;
+const isRowMove = (change: MarkRange) => isRowInsertion(change) && change.entry.move !== undefined;
 
 /** Whether a change is an inserted table column (format §3.7). */
-export const isColInsertion = (change: MarkRange) =>
-  change.kind === 'ins' && change.payload === 'col';
+const isColInsertion = (change: MarkRange) => change.kind === 'ins' && change.payload === 'col';
 
 /** Whether a change is a deleted table column (format §3.7). */
-export const isColDeletion = (change: MarkRange) =>
+const isColDeletion = (change: MarkRange) =>
   change.kind === 'del' && /^col=/.test(change.payload ?? '');
 
 /** Whether a change is a column moved: the column at its new place. */
-export const isColMove = (change: MarkRange) =>
-  isColInsertion(change) && change.entry.move !== undefined;
+const isColMove = (change: MarkRange) => isColInsertion(change) && change.entry.move !== undefined;
 
 /**
  * What changes of rows or columns did, in the words of a card and a note: `Inserted row`,
@@ -289,7 +281,19 @@ export function describeChange(parsed: Parsed, change: MarkRange): string {
     return `Inserted ${quote(added)}`;
   }
   if (change.kind === 'del') return isBreak(old) ? 'Joined paragraphs' : `Deleted ${quote(old)}`;
-  return `Replaced ${quote(old)} with ${quote(added)}`;
+  return describePictureChange(old, added) ?? `Replaced ${quote(old)} with ${quote(added)}`;
+}
+
+/**
+ * `Moved block` for the suggestion of a move of blocks (format §3.14): an insertion and a deletion
+ * that name each other in `move`, and no row or column; null for any other.
+ */
+export function blockMoved(changes: readonly MarkRange[]): string | null {
+  const plain = (change: MarkRange) =>
+    change.entry.move !== undefined && !isRowInsertion(change) && !isColInsertion(change);
+  const insertion = changes.find((change) => change.kind === 'ins' && plain(change));
+  const deletion = changes.find((change) => change.kind === 'del' && plain(change));
+  return insertion && deletion && !rowsDone(changes) ? 'Moved block' : null;
 }
 
 /** What the changes of one suggestion did: `Inserted 2 rows` for rows inserted together, else each
@@ -297,6 +301,8 @@ export function describeChange(parsed: Parsed, change: MarkRange): string {
 export function describeChanges(parsed: Parsed, changes: readonly MarkRange[]): string {
   const rows = changes.length > 1 ? rowsDone(changes) : null;
   if (rows !== null) return rows;
+  const moved = blockMoved(changes);
+  if (moved !== null) return moved;
   return changes.map((change) => describeChange(parsed, change)).join(' · ');
 }
 
@@ -361,7 +367,7 @@ function ledgerTime(date: Date): Time {
 }
 
 /** An edit by `author`, now. Only the fields `author` has are written to the ledger's people. */
-export function editContext(author: Author, dialect?: MarkdownDialect): EditContext {
+function editContext(author: Author, dialect?: MarkdownDialect): EditContext {
   const person: Person = { handle: author.handle, name: author.name };
   if (author.email !== undefined) person.email = author.email;
   if (author.agent !== undefined) person.agent = author.agent;
@@ -372,15 +378,6 @@ export function editContext(author: Author, dialect?: MarkdownDialect): EditCont
     ...(dialect === undefined ? {} : { dialect }),
   };
 }
-
-/**
- * Applies a ledger edit made by @redlines/format, such as a reply. It isn't typing, so Track
- * Changes leaves it alone, and Undo takes it back.
- */
-export function applyEdit(view: EditorView, changes: TextChange[], userEvent: string): void {
-  if (changes.length) view.dispatch({ changes, userEvent });
-}
-
 /**
  * A review action by `author`, now: a comment, a highlight, a reply, a resolve or a reopen. Written
  * by the format and applied as one step, with what was asked recorded beside it. Returns the id of
@@ -467,6 +464,28 @@ export function visibleSpace(view: EditorView): Rect {
     space.bottom = Math.min(space.bottom, rect.bottom);
   }
   return space;
+}
+
+/**
+ * How far below the top of `rect` CodeMirror's clip puts it away, and how far to lower it to stay:
+ * CodeMirror hides a tooltip whose anchor ends above the top of the editor's own box plus the scroll
+ * margins a host keeps (the title bar's room), and `HoverTooltipHost` takes no `clip: false` from
+ * the tooltip it hosts. Where the page scrolls, that box is the whole document, which starts
+ * below that room already, so a change on the document's first lines would be put away while it is
+ * in plain sight: `visibleSpace` says where the page can be seen. The anchor is lowered to just
+ * clear of the clip, and the card's offset takes the shift back (it can only be below, then).
+ */
+export function clearOfClip(view: EditorView, rect: Rect): { rect: Rect; shift: number } {
+  let top = view.scrollDOM.getBoundingClientRect().top;
+  let margin = 0;
+  for (const provider of view.state.facet(EditorView.scrollMargins)) {
+    margin = Math.max(margin, provider(view)?.top ?? 0);
+  }
+  top += margin;
+  // Only what can be seen is lowered: what is under the title bar is put away, as it should be.
+  if (rect.bottom > top || rect.bottom <= visibleSpace(view).top) return { rect, shift: 0 };
+  const shift = top + 1 - rect.bottom;
+  return { rect: { ...rect, bottom: rect.bottom + shift }, shift };
 }
 
 /** An element with a class, and text if given. */

@@ -116,6 +116,11 @@ function linkOf(state: EditorState, node: SyntaxNode): string | null {
  * is no link inside it: the reader makes none there, and what the link opens is its own destination.
  */
 export function linkDestination(state: EditorState, pos: number): string | null {
+  return linkAtPos(state, pos)?.address ?? null;
+}
+
+/** The link at `pos`: where it starts in the text, and the address it opens (`linkDestination`). */
+function linkAtPos(state: EditorState, pos: number): { from: number; address: string } | null {
   let bare: SyntaxNode | null = null;
   for (
     let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1);
@@ -130,16 +135,20 @@ export function linkDestination(state: EditorState, pos: number): string | null 
       // A bracketed phrase with no destination, or a reference nothing defines, is text: an
       // address in it is a bare address.
       const to = linkOf(state, node);
-      if (to !== null) return to;
+      if (to !== null) return { from: node.from, address: to };
     }
     if (node.name === 'Autolink') {
       const url = node.getChild('URL');
-      return url ? mailed(destination(state.sliceDoc(url.from, url.to))) : null;
+      return url
+        ? { from: node.from, address: mailed(destination(state.sliceDoc(url.from, url.to))) }
+        : null;
     }
     // The climb goes on, to a link around it if there is one.
     if (node.name === 'URL' && !bare && node.parent?.name !== 'Autolink') bare = node;
   }
-  return bare ? mailed(destination(state.sliceDoc(bare.from, bare.to))) : null;
+  return bare
+    ? { from: bare.from, address: mailed(destination(state.sliceDoc(bare.from, bare.to))) }
+    : null;
 }
 
 /**
@@ -158,6 +167,8 @@ export function visibleFormat(address: string): string {
 interface Hovered {
   element: HTMLElement;
   pos: number;
+  /** Where the link starts in the text: a link wrapped over two lines is two elements, one link. */
+  from: number;
   address: string;
 }
 
@@ -176,9 +187,9 @@ function linkAt(view: EditorView, element: HTMLElement): Hovered | null {
     // Not part of the text: an element of a widget.
     return null;
   }
-  const href = linkDestination(view.state, pos);
-  const address = href === null ? null : openableAddress(href);
-  return address === null ? null : { element, pos, address };
+  const found = linkAtPos(view.state, pos);
+  const address = found === null ? null : openableAddress(found.address);
+  return found === null || address === null ? null : { element, pos, from: found.from, address };
 }
 
 function linkUnder(view: EditorView, target: EventTarget | null): Hovered | null {
@@ -187,7 +198,7 @@ function linkUnder(view: EditorView, target: EventTarget | null): Hovered | null
 }
 
 /** What the extension needs of the host and the page. */
-export interface LinkOpeningOptions {
+interface LinkOpeningOptions {
   /** Opens an address, which is `http`, `https` or `mailto`, in the host's browser or mail app. */
   open(address: string): void;
   /** How long the pointer rests on a link before its hint shows, in ms. Default: 400 (the title bar's). */
@@ -375,11 +386,21 @@ export function linkOpening(options: LinkOpeningOptions): Extension {
         if (element && element === this.over?.element) return this.sync(false);
         const hovered = element ? linkAt(this.view, element) : null;
         if (!hovered) return this.forget();
+        // The other half of a link that wraps: the same link, and its hint and its pause go on.
+        if (this.over && this.over.from === hovered.from && this.over.address === hovered.address) {
+          this.over = hovered;
+          return this.sync(false);
+        }
         this.release();
         this.over = hovered;
         // The hint comes after the usual pause.
         this.timer = setTimeout(() => {
-          if (this.over?.element === hovered.element) {
+          // A card of the review (over a link that a change holds) is showing: two tooltips on one
+          // place would cover each other, and the card is what the person came for (#380).
+          if (
+            this.over?.from === hovered.from &&
+            !this.view.state.facet(showTooltip).some(Boolean)
+          ) {
             this.view.dispatch({ effects: setHint.of(hovered) });
           }
         }, delay);

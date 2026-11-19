@@ -43,7 +43,7 @@ function blockAt(tree: Tree, pos: number, side: -1 | 1): SyntaxNode | null {
 }
 
 /** The blocks around `from` to `to`: this and the neighbors, as a window. */
-export function windowAround(tree: Tree, from: number, to: number): Window {
+function windowAround(tree: Tree, from: number, to: number): Window {
   const first = blockAt(tree, Math.min(from, tree.length), -1);
   const last = blockAt(tree, Math.min(to, tree.length), 1);
   if (!first || !last)

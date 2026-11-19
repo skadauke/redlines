@@ -125,6 +125,81 @@ describe('dropping selected blocks', () => {
   }
 });
 
+describe('a table dragged with Track Changes on (#1271, #1279)', () => {
+  const TABLE_DOC = 'One.\n\n| A |\n| - |\n| 1 |\n\nThree.\n\nFour.\n\nFive.';
+  const from = TABLE_DOC.indexOf('| A |');
+  const to = TABLE_DOC.indexOf('| 1 |') + 5;
+  const far: DragGeometry = {
+    gapY: (_view, gap) => 10 * (gap.index + 1),
+    extent: () => ({ top: 1000, bottom: 1010 }),
+  };
+
+  for (const tracking of [true, false]) {
+    it(`goes to any gap, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      const { view } = mount(TABLE_DOC, [from, to], tracking);
+      const drag = new BlockDrag(view, runOfSelection(view.state)!, far);
+      expect(runOfSelection(view.state)?.kind).toBe('table');
+      drag.move(900);
+      expect(drag.gap?.index, 'the far end').toBe(5);
+      drag.move(-900);
+      expect(drag.gap?.index, 'the top').toBe(0);
+      drag.cancel();
+    });
+  }
+});
+
+describe('the room that opens at the drop place (#1200)', () => {
+  const space = (view: { dom: HTMLElement }) => view.dom.querySelectorAll('.rl-drop-space');
+
+  it('opens at the gap the pointer is at, with the drop line in it, and closes with the drag', () => {
+    const two = BODY.indexOf('Two.');
+    const { view } = mount(BODY, [two, two + 4], false);
+    const drag = new BlockDrag(view, runOfSelection(view.state)!, lines);
+    expect(space(view)).toHaveLength(0);
+    drag.move(38);
+    expect(space(view), 'one room').toHaveLength(1);
+    expect(view.dom.querySelectorAll('.rl-drop-space > .rl-drop-line')).toHaveLength(1);
+    expect(view.dom.querySelectorAll('.rl-drop-line'), 'and one line').toHaveLength(1);
+    // Over the blocks themselves there is no place, so no room.
+    drag.move(105);
+    expect(space(view)).toHaveLength(0);
+    drag.move(38);
+    expect(space(view)).toHaveLength(1);
+    drag.cancel();
+    expect(space(view)).toHaveLength(0);
+    expect(view.state.doc.toString()).toBe(BODY);
+  });
+
+  it('is above the block the gap is before, and below the last block for the gap at the end', () => {
+    const two = BODY.indexOf('Two.');
+    const { view } = mount(BODY, [two, two + 4], false);
+    const drag = new BlockDrag(view, runOfSelection(view.state)!, lines);
+    drag.move(38);
+    expect(drag.gap?.index).toBe(3);
+    const room = view.dom.querySelector('.rl-drop-space')!;
+    expect(room.nextElementSibling?.textContent, 'above Four.').toBe('Four.');
+    drag.move(200);
+    expect(drag.gap?.index).toBe(4);
+    const end = view.dom.querySelector('.rl-drop-space')!;
+    expect(end.previousElementSibling?.textContent, 'below Four.').toBe('Four.');
+    drag.cancel();
+  });
+
+  it('is moved with the pointer, and is one element, not drawn again, while the gap stays', () => {
+    const two = BODY.indexOf('Two.');
+    const { view } = mount(BODY, [two, two + 4], false);
+    const drag = new BlockDrag(view, runOfSelection(view.state)!, lines);
+    drag.move(38);
+    const room = view.dom.querySelector('.rl-drop-space');
+    drag.move(39);
+    expect(view.dom.querySelector('.rl-drop-space'), 'the same room, still opening').toBe(room);
+    drag.move(12);
+    expect(view.dom.querySelector('.rl-drop-space'), 'another gap, another place').not.toBe(room);
+    expect(space(view)).toHaveLength(1);
+    drag.cancel();
+  });
+});
+
 describe('a drag as the editor scrolls', () => {
   it('measures the blocks being dragged at every move, not at the press', () => {
     const editor = mount(BODY, [0, 4], false);

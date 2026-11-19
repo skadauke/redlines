@@ -5,12 +5,12 @@
 
 import type { SetupResult } from '@redlines/agents';
 
-export interface SetupUnderWay {
+interface SetupUnderWay {
   doing: 'update' | 'sign-in';
   ended: Promise<SetupResult>;
 }
 
-export interface SetupRegistry {
+interface SetupRegistry {
   /**
    * Keeps `started` as what is under way for `agent` until it ends, either way, and then calls
    * `onEnded`. Returns the same, for whoever asked.

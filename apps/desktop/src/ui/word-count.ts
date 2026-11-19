@@ -19,7 +19,7 @@ export const IDLE_MS = 150;
 export const SELECTION_MS = 40;
 
 /** What the label counts. */
-export interface Words {
+interface Words {
   total: number;
   /** The words a selection covers, or null when nothing with a word in it is selected. */
   selected: number | null;
@@ -109,8 +109,8 @@ export function wordCountLabel(total: number, selected: number | null): string {
 }
 
 /**
- * What hovering the label says: "12 lines · 640 characters", and with a selection "3 of 12 lines ·
- * 120 of 640 characters".
+ * What hovering the label says, a count on each line: "12 lines" and "640 characters", and with a
+ * selection "3 of 12 lines" and "120 of 640 characters".
  */
 export function textPartsLabel(parts: TextParts): string {
   const n = (count: number, one: string) =>
@@ -120,10 +120,10 @@ export function textPartsLabel(parts: TextParts): string {
   return [
     of(parts.selectedLines, parts.lines, 'line'),
     of(parts.selectedCharacters, parts.characters, 'character'),
-  ].join(' \u00b7 ');
+  ].join('\n');
 }
 
-export interface WordCount {
+interface WordCount {
   /**
    * The document changed (the default): counts once the changes stop. Only the selection changed
    * (`textChanged` false): counts after `SELECTION_MS`, since the text is already read, unless a

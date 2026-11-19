@@ -15,7 +15,7 @@ import {
 import { aloneInItsLine, columnWidth } from './preview/image.ts';
 
 /** The sizes a menu offers, as the part of the text column the image fills. */
-export const IMAGE_SIZES = [
+const IMAGE_SIZES = [
   { id: 'small', title: 'Small Image', share: 0.25 },
   { id: 'medium', title: 'Medium Image', share: 0.5 },
   { id: 'large', title: 'Large Image', share: 0.75 },

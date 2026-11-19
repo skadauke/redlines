@@ -18,17 +18,9 @@
 name: Journeys
 
 on:
-  pull_request:
-    # Only adding the `journeys` label runs them on a pull request; a push to it doesn't, which
-    # spares the Macs.
-    types: [labeled]
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!website/**'
-      - '!**/*.md'
-      # The sample document is a journeys input (the smoke baseline opens it).
-      - 'apps/desktop/src/sample.md'
+  # The journeys run on the dev Mac (AGENTS.md): lanes run theirs, and the sweep runs them all, and
+  # the baselines are drawn there. A macOS runner runs them only when someone asks: a dispatch here,
+  # or ci.yml dispatched with `mac: true`.
   workflow_dispatch:
   # Called by ci.yml's full run (every two hours), with `main-tier`: the middle tier, as a push.
   workflow_call:

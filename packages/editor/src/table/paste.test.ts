@@ -20,6 +20,7 @@ import { createEditor, type Editor } from '../index.ts';
 import { htmlToRange } from '../clipboard/paste-html.ts';
 import { tsvToRange } from './clipboard.ts';
 import { rectOf } from './cells.ts';
+import { isWidenedNotice, widenedNotice } from '../tracked/intent.ts';
 
 const open: Editor[] = [];
 afterEach(() => {
@@ -29,6 +30,8 @@ afterEach(() => {
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const notices: string[] = [];
+/** What was said of an edit that was widened (#1188). */
+const widenedNotices: string[] = [];
 
 function load(doc: string, tracking = false): Editor {
   const parent = document.createElement('div');
@@ -37,11 +40,15 @@ function load(doc: string, tracking = false): Editor {
     doc,
     author: ada,
     tracking,
-    onNotice: (message) => notices.push(message),
+    onNotice: (message) => {
+      if (isWidenedNotice(message)) widenedNotices.push(message);
+      else notices.push(message);
+    },
   });
   open.push(editor);
   forceParsing(editor.view, editor.view.state.doc.length, 10_000);
   notices.length = 0;
+  widenedNotices.length = 0;
   return editor;
 }
 
@@ -435,6 +442,8 @@ describe('a paste that needs more of a table while it has changes pending', () =
     editor.view.dispatch({ selection: { anchor: DELETED.indexOf('21') + 1 } });
     expect(paste(editor, 'x\ty\nz\tw')).toBe(true);
     expect(notices).toEqual([]);
+    // Said once (#1188).
+    expect(widenedNotices).toEqual([widenedNotice(['table'])]);
     const done = reads(editor);
     expect(done.file).toContain('<!--sub ');
     expect(done.newest).toContain('| z | w |');

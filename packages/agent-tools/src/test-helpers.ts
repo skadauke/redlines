@@ -5,7 +5,7 @@ import type { ToolContext, ToolDocument } from './tools.ts';
 export const PLAN = '# Plan\n\nWe will ship the importer in March.\n\nThe tests run in CI.\n';
 
 /** A document in memory that counts how often it was written. */
-export interface FakeDocument extends ToolDocument {
+interface FakeDocument extends ToolDocument {
   text: string;
   writes: number;
 }

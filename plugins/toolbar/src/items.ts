@@ -27,7 +27,7 @@ import { ariaShortcut, formatShortcut } from './shortcuts.ts';
 export type MenuId = 'insert' | 'review' | 'list' | 'table' | 'image' | 'format' | 'edit';
 
 /** What a toolbar item may ask of the registry, besides its own command. */
-export interface Context {
+interface Context {
   /** Whether the command `id` is registered and on where the selection is. */
   isOn(id: string): boolean;
   /** Whether the command `id` is registered and has no reason against it where the selection is. */
@@ -37,7 +37,7 @@ export interface Context {
 }
 
 /** An item the toolbar may hold: the command it runs, and how it is drawn. */
-export interface ItemSpec {
+interface ItemSpec {
   /** The command's id in the registry. */
   command: string;
   icon: ToolbarIcon;
@@ -92,7 +92,7 @@ const columnSide = (state: EditorState): string | undefined =>
 const plural = (n: number, word: string) => (n === 1 ? `1 ${word}` : `${n} ${word}s`);
 
 /** The Table menu's header: where the caret is, or what is selected. */
-export function tableHeading(state: EditorState): string {
+function tableHeading(state: EditorState): string {
   const rect = rectOf(state);
   if (rect) {
     const cover = wholeRect(rect);
@@ -353,7 +353,7 @@ export interface ShownItem {
   note: string | null;
 }
 
-export interface ShownMenu {
+interface ShownMenu {
   id: MenuId;
   label: string;
   /** The header: the menu's name, or what its selection is. */

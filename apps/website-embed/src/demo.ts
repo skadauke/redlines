@@ -29,13 +29,13 @@ import { DOCS } from './docs.ts';
 import { VIEWS } from './views.ts';
 
 /** The visitor. */
-export const VISITOR: Author = { handle: 'ada', name: 'Ada Lovelace' };
+const VISITOR: Author = { handle: 'ada', name: 'Ada Lovelace' };
 
 /**
  * The people the page draws in colors: Claude purple and Bo teal, as the fallback does. Without
  * this, `claude-ada` would lead to blue, and the swap at mount would recolor Claude's change.
  */
-export const PEOPLE: readonly MetPerson[] = [
+const PEOPLE: readonly MetPerson[] = [
   { handle: 'claude-ada', color: 2 },
   { handle: 'bo', color: 3 },
 ];

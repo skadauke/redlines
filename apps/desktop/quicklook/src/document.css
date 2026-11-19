@@ -111,9 +111,41 @@ del {
   color: var(--rl-ink-2);
   text-decoration: line-through;
 }
-sup {
+sup,
+sub {
   font-size: 0.75em;
   line-height: 0;
+}
+
+/* What Quarto draws (quarto.ts): the attributes of a heading, a figure or a formula as a small chip,
+   a table's caption, and a cross-reference with a fine dotted underline, as the editor draws them. */
+.rl-attr-chip {
+  display: inline-block;
+  font-family: var(--rl-font-ui);
+  font-size: var(--rl-size-ui-small);
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: normal;
+  line-height: 1.4;
+  color: var(--rl-ink-2);
+  background: var(--rl-tint);
+  border-radius: 5px;
+  padding: 0 0.4em;
+  vertical-align: middle;
+}
+.rl-caption {
+  font-size: 0.9em;
+  color: var(--rl-ink-2);
+}
+.rl-caption-label {
+  font-weight: 600;
+  color: var(--rl-ink);
+}
+.rl-xref {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--rl-ink-3);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
 }
 
 /* Links are text, not color: color means a person. */
@@ -463,4 +495,22 @@ details[open] > summary {
   background: var(--rl-tint);
   color: var(--rl-ink-2);
   font-size: 0.8em;
+}
+
+/* Math (math.ts): MathML, which the web view draws with the system's math font. A display stands on
+   its own line, centered, with its equation's number at the right. */
+.rl-math math {
+  font-size: 1.08em;
+}
+.rl-math-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 0.4em 0;
+}
+.rl-math-number {
+  position: absolute;
+  right: 0;
+  color: var(--rl-ink-2);
 }

@@ -54,9 +54,9 @@ export const CROP_HINT =
 export const CROP_NO_IMAGE = 'Select an image to crop it.';
 export const CROP_REMOTE = 'Only a picture kept in a file can be cropped.';
 export const CROP_RAW = 'Crop works on the picture as it reads. Show Clean or Redlines first.';
-export const CROP_NOT_POINTED =
+const CROP_NOT_POINTED =
   'The image could not be pointed at the cropped copy, so it was left as it was.';
-export const CROP_MOVED = 'The image moved before it was cropped, so it was left as it was.';
+const CROP_MOVED = 'The image moved before it was cropped, so it was left as it was.';
 
 const STYLE_ID = 'rl-crop-style';
 const STYLE = `
@@ -80,8 +80,7 @@ const STYLE = `
 .rl-crop-size { margin-right: 8px; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); font-variant-numeric: tabular-nums; }
 .rl-crop-button { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--rl-ink-2);
   font: inherit; font-size: var(--rl-size-ui); cursor: default; }
-.rl-crop-button:hover { background: var(--rl-pressed); color: var(--rl-ink); }
-.rl-crop-button:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: -2px; }
+.rl-crop-button:hover, .rl-crop-button:focus-visible { background: color-mix(in srgb, var(--rl-pressed) 55%, transparent); color: var(--rl-ink); outline: none; }
 .rl-crop-button[data-primary] { color: var(--rl-ink); font-weight: 600; }
 .rl-crop-button[aria-disabled='true'] { opacity: 0.5; }
 `;
@@ -121,7 +120,7 @@ function drawnImage(view: EditorView, from: number, to: number): HTMLImageElemen
 }
 
 /** An open crop: what the view shows now. */
-export interface CropSession {
+interface CropSession {
   isOpen(): boolean;
   close(): void;
 }

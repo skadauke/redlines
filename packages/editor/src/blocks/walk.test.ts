@@ -182,26 +182,29 @@ async function walk(count: number, adjacent: boolean, stage2 = false): Promise<v
   expect(failures).toEqual([]);
 }
 
+/** 600 s for the default draw count, and 5 s a walk beyond it (the depth run at 600 draws takes more than 600 s on a runner). */
+const timeoutFor = (walks: number) => Math.max(600_000, walks * 5_000);
+
 it(
   `holds every invariant over ${WALKS} random walks of ${STEPS} keys`,
   async () => walk(WALKS, false),
-  600_000,
+  timeoutFor(WALKS),
 );
 
 it(
   `holds every invariant over ${ADJACENT} walks over lists side by side`,
   async () => walk(ADJACENT, true),
-  600_000,
+  timeoutFor(ADJACENT),
 );
 
 it(
   `holds every invariant over ${WALKS} walks of Tab and ⌥↑ ⌥↓ with the list keys`,
   async () => walk(WALKS, false, true),
-  600_000,
+  timeoutFor(WALKS),
 );
 
 it(
   `holds every invariant over ${ADJACENT} walks of Tab and ⌥↑ ⌥↓ over lists side by side`,
   async () => walk(ADJACENT, true, true),
-  600_000,
+  timeoutFor(ADJACENT),
 );

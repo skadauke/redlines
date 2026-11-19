@@ -31,6 +31,7 @@ import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
 import { redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { plainPastes } from '../tracked/clipboard.ts';
+import { isWidenedNotice } from '../tracked/intent.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import { openBlock, textWithoutOpen } from './open.ts';
 
@@ -45,7 +46,7 @@ import { openBlock, textWithoutOpen } from './open.ts';
 export const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 /** A key as CodeMirror names it, with its modifiers. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
-export type KeyName =
+type KeyName =
   | 'Enter'
   | 'Escape'
   | 'Shift-Enter'
@@ -164,7 +165,7 @@ export interface StepResult {
   caretLine: { text: string; col: number };
 }
 
-export interface ScriptResult {
+interface ScriptResult {
   script: Script;
   /** The file the script starts from, as the editor was given it. */
   start: string;
@@ -385,7 +386,10 @@ function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted 
     author: ada,
     tracking: script.tc,
     showLineBreakMarks: script.lineBreakMarks ?? false,
-    onNotice: (message) => refusals.push(message),
+    // The notice of a widened edit says what was written; a refusal is what a row is held to.
+    onNotice: (message) => {
+      if (!isWidenedNotice(message)) refusals.push(message);
+    },
     // A host with an Image menu, whose commands a script may run (#526).
     openImage: () => {},
     extensions: [
@@ -398,7 +402,12 @@ function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted 
     author: ada,
     notice: (message) => refusals.push(message),
   });
-  editor.view.dispatch({ selection: { anchor: expanded.anchor, head: expanded.head } });
+  // The caret is an offset of the file's text, where a CRLF is two characters; the document has one
+  // LF there (#1233: a CRLF script put the caret a character per line break too far).
+  const inDocument = (at: number) => at - (expanded.text.slice(0, at).match(/\r\n/g)?.length ?? 0);
+  editor.view.dispatch({
+    selection: { anchor: inDocument(expanded.anchor), head: inDocument(expanded.head) },
+  });
   return {
     editor,
     refusals,
@@ -522,7 +531,7 @@ function itemLines(body: string): number {
 }
 
 /** How many more marker lines a file has than micromark reads items in it. */
-export function unreadItems(file: string): number {
+function unreadItems(file: string): number {
   // The front matter is YAML, whose `- ` lines no Markdown reader reads as items.
   const whole = bodyOf(file);
   const body = whole.slice(Math.max(0, frontMatterEnd(whole)));
@@ -626,7 +635,7 @@ export function runScript(
   } = {},
 ): ScriptResult {
   const expanded = expandDoc(script);
-  const seen = new Set<string>([expanded.text]);
+  const seen = new Set<string>([expanded.text.replaceAll('\r\n', '\n')]);
   const mounted = mount(script, expanded, seen);
   const { editor } = mounted;
   try {
@@ -676,7 +685,12 @@ export function runScript(
       fileTextFailures,
       openItem: openBlock(editor.view.state)?.item === true,
     };
-    if (!options.light) result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
+    if (!options.light)
+      result.historyFailures = undoAllTheWay(
+        editor.view,
+        seen,
+        expanded.text.replaceAll('\r\n', '\n'),
+      );
     if (!options.light && script.keys.length === 1 && script.keys[0] === 'Enter') {
       const again = mount(script, expanded);
       try {

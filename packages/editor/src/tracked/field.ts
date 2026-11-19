@@ -190,7 +190,8 @@ export function isChange(mark: MarkRange): boolean {
   // ghost.
   if (isTableDeletion(mark)) return mark.entry.move === undefined;
   if (mark.kind === 'ins' && (mark.payload === 'row' || mark.payload === 'col')) return true;
-  return isDrawnChange(mark) && mark.entry.move === undefined;
+  // The halves of a move of blocks share a group (format §3.14) and are changes as any group is.
+  return isDrawnChange(mark) && (mark.entry.move === undefined || mark.entry.group !== undefined);
 }
 
 export const setViewModeEffect = StateEffect.define<ViewMode>();

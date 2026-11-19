@@ -34,7 +34,7 @@ export type Place =
 
 /** The text next to a marker, when it is not the text of the paragraph on either side of the
  * position: what is written before a closer, or after an opener. */
-export interface Around {
+interface Around {
   before?: string;
   after?: string;
   /** Where markers of the file stand in `after`: the indices of the characters that one is in front of. */
@@ -45,7 +45,7 @@ export interface Around {
 }
 
 /** The text of a paragraph without the markers, and where each character of it is in the file. */
-export interface Paragraph {
+interface Paragraph {
   text: string;
   /** For each character, its offset in the file; one more for the end. */
   offsets: number[];
@@ -61,7 +61,21 @@ export const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.
  * takes a fence only when nothing else is on its line. A writer widens it to the unit that holds the
  * fence, which is the div or the paragraph its fence starts or ends (§3.12).
  */
-export const DIV_FENCE = 'A marker can not stand on a :::\u00a0line, the fence of a div.';
+const DIV_FENCE = 'A marker can not stand on a :::\u00a0line, the fence of a div.';
+
+/**
+ * Why a div typed in a list item has no tracked write (format §9.4, #1234): its closer stands at the
+ * prefix of the outermost list's parent, which reads alike where the item is the last block of its
+ * lists, and a replacement of the list holds it where another item follows; where no list holds
+ * it (a nested item with another item after it), the editor asks before it is made without
+ * tracking, and an agent, which can't be asked, is told this.
+ */
+export const DIV_IN_ITEM =
+  "A div can't be tracked in this list item, since more of the list follows it. Type it after the last item of the list, or turn Track Changes off.";
+
+/** The question the editor asks about it: the edit is made without tracking when the person says so. */
+export const DIV_IN_ITEM_ASK =
+  "This div can't be tracked in a list item. Make it without tracking?";
 
 /** A line that is a fenced div's fence: three or more colons after the quote markers. */
 const DIV_FENCE_LINE = /^[ \t>]*:{3,}/;

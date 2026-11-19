@@ -26,7 +26,7 @@ export const checkBoxEffect = StateEffect.define<CheckBoxRequest>();
  * author's color in Redlines (empty in the other views, which draw the change's bar alone), and
  * `note` says what is pending, for a screen reader ("checked by Bo, pending").
  */
-export type PendingBox = 'source' | { color: string; note: string };
+type PendingBox = 'source' | { color: string; note: string };
 
 /**
  * What the pending changes make of the box whose marker is `from`–`to`: null where none touches

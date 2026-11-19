@@ -118,6 +118,7 @@ import {
   textLike,
   underliningBullet,
   visible,
+  DIV_IN_ITEM,
 } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
@@ -141,6 +142,7 @@ import {
   atBlockBoundary,
   atDelimiter,
   delimiterBesideBreak,
+  ordersDifferNear,
   ordersReadOtherwiseNear,
   readsOtherMicromark,
 } from './widen.ts';
@@ -1169,6 +1171,9 @@ function wholeIndentedCode(tokens: Token[], linePrefix: string, where: TypedAt, 
   }
 }
 
+/** The prefix of a line that ends in a list marker. */
+const LIST_PREFIX_END = /(?:[-*+]|\d{1,9}[.)])[ \t]+$/;
+
 /** A line of typed text that is the fence of a pandoc div: three or more colons, then attributes. */
 const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
 
@@ -1181,7 +1186,11 @@ const DIV_FENCE_TYPED = /^ {0,3}:{3,}(?:[ \t{][^\r\n]*)?$/;
  * a line, with nothing after the text on its last line; anywhere else the text is written as it was.
  */
 function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
-  if (where.rest.trim() !== '' || wholeTopDiv(tokens, linePrefix, where)) return;
+  // What follows the typed text is on the line of its last text, unless the text ends with a break
+  // (a div typed whole at the start of a paragraph, with the blank line after it, #1169).
+  const endsInBreak = tokens.length > 0 && 'brk' in tokens[tokens.length - 1]!;
+  if (where.rest.trim() !== '' && !endsInBreak) return;
+  if (wholeTopDiv(tokens, linePrefix, where) || where.rest.trim() !== '') return;
   // Typed text that ends in a bare fence line and is no div at the top level (a div closed
   // wherever it opened, as in a quote or after text on its line): the closer stands alone on the
   // line after it (#1088).
@@ -1197,23 +1206,88 @@ function wholeDivs(tokens: Token[], linePrefix: string, where: TypedAt): void {
   }
 }
 
-/** The div at the top level that `wholeDivs` makes one piece: whether it did. */
+/**
+ * The div that `wholeDivs` makes one piece: whether it did. In a quote or a list item every line of
+ * the typed div goes on in the container of the one before (the prefix after each of its breaks is
+ * the same, and the container's own continuation), and the closer stands alone on the line after the
+ * closing fence, behind that prefix, as for a fenced code block (#1234); a div whose lines leave the
+ * container, or whose breaks are some other kind, is written as it was.
+ */
 function wholeTopDiv(tokens: Token[], linePrefix: string, where: TypedAt): boolean {
-  if (linePrefix !== '') return false;
-  const first = tokens.findIndex((token, i) => {
+  let first = tokens.findIndex((token, i) => {
     if (!('text' in token) || token.fence === true) return false;
     const before = tokens[i - 1];
     const atLineStart = before === undefined ? where.prefix !== undefined : 'brk' in before;
     return atLineStart && DIV_FENCE_TYPED.test(token.text.split('\n')[0]?.replace(/\r$/, '') ?? '');
   });
   if (first < 0) return false;
-  const rest = tokens.slice(first);
-  if (rest.some((token) => 'brk' in token && token.prefix !== '')) return false;
+  // At the top level the breaks after the last text stay behind the div, after its closer, as for a
+  // code block (#1169); in a container they are part of what the lines are read by (#1234).
+  const lastText = tokens.findLastIndex((token) => 'text' in token);
+  let rest = linePrefix === '' ? tokens.slice(first, lastText + 1) : tokens.slice(first);
   if (rest.some((token) => 'text' in token && token.fence === true)) return false;
+  // The container of the lines after the first: what each break leaves on its next line.
+  const tails = rest.flatMap((token) =>
+    'brk' in token ? [token.brk.slice(token.brk.lastIndexOf('\n') + 1)] : [],
+  );
+  const container = tails.at(-1) ?? linePrefix;
+  let closer = container;
+  // In a list a div is never written with a marker on a fence line (it reads otherwise than the
+  // view): where no form below holds it, it is the signal that the list's edit is widened or asked
+  // about, not the old form (#1234).
+  const inList =
+    linePrefix !== '' && (LIST_PREFIX_END.test(linePrefix) || !/>[ ]?$/.test(container));
+  const bail = (): boolean => {
+    if (inList) throw new EditError(DIV_IN_ITEM, 'no-legal-placement');
+    return false;
+  };
+  // (At the top level a break's tail may be a block's mark typed on the next line, as a heading's `## `.)
+  if (linePrefix !== '') {
+    // A lone fence line has no line after it that the container could be read from: the old form.
+    if (tails.length === 0) return false;
+    if (tails.some((tail) => tail !== container)) return bail();
+    if (continuationPrefix(container) !== container) return bail();
+    // In a list item the closer alone on its line inside the item is an HTML block after the div's
+    // text, which a tight item reads with a line break that the view lacks (#1234). Two forms read
+    // alike. Where the last line break before the fence is blank, the div is a block of its own in
+    // an item that is loose in every state: all the typed text before the fence goes into the
+    // insertion with it (no `split`, so no state has the div glued to the text before it), and the
+    // closer stands in the item. Otherwise the closer stands at the prefix of the list's parent,
+    // outside the item, as a quote's closer stands at the quote's prefix, which reads alike where
+    // the item is the last block of its list; anywhere else the list is replaced (the widening).
+    if (inList) {
+      const lead = tokens.slice(0, first);
+      const lastBreak = lead.at(-1);
+      if (lastBreak && 'brk' in lastBreak && BLANK_IN_BREAK.test(lastBreak.brk)) {
+        rest = tokens.slice(0);
+        first = 0;
+        // The closer stands at the item's own prefix, which in a quote is more than the quote's.
+        closer = continuationPrefix(linePrefix);
+      } else {
+        // The prefix of the outermost list's parent: the quote markers before its lists, or none.
+        const parent = /^(?:[ \t]*>[ ]?)*/.exec(linePrefix)?.[0] ?? '';
+        const continues = (following: string | undefined) =>
+          following !== undefined &&
+          following.startsWith(parent) &&
+          /^(?:[ \t]+|(?:[-*+]|\d{1,9}[.)])[ \t])/.test(following.slice(parent.length));
+        if (continues(where.following)) throw new EditError(DIV_IN_ITEM, 'no-legal-placement');
+        closer = parent;
+      }
+    }
+    // A typed line that is not the container's would end the div there.
+    if (
+      rest.some(
+        (token) => 'brk' in token && token.prefix !== container && token.prefix !== linePrefix,
+      )
+    ) {
+      return bail();
+    }
+  } else if (rest.some((token) => 'brk' in token && token.prefix !== '')) return false;
   const text = rest.map((token) => ('text' in token ? token.text : token.brk)).join('');
   // The break after the last line is the one that the closer stands behind (format §3.3).
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  tokens.splice(first, rest.length, { text: /\n$/.test(text) ? text : text + eol, fence: true });
+  const done = /\n[ \t>]*$/.test(text) && (linePrefix === '' ? /\n$/.test(text) : true);
+  tokens.splice(first, rest.length, { text: done ? text : text + eol + closer, fence: true });
   return true;
 }
 
@@ -1236,6 +1310,39 @@ function typingOf(tokens: readonly Token[]): Typing {
       .join(''),
     ...(last && 'fence' in last && last.fence ? { fenced: true } : {}),
   };
+}
+
+/** A line of a table: pipes, after the prefix of its container. */
+const TABLE_LINE = /^[ \t]*(?:>[ \t]*)*\|/;
+
+/**
+ * Where the text typed has the rows of a table, one line after another (the table is a block of its
+ * own, or in an item or a quote), the breaks between its rows are text of the change, not splits: a
+ * row that ends in a marker is no delimiter row, so the file read as it is, every change pending,
+ * would show the table as a paragraph (#1279). The breaks before the first row and after the last stay
+ * splits. True when a break was changed.
+ */
+function tableRowBreaks(tokens: Token[]): boolean {
+  let changed = false;
+  for (let i = 1; i + 1 < tokens.length; i++) {
+    const token = tokens[i];
+    const before = tokens[i - 1];
+    const after = tokens[i + 1];
+    if (
+      token &&
+      'brk' in token &&
+      before &&
+      'text' in before &&
+      after &&
+      'text' in after &&
+      TABLE_LINE.test(before.text.slice(before.text.lastIndexOf('\n') + 1)) &&
+      TABLE_LINE.test(after.text)
+    ) {
+      tokens[i] = { text: token.brk };
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /**
@@ -4495,6 +4602,10 @@ function planEdit(plan: Plan, edit: TextChange): void {
         }
       }
     }
+    // The rows of a table typed as a block are one line break apart in the text of the change, with no
+    // split between them: a row that ends in a marker is no delimiter row, so the file read as it is
+    // (every change pending) would show the table as a paragraph (#1279).
+    if (tableRowBreaks(tokens)) plain = true;
     // The line break in front of a prefix is typed again as text, not as a break: it is not new. A
     // split that the range took in is cancelled with its break, and the break is not typed again.
     if (lead !== '' && from === covers.from && to === covers.to) tokens.unshift({ text: lead });
@@ -5511,6 +5622,36 @@ function pastLoneDeletion(text: string, at: number): number {
   return segment.open.to;
 }
 
+/**
+ * Text and a line break typed at once (a paste) at the end of the line above the author's own
+ * paragraph break: the line break is typed behind the break, at the start of the next paragraph,
+ * which is the same text (three line breaks in a row), where it leaves no break side by side with
+ * the split's, whose orders of decision read differently (#120, §3.4). Undefined where the edit is
+ * no such paste: not at the end of a line right in front of the author's own split, whose break is a
+ * blank line and nothing else, in a paragraph with no prefix.
+ */
+function lineBreakBehind(
+  text: string,
+  edit: TextChange,
+  ctx: EditContext,
+): TextChange[] | undefined {
+  const typed = /^([^\r\n]+)\n$/.exec(edit.insert);
+  if (!typed || edit.from !== edit.to) return undefined;
+  const open = /^<!--split ([a-z0-9]{4})-->/.exec(text.slice(edit.from, edit.from + 40));
+  if (!open) return undefined;
+  const mark = parse(text).marks.find((found) => found.id === open[1]);
+  const segment = mark?.segments[0];
+  if (mark?.kind !== 'split' || mark.entry.by !== ctx.author.handle || !segment) return undefined;
+  const end = breakEnd(text, segment.open.to);
+  if (text.slice(segment.open.to, end) !== '\n\n' || /^[ \t>]/.test(text.slice(end, end + 1))) {
+    return undefined;
+  }
+  return [
+    { from: edit.from, to: edit.to, insert: typed[1] ?? '' },
+    { from: end, to: end, insert: '\n' },
+  ];
+}
+
 function editsWidening(
   text: string,
   edits: readonly TextChange[],
@@ -5522,6 +5663,8 @@ function editsWidening(
     const at = pastLoneDeletion(text, edits[0]!.from);
     if (at !== edits[0]!.from) edits = [{ ...edits[0]!, from: at, to: at }];
   }
+  const behind = edits.length === 1 ? lineBreakBehind(text, edits[0]!, ctx) : undefined;
+  if (behind) edits = behind;
   // A block's start typed into an empty item is a block of its own in the newest view, and the file
   // reads it as text of the item (#583): the whole item is written as a replacement.
   if (edits.some((edit) => startsBlockInEmptyItem(text, edit))) {
@@ -5592,9 +5735,8 @@ function editsWidening(
           } catch {
             // no unit holds it: the fine write stays
           }
-          return whole && !readsOtherMicromark(text, whole.changes)
-            ? whole
-            : noUnderliningSplit(text, written);
+          if (whole && !readsOtherMicromark(text, whole.changes)) return whole;
+          return noUnderliningSplit(text, written);
         }
         return noUnderliningSplit(text, written);
       } catch (error) {
@@ -5620,6 +5762,45 @@ function editsWidening(
   }
 }
 
+/** A marker's closer alone on its line, and an ordered item that doesn't start at 1 on the next. */
+const CLOSER_BEFORE_ITEM = /<!--\/\w+-->[ \t]*\r?\n[ \t]*(?!0*1[.)])\d{1,9}[.)](?:[ \t]|\r?\n|$)/;
+
+/**
+ * Whether a delimiter typed or taken out beside another person's mark is written so that the marks
+ * give another text in one order of decisions than in another (#1136): the unit is replaced.
+ */
+function delimiterOrdersDiffer(
+  text: string,
+  edits: readonly TextChange[],
+  changes: readonly TextChange[],
+): boolean {
+  if (!atDelimiter(text, edits)) return false;
+  const after = applyChanges(text, changes);
+  // A delimiter beside another person's pending italic: the newest view spells it with `*`, which
+  // pairs with the typed run in the view and not in the file, where it stays `_`: the write that
+  // micromark reads otherwise than the view is replaced as the unit, whose new text has the view's
+  // spelling (#1136).
+  const italic = edits.some((edit) => {
+    const from = Math.max(0, text.lastIndexOf('\n\n', Math.max(0, edit.from - 1)));
+    const to = text.indexOf('\n\n', edit.to);
+    return /<!--fmt [a-z0-9]{4} \+italic/.test(text.slice(from, to < 0 ? text.length : to));
+  });
+  const first = Math.min(...changes.map((change) => change.from));
+  const last = Math.max(...changes.map((change) => change.from + change.insert.length));
+  if (
+    italic &&
+    (readsOtherMicromark(text, changes) || ordersReadOtherwiseNear(after, first, last))
+  ) {
+    return true;
+  }
+  // A pasted run that holds an HTML tag beside a delimiter reads in more ways than the file shows
+  // it, in the orders of deciding the marks around it (#1135): each is read, not only compared.
+  const tagged = edits.some((edit) => /<\/?[a-z]/i.test(edit.insert) && /[*_~]/.test(edit.insert));
+  return (
+    (tagged && ordersReadOtherwiseNear(after, first, last)) || ordersDifferNear(after, first, last)
+  );
+}
+
 /**
  * Whether `changes`, a fine write of `edits`, are at a block's boundary (`atBlockBoundary`) and
  * make a file that micromark reads otherwise than its newest view (#597, #601, #588), or whether
@@ -5636,11 +5817,24 @@ export function readsOtherAtBoundary(
   // stands and otherwise once the deletion is rejected: the unit is replaced (#1104).
   if (edits.some((edit) => afterBareDeletion(text, edit.from))) return true;
   if (hardBreakBesideDeletionReadsOtherwise(text, edits, changes)) return true;
+  // A closer's line between indented code and an item that starts at a number other than 1: micromark
+  // reads the item after the closer as a list, and as text after the code without it (#601).
+  if (
+    changes.some((change) => change.insert.includes('<!--/')) &&
+    CLOSER_BEFORE_ITEM.test(applyChanges(text, changes)) &&
+    // (The item is outside the paragraph that the change is in, so the whole file is read.)
+    readsOtherMicromark(text, changes, true)
+  ) {
+    return true;
+  }
   return (
     ((atBlockBoundary(text, edits) || atDelimiter(text, edits)) &&
       readsOtherMicromark(text, changes)) ||
     delimiterBesideBreak(text, edits) ||
-    readsOtherInDecisions(text, edits, changes)
+    readsOtherInDecisions(text, edits, changes) ||
+    // A delimiter beside another person's mark whose decisions give other texts (#1136): the editor
+    // asks here, as `trackedEdits` does, so that both replace the unit.
+    delimiterOrdersDiffer(text, edits, changes)
   );
 }
 

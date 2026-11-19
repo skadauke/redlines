@@ -30,7 +30,7 @@ import { markDivs } from './divs.ts';
 import { Html } from './html.ts';
 
 /** Whether a fence's info string is written in braces, as a chunk's is, and Pandoc's attributes. */
-export const isBraced = (info: string): boolean => info.startsWith('{');
+const isBraced = (info: string): boolean => info.startsWith('{');
 
 /** The engine of a chunk's info string, `r` for `{r setup}`, or null when it names none, as
  * Pandoc's attributes (`{.python .numberLines}`) don't. Quarto's literal `{{r}}` has one too. */
@@ -154,7 +154,7 @@ const IMAGE =
   /<img src="([^"]*)" alt="([^"]*)"(?: title="[^"]*")?(?: width="(\d{1,5}%?)")?(?: height="(\d{1,5}%?)")? \/>/g;
 
 /** The most local images that a document is asked about: a preview shows no more. */
-export const MAX_IMAGES = 40;
+const MAX_IMAGES = 40;
 
 /** The file path that an image's `src` stands for, as the document wrote it: micromark writes it
  * percent-encoded and with its quotes and ampersands escaped. Null for an address that isn't a path:
@@ -208,11 +208,12 @@ function classOfItems(html: string): string {
 }
 
 /** micromark's HTML of Markdown `source`, with nothing changed: where its images are. */
-function rawHtml(source: string): string {
+function rawHtml(source: string, pandoc = false): string {
   const html = new Html();
   const divs = markDivs(source);
   const drawn = micromark(divs.text, {
-    extensions: [gfm()],
+    // One tilde is a subscript in Pandoc (quarto.ts) and a strikethrough in GitHub's Markdown.
+    extensions: [gfm({ singleTilde: !pandoc })],
     htmlExtensions: [gfmHtml(), extension(html)],
   });
   return divs.finish(drawn + html.end());
@@ -225,8 +226,12 @@ export function markdownImages(source: string): string[] {
 
 /** The HTML of Markdown `source`, to go inside the page's document. Each image is its alt text,
  * except those in `images`, which the host loaded: those are the pictures. */
-export function markdownToHtml(source: string, images: LoadedImages = new Map()): string {
-  return classOfItems(rawHtml(source))
+export function markdownToHtml(
+  source: string,
+  images: LoadedImages = new Map(),
+  pandoc = false,
+): string {
+  return classOfItems(rawHtml(source, pandoc))
     .replace(IMAGE, (_, src: string, alt: string, width?: string, height?: string) => {
       const path = localImagePath(src);
       const name = path === null ? undefined : images.get(path);

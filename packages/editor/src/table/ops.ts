@@ -37,7 +37,7 @@ import { shownCellAt } from './stops.ts';
 import { tablesField } from './model.ts';
 
 /** What `planned` gives: the changes, where the caret goes, and the rows or columns made. */
-export type Planned =
+type Planned =
   | {
       changes: TextChange[];
       caret: number;
@@ -114,7 +114,7 @@ export function plannedIn(
 
 /** Changes written as one, from the start of the first to the end of the last, when there are many
  * (the lines of a table). */
-export function coalesced(text: string, changes: readonly TextChange[]): TextChange[] {
+function coalesced(text: string, changes: readonly TextChange[]): TextChange[] {
   if (changes.length < 8) return [...changes];
   const sorted = changes.toSorted((a, b) => a.from - b.from || a.to - b.to);
   const from = sorted[0]?.from ?? 0;

@@ -102,7 +102,7 @@ export function mapPos(pos: number, changes: readonly TextChange[], assoc: -1 | 
   return pos + delta;
 }
 
-export function mapRange(range: Range, changes: readonly TextChange[]): Range {
+function mapRange(range: Range, changes: readonly TextChange[]): Range {
   const from = mapPos(range.from, changes, 1);
   const to = mapPos(range.to, changes, -1);
   return { from, to: Math.max(from, to) };

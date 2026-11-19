@@ -57,7 +57,7 @@ export interface SessionSummary {
   };
 }
 
-export function configOf(cell: Cell, n: number, base = 7): SessionConfig {
+function configOf(cell: Cell, n: number, base = 7): SessionConfig {
   return {
     seed: seedFor(base, n),
     workload: cell.workload,
@@ -69,7 +69,7 @@ export function configOf(cell: Cell, n: number, base = 7): SessionConfig {
   };
 }
 
-export function summarize(result: SessionResult): SessionSummary {
+function summarize(result: SessionResult): SessionSummary {
   const codes: Record<string, string> = {};
   for (const v of result.violations) codes[v.code] ??= `v${v.version}: ${v.detail}`;
   const s = result.stats;
@@ -98,7 +98,7 @@ export function summarize(result: SessionResult): SessionSummary {
   };
 }
 
-export function summarizeReplay(result: ReplayResult): SessionSummary {
+function summarizeReplay(result: ReplayResult): SessionSummary {
   const codes: Record<string, string> = {};
   for (const v of result.violations) codes[v.code] ??= `v${v.version}: ${v.detail}`;
   const s = result.stats;

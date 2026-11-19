@@ -15,6 +15,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | Path                    | What it is                                                                |
 | ----------------------- | ------------------------------------------------------------------------- |
 | `packages/format`       | `@redlines/format`: types, ids and payload handling for the file format   |
+| `packages/citations`    | `@redlines/citations`: a Quarto document's citations, printed from its bibliography (BibTeX or CSL JSON) |
 | `packages/collab`       | `@redlines/collab`: the session authority for multiuser editing, its hub, window client and transports (live between windows of the app) |
 | `packages/editor`       | `@redlines/editor`: the editor core                                       |
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
@@ -118,7 +119,7 @@ repo root.
   (`src/block-check.ts`, `src/table-check.ts`, `src/struck-check.ts`, `src/palette-check.ts`).
   `VITE_SYNC_CHECK=1` (one document in two windows side by side, joined to one authority, typed
   into through the browser's own input path, `src/sync-check.ts`; `/?sync-check` on a dev page does
-  the same, and `journeys/tests/sync.spec.ts` runs it) is the same too. `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
+  the same, and `journeys/tests/sync.spec.ts` runs it) is the same too. `VITE_SHEET_CHECK=1` (the sheet of every interface element, #1208: the page the journey `journeys/tests/sheet.spec.ts` takes through the states, `src/sheet-check.ts`; `/?sheet-check` on a dev page does the same) is the same. `VITE_SIMPLE_CHECK=1` (the click on a change bar through real layout, `src/simple-check.ts`) is
   the same, and `VITE_ZOOM_CHECK=1` (the column and the rail at every text size, and the window
   zoom, which needs `pnpm tauri dev`; `src/zoom-check.ts`) runs in the app. `VITE_PRINT_CHECK=1`
   (`src/print-check.ts`) shows that the printed page holds the document and no mark (and, in `pnpm tauri dev` with `REDLINES_EXPORT_PDF=<path>`, writes the PDF there with no panel). They read nothing in a
@@ -128,6 +129,9 @@ repo root.
   written to `crash.log` in the app's log folder (`~/Library/Logs/md.redlines.editor/crash/`, slow
   timers in `slow.log`), and a gray notification offers **Report…** (a filled-in GitHub issue with the
   build, system, trace and the document's shape, never its text) and **Reveal Log**; Help has both.
+  Builds that aren't releases (no `redlines_release` cfg) also keep `dev.log` there
+  (`src-tauri/src/dev_log.rs`, `src/dev-log.ts`): refusals, alerts, errors, agent runs, slow
+  keystrokes, and Help › Write to Log… (a note and a snapshot, no document text, no secrets).
   In `pnpm tauri dev`, `__simulateFailure('throw' | 'reject' | 'hang' | 'panic' | 'terminate')` in
   the page's console makes each happen
 - Recovery (`apps/desktop/src-tauri/src/recovery.rs`, `src/recovery.ts`): while a document has
@@ -174,7 +178,8 @@ repo root.
   signs the app and its programs but never a plug-in, so the release workflow signs the extension
   first (`--sign-only`). `scripts/build-quicklook --check` also runs the renderer in the system's
   JavaScriptCore, through `preview-render`, on `apps/desktop/quicklook/fixtures`, and reads the
-  extension's layout, Info.plist, entitlements and signature; CI's `quicklook` job runs it.
+  extension's layout, Info.plist, entitlements and signature. Run it on the dev Mac when you change the
+  Quick Look code (CI's `quicklook` job runs it only when dispatched with `-f mac=true`).
   `--check-app <Redlines.app> [--signed]` checks the extension inside a built app. To see a
   preview, register the app (`lsregister -f -R -trusted`, `pluginkit -a <the .appex>`) and run
   `qlmanage -p file.md`; the steps are in [docs/releasing.md](docs/releasing.md#the-quick-look-extension).
@@ -196,7 +201,11 @@ repo root.
   `website/public/embed/`, which git ignores; `size` builds it and holds it to
   `apps/website-embed/size-budget.json` (JS and CSS gzipped, fonts as served; CI runs it as the
   "Website embed size budget" step). Raise the budget deliberately, in a commit of its own, with
-  the reason in the file's note
+  the reason in the file's note. On an Epic's branch, and a pull request into one, CI sets
+  `REDLINES_SIZE=epic`, and both checks let the JavaScript go past its budget by the file's Epic
+  allowance (32 KB), with a warning, so that lanes landing in parallel don't fail it in turn or
+  wait for a raise; the pull request from the Epic to main is held to the budgets, which the
+  Epic's sweep sets to what the Epic measures
 
 ## CI (`.github/workflows/`)
 
@@ -217,36 +226,36 @@ repo root.
   (`apps/desktop/quicklook`, `scripts/build-quicklook`, and on main `packages/format`) and `ui` (the desktop's `src` and `journeys`,
   `plugins`, `packages/editor`, `packages/format`); a change to `.github/workflows/**`, or a diff
   that can't be made, sets all. Then:
-  - `check` always runs typecheck, lint, format:check and the two size budgets. **On a pull
+  - `check` always runs typecheck, lint, format:check and the two size budgets (with the Epic's
+    allowance on an Epic's branch and the pull requests into it, as above). **On a pull
     request** its tests are `vitest run --changed <base sha>`: the tests that import, through any
     chain, a file the PR changed (a package's dependents' among them), and all of them when a
     config or `package.json` changes, plus the tests that read the source files to hold every change
     to a rule (refusals, text contrast and sizes, styles, hints, command permissions, the skill). **On main** it runs every test, the timing tests included.
   - `desktop` (Rust: build the `redlines` program and the frontend, clippy with warnings denied,
-    `cargo test` for the program and `src-tauri`) and `quicklook` (macOS) run only when their flag is
-    set; otherwise the job is skipped, which counts as passing.
+    `cargo test` for the program and `src-tauri`) runs only when its flag is set; otherwise the job
+    is skipped, which counts as passing. `quicklook` (macOS) runs only in a dispatch with
+    `-f mac=true`.
   **A full run** (`schedule`, `23 */2 * * *`, or `workflow_dispatch`, started by
   `gh workflow run ci.yml --ref <branch>`) sets every flag, runs every test with `REDLINES_COST=check`
-  and calls `journeys.yml` (the middle tier). It has a concurrency group of its own and is never
+  and, dispatched with `-f mac=true`, the macOS jobs: `quicklook` and `journeys.yml` (the middle tier). It has a concurrency group of its own and is never
   cancelled; a scheduled one is skipped when a finished full run, scheduled or dispatched (not
   cancelled), already tested main's head, meaning nothing has merged since. The workflow **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`, but for the
   skill's files, which a test checks. The Epic's final sweep runs everything.
-- **The Mac jobs are on** (#900): the Quick Look job and the journeys run as the entries below say,
-  on pull requests and on main.
-- `journeys.yml`: the journeys, on a macOS runner (WebKit there is the app's engine, and the
-  baselines are drawn by it), as a job of its own beside `check`: **pull requests** run it only when
-  someone adds the **`journeys` label** (lanes run their journeys locally and attach screenshots;
-  a push doesn't run them), and then run the smoke
-  journeys and those tagged for the areas their paths touch (`journeys/src/areas.ts`), in the light
-  look; **main** runs every journey in the light look and the smoke journeys in the other
-  three looks from `ci.yml`'s full run every two hours, not on every push (nobody waits on it;
-  a red main goes to the coordinator); **manual dispatch is the
-  sweep**: every journey in all four looks. It skips docs, the website and Markdown, as `ci.yml` does (but for the sample document). Every run uploads
+- **Macs are the dev machine's, not CI's.** macOS runners are scarce and slow to start, so CI uses
+  one only for a release (`release.yml`, which signs) and when someone dispatches `ci.yml` with
+  `-f mac=true`. The journeys and the Quick Look check run on the dev Mac: a lane runs them for what
+  it changes, and the Epic's sweep runs them all (`JOURNEYS_PROJECTS=all pnpm journeys`, and
+  `apps/desktop/scripts/build-quicklook --check`), with the results in the final PR. The baselines
+  are drawn by the dev Mac's WebKit.
+- `journeys.yml`: the journeys on a macOS runner, only by hand: a dispatch of it runs every
+  journey in all four looks, and `ci.yml` dispatched with `-f mac=true` calls its middle tier
+  (every journey in the light look, the smoke journeys in the other three). It skips docs, the website and Markdown, as `ci.yml` does (but for the sample document). Every run uploads
   `journeys-test-results` (screenshots, and the picture got, the approved one and the diff for a
   failed comparison) and `look-review` (the pictures in order, with INDEX.md).
-- The `quicklook` job of `ci.yml` runs on macOS, when its flag is set (on a pull request, only for
-  a change to the Quick Look code; on main, also for `packages/format`): it builds the Quick Look
-  extension and checks it (`scripts/build-quicklook --check`), since no other job compiles Swift.
+- The `quicklook` job of `ci.yml` runs on macOS, only in a dispatch with `-f mac=true` and when its
+  flag is set: it builds the Quick Look extension and checks it (`scripts/build-quicklook --check`).
+  The release build compiles the Swift too, so a break is caught there at the latest.
 - `deep.yml`: the depth run (#586): every test file that reads `REDLINES_FUZZ` (or calls
   `fuzzCount`) at a deeper draw count, one job per file on GitHub's runners, since a shared Mac
   can't hold it. Only by hand: `gh workflow run deep.yml --ref <branch>`, with `-f fuzz=300` (the

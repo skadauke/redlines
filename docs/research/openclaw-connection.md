@@ -25,7 +25,7 @@ and plans the work. The findings of the earlier note stand.
 - **Tailscale is the road the Mac dials out on.** The Gateway stays on loopback and OpenClaw's own
   `gateway.tailscale.mode: serve` puts it on the tailnet as `wss://<name>.<tailnet>.ts.net`, with
   Gateway auth still on. Redlines checks that Tailscale is installed, signed in and can see the
-  computer, in plain words, and never changes Tailscale.
+  computer, in plain words (since Epic #1155 it also installs, opens and restarts Tailscale for the person, from the setup window and only when asked).
 - **Setup is one prompt and one code.** Redlines writes a prompt (with Copy) that asks the person's
   agent to set up its side and to answer with a **setup code** (what OpenClaw's own iPhone app
   takes). The person pastes the code into a secure field once. Redlines exchanges it, keeps what it
@@ -525,13 +525,36 @@ Gateway can't take at all (no model signed in) fails the request itself with
 |---|---|---|
 | `client.id`, `mode` | `node-host`, `node` | `gateway-client`, `backend` |
 | `role`, `scopes` | `node`, none | `operator`, `operator.read` and `operator.write` (never `operator.admin`) |
-| protocol | 3 (4 is also taken) | **4**: a live Gateway refuses an operator that offers 3 |
+| protocol | 4 first, then 3 when the Gateway says it expects 3 (`protocol mismatch`, `expectedProtocol`), as OpenClaw's node host does | **4**: a live Gateway refuses an operator that offers 3 |
 | signed text | `v2\|id\|node-host\|node\|node\|\|at\|credential\|nonce` | `v2\|id\|gateway-client\|backend\|operator\|operator.read,operator.write\|at\|credential\|nonce` |
 | used for | the agent's tool calls | `chat.send`, the run's events, `chat.abort` |
 
 It needs no token of its own to be set up: the Gateway gave the same **setup code** both roles,
 and each role gets its own device token back in `hello-ok` (`auth.deviceToken`), which Redlines
 keeps as the connection's operator token (`Kind::OperatorToken`, a 0600 file, never shown).
+
+**Device family, and which field a token goes in** (found in build 21's Test Drive). A Gateway pins
+the `client.deviceFamily` it was told when it approved a device, and compares every later connect
+with it; a remote client whose claim differs gets a `metadata-upgrade` approval request, and
+approving it replaces the device's tokens (`approveDevicePairing` writes every role's token again,
+`rotatedAtMs` set), and the Gateway sends the new one to no waiting client. Both connections
+therefore say `deviceFamily: "Mac"`, as OpenClaw's own clients do on macOS. A token the Gateway
+gave this device goes in `auth.deviceToken` ("Cached device credentials belong in deviceToken",
+OpenClaw's `connect-auth.ts`), where a stale one comes back as `AUTH_DEVICE_TOKEN_MISMATCH`; sent as
+`auth.token` it is read as the shared Gateway token first, and the answer is the wrong diagnosis. A
+token the person typed is a shared token and stays `auth.token` (`Kind::SharedToken`). The files
+say which is which: the device's tokens are `node-device-token` and `operator-device-token`; the
+older `node-token` and `operator-token` are of unknown origin, are sent as `auth.token` as before
+(the Gateway also checks that as a device token), and are replaced by the next `hello-ok`.
+
+**After an approval replaced a token.** For a client that has only a setup code there is no way
+back but a new one: OpenClaw's node host clears a refused device token and pairs again. A client
+that keeps an explicit shared token is better off: it sends that again, and the Gateway gives the
+connection it opens a new device token (`shouldRetryGatewayWithDeviceToken` and
+`selectGatewayConnectAuth`). Redlines does the same with a typed token, on the node and for chat.
+The owner can also run `openclaw devices rotate --device <id> --role operator` and give the person
+a token to type. A new setup code deletes nothing before it is proved: it is sent first, and when it
+is refused or never connects the token that worked is tried next.
 
 **The order matters.** Used by the node first, a setup code was then refused to the operator
 ("already used") and the operator's request waited for approval ("role upgrade"). Used by the

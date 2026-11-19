@@ -341,7 +341,7 @@ const pageEnvironment: WidthEnvironment = {
 
 /** A table's widths, and whether its columns are wider than the room, so that it scrolls. They are
  * for the table with this identity, whatever place it has by the time they arrive. */
-export interface TableWidths {
+interface TableWidths {
   id: number;
   columns: readonly number[];
   scrolls: boolean;
@@ -355,7 +355,7 @@ export const widthEnvironment = Facet.define<WidthEnvironment, WidthEnvironment>
 /** The widths of each table, as last measured. */
 const setWidths = StateEffect.define<readonly TableWidths[]>();
 
-export const widthsField = StateField.define<readonly TableWidths[]>({
+const widthsField = StateField.define<readonly TableWidths[]>({
   create: () => [],
   update(widths, tr) {
     for (const effect of tr.effects) if (effect.is(setWidths)) return effect.value;

@@ -60,7 +60,7 @@ export interface Violation {
   detail: string;
 }
 
-export interface OracleOptions {
+interface OracleOptions {
   /** Also check that the body reads as the newest view does (micromark). */
   render: boolean;
 }

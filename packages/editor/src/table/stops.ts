@@ -260,7 +260,7 @@ export function nearestStop(state: EditorState, pos: number, caret = true): numb
  * table's first and last character (Select All in a document that starts or ends in one): what
  * covers a table goes with it, as a block.
  */
-export function onStops(state: EditorState, selection: EditorSelection): EditorSelection {
+function onStops(state: EditorState, selection: EditorSelection): EditorSelection {
   let changed = false;
   const tables = state.field(tablesField, false) ?? [];
   const ranges = selection.ranges.map((range): SelectionRange => {

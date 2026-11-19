@@ -59,7 +59,7 @@ export const untrackedAskFacet = Facet.define<UntrackedAsker, UntrackedAsker | n
 });
 
 /** An edit that waits for the answer: what it did, to the document it was made against. */
-export interface HeldEdit {
+interface HeldEdit {
   reason: UntrackedReason;
   /** Its own words, for `accept-pending`. */
   words?: UntrackedWords;
@@ -78,7 +78,7 @@ export const heldEditEffect = StateEffect.define<HeldEdit>();
 export const untrackedAnswerAnnotation = Annotation.define<boolean>();
 
 /** How long an answer of Make Edit holds for the edits that follow in the same run (design §3.1). */
-export const UNTRACKED_RUN_MS = 5000;
+const UNTRACKED_RUN_MS = 5000;
 
 const ranEffect = StateEffect.define<{ reason: UntrackedReason; at: number }>();
 

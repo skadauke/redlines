@@ -24,7 +24,7 @@ export { expect };
 export type Scheme = 'light' | 'dark';
 export type ViewName = 'clean' | 'simple' | 'redlines' | 'raw';
 
-export interface StartOptions {
+interface StartOptions {
   /** The document's text, with its ledger if it has changes. Default: the page's own sample. */
   doc?: string;
   /**
@@ -42,6 +42,8 @@ export interface StartOptions {
   textSize?: number;
   /** Shows the word count in the corner. Default: hidden, for a quiet window. */
   wordCount?: boolean;
+  /** The page's query, such as `?models` (the scripted agent lists models). */
+  query?: string;
 }
 
 export interface JourneyOptions {
@@ -66,6 +68,7 @@ interface Hook {
       contentDOM: HTMLElement;
       viewport: { from: number; to: number };
       coordsAtPos(pos: number): { left: number; right: number; top: number; bottom: number } | null;
+      domAtPos(pos: number): { node: Node; offset: number };
       focus(): void;
       requestMeasure(): void;
       dispatch(spec: unknown): void;
@@ -78,6 +81,7 @@ interface Hook {
   };
   controller: { createWith(text: string): Promise<void> };
   openFile(path: string, text: string): Promise<void>;
+  dockToolbar(docked: boolean): void;
   menuRow(text: string): { enabled: boolean; run(): boolean } | null;
   parsedAtViewport(): boolean;
 }
@@ -88,7 +92,7 @@ declare global {
   }
 }
 
-export interface Caret {
+interface Caret {
   /** The selection's anchor and head, as offsets in the document. */
   anchor: number;
   head: number;
@@ -336,6 +340,12 @@ export class Journey {
     return ran;
   }
 
+  /** Docks the toolbar at the bottom center of the window, as the preference does, or takes it down. */
+  async dockToolbar(docked = true): Promise<void> {
+    await this.page.evaluate((on) => window.__redlines!.dockToolbar(on), docked);
+    await this.settle();
+  }
+
   /** Waits for the page to draw what it has: two frames, and the editor's measuring. */
   async settle(): Promise<void> {
     await this.page.evaluate(
@@ -497,7 +507,7 @@ async function openPage(page: Page, look: JourneyOptions, options: StartOptions)
   // destroys the context under a wait: a start is tried again.
   for (let attempt = 1; ; attempt++) {
     try {
-      await page.goto('/');
+      await page.goto(`/${options.query ?? ''}`);
       await page.waitForFunction(() => window.__redlines !== undefined, undefined, {
         timeout: 60_000,
       });

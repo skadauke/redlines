@@ -10,7 +10,7 @@ import { NodeType, Parser, Tree } from '@lezer/common';
 import type { Input, PartialParse, TreeFragment } from '@lezer/common';
 
 /** Whether the text is one comment and nothing after it but white space. */
-export function onlyComment(text: string): boolean {
+function onlyComment(text: string): boolean {
   if (!text.startsWith('<!--')) return false;
   const close = text.indexOf('-->', 4);
   return close !== -1 && text.slice(close + 3).trim() === '';

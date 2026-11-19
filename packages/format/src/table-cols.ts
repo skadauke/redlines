@@ -70,18 +70,11 @@ export function gridOf(text: string, table: TableRead, parsed?: Parsed): Grid {
       : null,
   };
 }
-
-/** The text of the cell `col` of a line, between its pipes, as written. */
-export function contentOf(text: string, line: TableLineRead, col: number): string | undefined {
-  const cell = line.cells[col];
-  return cell ? text.slice(cell.contentFrom, cell.contentTo) : undefined;
-}
-
 /** Where a marker goes in the content of a cell: after the first space, in front of the text. */
 const slot = (content: string): number => (/^[ \t]/.test(content) ? 1 : 0);
 
 /** The content with the marker of an inserted row at the start of its text. */
-export function withRowMarker(content: string, marker: string): string {
+function withRowMarker(content: string, marker: string): string {
   const at = slot(content);
   return content.slice(0, at) + marker + content.slice(at);
 }
@@ -96,7 +89,7 @@ export function withColMarker(content: string, marker: string): string {
 }
 
 /** The content without the marker of the inserted column `id`, and the space after it. */
-export function withoutColMarker(content: string, id: string): string {
+function withoutColMarker(content: string, id: string): string {
   return content.replace(new RegExp(`<!--ins ${id} col--> ?`), '');
 }
 
@@ -400,7 +393,7 @@ export function newCellContent(
 }
 
 /** What deciding columns comes to: the changes, and the marks that are decided with them. */
-export interface ColDecision {
+interface ColDecision {
   changes: TextChange[];
   /** Every mark decided, the other half of a move among them. */
   decided: string[];

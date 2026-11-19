@@ -67,7 +67,7 @@ export interface Entry {
 }
 
 /** The palette's name for a command, where it differs from the menu's (the menu's word is searched too). */
-export const PALETTE_NAMES: Readonly<Record<string, string>> = {
+const PALETTE_NAMES: Readonly<Record<string, string>> = {
   'format.link': 'Insert Link',
   'image.insert': 'Insert Image',
   'block.table': 'Insert Table',
@@ -89,7 +89,7 @@ export const PALETTE_NAMES: Readonly<Record<string, string>> = {
 };
 
 /** Words that find a command besides its names. Matching is by whole word. */
-export const SYNONYMS: Readonly<Record<string, string>> = {
+const SYNONYMS: Readonly<Record<string, string>> = {
   'format.link': 'url hyperlink',
   'image.insert': 'picture photo',
   'block.table': 'grid',
@@ -177,7 +177,7 @@ const wordsOf = (text: string): string[] => text.toLowerCase().match(/[\p{L}\p{N
  * of the entry (whole words: "ordered list" finds Numbered List, never "unordered"). A word of the
  * name scores best, and an earlier word and a shorter name better.
  */
-export function score(entry: Entry, query: string): number | null {
+function score(entry: Entry, query: string): number | null {
   const wanted = wordsOf(query);
   if (wanted.length === 0) return 0;
   const names = wordsOf(entry.name);

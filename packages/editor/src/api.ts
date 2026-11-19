@@ -30,6 +30,12 @@ export interface IncludeHost {
   read(path: string): Promise<string | null>;
   /** Opens the included file, as a document of its own. */
   open(path: string): void;
+  /**
+   * The path of the open document, as the host has it, for what Quarto leaves beside a document and
+   * above it (`_freeze/`, `keep-md`, `keep-ipynb`; read through `read`, which stays inside the
+   * project). Without it, no outputs are shown.
+   */
+  documentPath?(): string | null;
 }
 
 /** The dialect of a Markdown file (format §9.1): GitHub's, or pandoc's in `.qmd` and `.Rmd`. */
@@ -37,7 +43,8 @@ export type MarkdownDialect = 'gfm' | 'pandoc';
 
 /**
  * The views a View menu lists (design §5.3): Clean, Redlines and Plain. Redlines is the view in
- * either of its looks (`menuViewOf`), and `Editor.showView` shows it in the look shown last.
+ * either of its looks (`menuViewOf`), and `Editor.showView` shows it: from Clean or Plain in the look
+ * shown last, and from the simple look as the full markup.
  */
 export type MenuView = 'clean' | 'redlines' | 'raw';
 
@@ -349,6 +356,25 @@ export interface EditorOptions {
    */
   includes?: IncludeHost;
   /**
+   * Loads the formatter of citations (`import('@redlines/citations')`), which draws `[@smith2020]`
+   * as "(Smith 2020)" from the bibliography that a Quarto document's front matter names, read
+   * through `includes`. It is the host's to import, so that a page that doesn't (the website's
+   * embed) never holds it. Default: none, and a citation shows its keys.
+   */
+  citations?: () => Promise<typeof import('@redlines/citations')>;
+  /**
+   * Loads the engine that draws math (`$x^2$`, `$$ E = mc^2 $$`): TeX in, MathML out (Temml's
+   * `renderToString`). It is the host's to import, so that a page that doesn't (the website's
+   * embed) never holds it, and it is called only when a document has a formula. Default: none, and
+   * a formula shows its source.
+   */
+  math?: () => Promise<{
+    renderToString(
+      tex: string,
+      options?: { displayMode?: boolean; throwOnError?: boolean },
+    ): string;
+  }>;
+  /**
    * Makes the cropped copy of a local image for the `image.crop` command (Crop…, #624), which the
    * crop box calls on Done: given the image's path as the document writes it, decoded, and the part
    * to keep, as fractions of its width and height. Writes the copy beside the original, in the
@@ -394,6 +420,12 @@ export interface EditorOptions {
    * alone.
    */
   projectImageLink?: (dragged: string) => string | null;
+  /**
+   * Whether the document has a folder that a project image is linked from (it is saved). Where it
+   * says no, the document takes no such drag: no line, no drop, and a drop that comes anyway says
+   * to save the document first. Default: yes.
+   */
+  projectImageFolder?: () => boolean;
   /**
    * The people this machine has met, in the order of meeting, each with their author color
    * (design §5.5): a person keeps their color in every document. Default: none, and colors come
@@ -537,9 +569,10 @@ export interface Editor {
   /**
    * Shows a view as a View menu lists them (`MenuView`): Clean, Redlines or Plain. Redlines is
    * shown in the look that was shown last: the one a click on a change bar or `switchLook` chose
-   * (`EditorUiState.markupView`), unless the review bar has shown the full markup since. It
-   * chooses no look, and when Redlines is shown already, in either look, it does nothing: a click
-   * on a change bar, or `switchLook`, chooses a look.
+   * (`EditorUiState.markupView`), unless the review bar has shown the full markup since; from Clean
+   * or Plain it chooses no look. Chosen while the simple look shows, it is the way back to the full
+   * markup, as a click on a change bar is (#1156), and chooses it. When the full markup shows
+   * already, it does nothing.
    */
   showView(view: MenuView): void;
   /**

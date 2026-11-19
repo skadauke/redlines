@@ -35,8 +35,9 @@ export interface MenuCommands {
   /** Opens the About Redlines window, or brings it forward. */
   openAbout(): void;
   /**
-   * Shows a view of the View menu. Redlines is shown in the look that was shown last, and does
-   * nothing when it is shown already (`Editor.showView`).
+   * Shows a view of the View menu. Redlines is shown in the look that was shown last, as the full
+   * markup when the simple look shows, and does nothing when the full markup shows already
+   * (`Editor.showView`).
    */
   setView(view: MenuView): void;
   /**
@@ -45,6 +46,8 @@ export interface MenuCommands {
    */
   switchLook(): void;
   toggleSidebar(): void;
+  /** Opens the sidebar at the document's chat, or closes it when it is showing the chat. */
+  showChat(): void;
   /** Shows the word count in the window's corner, or hides it (Preferences' switch). */
   toggleWordCount(): void;
   toggleTracking(): void;
@@ -86,6 +89,14 @@ export interface MenuCommands {
   reportProblem(): void;
   /** Help › Reveal Log: the crash log in Finder. */
   revealCrashLog(): void;
+  /**
+   * Help › Write to Log… and Reveal Dev Log, in dev builds only (#1205): a release build has no dev
+   * log, and leaves these out, so that its Help menu has neither row.
+   */
+  writeToLog?(): void;
+  revealDevLog?(): void;
+  /** Help › Replay Onboarding, in dev builds only (#1206): the first-launch sheet and tour again. */
+  replayOnboarding?(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
@@ -101,6 +112,8 @@ export interface MenuState {
   /** The editor's `EditorUiState.canAcceptAll`: a change in the selection, or in the document. */
   canAcceptAll: boolean;
   sidebarOpen: boolean;
+  /** What the sidebar shows (#1194); the file list when it says nothing. */
+  sidebarView?: 'files' | 'chat';
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
   /** Whether the word count is shown in the window's corner. */
@@ -138,7 +151,7 @@ export interface MenuState {
 }
 
 /** One of the Mac's standard items, which it draws and handles itself. */
-export interface StandardRow {
+interface StandardRow {
   item:
     | 'Separator'
     | 'Undo'
@@ -199,7 +212,7 @@ export interface SubmenuRow {
 
 export type MenuRow = StandardRow | ActionRow | SubmenuRow;
 
-export interface AppMenu {
+interface AppMenu {
   title: string;
   rows: readonly MenuRow[];
   /** The Mac's Window menu, to which it adds the open windows. */
@@ -393,11 +406,6 @@ export function appMenuModel(
           action: () => commands.revealInFinder(),
           enabled: (state) => state.hasFile,
         },
-        {
-          text: 'Open in Another Window',
-          action: () => commands.openAnotherWindow(),
-          enabled: (state) => state.hasFile,
-        },
         SEPARATOR,
         // Closing asks about unsaved edits through the window's close request.
         { item: 'CloseWindow', text: 'Close' },
@@ -534,12 +542,27 @@ export function appMenuModel(
             text: 'Show Files',
             accelerator: 'Ctrl+Cmd+S',
             action: () => commands.toggleSidebar(),
-            textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
+            textFor: (state) =>
+              state.sidebarOpen && state.sidebarView !== 'chat' ? 'Hide Files' : 'Show Files',
+          },
+          {
+            text: 'Show Chat',
+            accelerator: 'Ctrl+Cmd+C',
+            action: () => commands.showChat(),
+            textFor: (state) =>
+              state.sidebarOpen && state.sidebarView === 'chat' ? 'Hide Chat' : 'Show Chat',
           },
           {
             text: 'Show Word Count',
             action: () => commands.toggleWordCount(),
             textFor: (state) => (state.showWordCount ? 'Hide Word Count' : 'Show Word Count'),
+          },
+          SEPARATOR,
+          // Word's name and place for the second window of one document.
+          {
+            text: 'New Window',
+            action: () => commands.openAnotherWindow(),
+            enabled: (state) => state.hasFile,
           },
         ],
         [
@@ -603,6 +626,16 @@ export function appMenuModel(
       rows: [
         { text: 'Report a Problem…', action: () => commands.reportProblem() },
         { text: 'Reveal Log', action: () => commands.revealCrashLog() },
+        ...(commands.writeToLog && commands.revealDevLog
+          ? [
+              SEPARATOR,
+              { text: 'Write to Log…', action: () => commands.writeToLog?.() },
+              { text: 'Reveal Dev Log', action: () => commands.revealDevLog?.() },
+            ]
+          : []),
+        ...(commands.replayOnboarding
+          ? [{ text: 'Replay Onboarding', action: () => commands.replayOnboarding?.() }]
+          : []),
         SEPARATOR,
         { text: 'Show Agent Logs', action: () => commands.showAgentLogs() },
       ],

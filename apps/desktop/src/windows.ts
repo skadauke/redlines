@@ -75,7 +75,7 @@ export async function restartAfterAsking(
 }
 
 /** What `followFocus` needs of the window: Tauri's own object has it all. */
-export interface FocusableWindow {
+interface FocusableWindow {
   isFocused(): Promise<boolean>;
   onFocusChanged(handler: (event: { payload: boolean }) => void): Promise<unknown>;
   listen(event: string, handler: () => void): Promise<unknown>;
@@ -146,7 +146,7 @@ export function tauriWindowLink(): WindowLink {
 }
 
 /** This window, connected to the others. */
-export interface ConnectedWindow {
+interface ConnectedWindow {
   /**
    * Asks each window with unsaved edits in turn (`askEachDirtyWindow`). False, with the person told
    * (`ConnectOptions.held`), while a window opened for text is starting.
@@ -189,7 +189,7 @@ function shared<A extends unknown[], T>(
 }
 
 /** What a connected window tells the person. */
-export interface ConnectOptions {
+interface ConnectOptions {
   /**
    * A quit, or this window's close, was held because a window opened for text hasn't said what it
    * holds yet, and its text would be lost without a question: the person is told to try again in a

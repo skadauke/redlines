@@ -7,7 +7,7 @@
 // in it reads a document but the lines it is given.
 
 /** Quarto's five kinds of callout. */
-export const FENCE_TYPES: readonly string[] = ['note', 'tip', 'important', 'warning', 'caution'];
+const FENCE_TYPES: readonly string[] = ['note', 'tip', 'important', 'warning', 'caution'];
 
 /** An opening fence with attributes: the colons and the blank after them, the attribute text, and
  * the closing colons that pandoc allows after it. */
@@ -17,7 +17,7 @@ const CODE_FENCE = /^[ \t]*(`{3,}|~{3,})/;
 const TOKEN = /\.([\w-]+)|#([\w:.-]+)|([\w-]+)=(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([^\s"'}]+))/g;
 
 /** A callout's opening fence, as the text of one line shows it. */
-export interface FenceLine {
+interface FenceLine {
   /** Where the attribute text starts in the line, and where it ends. */
   from: number;
   to: number;

@@ -24,6 +24,9 @@ export function space(kind: keyof typeof SPACE): string {
 
 type ThemeSpec = Parameters<typeof EditorView.baseTheme>[0];
 
+/** The clip that keeps a quote's bar out of the space around the quote, and leaves its sides. */
+const QUOTE_CLIP = 'inset(var(--rl-clip-top, 0px) -100vw var(--rl-clip-bottom, 0px) -100vw)';
+
 /**
  * A rule for each kind of space: above a block's first line, below the text of the line above
  * code, front matter or a table, whose first line is tinted or not drawn, and outside an alert's
@@ -47,6 +50,20 @@ function spaceRules(): ThemeSpec {
     // clip's insets and corners are variables, so a single line that is both ends takes both.
     const clipped =
       'inset(var(--rl-clip-top, 0px) 0 var(--rl-clip-bottom, 0px) 0 round var(--rl-clip-rt, 0px) var(--rl-clip-rt, 0px) var(--rl-clip-rb, 0px) var(--rl-clip-rb, 0px))';
+    // A quote's bar is the line's border, which would be drawn through the space above the quote
+    // and the space below it, where a block under it takes it as padding on its last line (#1183):
+    // the bar is clipped to the text's own lines (sideways it is left whole). The space between
+    // a quote's paragraphs ('loose') is inside the quote, and the bar goes on through it.
+    if (kind === 'block' || kind === 'h1' || kind === 'heading') {
+      rules[`.cm-line.rl-quote.rl-space-${kind}`] = {
+        '--rl-clip-top': space(kind),
+        clipPath: QUOTE_CLIP,
+      };
+    }
+    rules[`.cm-line.rl-quote.rl-space-${kind}-below`] = {
+      '--rl-clip-bottom': space(kind),
+      clipPath: QUOTE_CLIP,
+    };
     rules[`.cm-line.rl-callout-first.rl-space-${kind}-apart`] = {
       paddingTop: `calc(${space(kind)} + ${textPx(10)})`,
       '--rl-clip-top': space(kind),
@@ -69,6 +86,13 @@ function spaceRules(): ThemeSpec {
       paddingBottom: space(kind),
       '--rl-clip-bottom': space(kind),
       '--rl-clip-rb': '6px',
+      clipPath: clipped,
+    };
+    // Code that ends an alert is the alert's last line: its padding and corners.
+    rules[`.cm-line.rl-callout-last.rl-codeblock-last.rl-space-${kind}-clip`] = {
+      paddingBottom: `calc(${space(kind)} + ${textPx(10)})`,
+      '--rl-clip-bottom': space(kind),
+      '--rl-clip-rb': '8px',
       clipPath: clipped,
     };
   }
@@ -423,12 +447,16 @@ export const baseThemeSpec: ThemeSpec = {
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
   },
-  '.rl-callout-fold:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
-  '.rl-callout-fold:focus': { outline: 'none' },
-  '.rl-callout-fold:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
-  '.rl-callout-menu:hover': { color: 'var(--rl-ink)', backgroundColor: 'var(--rl-rule)' },
-  '.rl-callout-menu:focus': { outline: 'none' },
-  '.rl-callout-menu:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '1px' },
+  '.rl-callout-fold:hover, .rl-callout-fold:focus-visible': {
+    color: 'var(--rl-ink)',
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+  },
+  '.rl-callout-fold:focus, .rl-callout-fold:focus-visible': { outline: 'none' },
+  '.rl-callout-menu:hover, .rl-callout-menu:focus-visible': {
+    color: 'var(--rl-ink)',
+    backgroundColor: 'color-mix(in srgb, var(--rl-pressed) 55%, transparent)',
+  },
+  '.rl-callout-menu:focus, .rl-callout-menu:focus-visible': { outline: 'none' },
   '.rl-callout-pending, .rl-callout-pending .rl-callout-icon': { color: 'var(--rl-color)' },
 
   // Images: no frame. One on a line of its own is centered, at most as wide as the text column;
@@ -449,8 +477,10 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-image:not(.rl-image-own) .rl-image-frame': { verticalAlign: 'middle' },
   '.rl-image:not(.rl-image-own) .rl-image-frame img': { display: 'block', margin: '0' },
   '.rl-image-missing': { color: 'var(--rl-ink-2)' },
-  // A click selects the image: an outline in the theme's focus-ring ink, and its handles.
-  '.rl-image-selected img': { outline: '2px solid var(--rl-ink-3)' },
+  // A click selects the image: a very faint outline, and its handles (#1195).
+  '.rl-image-selected img': {
+    outline: '1px solid color-mix(in srgb, var(--rl-ink-3) 40%, transparent)',
+  },
   '.rl-image-selected .rl-image-handle': { opacity: '1' },
   '&.rl-image-is-selected .cm-line::selection, &.rl-image-is-selected .cm-line *::selection': {
     backgroundColor: 'transparent',
@@ -487,12 +517,12 @@ export const baseThemeSpec: ThemeSpec = {
   },
   '.rl-image-frame:hover .rl-image-handle, .rl-image:not(.rl-image-own):hover .rl-image-handle, .rl-image-resizing .rl-image-handle':
     { opacity: '1' },
-  // The line a dragged image file shows between blocks (#681), in the theme's gray, never red.
+  // The line a dragged image file shows between blocks (#681), the faint blue of every drop marker.
   '.rl-drop-line': {
     position: 'absolute',
     height: '2px',
     borderRadius: '1px',
-    backgroundColor: 'var(--rl-ink-2, #6a6a6f)',
+    backgroundColor: 'var(--rl-drop, rgba(10, 100, 255, 0.45))',
     pointerEvents: 'none',
     zIndex: '5',
   },

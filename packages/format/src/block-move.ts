@@ -11,6 +11,7 @@ import { applyChanges } from './changes.ts';
 import { withDialect } from './dialect.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
+import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { fineEdits as trackedEdits } from './track.ts';
 import type { EditContext, Range, TextChange } from './types.ts';
@@ -507,6 +508,24 @@ function insideCode(text: string, changes: readonly TextChange[]): boolean {
 }
 
 /**
+ * The widened write of a move. A table's move never decides another person's pending changes: a
+ * replacement that holds them in its old text would turn them into text when it is accepted, so the
+ * move is not written tracked: the person is asked first, as for any edit no unit can hold (#1279).
+ */
+function widenMove(text: string, view: TextChange[], ctx: EditContext, run: BlockRun) {
+  const widened = widen(text, view, ctx);
+  if (run.kind === 'table' && widened.held.length > 0) {
+    throw new Untrackable(
+      'no-unit',
+      'A table is moved past or with another person’s pending changes, which a tracked move would decide.',
+      undefined,
+      widened.held,
+    );
+  }
+  return widened;
+}
+
+/**
  * The tracked move of `run` to `gap`: the edits of `moveBlockEdits` (with where the run lands) written as the author's tracked
  * changes, a deletion at the old place and an insertion at the new, all in one group so that they
  * are decided together. Where a fine write isn't sound (a line break that someone else inserted
@@ -534,7 +553,7 @@ export function trackedBlockMove(
       // the markers of an insertion, a mark each on a line of its own, which read otherwise when
       // some of them are decided and others not (#1052, walk seed 44).
       try {
-        return { changes: widen(text, plan.view, ctx).changes, moved: plan.moved };
+        return { changes: widenMove(text, plan.view, ctx, run).changes, moved: plan.moved };
       } catch (error) {
         if (!(error instanceof EditError) && !(error instanceof Untrackable)) throw error;
       }
@@ -550,11 +569,74 @@ export function trackedBlockMove(
         // item starts takes its bullet, as a Delete over the break does) reads otherwise than the
         // plain move: the next way, then the widened one (#586, block-move-random seed 142).
         if (!readsAs(text, next.source, changes)) continue;
-        return { changes, moved: next.moved };
+        return { changes: linkMove(text, changes, group), moved: next.moved };
       } catch (error) {
         if (!(error instanceof EditError)) throw error;
       }
     }
-    return { changes: widen(text, plan.view, ctx).changes, moved: plan.moved };
+    return { changes: widenMove(text, plan.view, ctx, run).changes, moved: plan.moved };
   });
+}
+
+/**
+ * The marks of a fine move linked as a move (format §3.14): each insertion's ledger entry names the
+ * first deletion of the group in `move`, and each deletion's the first insertion, as the two halves
+ * of a moved table row do (§3.7). The link changes nothing a reader sees or any decision: it says
+ * that the insertion is the deletion's text at a new place, so that it can be drawn as a move. The
+ * changes are the move's, with the ledger written once, with the links.
+ */
+function linkMove(text: string, changes: TextChange[], group: string): TextChange[] {
+  const after = applyChanges(text, changes);
+  const parsed = parse(after);
+  const marks = parsed.marks.filter((mark) => mark.entry.group === group);
+  const insertion = marks.find((mark) => mark.kind === 'ins');
+  const deletion = marks.find((mark) => mark.kind === 'del');
+  if (
+    !insertion ||
+    !deletion ||
+    marks.some((mark) => mark.kind !== 'ins' && mark.kind !== 'del' && mark.kind !== 'split')
+  ) {
+    return changes;
+  }
+  const ledger = structuredClone(parsed.ledger);
+  for (const mark of marks) {
+    const entry = ledger.marks[mark.id];
+    if (entry && mark.kind !== 'split')
+      entry.move = mark.kind === 'ins' ? deletion.id : insertion.id;
+  }
+  const linked = applyChanges(after, setLedger(after, ledger));
+  if (linked === after) return changes;
+  // The ledger is the end of the file: the move's own changes without the ledger's, and one change
+  // from where the text they make first differs from the linked one.
+  const ledgerAt = parse(text).ledgerRange?.from;
+  const inLedger = (change: TextChange) =>
+    change.insert.includes('<!-- redlines') || (ledgerAt !== undefined && change.from >= ledgerAt);
+  const body = changes.filter((change) => !inLedger(change));
+  const mid = applyChanges(text, body);
+  if (mid === linked) return body;
+  let start = 0;
+  while (start < mid.length && mid[start] === linked[start]) start++;
+  let end = 0;
+  while (
+    end < mid.length - start &&
+    mid[mid.length - 1 - end] === linked[linked.length - 1 - end]
+  ) {
+    end++;
+  }
+  const delta = mid.length - text.length;
+  let shift = 0;
+  let lastEnd = 0;
+  for (const change of body.toSorted((a, b) => a.from - b.from)) {
+    lastEnd = change.from + shift + change.insert.length;
+    shift += change.insert.length - (change.to - change.from);
+  }
+  if (start < lastEnd) return changes;
+  return [
+    ...body,
+    {
+      from: Math.max(start - delta, 0),
+      to: mid.length - end - delta,
+      insert: linked.slice(start, linked.length - end),
+    },
+  ];
 }

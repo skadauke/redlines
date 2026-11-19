@@ -19,13 +19,13 @@ export function sidebarWidthOf(value: unknown): number {
   return Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, value)));
 }
 
-export interface SidebarResize {
+interface SidebarResize {
   /** The width to draw: what the person has chosen, and between a drag's moves, its latest. */
   setWidth(width: number): void;
   destroy(): void;
 }
 
-export interface ResizeOptions {
+interface ResizeOptions {
   /** The sidebar, whose left edge is the drag's origin. */
   aside: HTMLElement;
   /** The page, which is told that a drag is on (`data-sidebar-drag`), so that it follows the pointer. */
@@ -82,8 +82,8 @@ export function createSidebarResize(options: ResizeOptions): SidebarResize {
     const last = dragging;
     dragging = null;
     delete app.dataset['sidebarDrag'];
-    handle.releasePointerCapture?.(event.pointerId);
-    if (event.type === 'pointercancel') return draw(width);
+    if (event.type === 'pointerup') handle.releasePointerCapture?.(event.pointerId);
+    if (event.type !== 'pointerup') return draw(width);
     if (last < SIDEBAR_CLOSES_BELOW) {
       // The width it had stays what is kept; the sidebar closes and opens at it again.
       draw(width);
@@ -108,12 +108,15 @@ export function createSidebarResize(options: ResizeOptions): SidebarResize {
   handle.addEventListener('pointermove', move);
   handle.addEventListener('pointerup', end);
   handle.addEventListener('pointercancel', end);
+  // Capture lost mid-drag (the sidebar was closed, or the window lost it): the drag is over.
+  handle.addEventListener('lostpointercapture', end);
   handle.addEventListener('keydown', key);
   setWidth(width);
 
   return {
     setWidth,
     destroy() {
+      dragging = null;
       delete app.dataset['sidebarDrag'];
       handle.remove();
     },

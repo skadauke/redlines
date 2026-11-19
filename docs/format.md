@@ -142,7 +142,11 @@ edit is refused as one in code, or made when none of its markers lands in the co
 around the whole block where it does around a fenced one, with its markers in the text before and
 after the block or on lines of their own, never on a line of the block or in its indentation; when
 the new text of an insertion ends with the block, or goes on after it past a blank line, its closer
-or the split after it stands alone on the line after it (§3.3). An edit that would make other
+or the split after it stands alone on the line after it (§3.3). A key in indented code that has an
+ordered item right below it that doesn't start at 1 (`2. …`) replaces the item with the block: the
+closer's line between them would make micromark read the item as a list (`<ol start="2">`), where
+the newest view, with no closer, has it as text after the code, which micromark reads as a paragraph
+(#601). An item that starts at 1 is a list in both readings and stays out. An edit that would make other
 markers code, as a blank line typed above a line that goes on a paragraph does, and a decision that
 would bring a marker onto a line of code, are refused as hiding other changes (`would-hide-marks`);
 when the markers are a comment's, which no decision takes away, the refusal says to delete that
@@ -1185,7 +1189,7 @@ at the outer edge of a whole inline construct. A marker never goes:
    a digit or punctuation and an emoji shortcode; or inside `{{< >}}`, a cross-reference or a citation in the text (`@fig-x`, `@sec-x`, `@smith2020`), a
    citation bracket (`[@a; @b]`, `[-@a]`), the brackets and attributes of a span (`[x]{.mark}`: a marker never stands between them) or `(\#fig:x)`. Four of these are pandoc's alone and
    are held in a file of the pandoc dialect only (§9.1): `^x^`, `~x~`, the `:::` line, and the
-   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. Text typed in front of a word that makes a key with it (`@fig-x` before `42`) takes the rest of the key into the tracked change, so that no marker stands in the key; with Track Changes off, where that can't be done, the edit says so (#1074). A decision that would bring a letter or a digit in front of the marker that starts such a key (a deletion rejected, a replacement's old text given back) is made with that insertion, so that in no order of decisions does a marker stand before a key with a word against it (#1088). GitHub shows a
+   cross-reference and citation. In a `.md` file they are text, and a marker may stand in them. Text typed in front of a word that makes a key with it (`@fig-x` before `42`) takes the rest of the key into the tracked change, so that no marker stands in the key; with Track Changes off, where that can't be done, the person is asked whether to accept the other person's change first (§3.4, an alert comes before a refusal) and the text is typed after it, and where nothing can ask (an agent, the command line) the edit says so, in words that name the ways round (#1074, #1204). A decision that would bring a letter or a digit in front of the marker that starts such a key (a deletion rejected, a replacement's old text given back) is made with that insertion, so that in no order of decisions does a marker stand before a key with a word against it (#1088). GitHub shows a
    shortcode as its emoji only at the start of a text or after white space, and as written after
    anything else: a letter or a digit (`a:tent:`), punctuation (`(:tent:`, `.:tent:`) or another
    shortcode. Redlines draws the same (#388), and a marker never changes which: between that
@@ -1690,6 +1694,22 @@ doesn't know the markers, and the item would be tight in the file and loose in t
 As one split the blank line is a line of the file as it is, and rejecting the split takes the blank
 line and the item away with it, the item above tight again.
 
+The same holds at the top level for a `-` item (#443): Return or Shift-Return at the start of the
+first item of a `- ` list right under a line of text, with Track Changes on, is one split of the
+same form (`Fruit:<!--split k3x9-->\n\n- \n- apples`). Written as two changes, the blank line
+and the new item, an order of decisions that keeps the item and rejects the blank line would put
+an empty `-` right under the text, which Markdown reads as the text's underline. A bullet of `+`
+or `*`, and a number, read as text there, and keep the two changes. Backspace right after the key
+takes it back whole.
+
+**Tab under the empty item a Return just left (#1202).** Where the author's own Return made an empty
+item whose split's break holds a blank line before the next item, Tab on that next item would put
+it under an empty item that Markdown ends at the blank line: the file would read it as no child,
+the newest view as one. The blank line is part of the author's own pending break, so the Tab takes
+it with it and the item stands directly under the empty one (`+ <!--split k3x9-->\n  + alpha`). If
+the split is not the author's own, or the line above is no empty item, the key still says why it
+does nothing.
+
 **Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
 other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
 prefix of the next line) by a paragraph break, as Return on either side of it does, is written
@@ -1920,6 +1940,16 @@ decided, as is Enter where a new split has no other legal form (a hard break's t
 marker, a line that is only syntax, a marker that would start a line). The rule is counted for each
 split: an edit is refused when it gives a split such a break that it did not have, so a file that
 has such a pair already, as an older one may, keeps it, and edits elsewhere are not refused for it.
+
+A line break pasted with text at once, at the end of the line above your own paragraph break at the
+top level (`new⏎` after `one<!--split k3x9-->⏎⏎two`), is typed behind the break, at the start of the
+next paragraph, which is the same text, three line breaks in a row, with no break right next to
+another (`one<!--ins m2bd-->new<!--/m2bd--><!--split k3x9-->⏎⏎<!--split n8fx-->⏎two`, #120). In a
+list item or a quote the edit is the replacement of the item or the block, where the fine form has no
+such place (§3.12), and every order of decisions reads alike. Four things keep the new form out, and
+the edit is refused as before: a split that is another person's, a gap behind the split that is not
+plain two line breaks, a next line that starts with a space, a tab or `>`, and a file with CRLF line
+breaks.
 
 **Whole-block deletion** uses the same mechanism: a deletion at the start of the following block,
 with a payload that ends in `\n\n`. At the end of the document, it is a deletion at the end of the
@@ -2412,19 +2442,25 @@ Return there is the ordinary Return, a new paragraph, and the line stays a parag
 Changes on only Paragraph › Table makes a table. With Track Changes off the rows are written
 as typed.
 
-**A table inserted as a whole** (Paragraph › Table with Track Changes on) is the author's pending
-insertion, with the paragraph breaks around it as splits (§3.4): each of its lines ends with the
-marker of the break after it, and its last line with the closer of the insertion:
+**A table inserted as a whole** (Paragraph › Table with Track Changes on, and a table pasted or
+moved, §3.14) is the author's pending insertion, with the paragraph break before it as a split
+(§3.4). The rows are one line break apart, as text of the insertion, with no split on each: a row
+that ends in a marker is no delimiter row, so a plain reader would read the file as it is, every
+change pending, as a paragraph. The last row ends with the closer of the insertion:
 
 ```markdown
 One.<!--ins k3x9--><!--split s1aa-->
 
-| Name | Age |<!--split s2bb-->
-| ---- | --- |<!--split s3cc-->
+| Name | Age |
+| ---- | --- |
 | Ada  | 36  |<!--/k3x9-->
 
 Two.
 ```
+
+Files written before, with a split at the end of each row (`| Name | Age |<!--split s2bb-->`), still
+read: the reader and the editor's parse take a marker that ends a row as white space, as below, and
+deciding them reads as before.
 
 A marker of a split or the closer of an insertion that ends a line of a table is no cell of that
 row, in the reader (`blankTrailingMarkers`: the line read with the marker as white space, the
@@ -2761,6 +2797,12 @@ it, one per line:
   beside them, and so does one in the only cell of a header (any header of one cell, not only one that
   holds an alignment change's mark); a body row that is a lone pipe stands for its empty cell and takes
   no pipe (#428).
+  A decision never writes a closing pipe: it restores or accepts exactly (docs/hardening.md: all
+  rejected gives the original byte for byte), so a hand-made header with no closing pipe that is one
+  cell short of its delimiter row once the author's insertion that is all the text of its last cell
+  is rejected reads as no table again, as the file did before the insertion. The editor never writes
+  that file: a key that empties the cell writes the pipe (above), so the header it leaves is not
+  one cell short in either version (#428).
 - **A comment's or a highlight's markers in a table with a change pending** stand where no decision
   of that change becomes impossible (#376, #396). A marker after the closing pipe of a header is a
   cell too many, so the end goes in front of the pipe (and in front of a delimiter run that the
@@ -3237,6 +3279,14 @@ In a file with full history, such an edit is an `edit` event (§6.2).
   block on a line of its own (§3.3). Where the first part would end at the start of the block after
   the break of a split inside the mark, it ends in front of the split instead, and the split and its
   break belong to neither part: `Para one.<!--/k3x9--><!--split s3vb-->⏎⏎X<!--ins w8nn-->Para two.`
+- A delimiter (`*`, `_`, `~`) typed beside the marker of a comment or a highlight, which are no
+  changes to decide, goes where it is typed, and the marker is moved across the run where it stands
+  between the delimiter and its neighbour, so that micromark reads the file as it reads the newest
+  view (`foo*<!--hl k3x9-->bar<!--/k3x9-->` typed `*` at the end gives
+  `foo<!--hl k3x9-->*bar*<!--/k3x9-->`); the range of the comment or highlight takes the run in or
+  leaves it out (#1140). Only a marker on the line of the edit is moved, and only across a run that
+  holds a character the edit typed: a delimiter typed in the next list item, or in a table's
+  separator row, leaves the marker as it was.
 - Text typed next to a pending deletion goes where it is typed, before or after the deleted text,
   which the editor shows. Text is never typed between a split and its break: it goes in front of
   the split. Text typed further into the break, on the blank line of a paragraph break, would part
@@ -3438,6 +3488,20 @@ already, so that no blank line is added to the file. A text that ends in two or 
 delimiter, a risky line or an atomic block, or that is only line breaks, keeps the closer rule below
 (`widen.ts`, `tryRung`).
 
+A delimiter (`*`, `_`, `~`) typed, taken out or pasted beside another person's marks is read in every
+order of deciding the marks of its paragraph (four at most), and the unit is replaced where one of
+three things holds: the fine write reads otherwise in some order (a run pasted with an HTML tag beside
+a delimiter, `ordersReadOtherwiseNear`); two orders leave different texts, a stray blank line in one
+(a delimiter at the seam of a paragraph made of their insertion, or beside their deletion, with the
+paragraph's break written as block syntax, `ordersDifferNear`, #1136); or their pending italic is in
+the paragraph and the fine write reads otherwise than the view, which spells that italic with `*`
+and pairs it with the typed run where the file keeps `_`: the new text of the replacement is the
+view's, `x ca*f*` with the run typed, and the old text keeps their mark (#1136). A unit that ends the
+body takes the view's last delimiter into its new text. Where no unit holds it and the fine write is
+refused (a run typed inside their italic, or after it, which would change how it reads), the
+refusal stays, in words that say what to do. The three tests are read only where a delimiter stands
+in a paragraph that holds a mark.
+
 The engine is `widen` in `packages/format` (`widen.ts`, `widen-units.ts`): the parser, the decisions
 and the views read the replacements it writes, and the writers that refuse today call it one unit at
 a time: the tables have (`table-widen.ts`: the operations of §3.7 and a format change in a cell),
@@ -3634,6 +3698,22 @@ reads alike, like any deletion and insertion. Accepting both gives the blocks at
 rejecting both at the old. (Rows and columns of a table are moved by `move` links; they are not
 blocks of the document's own flow, §3.7.)
 
+Where the move is written as insertions and deletions (the fine form, not the widened substitution
+below), the ledger links them as it links the halves of a moved row: each insertion's entry names
+the first deletion of the group in `move`, and each deletion's names the first insertion. The link
+changes no reading and no decision: every order of deciding reads as it did, and the group still
+decides the marks together, so that a half of a move that has a group (unlike a half with none, §3.7)
+is decided like any mark. What it adds is that a reader can tell a move from an insertion and a
+deletion that happen to share text: Redlines names it `Moved block` on one card, and draws the new
+place with a double underline, as the new place of a moved row, after Word's marks for a move. A
+move written as a widened substitution is a replacement, and is drawn as one.
+
+A link whose partner is gone is ignored, and dropped when the ledger is next written: the block moved
+again, or deleted at its new place, leaves the first deletion's `move` naming a mark that no longer
+exists, as a deleted moved row does (§3.7). A deletion typed right next to the old place is a
+deletion of its own, as beside any other deletion with a link: it is no longer taken into the move's
+deletion.
+
 - **The unit.** A move takes a run of siblings under one parent, as `widen-units.ts` reads them: a
   paragraph, a heading, a code block, a table, a quote or a list at the top of the file, a block of
   a quote, an item of a list. A caret in a paragraph moves the paragraph; in an item, the item with
@@ -3641,6 +3721,11 @@ blocks of the document's own flow, §3.7.)
   covers a whole list, quote or item moves it, and one across several siblings moves them all. A
   block moves among its own siblings only: an item stays in its list, and a block in its quote.
   Nothing moves above the first sibling or below the last, and the command says so.
+  A fenced code block that nothing closes holds the rest of its container, so it has nowhere to go
+  as it is: the move writes its closing fence first (on the block's last line when that is empty,
+  and on a new line under it otherwise, in the opening fence's container syntax), tracked with
+  Track Changes on, and moves the closed block, in one step to undo (#1203). Where the closed block
+  would have nowhere to go either (it is the only block), nothing is written.
 - **The text.** The moved text is the newest view of the blocks, with the break that the siblings
   have between them. Another person's pending changes in the blocks are not carried: they stay in
   the deleted text at the old place, as in any deletion (§3.4), and the copy at the new place has the
@@ -3653,6 +3738,26 @@ blocks of the document's own flow, §3.7.)
   So is a move that leaves two lists side by side (a paragraph between them moved away, or a list
   moved up to one): the newest view reads them as one list and the marker between them in the file
   reads two, so no fine write is tried, and where no unit passes either, the person is asked (#883).
+- **A table's rows are not split (#1279).** A table moves, to any gap, as other blocks do: the deletion
+  at the old place holds the table's lines, the insertion at the new place wraps the whole table, and
+  the break that sets it apart is one split before it (on the previous block's line, or after it at
+  the end of the file), so that the blocks the move passes are not touched, and another person's
+  changes in them stay pending, decided only by their author. The rows inside the insertion are one
+  line break apart as text of the change, with no split on each: a row that ends in a marker is not a
+  delimiter row, and the file with the move pending would read the table as a paragraph. The same
+  holds for any text written with Track Changes on that holds the rows of a table, typed, pasted or
+  moved, whether the table is a block of its own or in a list item or a quote. At the top of the
+  file the opener of the insertion stands alone on the line before the table, as §3.3 has it, and
+  the closer alone after it. Judged by micromark (`block-move-table.test.ts`, with a paragraph's
+  move beside it for the count of decisions refused, and `block-move-table-bo.test.ts`, which passes
+  another person's insertion, deletion, substitution, comment and split): every order of accept and
+  reject reads alike, rejecting Ada's move gives the body back byte for byte, and accepting it
+  leaves the other person's marks as they were. A table has no limit on how many blocks it passes.
+  Where no fine form reads alike, a table is never widened across another person's pending changes,
+  since a replacement that holds them in its old text would turn them into plain text when it is
+  accepted: the person is asked first and the move is made untracked (§3.13), as for any edit no unit
+  can hold. (A format change of another person's in a block the move passes, or in the table, is
+  such a case.)
 - **Pending changes in the blocks.** Where the blocks a move takes out hold a pending change (an
   insertion, deletion, replacement, split or format change, whoever made it), the move is written as
   the widened replacement at once: the fine write would put the deletions among the markers of
@@ -4526,8 +4631,26 @@ A file changes only when its content does.
   of it is a deletion, and text typed next to it stands outside it). A div typed with Track Changes
   on, from its opening fence to the end of the typed text, is one insertion with no `split`
   marker inside; its closer stands alone on the line after the closing fence, as after a code
-  fence (§3.3). This holds at the top level of the file; in a quote or a list item the typed
-  fence lines keep the old form (not built).
+  fence (§3.3). This holds at the top level of the file, at the start of a paragraph too (where the
+  typed text ends with its blank line and text follows: the breaks typed after the last text stay
+  behind the closer, as after a code fence, #1169), and in a quote (also one in a list item or in
+  another quote), the closer standing alone on the line after the closing fence behind the quote's
+  prefix (`> :::` then `> <!--/k3x9-->`), as in a fenced code block (#1234). In a list item the closer alone on a line inside a tight
+  item is an HTML block after the item's text, which renders a line break that the newest view does not
+  have, so the closer is written where it reads alike (#1234). A div typed after a blank line (a
+  further paragraph of the item, which makes it loose in every state) is one insertion that takes all
+  the typed text before the fence with it, with no `split`, so that no state has the div glued to the
+  text before it, and its closer stands in the item behind the item's prefix (`- one<!--ins k3x9-->⏎⏎
+  ::: {.callout-tip}⏎  A.⏎  :::⏎  <!--/k3x9-->`). Any other div (first in an item, or right under its
+  text) is one insertion whose closer stands at the prefix of the outermost list's parent, which is
+  empty at the top level and the quote's `> ` in a quote, as a quote's closer does: outside the list
+  (`- one<!--ins k3x9--><!--split m4zp-->⏎  ::: {.callout-tip}⏎  A.⏎  :::⏎<!--/k3x9-->`), and it reads alike
+  where nothing of the list follows the item. Where more of the list follows, the list is replaced
+  (§3.12: `<!--sub k3x9 - one⏎- two-->⏎- one⏎  :::…⏎- two<!--/k3x9-->`). Where no list holds it
+  (a line of the div that leaves the item, which has no form), the person is asked before it is made
+  without tracking, "This div can't be tracked in a list item. Make it without tracking?" (§3.13), and
+  an agent, which can't be asked, is told in words that say what to do. A div in a list in a quote
+  nested two levels deep, with more of the list after it, is not built.
 - knitr runs code it finds inside HTML comments, in payloads and in the ledger alike, so both
   escape every backtick (§2.5). This was verified with knitr 1.51.
 - No Redlines comment starts with `#`, which Jupytext's cell markers and Quarto's editing comments

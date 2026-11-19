@@ -3,7 +3,7 @@
 
 import type { Intent } from './intents.ts';
 
-export interface RealCase {
+interface RealCase {
   label: string;
   text: string;
   intent: Intent;

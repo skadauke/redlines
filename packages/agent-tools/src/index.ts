@@ -5,9 +5,11 @@ export { answerMcp } from './mcp.ts';
 export type { McpOptions } from './mcp.ts';
 export {
   DOCUMENT_LIMIT,
+  THREAD_LIMIT,
   agentPrompt,
   altTextPrompt,
   askPrompt,
+  chatPrompt,
   nodeToolsPrompt,
   quoteBlock,
   replyOnlyPrompt,

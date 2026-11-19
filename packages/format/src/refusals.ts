@@ -18,10 +18,10 @@ import type { EditErrorCode } from './errors.ts';
 
 /** What becomes of a refusal. `info` is no refusal: a notice that tells, or shows an error that
  * has its own tier. */
-export type RefusalTier = 'widen' | 'alert' | 'disable' | 'keep' | 'info';
+type RefusalTier = 'widen' | 'alert' | 'disable' | 'keep' | 'info';
 
 /** A refusal: the file, the key of its message, its tier, and why. */
-export type RefusalEntry = readonly [file: string, key: string, tier: RefusalTier, why: string];
+type RefusalEntry = readonly [file: string, key: string, tier: RefusalTier, why: string];
 
 /**
  * The error codes that stay refusals: where any write would leave the file wrong, or the
@@ -51,6 +51,18 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'DIV_FENCE',
     'widen',
     "a marker can't stand on a `:::` line (rule 9): the edit is a replacement of the paragraph or div that holds the fence (§3.12), written by the widened path (Q0)",
+  ],
+  [
+    'packages/editor/src/images.ts',
+    'NO_FOLDER',
+    'disable',
+    "a document that is not saved has no folder to link a project picture from: the sidebar's picture drag is not offered to it (no line, no drop), and a drop that comes says to save it first (#681 review)",
+  ],
+  [
+    'packages/editor/src/images.ts',
+    'NO_LINK',
+    'alert',
+    'a project picture on another drive from the document has no relative path to it: nothing is written, and the notice says why (#681 review)',
   ],
   [
     'packages/editor/src/image-crop.ts',
@@ -801,6 +813,24 @@ export const REFUSALS: readonly RefusalEntry[] = [
   ['packages/format/src/table-rules.ts', 'PENDING_PIPE', 'widen', 'inventory #117'],
   [
     'packages/format/src/track.ts',
+    'DIV_IN_ITEM',
+    'alert',
+    "a div typed in a list item that no fine write and no replacement of the list holds (a nested item with more of the list after it): the editor asks before it is made without tracking (design §3.1), and a caller that can't ask (an agent) is refused in words that say what to do (format §9.4, #1234)",
+  ],
+  [
+    'packages/format/src/inline.ts',
+    'DIV_IN_ITEM',
+    'alert',
+    'the words of the same signal (track.ts), for a caller that cannot ask',
+  ],
+  [
+    'packages/format/src/inline.ts',
+    'DIV_IN_ITEM_ASK',
+    'info',
+    'the question the editor asks about it, the alert itself (design §3.1)',
+  ],
+  [
+    'packages/format/src/track.ts',
     'A line break at the end of this text would take ',
     'widen',
     'inventory #51',
@@ -985,6 +1015,30 @@ export const REFUSALS: readonly RefusalEntry[] = [
     'inCode',
     'widen',
     'no fine form reads alike in every order: written as a replacement of its unit (format §3.12)',
+  ],
+  [
+    'plugins/agents/src/chat/index.ts',
+    'This chat’s history couldn’t be read, so the cha',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
+  ],
+  [
+    'plugins/agents/src/chat/index.ts',
+    'Copied the answer.',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
+  ],
+  [
+    'plugins/agents/src/chat/index.ts',
+    'Couldn’t copy the answer.',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
+  ],
+  [
+    'plugins/agents/src/chat/index.ts',
+    'Couldn’t keep the chat’s history.',
+    'info',
+    'a notice that tells, or shows an error that has its own tier',
   ],
   [
     'plugins/agents/src/ask/index.ts',

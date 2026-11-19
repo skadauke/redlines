@@ -59,7 +59,7 @@ function skillText(skill: SkillState, done: 'installed' | 'updated' | null): str
 }
 
 /** What `skillControls` hands to the row that draws it. */
-export interface SkillControls {
+interface SkillControls {
   /** The state line, the button and what installing said, in the order they go. */
   nodes: HTMLElement[];
   /** Looks at the skill's folder where the agent is found; says nothing of it where it isn't. */

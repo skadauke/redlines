@@ -5,7 +5,7 @@
 import { DEFAULT_HANDLES, displayName, handleOf, handleProblem } from './handles.ts';
 import { el, uniqueId } from './pane-dom.ts';
 
-export interface HandleFieldDeps {
+interface HandleFieldDeps {
   /** The handles the person gave, by agent id. */
   handles(): Readonly<Record<string, string>>;
   /** Keeps `handles` as the person's. */

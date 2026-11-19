@@ -76,7 +76,7 @@ function after(starts: readonly number[], pos: number): number {
 }
 
 /** Whether a mark's range (open to end of its last segment) touches `from`–`to`, ends included. */
-export function overlapsMarks(parsed: Parsed, from: number, to: number): boolean {
+function overlapsMarks(parsed: Parsed, from: number, to: number): boolean {
   const { starts, ends } = indexOf(parsed);
   const last = after(starts, to) - 1;
   return last >= 0 && ends[last]! >= from;

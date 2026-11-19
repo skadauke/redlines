@@ -136,7 +136,7 @@ export function drawChevron(): SVGSVGElement {
 
 /** A pending change of the alert's type: its author's color class (empty in the views without
  * colors), and what a screen reader is told of it. */
-export interface PendingCallout {
+interface PendingCallout {
   color: string;
   note: string;
 }

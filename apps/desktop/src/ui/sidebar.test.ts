@@ -268,26 +268,55 @@ describe('sidebar', () => {
     expect(button('images').getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('drags an image into a document by its path, and never opens it', async () => {
-    const { sidebar, button, openFile, allowDocument } = setUp();
+  it('drags an image into a document with the pointer, by its path, and never opens it (#1198)', async () => {
+    const over = vi.fn();
+    const drop = vi.fn();
+    const leave = vi.fn();
+    const { sidebar, button, openFile, allowDocument } = setUp(repoTree(), {
+      imageDrag: { over, drop, leave },
+    });
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
     button('images').click();
     await vi.waitFor(() => expect(button('logo.png')).toBeTruthy());
     const logo = button('logo.png');
-    expect(logo.draggable).toBe(true);
     expect(logo.title).toMatch(/drag/i);
-    const data = new DataTransfer();
-    const event = new Event('dragstart', { bubbles: true });
-    Object.defineProperty(event, 'dataTransfer', { value: data });
-    logo.dispatchEvent(event);
-    expect(data.getData('application/x-redlines-project-image')).toBe('/repo/docs/images/logo.png');
+    // No HTML drag: the app's web view delivers none to the page.
+    expect(logo.draggable).toBeFalsy();
+    const pointer = (type: string, x: number, y: number, target: EventTarget = window) =>
+      target.dispatchEvent(
+        new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 }),
+      );
+    // A press that moves a pixel is no drag.
+    pointer('pointerdown', 10, 10, logo);
+    pointer('pointermove', 11, 10);
+    expect(over).not.toHaveBeenCalled();
+    expect(document.querySelector('.rl-sidebar-drag')).toBeNull();
+    pointer('pointerup', 11, 10);
+    expect(drop).not.toHaveBeenCalled();
+    // A drag shows a label, tells the document where it is, and drops there.
+    pointer('pointerdown', 10, 10, logo);
+    pointer('pointermove', 60, 40);
+    expect(document.querySelector('.rl-sidebar-drag')?.textContent).toBe('logo.png');
+    expect(over).toHaveBeenLastCalledWith({ x: 60, y: 40 });
+    pointer('pointerup', 300, 200);
+    expect(drop).toHaveBeenCalledWith({ x: 300, y: 200 }, '/repo/docs/images/logo.png');
+    expect(document.querySelector('.rl-sidebar-drag')).toBeNull();
+    // Escape gives a drag up.
+    pointer('pointerdown', 10, 10, logo);
+    pointer('pointermove', 60, 40);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(leave).toHaveBeenCalled();
+    pointer('pointerup', 300, 200);
+    expect(drop).toHaveBeenCalledTimes(1);
     logo.click();
     expect(allowDocument).not.toHaveBeenCalled();
     expect(openFile).not.toHaveBeenCalled();
     // A document is no drag.
-    expect(button('design.md').draggable).toBeFalsy();
+    pointer('pointerdown', 10, 10, button('design.md'));
+    pointer('pointermove', 60, 40);
+    expect(document.querySelector('.rl-sidebar-drag')).toBeNull();
   });
 
   it('opens Markdown here and a new window with ⌘-click', async () => {
@@ -442,5 +471,80 @@ describe('sidebar', () => {
     sidebar.setDocument(null);
     await sidebar.refresh();
     expect(rows()).toEqual(['Save the document to see its folder here.']);
+  });
+});
+
+describe('the sidebar’s chat view and foot (#1194)', () => {
+  const withChat = (more: Partial<SidebarOptions> = {}) => {
+    const chat = document.createElement('section');
+    const made = setUp(repoTree(), { chat, ...more });
+    const tab = (name: string) =>
+      [...made.container.querySelectorAll<HTMLElement>('[role=tab]')].find(
+        (found) => found.textContent === name,
+      )!;
+    return { ...made, chat, tab };
+  };
+
+  it('has only the file list without a chat panel, and no foot', () => {
+    const { container } = setUp();
+    expect(container.querySelector('[role=tablist]')).toBeNull();
+    expect(container.querySelector('.rl-sidebar-foot')).toBeNull();
+  });
+
+  it('switches between the files and the chat, and says which tab is selected', () => {
+    const onView = vi.fn();
+    const { chat, tab, sidebar, container } = withChat({ onView });
+    const files = container.querySelector<HTMLElement>('.rl-sidebar-list')!;
+    expect(sidebar.view).toBe('files');
+    expect(chat.hidden).toBe(true);
+    expect(tab('Files').getAttribute('aria-selected')).toBe('true');
+    tab('Chat').click();
+    expect(sidebar.view).toBe('chat');
+    expect(chat.hidden).toBe(false);
+    expect(files.hidden).toBe(true);
+    expect(tab('Chat').getAttribute('aria-selected')).toBe('true');
+    expect(onView).toHaveBeenLastCalledWith('chat');
+    sidebar.setView('files');
+    expect(chat.hidden).toBe(true);
+    expect(files.hidden).toBe(false);
+  });
+
+  it('names each panel the tab shows, and each tab its panel', () => {
+    const { chat, tab, container } = withChat();
+    const files = container.querySelector<HTMLElement>('.rl-sidebar-list')!;
+    for (const [name, panel] of [
+      ['Files', files],
+      ['Chat', chat],
+    ] as const) {
+      expect(panel.getAttribute('role')).toBe('tabpanel');
+      expect(tab(name).getAttribute('aria-controls')).toBe(panel.id);
+      expect(panel.getAttribute('aria-labelledby')).toBe(tab(name).id);
+    }
+  });
+
+  it('moves between the tabs with the arrow keys', () => {
+    const { tab, sidebar } = withChat();
+    tab('Files').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(sidebar.view).toBe('chat');
+    tab('Chat').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(sidebar.view).toBe('files');
+  });
+
+  it('has a foot with the person’s name, Preferences and the problem report', () => {
+    const settings = vi.fn();
+    const report = vi.fn();
+    let name = 'Ada Lovelace';
+    const { container, sidebar } = withChat({ foot: { name: () => name, settings, report } });
+    const foot = container.querySelector<HTMLElement>('.rl-sidebar-foot')!;
+    expect(foot.textContent).toContain('Ada Lovelace');
+    expect(foot.querySelector('.rl-sidebar-foot-initial')?.textContent).toBe('A');
+    foot.querySelector<HTMLElement>('.rl-sidebar-foot-name')!.click();
+    foot.querySelector<HTMLElement>('[aria-label="Preferences"]')!.click();
+    expect(settings).toHaveBeenCalledTimes(2);
+    foot.querySelector<HTMLElement>('[aria-label="Report a problem"]')!.click();
+    expect(report).toHaveBeenCalledOnce();
+    name = 'Grace Hopper';
+    sidebar.refreshFoot();
+    expect(foot.textContent).toContain('Grace Hopper');
   });
 });

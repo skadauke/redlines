@@ -6,10 +6,10 @@
 
 import { icon, type IconName } from './icons.ts';
 
-export const HOVER_OPEN_MS = 120;
-export const HOVER_CLOSE_MS = 200;
+const HOVER_OPEN_MS = 120;
+const HOVER_CLOSE_MS = 200;
 
-export interface MenuItem {
+interface MenuItem {
   role: 'menuitemradio' | 'menuitemcheckbox' | 'menuitem';
   label: string;
   icon: IconName;
@@ -24,9 +24,9 @@ export interface MenuItem {
   select(): void;
 }
 
-export type MenuEntry = MenuItem | 'divider';
+type MenuEntry = MenuItem | 'divider';
 
-export interface MenuOptions {
+interface MenuOptions {
   /** The menu's name, shown as its header. */
   label: string;
   /** Holds the button; the menu is added to it and placed under the button. */

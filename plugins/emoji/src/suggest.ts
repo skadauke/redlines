@@ -286,7 +286,7 @@ class Suggester {
   }
 }
 
-export const suggestTheme = EditorView.baseTheme({
+const suggestTheme = EditorView.baseTheme({
   '.rl-emoji-popover': {
     position: 'fixed',
     zIndex: '300',

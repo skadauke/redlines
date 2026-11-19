@@ -50,7 +50,7 @@ export interface DrawnPiece {
 }
 
 /** A piece of a change bar: one or more neighboring screen lines, and the authors on them. */
-export interface BarSegment {
+interface BarSegment {
   /** Where its first screen line starts, which says which segment it is. */
   from: number;
   /** Where its last screen line ends. */
@@ -183,7 +183,7 @@ export function bandsOf(
 }
 
 /** The vertical extent of a box on the page, in the viewport's coordinates. */
-export interface Extent {
+interface Extent {
   top: number;
   bottom: number;
 }
@@ -296,7 +296,7 @@ export const barMeasure = Facet.define<BarMeasure, BarMeasure>({
 });
 
 /** The bar under the pointer, drawn wider: the one whose first screen line starts at `from`. */
-export interface HotBar {
+interface HotBar {
   from: number;
 }
 

@@ -14,7 +14,7 @@ export interface Span {
 }
 
 /** A row to build again, and the places of what was built for it, after the change. */
-export interface DirtyRow {
+interface DirtyRow {
   row: Row;
   clear: Span;
 }
@@ -48,8 +48,7 @@ function sameShape(old: Table, table: Table): boolean {
 }
 
 /** The end of what a row draws: a header's is its delimiter row's. */
-export const rowEnd = (table: Table, row: Row): number =>
-  row.header ? table.delimiter.to : row.to;
+const rowEnd = (table: Table, row: Row): number => (row.header ? table.delimiter.to : row.to);
 
 const memo = new WeakMap<Transaction, Dirty | null>();
 

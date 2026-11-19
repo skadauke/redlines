@@ -7,7 +7,7 @@
 // `openClawCommand`) and says no, with a line to show, to what it won't run.
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
-import { renderGuided, type GuidedDeps, type GuidedOptions } from './openclaw/guided.ts';
+import { renderGuided, type GuidedDeps } from './openclaw/guided.ts';
 import { button, el, reasonOf, row, textField } from './pane-dom.ts';
 import { skillControls, type PaneSkill } from './skill-controls.ts';
 
@@ -47,8 +47,6 @@ export interface OpenClawDeps {
    * as a node (openclaw/sheet.ts). Without it, only the `openclaw` command's form is offered.
    */
   guided?: GuidedDeps;
-  /** For screenshots and tests: the screen the guided sheet opens at, with what it knows. */
-  guidedStart?: GuidedOptions['start'];
 }
 
 /** Whether a Gateway's address is on this Mac: its host is the machine's own. */
@@ -137,7 +135,10 @@ export function renderOpenClaw(
       'on this Mac. Write @ and the name in a comment: the document and that comment thread go to ' +
       'the Gateway, wherever it runs, and the agent’s last message is posted as a reply. It can’t ' +
       'change the document. Redlines passes the token file’s path to openclaw and never reads ' +
-      'the file.',
+      'the file. To make the token file, run openclaw gateway auth-token --show in a terminal on ' +
+      'the Gateway’s computer, and save what it prints in a file only you can read. A Gateway ' +
+      'elsewhere may first ask its owner to approve the openclaw command as a device ' +
+      '(openclaw devices list, then openclaw devices approve).',
   );
 
   // The skill is for an OpenClaw on this Mac: it is looked at only where an agent's Gateway is here.
@@ -290,14 +291,7 @@ export function renderOpenClaw(
 
   adding.append(...closed());
   control.append(
-    ...(deps.guided
-      ? [
-          renderGuided(deps.guided, {
-            alive,
-            ...(deps.guidedStart ? { start: deps.guidedStart } : {}),
-          }),
-        ]
-      : []),
+    ...(deps.guided ? [renderGuided(deps.guided, { alive })] : []),
     items,
     adding,
     problem,

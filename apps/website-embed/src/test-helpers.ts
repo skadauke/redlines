@@ -5,7 +5,7 @@ import { afterEach, vi } from 'vitest';
 import type { DemoHandle, DemoName, DemoState } from './api.ts';
 import { mountDemo } from './demo.ts';
 
-export interface Mounted {
+interface Mounted {
   handle: DemoHandle;
   root: HTMLElement;
   view: EditorView;
@@ -82,7 +82,7 @@ export function click(el: HTMLElement): void {
 }
 
 /** The open comment box's field. */
-export function field(root: HTMLElement): HTMLTextAreaElement | null {
+function field(root: HTMLElement): HTMLTextAreaElement | null {
   return root.querySelector<HTMLTextAreaElement>('textarea');
 }
 

@@ -29,8 +29,17 @@
 
 use serde_json::{Value, json};
 
-/// The protocol version this was written against, and the only one it offers.
-pub const PROTOCOL: u64 = 3;
+/// The protocol a node offers first: OpenClaw's current one (`PROTOCOL_VERSION = 4`,
+/// `packages/gateway-protocol/src/version.ts`). A Gateway logs `legacy node protocol accepted ...
+/// upgrade recommended` for a node that offers 3, and a later one may stop accepting it.
+pub const PROTOCOL: u64 = 4;
+
+/// The lowest protocol a Gateway takes from a node (`MIN_NODE_PROTOCOL_VERSION = 3`), which a node
+/// offers when the Gateway answers a `connect` of [`PROTOCOL`] with a protocol mismatch that
+/// expects 3, as OpenClaw's own node host does (`resolveConnectRequestFailure` in
+/// `packages/gateway-client/src/client.ts`: it retries when `details.expectedProtocol` is the
+/// other protocol and the error is `PROTOCOL_MISMATCH` or says "protocol mismatch").
+pub const NODE_FALLBACK_PROTOCOL: u64 = 3;
 
 /// The one command this node declares, and so the only one a Gateway may send it. Never
 /// `system.run` or anything that runs a program.
@@ -58,6 +67,15 @@ pub const OPERATOR_MODE: &str = "backend";
 /// The protocol an operator speaks. A live Gateway refuses an operator that offers the node's 3
 /// ("protocol mismatch", expected 4), though it takes a node's 3.
 pub const OPERATOR_PROTOCOL: u64 = 4;
+
+/// The device family this Mac claims in both of its connections. A Gateway pins the family it was
+/// told when a device was approved and compares every later connect with it
+/// (`resolvePinnedClientMetadata`: `hasPinnedDeviceFamily && claimedDeviceFamily !==
+/// pairedDeviceFamily`), and a remote client whose claim differs gets a `metadata-upgrade`
+/// approval request, which, when approved, rotates the device's tokens. OpenClaw's own clients
+/// say `Mac` on macOS (`src/shared/gateway-client-platform.ts`), so the node and the operator of
+/// this Mac make the same claim, whichever was approved first.
+pub const DEVICE_FAMILY: &str = "Mac";
 
 /// What an operator may do here: read what a session said, and write to a session. Nothing else
 /// (no `operator.admin`, no pairing, no approvals).
@@ -239,6 +257,11 @@ pub fn parse(text: &str) -> Incoming {
 pub enum Refusal {
     /// This Mac isn't paired yet: its request waits for the Gateway's owner to approve it.
     PairingRequired { request_id: Option<String> },
+    /// This Mac is paired, and the Gateway wants its owner to approve it again: what it claims has
+    /// changed (`metadata-upgrade`) or it asks for more than was approved (`scope-upgrade`).
+    /// Approving replaces the device's tokens, and the Gateway sends the new one to no client
+    /// that is waiting, so the token Redlines holds is dead afterwards.
+    ApproveAgain { request_id: Option<String> },
     /// The setup code was used or has run out.
     CodeUsed,
     /// The token, or the device's token, isn't accepted.
@@ -254,7 +277,14 @@ pub enum Refusal {
 pub fn classify(error: &WireError, offered_setup_code: bool) -> Refusal {
     // Whole words, from the code and the message: "auth" in "too many auth attempts" is not a
     // refusal of the token.
-    let text = format!("{} {}", error.code, error.message).to_ascii_lowercase();
+    // The detail code too (`AUTH_DEVICE_TOKEN_MISMATCH`, `PAIRING_REQUIRED`): the Gateway names
+    // what was wrong there even when its message is a bare "unauthorized".
+    let detail_code = error
+        .details
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let text = format!("{} {} {}", error.code, error.message, detail_code).to_ascii_lowercase();
     let words: Vec<&str> = text
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|word| !word.is_empty())
@@ -266,12 +296,18 @@ pub fn classify(error: &WireError, offered_setup_code: bool) -> Refusal {
             .iter()
             .find_map(|key| error.details.get(key).and_then(Value::as_str))
             .map(str::to_owned);
-        return Refusal::PairingRequired { request_id };
+        // `details.reason` says why, for a device that is already paired.
+        return match error.details.get("reason").and_then(Value::as_str) {
+            Some("metadata-upgrade" | "scope-upgrade") => Refusal::ApproveAgain { request_id },
+            _ => Refusal::PairingRequired { request_id },
+        };
     }
     if has(&["protocol"]) && has(&["mismatch", "unsupported", "newer", "version", "unknown"]) {
+        // `expectedProtocol` is what the Gateway wanted instead of what was offered.
         let protocol = error
             .details
-            .get("maxProtocol")
+            .get("expectedProtocol")
+            .or_else(|| error.details.get("maxProtocol"))
             .or_else(|| error.details.get("protocol"))
             .and_then(Value::as_u64);
         return Refusal::TooNew { protocol };
@@ -360,25 +396,31 @@ pub struct Connect<'a> {
     pub signature: &'a str,
     pub signed_at_ms: u64,
     pub nonce: &'a str,
-    /// `token` for a token (the device's, or one the person typed), `bootstrapToken` for a setup
-    /// code.
+    /// `deviceToken` for the token the Gateway gave this device, `token` for a shared one the
+    /// person typed, `bootstrapToken` for a setup code. A Gateway reads `auth.token` as the shared
+    /// Gateway token first, so a device token sent there comes back as a shared-token mismatch;
+    /// OpenClaw's own clients send a cached device token as `deviceToken` ("Cached device
+    /// credentials belong in deviceToken, even though both are signed",
+    /// `packages/gateway-client/src/connect-auth.ts`).
     pub credential_kind: &'a str,
     pub credential: &'a str,
 }
 
-pub fn connect_request(c: &Connect<'_>) -> String {
+/// The node's `connect`, offering exactly protocol `offered` ([`PROTOCOL`], or the fallback).
+pub fn connect_request(c: &Connect<'_>, offered: u64) -> String {
     json!({
         "type": "req",
         "id": c.id,
         "method": "connect",
         "params": {
-            "minProtocol": PROTOCOL,
-            "maxProtocol": PROTOCOL,
+            "minProtocol": offered,
+            "maxProtocol": offered,
             "client": {
                 "id": CLIENT_ID,
                 "displayName": c.display_name,
                 "version": c.version,
                 "platform": "macos",
+                "deviceFamily": DEVICE_FAMILY,
                 "mode": "node",
             },
             "role": "node",
@@ -414,6 +456,7 @@ pub fn operator_connect_request(c: &Connect<'_>) -> String {
                 "displayName": c.display_name,
                 "version": c.version,
                 "platform": "macos",
+                "deviceFamily": DEVICE_FAMILY,
                 "mode": OPERATOR_MODE,
             },
             "role": "operator",
@@ -633,20 +676,30 @@ mod tests {
 
     #[test]
     fn connect_declares_the_one_command_and_the_node_role() {
-        let text = connect_request(&Connect {
-            id: "1",
-            display_name: "Redlines on Ada's MacBook",
-            version: "0.2.0",
-            device_id: "dev",
-            public_key: "pk",
-            signature: "sig",
-            signed_at_ms: 5,
-            nonce: "n",
-            credential_kind: "token",
-            credential: "secret-1",
-        });
+        let text = connect_request(
+            &Connect {
+                id: "1",
+                display_name: "Redlines on Ada's MacBook",
+                version: "0.2.0",
+                device_id: "dev",
+                public_key: "pk",
+                signature: "sig",
+                signed_at_ms: 5,
+                nonce: "n",
+                credential_kind: "token",
+                credential: "secret-1",
+            },
+            PROTOCOL,
+        );
         let frame: Value = serde_json::from_str(&text).unwrap();
         let params = &frame["params"];
+        // Protocol 4, and only 4 (#1162); the fallback offers only 3.
+        assert_eq!(
+            (params["minProtocol"].clone(), params["maxProtocol"].clone()),
+            (json!(4), json!(4))
+        );
+        assert_eq!(PROTOCOL, 4);
+        assert_eq!(NODE_FALLBACK_PROTOCOL, 3);
         assert_eq!(params["role"], "node");
         assert_eq!(params["commands"], json!(["mcp.tools.call.v1"]));
         assert_eq!(params["auth"], json!({"token": "secret-1"}));
@@ -684,18 +737,21 @@ mod tests {
             signed_text("d", "node", 7, "tok", "n"),
             "v2|d|node-host|node|node||7|tok|n"
         );
-        let text = connect_request(&Connect {
-            id: "1",
-            display_name: "x",
-            version: "1",
-            device_id: "d",
-            public_key: "p",
-            signature: "s",
-            signed_at_ms: 1,
-            nonce: "n",
-            credential_kind: "token",
-            credential: "t",
-        });
+        let text = connect_request(
+            &Connect {
+                id: "1",
+                display_name: "x",
+                version: "1",
+                device_id: "d",
+                public_key: "p",
+                signature: "s",
+                signed_at_ms: 1,
+                nonce: "n",
+                credential_kind: "token",
+                credential: "t",
+            },
+            PROTOCOL,
+        );
         let frame: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(frame["params"]["client"]["id"], "node-host");
         assert_eq!(frame["params"]["client"]["mode"], "node");
@@ -792,6 +848,66 @@ mod tests {
         assert_eq!(params["scopes"], json!(["operator.read", "operator.write"]));
         assert_eq!(params["commands"], json!([]));
         assert!(!text.contains("operator.admin"));
+    }
+
+    /// #1154: the node and the operator of one device make the same claim of its family, so that a
+    /// Gateway that pinned `Mac` at the node's approval sees no change at the operator's connect.
+    #[test]
+    fn both_connections_claim_the_same_device_family() {
+        let connect = Connect {
+            id: "1",
+            display_name: "Redlines on Ada's MacBook",
+            version: "0.2.0",
+            device_id: "dev",
+            public_key: "pk",
+            signature: "sig",
+            signed_at_ms: 5,
+            nonce: "n",
+            credential_kind: "deviceToken",
+            credential: "dt",
+        };
+        for text in [
+            connect_request(&connect, PROTOCOL),
+            operator_connect_request(&connect),
+        ] {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(frame["params"]["client"]["deviceFamily"], "Mac");
+            assert_eq!(frame["params"]["client"]["platform"], "macos");
+            assert_eq!(frame["params"]["auth"], json!({"deviceToken": "dt"}));
+        }
+    }
+
+    #[test]
+    fn an_approval_asked_for_again_is_told_from_a_first_pairing_and_a_stale_token() {
+        let wire = |message: &str, details: Value| WireError {
+            code: "NOT_PAIRED".into(),
+            message: message.into(),
+            details,
+        };
+        let again = wire(
+            "pairing required: device identity changed and must be re-approved",
+            json!({"code": "PAIRING_REQUIRED", "reason": "metadata-upgrade", "requestId": "r-1"}),
+        );
+        assert_eq!(
+            classify(&again, false),
+            Refusal::ApproveAgain {
+                request_id: Some("r-1".into())
+            }
+        );
+        let first = wire(
+            "pairing required: device is not approved yet",
+            json!({"code": "PAIRING_REQUIRED", "reason": "not-paired"}),
+        );
+        assert_eq!(
+            classify(&first, false),
+            Refusal::PairingRequired { request_id: None }
+        );
+        let stale = WireError {
+            code: "INVALID_REQUEST".into(),
+            message: "unauthorized".into(),
+            details: json!({"code": "AUTH_DEVICE_TOKEN_MISMATCH"}),
+        };
+        assert_eq!(classify(&stale, false), Refusal::BadToken);
     }
 
     #[test]

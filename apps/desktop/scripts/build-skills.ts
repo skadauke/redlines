@@ -32,9 +32,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** The agent a copy is for, by how it names itself. */
-export type Kind = 'claude' | 'generic';
+type Kind = 'claude' | 'generic';
 
-export interface Copy {
+interface Copy {
   /** Where the copy goes, below the repository's root. */
   path: string;
   kind: Kind;
@@ -42,7 +42,7 @@ export interface Copy {
   text: string;
 }
 
-export interface Version {
+interface Version {
   version: number;
   /** The hash of every copy's text, so that a change of the text can't go without a new version. */
   hash: string;
@@ -177,7 +177,7 @@ export function pluginManifest(version: number): string {
 }
 
 /** The files as they should be, by path, for a version. */
-export function filesFor(copies: readonly Copy[], version: Version): Map<string, string> {
+function filesFor(copies: readonly Copy[], version: Version): Map<string, string> {
   const files = new Map(copies.map((copy) => [copy.path, withVersion(copy, version.version)]));
   files.set(PLUGIN, pluginManifest(version.version));
   files.set(VERSION, `${JSON.stringify(version, null, 2)}\n`);

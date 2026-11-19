@@ -36,7 +36,7 @@ export interface FindOptions {
   regex: boolean;
 }
 
-export interface FindState extends FindOptions {
+interface FindState extends FindOptions {
   /** Whether the find bar is open: while it is closed, nothing is found or drawn. */
   open: boolean;
   /** Whether the bar shows the replace row. */
@@ -108,7 +108,7 @@ function trackedRanges(doc: string): { from: number; to: number }[] {
   );
 }
 
-export interface SearchOptions extends Partial<FindOptions> {
+interface SearchOptions extends Partial<FindOptions> {
   /** Only matches inside this range of the document. */
   scope?: { from: number; to: number } | null;
   /** Leave out matches that touch text in a tracked change. */
@@ -147,12 +147,6 @@ export function searchDoc(
   }
   return { matches, invalid: false };
 }
-
-/** The matches of `query` in the text a reader sees, without regard to case, in document order. */
-export function findMatches(doc: string, query: string): Match[] {
-  return searchDoc(doc, query).matches;
-}
-
 /**
  * The replacement for a match. With a regular expression it reads `$&`, `$$`, `$1` to `$99` and
  * `$<name>` as JavaScript's replace does: a group that took no part is empty, and a number with no
@@ -276,11 +270,7 @@ export const findField = StateField.define<FindState>({
 export const findState = (state: EditorState): FindState => state.field(findField);
 
 /** The next match from the selection (`dir` 1), or the previous (-1), round to the other end. */
-export function neighbor(
-  state: EditorState,
-  matches: readonly Match[],
-  dir: 1 | -1,
-): Match | undefined {
+function neighbor(state: EditorState, matches: readonly Match[], dir: 1 | -1): Match | undefined {
   const { from, to, empty } = state.selection.main;
   if (dir > 0) {
     const after = empty ? from : to;
@@ -290,7 +280,7 @@ export function neighbor(
 }
 
 /** Selects a match and scrolls it into view. */
-export function select(view: EditorView, match: Match): void {
+function select(view: EditorView, match: Match): void {
   for (const handler of view.state.facet(currentMatchHandlers)) handler(match);
   view.dispatch({
     selection: EditorSelection.range(match.from, match.to),
@@ -327,7 +317,7 @@ export function selectedText(state: EditorState): string {
 }
 
 /** A selection this long (in characters a reader sees) limits Find to itself. */
-export const SCOPE_LENGTH = 80;
+const SCOPE_LENGTH = 80;
 
 /**
  * What a selection means for Find. A selection limits Find to itself (`scope`) when it is more than

@@ -238,7 +238,7 @@ export function itemsAround(state: EditorState, block: Block): Item[] {
 
 /** The marker of a new item after `item`: its bullet, or the next number (or the same, in a list
  * numbered alike throughout, as `1.` all the way down). */
-export function nextMarker(state: EditorState, item: Item): string {
+function nextMarker(state: EditorState, item: Item): string {
   const number = /^(\d+)([.)])$/.exec(item.marker);
   if (!number) return item.marker;
   const numbers = listItems(state, item.node.parent).map((other) => {
@@ -626,11 +626,25 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
     // would stand on the blank line, with Track Changes on the key says so.
     const above = item.node.prevSibling ? null : lineAbove(state, item.line);
     const under = above && !BLANK.test(above.text) && itemDepth(state, above) < items.length;
-    if (under && tracking && items.length > 1 && HARD_BREAK_END.test(above.text)) {
+    // Where the blank line and the new item are one insertion: in the text of an item, and for a
+    // bullet `-`, whose empty item reads as the text's underline once the blank line above it is
+    // rejected and the item is not (#443). A bullet of `+` or `*` and a number read as text then,
+    // which the two insertions below keep.
+    // Only under a line of text the format can put a split after: not under front matter, a code
+    // fence, a setext underline, a rule or a link reference definition, which keep the old form.
+    const aboveBlock = above ? blockAt(state, above.from) : null;
+    const textAbove =
+      !!above &&
+      !!aboveBlock &&
+      ['paragraph', 'heading', 'table'].includes(aboveBlock.kind) &&
+      !/^[ \t>]*(?:=+|-+|\*{3,}|_{3,})[ \t]*$/.test(above.text) &&
+      !/^[ \t>]*\[[^\]]+\]:/.test(above.text);
+    const joinedBreak = items.length > 1 || (item.marker === '-' && textAbove);
+    if (under && tracking && joinedBreak && HARD_BREAK_END.test(above.text)) {
       // A hard break above: the break typed after its backslash would put a marker right behind it.
       return refuse(NEEDS_BLANK_AFTER_HARD_BREAK);
     }
-    if (under && tracking && items.length > 1) {
+    if (under && tracking && joinedBreak) {
       // In the text of an item the blank line is one insertion with the new item's line, at the end
       // of the line above: the format writes it as a split whose break is the blank line and the
       // item, which reads alike in every order (a blank line of its own, with the closer of an

@@ -29,7 +29,7 @@ export const PANES: readonly { id: PaneId; label: string }[] = [
 ];
 
 /** A group of rows under a small heading: what the filter names beside each result. */
-export interface Section {
+interface Section {
   title: string;
   rows: HTMLElement[];
 }
@@ -712,7 +712,7 @@ function editing(deps: PaneDeps): Section[] {
         row(
           'Show the toolbar at the bottom',
           toggle(current.toolbarAtBottom, (value) => update({ toolbarAtBottom: value })),
-          line('Otherwise the wrench in the title bar, ⇧⌘P and a right-click show it.'),
+          line('Otherwise ⇧⌘P and a right-click show it.'),
         ),
       ],
     },

@@ -23,9 +23,9 @@ const ICONS = {
   /** Review while your edits are tracked: a pen over a line, drawn a little heavier. */
   tracking:
     '<path d="M10.3 2.2l2.3 2.3-6.4 6.4-2.9.6.6-2.9z" stroke-width="1.4"/><path d="M2.5 14h11" stroke-width="1.4"/>',
-  /** The toolbar: a wrench, drawn on a 24 grid and scaled to this one. */
-  wrench:
-    '<path transform="scale(.6667)" stroke-width="1.95" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  /** The outline: headings at two depths, as the outline's own lines are. */
+  outline:
+    '<path d="M2.5 4h6M5 8h8.5M5 12h6.5"/><path d="M2.5 8h.01M2.5 12h.01" stroke-width="2"/>',
   /** The Clean view: a page of text. */
   clean:
     '<rect x="3.5" y="2" width="9" height="12" rx="1.6"/><path d="M6 5.5h4M6 8h4M6 10.5h2.5"/>',
@@ -52,6 +52,8 @@ const ICONS = {
   /** Preferences, Shortcuts: a keyboard. */
   shortcuts:
     '<rect x="1.8" y="4" width="12.4" height="8" rx="1.6"/><path d="M4.4 6.8h.01M6.8 6.8h.01M9.2 6.8h.01M11.6 6.8h.01M5 9.4h6" stroke-width="1.5"/>',
+  /** Report a problem: a bug. */
+  bug: '<path d="M5.6 6.4a2.4 2.4 0 0 1 4.8 0v2.6a2.4 2.4 0 0 1-4.8 0z"/><path d="M8 6.2v5.6M3 8.2h2.6M10.4 8.2H13M4.2 4.6l1.7 1.4M11.8 4.6L10.1 6M4.2 12l1.7-1.4M11.8 12l-1.7-1.4M6.6 3.4L8 4.2l1.4-.8"/>',
   /** Close or dismiss. */
   close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   /** A folder's disclosure arrow, pointing right while closed. */

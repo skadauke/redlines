@@ -7,10 +7,10 @@ import { parse } from './parse.ts';
 import { unitsOf } from './widen-units.ts';
 import type { Unit } from './widen-units.ts';
 
-export type WidenScope = 'cell' | 'code' | 'list' | 'block';
+type WidenScope = 'cell' | 'code' | 'list' | 'block';
 
 /** The places whose format changes are widened when no fine form writes them. */
-export const WIDEN_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>([
+const WIDEN_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>([
   'cell',
   'code',
   'list',
@@ -19,14 +19,10 @@ export const WIDEN_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>([
 
 /** The places whose typed, pasted and key edits are widened. The table's own edits go through its
  * operations (`table-widen.ts`), and a cell's typing keeps the rules of the table. */
-export const WIDEN_EDIT_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>([
-  'code',
-  'list',
-  'block',
-]);
+const WIDEN_EDIT_SCOPES: ReadonlySet<WidenScope> = new Set<WidenScope>(['code', 'list', 'block']);
 
 /** Where the source range `[from, to]` is: by the innermost unit that holds it. */
-export function scopeOfUnits(units: readonly Unit[], from: number, to: number): WidenScope {
+function scopeOfUnits(units: readonly Unit[], from: number, to: number): WidenScope {
   let level: readonly Unit[] = units;
   let scope: WidenScope = 'block';
   for (;;) {

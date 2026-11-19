@@ -70,10 +70,13 @@ ARCHS = ["arm64", "x86_64"]
 
 # The types of the files that the extensions handle. Markdown has two on macOS 27: the one macOS
 # exports, which `.md` files have and Redlines imports for a macOS that doesn't know it, and the one
-# that other apps declare (document-types.plist claims both). R Markdown and Quarto have none: macOS
-# gives their files a dynamic type, made from the extension.
+# that other apps declare (document-types.plist claims both). Quarto has one of Redlines' own: the
+# app exports it for `.qmd` (document-types.plist, UTExportedTypeDeclarations), so that a `.qmd` file
+# is previewed here and opened by Redlines. R Markdown has none: macOS gives its files a dynamic type,
+# made from the extension.
 MARKDOWN_TYPES = ["net.daringfireball.markdown", "public.markdown"]
-EXTENSIONS_WITH_NO_TYPE = ["qmd", "rmd"]
+QUARTO_TYPE = "md.redlines.quarto"
+EXTENSIONS_WITH_NO_TYPE = ["rmd"]
 
 # The theme's fonts that the thumbnails are drawn in (Carlito for the text, Cousine for code, design
 # §6.6), as the files of @fontsource that the preview inlines in its page.
@@ -158,7 +161,7 @@ EXTENSIONS = [PREVIEW, THUMBNAIL]
 
 def quick_look_types() -> List[str]:
     """The types that both extensions list: what macOS asks each extension for."""
-    return MARKDOWN_TYPES + [dynamic_type(extension) for extension in EXTENSIONS_WITH_NO_TYPE]
+    return MARKDOWN_TYPES + [QUARTO_TYPE] + [dynamic_type(extension) for extension in EXTENSIONS_WITH_NO_TYPE]
 
 
 def fail(message: str) -> NoReturn:
@@ -477,7 +480,12 @@ def fixture_checks(checks: Checks) -> None:
     lacks(page, "redlines.md", "March", "The old exporter", "k3x9", "Who signs off", "<!--")
 
     page = render(FIXTURES / "frontmatter.qmd")
-    has(page, "frontmatter.qmd", '<pre class="rl-frontmatter">---', "title: &quot;Penguin bills&quot;", 'data-chunk="r setup, include=FALSE"', 'data-chunk="python"', "#| label: fig-bills")
+    has(page, "frontmatter.qmd", '<pre class="rl-frontmatter">---', "title: &quot;Penguin bills&quot;", 'data-chunk="r setup, include=FALSE"', 'data-chunk="python"', "#| label: fig-bills", '<span class="rl-xref">Figure 1</span>')
+    # Math (#1216): Temml runs in JavaScriptCore with no DOM, and the formulas come out as MathML.
+    page = render(FIXTURES / "math.qmd")
+    has(page, "math.qmd", '<span class="rl-math">', 'class="rl-math rl-math-display"', "<msup>", "<mfrac>", '<span class="rl-math-number">(1)</span>', '<span class="rl-xref">Equation 1</span>', "It costs $5 and $6 here")
+    lacks(page, "math.qmd", "$$", "{#eq-", "RLMATHQX", "<script")
+
     page = render(FIXTURES / "analysis.Rmd")
     has(page, "analysis.Rmd", 'data-chunk="r, echo=FALSE, message=FALSE"', "<h1>Summary</h1>")
 

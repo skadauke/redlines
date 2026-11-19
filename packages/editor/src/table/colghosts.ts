@@ -17,7 +17,7 @@ import { cellShows } from './widths.ts';
 import { type Table, tablesField } from './model.ts';
 
 /** A deleted column of a table, as it is drawn. */
-export interface ColGhost {
+interface ColGhost {
   /** The deletion's id. */
   id: string;
   /** The card that decides it: its own, or the moved column's, for the old place of a move. */
@@ -37,7 +37,7 @@ export interface ColGhost {
 const POSITION = /^col=(\d+) ?/;
 
 /** The deleted columns of the tables of a state, in the order of their lines. */
-export function colGhostsOf(state: EditorState): ColGhost[] {
+function colGhostsOf(state: EditorState): ColGhost[] {
   const parsed = state.field(parsedField);
   const marks = parsed.marks.filter(isColDeletion);
   if (marks.length === 0) return [];
@@ -94,7 +94,7 @@ export function insertedColumnClass(added: InsertedColumn): string {
 }
 
 /** The columns changed in each table, and the stretches of text they stand for. */
-export interface ColGhosts {
+interface ColGhosts {
   byTable: ReadonlyMap<number, readonly ColGhost[]>;
   inserted: ReadonlyMap<number, readonly InsertedColumn[]>;
   spans: readonly { from: number; to: number }[];

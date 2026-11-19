@@ -35,12 +35,12 @@ export const PAUSE_MS = 1500;
 export const AT_LEAST_EVERY_MS = 5000;
 
 /** What the window shows of its document, as recovery needs it. */
-export interface RecoveryDocument {
+interface RecoveryDocument {
   path: string | null;
   dirty: boolean;
 }
 
-export interface RecoveryOptions {
+interface RecoveryOptions {
   link: RecoveryLink;
   /** The window's label, which names a document that was never saved. */
   label: string;

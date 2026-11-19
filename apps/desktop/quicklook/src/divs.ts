@@ -76,7 +76,7 @@ function commentOpensIn(text: string): boolean {
 }
 
 /** The text with its fences marked as blocks, and what turns the HTML of that text into the page's. */
-export interface MarkedDivs {
+interface MarkedDivs {
   text: string;
   /** `html`, drawn from `text`, with each mark replaced by its box. */
   finish(html: string): string;

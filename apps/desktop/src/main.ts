@@ -13,6 +13,7 @@ import {
   createAltDescriber,
   createAltText,
   createAsk,
+  createChat,
   createLiveLines,
   createMacAgents,
   createRuns,
@@ -22,7 +23,10 @@ import {
 import { codeFileHighlight, codeLanguagesFor } from '@redlines/code';
 import {
   createEditor,
+  dropProjectImage,
   editorDocumentHtml,
+  leaveProjectImage,
+  overProjectImage,
   PLAIN_ONLY_TRACKING,
   type Author,
   type CropRect,
@@ -78,7 +82,8 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
-import { requestPane } from './preferences/pane-request.ts';
+import { requestPane, type RequestedPane } from './preferences/pane-request.ts';
+import { menuPaletteCommands } from './menu-palette.ts';
 import { fillPrintPage, plainPageHtml, printPage } from './print.ts';
 import { exportToWord } from './word-export.ts';
 import { openWord } from './word-import.ts';
@@ -103,12 +108,19 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createDevLog, tauriDevLogLink } from './dev-log.ts';
+import { runTour } from './onboarding.ts';
+import { requestWelcome, watchWelcomeResult, type WelcomeResult } from './welcome-request.ts';
+import { noteStarted, shouldOnboard } from './onboarding-state.ts';
+import sampleDocument from './sample.md?raw';
+import { askDevNote } from './ui/dev-note.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
 import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { tooBroadNotice } from './project-notice.ts';
 import { createRecovery, tauriRecoveryLink, type Recovery } from './recovery.ts';
 import { simulateFailure, tauriCrashLink, watchCrashes, type CrashWatch } from './crash.ts';
+import { browserChatStore, tauriChatStore } from './chat-store.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { installTitleHints } from './ui/title-hints.ts';
 import { createTitleBar, TOOLTIP_MS } from './ui/titlebar.ts';
@@ -137,6 +149,18 @@ import './ui/title-hints.css';
 const isTauri = '__TAURI_INTERNALS__' in window;
 const host = createHost();
 
+/** Opens a web address in the default browser, which only the app can run (a tab opens its own). */
+function openAddress(address: string): void {
+  if (!isTauri) {
+    window.open(address, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  invoke('open_link', { url: address }).catch((error: unknown) => {
+    console.error('Could not open the link', error);
+    notice.flash('Couldn’t open the link.');
+  });
+}
+
 function element(selector: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(selector);
   if (!found) throw new Error(`index.html has no ${selector}`);
@@ -146,6 +170,9 @@ function element(selector: string): HTMLElement {
 // The theme first, so the window never shows unstyled, and the window itself in its appearance;
 // both follow every window's changes to them, and the system's (window-theme.ts).
 let settings = loadSettings();
+// Whether this launch is the first, which shows the onboarding (onboarding.ts). Worked out before
+// anything can save a setting, which would make the app look as if it had been used before.
+const firstLaunch = shouldOnboard(localStorage);
 const windowTheme = followTheme(document.documentElement, settings, {
   ...(isTauri ? { setAppearance } : {}),
 });
@@ -176,6 +203,17 @@ const app = element('.rl-app');
 const main = element('.rl-main');
 const scroller = element('.rl-scroller');
 const notice = createNotice(main);
+// The dev log, in a build that isn't a release (dev-log.ts, #1205): what the person is told, and
+// what the editor refuses, is kept in it, and so are errors and agent runs below.
+const devLog = await createDevLog(isTauri ? tauriDevLogLink() : null);
+if (devLog.enabled) {
+  const flash = notice.flash.bind(notice);
+  notice.flash = (text) => {
+    devLog.log('alert', text);
+    flash(text);
+  };
+  devLog.watchKeys(document);
+}
 const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
@@ -227,7 +265,9 @@ function sessionStatus(): string | undefined {
   if (!session) return undefined;
   if (sessionState === 'offline') return 'Offline: your edits are kept';
   if (sessionState === 'ended') return 'No longer in the session';
-  return sessionPeers > 0 ? `In ${sessionPeers + 1} windows` : undefined;
+  // Which window this is, as Word numbers the windows of one document ("Window 2").
+  if (sessionPeers === 0) return undefined;
+  return session.number === null ? `In ${sessionPeers + 1} windows` : `Window ${session.number}`;
 }
 
 /** Joins the session of the document at `path`, as its leader when there is none yet. */
@@ -252,6 +292,11 @@ async function beginSession(path: string, follow = false): Promise<void> {
     onPeers: (peers) => {
       sessionPeers = peers.length;
       render();
+    },
+    tracking: () => editor.getUiState().tracking,
+    onTracking: (on) => {
+      if (editor.getUiState().kind === 'plain-only' || on === editor.getUiState().tracking) return;
+      setTrackingHere(on);
     },
     notice: (message) => notice.flash(message),
   });
@@ -296,6 +341,22 @@ const openInNewWindow = (path?: string, line?: number) =>
  * has allowed the page to load from it (`showImages`). Null until then, and in a browser tab.
  */
 let imageFolder: string | null = null;
+/** Settles when the project of the open document is found (`showImages`): what reads beside it waits. */
+let projectKnown: Promise<void> = Promise.resolve();
+let projectPending = false;
+let projectFound: () => void = () => {};
+
+/** From the moment a document starts loading until its project is found, what reads beside it waits. */
+function awaitProject(): void {
+  if (projectPending) return;
+  projectPending = true;
+  projectKnown = new Promise<void>((resolve) => {
+    projectFound = () => {
+      projectPending = false;
+      resolve();
+    };
+  });
+}
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
@@ -423,7 +484,10 @@ const untrackedAnswers = createUntrackedAnswers();
 const editor = createEditor(element('#editor'), {
   doc: '',
   commandKeys: shortcutBook.commandKeys,
-  onError: (error) => crashes?.caught(error),
+  onError: (error) => {
+    devLog.log('error', error instanceof Error ? error.message : String(error));
+    crashes?.caught(error);
+  },
   author,
   // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
   askUntracked: createUntrackedSheet({
@@ -451,16 +515,7 @@ const editor = createEditor(element('#editor'), {
   }),
   // ⌘-click on a link opens its address (http, https or mailto: the editor lets no other through)
   // in the default browser or mail app, which only the app can run; a browser tab opens it itself.
-  openLink: (address) => {
-    if (!isTauri) {
-      window.open(address, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    invoke('open_link', { url: address }).catch((error: unknown) => {
-      console.error('Could not open the link', error);
-      notice.flash('Couldn’t open the link.');
-    });
-  },
+  openLink: (address) => openAddress(address),
   resolveImage: (src) => {
     const path = imageDocument;
     if (!path || imageFolder === null) return null;
@@ -478,14 +533,24 @@ const editor = createEditor(element('#editor'), {
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
     return file === null ? null : imageSizes.of(file);
   },
+  // The formatter of citations is loaded only when a document names a bibliography.
+  citations: () => import('@redlines/citations'),
+  // Math is drawn as MathML by Temml, loaded when a document has a formula.
+  math: () => import('temml').then((module) => module.default),
   // An include of a Quarto document (`{{< include _part.qmd >}}`) is read and opened as a file of
   // its own, as a local image is found: relative to the document, and only inside its project (a
   // browser tab's one folder in memory has no path of its own).
   includes: {
     read: async (path) => {
+      // The project is found a moment after the document opens: an include asked for before that
+      // waits for it, and isn't "not found" for being early (#1175).
+      await projectKnown;
       const file = includedFile(path);
       if (file === null) return null;
       try {
+        // The file plugin reads only the files the person opened or saved: the app allows this one
+        // as it allows a document that the sidebar lists, if it is inside the document's project.
+        await host.allowDocument(file);
         return await host.read(file);
       } catch {
         return null;
@@ -493,8 +558,17 @@ const editor = createEditor(element('#editor'), {
     },
     open: (path) => {
       const file = includedFile(path);
-      if (file !== null) void controller.open(file);
+      if (file === null) return;
+      host
+        .allowDocument(file)
+        .then(() => controller.open(file))
+        .catch((error: unknown) => {
+          notice.flash(typeof error === 'string' ? error : 'Couldn’t open the included file.');
+        });
     },
+    // What Quarto leaves beside the document and above it (the outputs under its chunks) is read
+    // by the same path, from the document's own place.
+    documentPath: () => imageDocument,
   },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
   // tab has no such app (the development page has a stand-in, for the journeys).
@@ -519,7 +593,10 @@ const editor = createEditor(element('#editor'), {
     runsSawChange();
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
-  onNotice: (message) => notice.flash(message),
+  onNotice: (message) => {
+    devLog.log('refusal', message);
+    notice.flash(message);
+  },
   // Image files pasted into the document, or dropped on it where the page gets the drop itself (a
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
@@ -550,6 +627,7 @@ const editor = createEditor(element('#editor'), {
     : undefined,
   // An image dragged from the sidebar is the project's own file: linked by its path, not copied.
   projectImageLink: (dragged) => relativeImagePath(controller.state.path, dragged),
+  projectImageFolder: () => controller.state.path !== null,
   // An Undo or Redo with nothing to take: the Mac's beep.
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
@@ -655,6 +733,17 @@ const attachAgentPicker = (field: HTMLTextAreaElement, agentsOnly = false) => {
     // The default agent comes first in the list (#528).
     agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
     agentsOnly,
+    // For someone with no OpenClaw agent yet: a last row that opens its setup, a window of its own.
+    ...(isTauri
+      ? {
+          connectOpenClaw: () => {
+            void invoke('open_openclaw_setup').catch((error: unknown) => {
+              console.error('Could not open the OpenClaw setup', error);
+              notice.flash('Couldn’t open the OpenClaw setup.');
+            });
+          },
+        }
+      : {}),
   });
 };
 
@@ -764,20 +853,24 @@ const review = createReview(editor, {
   },
 });
 
-// The toolbar: shown only when summoned (the title bar's wrench, ⇧⌘P at the caret, a right-click at
+// The toolbar: shown only when summoned (⇧⌘P at the caret, a right-click at
 // the pointer, in place of WebKit's own menu), or at the bottom of the window by preference
 // (settings.toolbarAtBottom, below). Its items are commands of the registry, so it
 // registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
 const toolbar = createToolbar(editor, {
   container: main,
+  // A right-click on a change, a comment or a highlight, and ⇧⌘P there, stack its review card above
+  // the bar, as one widget (#1190).
+  bubbleAt: (at) => review.bubbleAt(at),
   // The palette (type with the toolbar open) searches the app's own commands and settings beside
   // the registry's; a setting is a live control in its line (toolbar-commands.ts).
   appCommands: () => toolbarCommands(),
   // Ask has no way yet to start with a question typed: its box opens for the selection.
   askAbout: () => void editor.commands.run('ask.start'),
-  // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
+  // A bar at the pointer has the place's card in itself: hovering shows no other over the page.
+  onFloating: (floating) => review.holdCards(floating),
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
   // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
@@ -799,6 +892,9 @@ const toolbar = createToolbar(editor, {
       }
     : {}),
 });
+
+// The title bar's outline button is pressed while the outline shows as a window.
+document.addEventListener('rl-outline-floating', () => render());
 
 const documentHost: Host = {
   ...host,
@@ -823,6 +919,7 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
     if (path === imageDocument) return;
     imageDocument = path;
     imageFolder = null;
+    awaitProject();
   },
   // A change on disk that is nothing but the work of this person's agents is a step to undo.
   author: () => author.handle,
@@ -832,6 +929,8 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
 
 /** The document the runs were last told of. */
 let shownGeneration = controller.generation;
+/** The document the chat was last pointed at. */
+let chatGeneration = -1;
 
 /**
  * Puts the keyboard in the document, unless it is in the editor already, as in a comment box that
@@ -876,6 +975,10 @@ function showDocument(state: DocumentState): void {
   doc = state;
   imageDocument = state.path;
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
+  if (moved || controller.generation !== chatGeneration) {
+    chatGeneration = controller.generation;
+    chat.follow(state.path, controller.generation, state.name);
+  }
   if (moved) void showInSidebar(state.path);
   if (moved) void showImages(state.path);
   // The next launch can reopen it (Preferences, General).
@@ -902,8 +1005,55 @@ function reportWindow(): void {
   if (doc) windows?.reportDocument(doc.path, doc.dirty || doc.writing || draftsPending);
 }
 
+// The document's chat (#1194): a column in the sidebar's second view, kept per document in the
+// app's own data. It runs the agents as Ask does, and reads the same things; what it needs from
+// later in this file is looked up when it is used, so that it can be made here, for the sidebar.
+const chat = createChat({
+  agents,
+  author,
+  document: {
+    path: () => controller.state.path,
+    generation: () => controller.generation,
+    read: () => editor.getDoc(),
+  },
+  projectRoot: (path) => projectOf(path),
+  settings: {
+    defaultScope: () => agentSettings.defaultScope(),
+    consent: (agent, folder) => agentSettings.consent(agent, folder),
+    setConsent: (agent, folder, answer) => agentSettings.setConsent(agent, folder, answer),
+  },
+  defaultAgent: () => loadSettings().defaultAgent ?? undefined,
+  chosenModel: (agent) => loadSettings().agentModels[agent],
+  store: isTauri ? tauriChatStore() : browserChatStore(),
+  notice: (message) => notice.flash(message),
+  showLog: () => showAgentLogs(),
+  openPreferences: () => openAgentPreferences(),
+  openLink: (address) => openAddress(address),
+});
+
+/** Whether the client point is over the document's page, beside the sidebar and under the title bar. */
+function insidePage(at: { x: number; y: number }): boolean {
+  const box = editor.view.dom.getBoundingClientRect();
+  return at.x >= box.left && at.x <= box.right && at.y >= box.top && at.y <= box.bottom;
+}
+
 const sidebar = createSidebar(app, {
   host,
+  chat: chat.el,
+  onView: (view) => {
+    if (view === 'chat') chat.focus();
+  },
+  foot: {
+    name: () => author.name,
+    settings: () => {
+      if (isTauri) void invoke('open_preferences');
+      else notice.flash('Preferences are in the app.');
+    },
+    report: () => {
+      if (crashes) void crashes.reportProblem();
+      else notice.flash('Problem reports are in the app.');
+    },
+  },
   openFile: (path, { newWindow }) => {
     if (newWindow) void openInNewWindow(path);
     else {
@@ -918,6 +1068,21 @@ const sidebar = createSidebar(app, {
   },
   isRunLive: () => runs.isLive(),
   showPlainOnly: () => settings.showPlainOnlyFiles,
+  // An image dragged out of the sidebar: over the page it shows where it goes, and letting go writes
+  // its link there (#1198). Elsewhere, such as over the sidebar itself, it goes nowhere.
+  imageDrag: {
+    over: (at) => {
+      if (insidePage(at)) overProjectImage(editor.view, at.y);
+      else leaveProjectImage(editor.view);
+    },
+    drop: (at, path) => {
+      if (insidePage(at)) {
+        dropProjectImage(editor.view, at.y, path);
+        editor.view.focus();
+      } else leaveProjectImage(editor.view);
+    },
+    leave: () => leaveProjectImage(editor.view),
+  },
   onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
   onClose: () => {
     changeSettings({ sidebarOpen: false });
@@ -936,12 +1101,20 @@ const projectOf = (path: string) => host.projectRoot(path);
  * Lets the preview load the images in the project of the document at `path`: its sidebar folder,
  * which the app allows the page to load from. The images are drawn again once that is so.
  */
-async function showImages(path: string | null): Promise<void> {
+function showImages(path: string | null): Promise<void> {
   imageFolder = null;
   imageWatch.forget();
   imageSizes.forget();
   editor.refreshImages();
-  if (path === null) return;
+  if (path === null) {
+    projectFound();
+    return Promise.resolve();
+  }
+  awaitProject();
+  return findProject(path).finally(() => projectFound());
+}
+
+async function findProject(path: string): Promise<void> {
   try {
     const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
     // Another file may have opened meanwhile.
@@ -1035,6 +1208,18 @@ const runs = createRuns({
   onEnded: () => void sidebar.refresh(),
 });
 runsSawChange = () => runs.documentChanged();
+// Each change of an agent run's line is a line of the dev log: which agent, and how it stands.
+if (devLog.enabled) {
+  runs.subscribe((thread) => {
+    const line = runs.line(thread);
+    devLog.log(
+      'agent',
+      line === null
+        ? `thread ${thread} line cleared`
+        : `thread ${thread} ${line.agentName} ${line.kind}${line.kind === 'failed' ? `: ${line.message}` : ''}`,
+    );
+  });
+}
 // Each thread's live line, drawn again in its note whenever it changes. A failure the person
 // can't see, or a question waiting where nobody sees it, in a thread scrolled away, is also told of
 // in the lower-right corner.
@@ -1092,6 +1277,9 @@ const ask = createAsk(editor, {
   defaultAgent: () => loadSettings().defaultAgent ?? undefined,
   // The model the bubble's list starts at: Preferences' choice for the agent (#530, #507).
   chosenModel: (agent) => loadSettings().agentModels[agent],
+  // Every answered Ask is a turn in the document's chat too (#1194); Open in Chat shows it there.
+  onTurn: (turn) => chat.addTurn(turn),
+  openInChat: () => openChat(),
   notice: (message) => notice.flash(message),
   // Only agents: an @ of a person means nothing in a question to an agent.
   attachToField: (field) => attachAgentPicker(field, true),
@@ -1201,8 +1389,13 @@ async function readImageForAgent(src: string): Promise<{ mimeType: string; data:
  * agent itself; it asks for the pane, and Preferences shows it.
  */
 function openAgentPreferences(): void {
+  openPreferencesPane('agents');
+}
+
+/** Opens Preferences on `pane` (the palette's lines for the panes, and the Agents pane above). */
+function openPreferencesPane(pane: RequestedPane): void {
   if (!isTauri) return notice.flash('Preferences are in the app.');
-  requestPane('agents');
+  requestPane(pane);
   invoke('open_preferences').catch((error: unknown) => {
     console.error('Could not open Preferences', error);
     notice.flash('Couldn’t open Preferences.');
@@ -1235,6 +1428,13 @@ const toggleTracking = () => {
   // A text or code file has no Track Changes: its menu item and key are disabled; this says why.
   if (editor.getUiState().kind === 'plain-only') return notice.flash(PLAIN_ONLY_TRACKING);
   const on = !editor.getUiState().tracking;
+  setTrackingHere(on);
+  // Track Changes belongs to the document: every other window of it follows.
+  void session?.shareTracking(on);
+};
+
+/** Turns Track Changes on or off in this window, and says so (design §5.4). */
+const setTrackingHere = (on: boolean) => {
   // The switch writes nothing and edits nothing: the file records it when it is saved (format §5.6).
   editor.setTracking(on);
   // The notice that a file asking for tracking opened with has done its work: the choice is made.
@@ -1280,6 +1480,15 @@ const acceptAllAndStopTracking = () => {
 const changeSettings = (change: Partial<Settings>) => {
   settings = keepWindowOwn(settings, updateSettings(change), change);
 };
+
+/** The panes of the Preferences window, by name, for the palette. */
+const PREFERENCE_PANES: readonly (readonly [RequestedPane, string])[] = [
+  ['general', 'General'],
+  ['editor', 'Editor'],
+  ['appearance', 'Appearance'],
+  ['agents', 'Agents'],
+  ['shortcuts', 'Shortcuts'],
+];
 
 /**
  * What the toolbar's palette offers besides the registry's commands: the app's own commands and
@@ -1379,6 +1588,22 @@ function toolbarCommands(): AppCommand[] {
       run: () => commands.checkForUpdates(),
       available: () => updateNotifications !== undefined,
     },
+    // Each pane of Preferences, to go to it by name (the Preferences window has its own search).
+    ...PREFERENCE_PANES.map(([pane, label]): AppCommand => ({
+      id: `app.preferences.${pane}`,
+      title: `Open ${label} Preferences`,
+      synonyms: ['settings', 'options', 'preferences', label.toLowerCase()],
+      run: () => openPreferencesPane(pane),
+    })),
+    // Every other row of the menu bar (About Redlines, New, Open, the exports, zoom, …).
+    ...menuPaletteCommands(
+      menuModel,
+      () => menuState,
+      ({ row }) => {
+        const key = row.id ? shortcutBook.keyOf(row.id) : null;
+        return key ? displayKey(key) : undefined;
+      },
+    ),
   ];
 }
 
@@ -1424,7 +1649,28 @@ const toggleWordCount = () => {
 };
 
 const toggleSidebar = () => {
-  changeSettings({ sidebarOpen: !settings.sidebarOpen });
+  // Showing the chat, the sidebar shows the files first, and closes at the next press.
+  if (settings.sidebarOpen && sidebar.view === 'chat') sidebar.setView('files');
+  else changeSettings({ sidebarOpen: !settings.sidebarOpen });
+  render();
+};
+
+/** Opens the sidebar at the chat, at its newest message, with the keyboard in the composer. */
+const openChat = () => {
+  sidebar.setView('chat');
+  if (!settings.sidebarOpen) changeSettings({ sidebarOpen: true });
+  render();
+  chat.reveal();
+  chat.focus();
+};
+
+/** Show Chat (⌃⌘C): the sidebar open at the document's chat; again, closed. */
+const showChat = () => {
+  if (settings.sidebarOpen && sidebar.view === 'chat') changeSettings({ sidebarOpen: false });
+  else {
+    sidebar.setView('chat');
+    if (!settings.sidebarOpen) changeSettings({ sidebarOpen: true });
+  }
   render();
 };
 
@@ -1451,7 +1697,7 @@ installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
   keyOf: (id) => shortcutBook.keyOf(id),
-  toggleToolbar: () => toolbar.toggle(),
+  toggleOutline: () => void editor.commands.run('outline.toggle'),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleTracking,
@@ -1536,6 +1782,54 @@ const updateNotifications =
         ? restartAfterAsking(windows, () => updates.install(), relaunch)
         : Promise.resolve(false),
   });
+
+/** Whether the onboarding is under way, so that a second ask (Replay) doesn't start another. */
+let onboarding = false;
+
+/**
+ * The first-launch onboarding (#1206, design §5.11a). Its first three screens are the Preferences
+ * window's Welcome mode, which holds the app's install commands (this window is granted none of
+ * them): it is asked for through the page's storage and opened, and says how it ended. This window
+ * then runs the tour.
+ */
+async function runOnboarding(): Promise<void> {
+  if (onboarding) return;
+  onboarding = true;
+  try {
+    noteStarted(localStorage);
+    const ended = new Promise<WelcomeResult>((resolve) => watchWelcomeResult(resolve));
+    requestWelcome();
+    await invoke('open_preferences');
+    if ((await ended) === 'finished') await runWelcomeTour();
+  } catch (error) {
+    console.error('Could not run the onboarding', error);
+  } finally {
+    onboarding = false;
+  }
+}
+
+/** The tour: the Welcome document in this untouched window, and a card for each of three buttons. */
+async function runWelcomeTour(): Promise<void> {
+  // The Preferences window is in front: the tour is in this one.
+  if (isTauri)
+    await getCurrentWindow()
+      .setFocus()
+      .catch(() => {});
+  await runTour({
+    container: app,
+    // An untouched first window takes the document; a window that has one keeps it.
+    openWelcome: async () => {
+      if (isTauri && controller.untouched) await controller.createWith(sampleDocument);
+    },
+    anchors: {
+      pen: () => document.querySelector<HTMLElement>('[data-tour="pen"]'),
+      views: () => document.querySelector<HTMLElement>('[data-tour="views"]'),
+      // The palette has no button: ⇧⌘P opens it at the caret.
+      palette: () => null,
+    },
+    restoreFocus: () => editor.focus(),
+  });
+}
 
 const commands: MenuCommands = {
   create: () => void openInNewWindow(),
@@ -1623,6 +1917,7 @@ const commands: MenuCommands = {
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleSidebar,
+  showChat,
   toggleWordCount,
   toggleTracking,
   acceptAllAndStopTracking,
@@ -1661,6 +1956,27 @@ const commands: MenuCommands = {
     if (crashes) void crashes.revealLog();
     else notice.flash('The log is in the app.');
   },
+  // Dev builds only: a release build has no dev log, and its Help menu has neither row.
+  ...(devLog.enabled
+    ? {
+        writeToLog: () => {
+          void askDevNote({ container: app, restoreFocus: () => editor.focus() }).then((note) => {
+            if (note === null) return;
+            const { from, to } = editor.view.state.selection.main;
+            void devLog
+              .writeNote(note, {
+                text: editor.getDoc(),
+                selection: { from, to },
+                view: editor.getUiState().view,
+                tracking: editor.getUiState().tracking,
+              })
+              .then(() => notice.flash('Written to the dev log.'));
+          });
+        },
+        revealDevLog: () => devLog.reveal(),
+        replayOnboarding: () => void runOnboarding(),
+      }
+    : {}),
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. Of the
@@ -1763,7 +2079,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    toolbarShown: toolbar.isOpen(),
+    outlineShown: document.querySelector('.rl-outline[data-floating]') !== null,
   });
   menuState = {
     plainOnly: ui.kind === 'plain-only',
@@ -1772,6 +2088,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     canAcceptAll: ui.canAcceptAll,
     sidebarOpen: settings.sidebarOpen,
+    sidebarView: sidebar.view,
     showResolved: settings.showResolved,
     showWordCount: settings.showWordCount,
     zoom: zoom?.level() ?? null,
@@ -1919,6 +2236,10 @@ if (isTauri) {
   // The app keeps a copy of this setting, to know it at the next start, before there is a window.
   reportIconRotation(settings.rotateIcon);
   updates?.setAutomatic(settings.checkForUpdates);
+  // The first launch: the first window, with nothing opened for it, begins the onboarding.
+  if (firstLaunch && getCurrentWindow().label === 'main' && start.path === null && !start.text) {
+    void runOnboarding();
+  }
 } else {
   installShortcuts(menuModel, shortcutBook);
   const query = new URLSearchParams(location.search);
@@ -1939,10 +2260,14 @@ if (isTauri) {
       });
     }
   }
+  // Debug only (the onboarding journey): `?onboarding` runs the tour in the plain page. Its first
+  // three screens are the Preferences page's Welcome mode (`/preferences.html?welcome`).
+  if (import.meta.env.DEV && query.has('onboarding')) void runWelcomeTour();
   // Debug only (apps/desktop/journeys): the Playwright journeys start a document and read the
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
     exposeForJourneys(editor, controller, {
+      dockToolbar: (docked) => toolbar.setAtBottom(docked),
       openFile: async (path, text) => {
         await host.write(path, text);
         await controller.open(path);
@@ -1986,6 +2311,8 @@ watchSettings((changed) => {
   if (next.handle !== author.handle || next.name !== author.name) {
     setAuthor(next);
     editor.setAuthor({ ...author });
+    // The sidebar's foot shows the name.
+    sidebar.refreshFoot();
   }
   updates?.setAutomatic(settings.checkForUpdates);
   // Another window may have opened a file.
@@ -2022,6 +2349,16 @@ if (
   (import.meta.env['VITE_SYNC_CHECK'] || new URLSearchParams(location.search).has('sync-check'))
 ) {
   void import('./sync-check.ts').then(({ runSyncCheck }) => runSyncCheck());
+}
+
+// Debug only (sheet-check.ts): the sheet of every interface element, for the look sweep.
+if (
+  import.meta.env.DEV &&
+  (import.meta.env['VITE_SHEET_CHECK'] || new URLSearchParams(location.search).has('sheet-check'))
+) {
+  void import('./sheet-check.ts').then(({ runSheetCheck }) =>
+    runSheetCheck(editor, { notify: (options) => notifications.show(options) }),
+  );
 }
 
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.

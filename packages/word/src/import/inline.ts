@@ -57,7 +57,7 @@ function key(state: State): string {
 }
 
 /** Text that is only text: what Markdown would read as syntax is escaped. */
-export function escapeText(text: string): string {
+function escapeText(text: string): string {
   return text
     .replaceAll('\\', '\\\\')
     .replace(/[`*_[\]<>~|]/g, (c) => `\\${c}`)

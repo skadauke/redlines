@@ -31,6 +31,7 @@ function commands() {
     setView: vi.fn(),
     switchLook: vi.fn(),
     toggleSidebar: vi.fn(),
+    showChat: vi.fn(),
     toggleTracking: vi.fn(),
     acceptAllAndStopTracking: vi.fn(),
     openReview: vi.fn(),
@@ -203,7 +204,6 @@ describe('the menu model', () => {
       ['Save As…', 'Shift+CmdOrCtrl+S'],
       ['Rename…', undefined],
       ['Reveal in Finder', undefined],
-      ['Open in Another Window', undefined],
       '---',
       'Close',
       '---',
@@ -240,7 +240,10 @@ describe('the menu model', () => {
       ['Smaller Text', 'Ctrl+Cmd+-'],
       '---',
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Chat', 'Ctrl+Cmd+C'],
       ['Show Word Count', undefined],
+      '---',
+      ['New Window', undefined],
       '---',
       'Enter Full Screen',
     ]);
@@ -279,6 +282,34 @@ describe('the menu model', () => {
     expect(model.menus.find((menu) => menu.title === 'Help')?.helpMenu).toBe(true);
   });
 
+  it('has Write to Log… and Reveal Dev Log in a dev build, and neither in a release build (#1205)', () => {
+    const release = appMenuModel(commands(), registryOf());
+    expect(readsAll(release, 'Help').flat().join()).not.toMatch(/Dev Log|Write to Log/);
+    const writeToLog = vi.fn();
+    const dev = appMenuModel({ ...commands(), writeToLog, revealDevLog: vi.fn() }, registryOf());
+    expect(readsAll(dev, 'Help')).toEqual([
+      ['Report a Problem…', undefined],
+      ['Reveal Log', undefined],
+      '---',
+      ['Write to Log…', undefined],
+      ['Reveal Dev Log', undefined],
+      '---',
+      ['Show Agent Logs', undefined],
+    ]);
+    // The dev build also replays the first-launch onboarding (#1206); a release build has no such row.
+    const replay = vi.fn();
+    const again = appMenuModel(
+      { ...commands(), writeToLog, revealDevLog: vi.fn(), replayOnboarding: replay },
+      registryOf(),
+    );
+    expect(readsAll(again, 'Help')).toContainEqual(['Replay Onboarding', undefined]);
+    actionRow(again, 'Help', 'Replay Onboarding').action();
+    expect(replay).toHaveBeenCalledOnce();
+    expect(readsAll(release, 'Help').flat().join()).not.toMatch(/Onboarding/);
+    actionRow(dev, 'Help', 'Write to Log…').action();
+    expect(writeToLog).toHaveBeenCalledOnce();
+  });
+
   it('runs each item’s command', () => {
     const c = commands();
     const model = appMenuModel(c, registryOf());
@@ -295,7 +326,7 @@ describe('the menu model', () => {
     expect(c.rename).toHaveBeenCalledOnce();
     click('File', 'Reveal in Finder');
     expect(c.revealInFinder).toHaveBeenCalledOnce();
-    click('File', 'Open in Another Window');
+    click('View', 'New Window');
     expect(c.openAnotherWindow).toHaveBeenCalledOnce();
     click('File', 'Print…');
     expect(c.print).toHaveBeenCalledOnce();
@@ -511,9 +542,12 @@ describe('the menu model', () => {
       ['Rename…', undefined],
     ]);
     // Enter Full Screen closes View, as it does on the Mac: what plugins register comes before it.
-    expect(readsAll(model, 'View').slice(-7)).toEqual([
+    expect(readsAll(model, 'View').slice(-10)).toEqual([
       ['Show Files', 'Ctrl+Cmd+S'],
+      ['Show Chat', 'Ctrl+Cmd+C'],
       ['Show Word Count', undefined],
+      '---',
+      ['New Window', undefined],
       '---',
       ['Zoom In', undefined],
       ['Zoom Out', undefined],

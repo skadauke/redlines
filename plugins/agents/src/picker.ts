@@ -18,6 +18,8 @@ export interface PickerEntry {
   color: number;
   /** The plain text it puts in the comment, with the space after it. */
   insert: string;
+  /** For a row that does something instead of naming someone: it puts nothing in the comment. */
+  action?: () => void;
 }
 
 /** The agents with the default one first (#528), the rest in the order they came. */
@@ -123,6 +125,21 @@ export interface PickerDeps {
   agents(): readonly AgentInfo[];
   /** List only the agents, as a question to an agent does (Ask). */
   agentsOnly?: boolean;
+  /**
+   * Opens the setup of an OpenClaw agent. With it, a last row, "Connect an OpenClaw agent…", is
+   * listed while no OpenClaw agent is connected, for an @ that has typed nothing or part of
+   * "openclaw": the place where someone looks for an agent that isn't there yet.
+   */
+  connectOpenClaw?: () => void;
+}
+
+/** The row that opens the OpenClaw setup. */
+const CONNECT_OPENCLAW = 'Connect an OpenClaw agent…';
+
+/** Whether the typed part of a mention asks for the connect row: nothing, or a start of "openclaw". */
+function asksToConnect(query: string): boolean {
+  const wanted = query.trim().toLowerCase();
+  return wanted === '' || 'openclaw'.startsWith(wanted);
 }
 
 const STYLE_ID = 'rl-picker-style';
@@ -156,6 +173,7 @@ export const PICKER_STYLE = `
 .rl-picker-row[aria-selected='true'] { background-color: var(--rl-pressed); }
 .rl-picker-name { overflow: hidden; text-overflow: ellipsis; }
 .rl-picker-for { color: var(--rl-ink-2); overflow: hidden; text-overflow: ellipsis; }
+.rl-picker-action { color: var(--rl-ink-2); }
 `;
 
 function addStyle(): void {
@@ -226,15 +244,19 @@ export function attachPicker(field: HTMLTextAreaElement, deps: PickerDeps): () =
       ...entries.map((entry, i) => {
         const row = document.createElement('div');
         row.id = `${id}-${i}`;
-        row.className = `rl-picker-row rl-author-${entry.color}`;
+        row.className = `rl-picker-row ${entry.action ? 'rl-picker-action' : `rl-author-${entry.color}`}`;
         row.setAttribute('role', 'option');
         row.setAttribute('aria-selected', String(i === index));
-        const dot = document.createElement('span');
-        dot.className = 'rl-dot';
         const name = document.createElement('span');
         name.className = 'rl-picker-name';
         name.textContent = entry.name;
-        row.append(dot, name);
+        if (entry.action) {
+          row.append(name);
+        } else {
+          const dot = document.createElement('span');
+          dot.className = 'rl-dot';
+          row.append(dot, name);
+        }
         if (entry.for) {
           const principal = document.createElement('span');
           principal.className = 'rl-picker-for';
@@ -263,6 +285,17 @@ export function attachPicker(field: HTMLTextAreaElement, deps: PickerDeps): () =
       deps.getMet?.(),
       deps.agentsOnly === true,
     );
+    // The row that sets up an OpenClaw agent, for someone who has none (and is looking).
+    const connect = deps.connectOpenClaw;
+    if (connect && asksToConnect(mention.query) && !agentsNow.some((agent) => agent.nodeTools)) {
+      found.push({
+        handle: '',
+        name: CONNECT_OPENCLAW,
+        color: 0,
+        insert: '',
+        action: connect,
+      });
+    }
     if (!found.length) return close();
     entries = found;
     query = mention.query;
@@ -287,6 +320,16 @@ export function attachPicker(field: HTMLTextAreaElement, deps: PickerDeps): () =
     if (!entry || !mention) return close();
     const caret = field.selectionStart;
     const after = field.value.slice(caret);
+    if (entry.action) {
+      // Nothing is mentioned: the @ and what was typed after it go, and the setup opens.
+      const run = entry.action;
+      close();
+      field.value = field.value.slice(0, mention.start) + after;
+      field.setSelectionRange(mention.start, mention.start);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      run();
+      return;
+    }
     // Not a second space when one follows already; the caret goes past it.
     const spaced = /^\s/.test(after) && entry.insert.endsWith(' ');
     const text = spaced ? entry.insert.slice(0, -1) : entry.insert;

@@ -27,7 +27,7 @@ export class UsageError extends Error {
 }
 
 /** What a command is given. */
-export interface Input {
+interface Input {
   /** The arguments after the file, in the order the command names them. */
   args: readonly string[];
   /** The options that were given. An option without a value, such as `--review`, has an empty one. */
@@ -38,7 +38,7 @@ export interface Input {
 }
 
 /** What a command gives back. */
-export interface Outcome {
+interface Outcome {
   /** The new text of the file; absent when the command left it as it was. */
   text?: string;
   /** What the command prints. */

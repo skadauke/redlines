@@ -231,4 +231,50 @@ test.describe('resizing an image @blocks', () => {
     await expect.poll(() => width(image)).toBeLessThan(300);
     await j.shot('image-resize-tracked');
   });
+
+  // #1197: the old source struck through, as raw Markdown, was drawn above the picture.
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`a tracked resize draws the picture at its new size with a bar and a card, and no raw source (${scheme})`, async ({
+      start,
+    }) => {
+      const { j, image } = await open(start, true, DOC, scheme);
+      const before = await width(image);
+      const held = await drag(j, 'right', -80);
+      await held.release();
+      await expect.poll(() => width(image)).toBeLessThan(before - 40);
+      const shown = () => j.page.locator('.cm-content').innerText();
+      for (const view of ['redlines', 'simple', 'clean'] as const) {
+        await j.page.evaluate((mode) => window.__redlines!.editor.setViewMode(mode), view);
+        await j.caretAtEnd();
+        await expect(image, `the picture is drawn (${view})`).toHaveCount(1);
+        const text = await shown();
+        expect(text, `no raw source in ${view}`).not.toContain('![');
+        expect(text, `no raw source in ${view}`).not.toContain('red.png');
+        expect(text, `no raw source in ${view}`).not.toContain('<!--');
+        if (view !== 'clean') {
+          await expect(j.page.locator('.rl-bar-seg').first(), `a bar (${view})`).toBeVisible();
+        }
+        await j.shot(`image-resize-tracked-${view}-${scheme}`);
+      }
+      await j.page.evaluate(() => window.__redlines!.editor.setViewMode('simple'));
+      const bar = (await j.page.locator('.rl-bar-seg').first().boundingBox())!;
+      await j.page.mouse.click(bar.x + bar.width / 2, bar.y + bar.height / 2);
+      // #1156: a click on a bar in Simple goes back to Redlines and opens no card; the card of a
+      // change comes from the change itself: in Redlines, the pointer over the resized picture.
+      await j.settle();
+      expect(
+        await j.page.evaluate(() => window.__redlines!.editor.getUiState()['view']),
+        'the bar in Simple goes back to Redlines',
+      ).toBe('redlines');
+      await expect(j.page.locator('.rl-card'), 'the bar opens no card').toHaveCount(0);
+      await image.hover();
+      const card = j.page.locator('.rl-card');
+      await expect(
+        card,
+        'the pointer over the resized picture opens the change’s card',
+      ).toBeVisible();
+      await expect(card).toContainText('Resized picture');
+      await j.shot(`image-resize-tracked-card-${scheme}`);
+    });
+  }
 });

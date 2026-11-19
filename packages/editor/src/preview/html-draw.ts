@@ -14,7 +14,7 @@ import { selectionInside } from './image.ts';
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 /** What the drawing needs of the preview's builder. */
-export interface Sink {
+interface Sink {
   readonly state: EditorState;
   push(range: Range<Decoration>): void;
   syntax(from: number, to: number, shown: boolean): void;

@@ -6,7 +6,7 @@ import { newestView, originalView } from '@redlines/format';
 import type { Range } from '@redlines/format';
 
 /** No word boundary: two words that have been joined are still two tokens, and `joined` says so. */
-export const TOKEN = /u\d{3,}|e[a-e]\d{3,}/g;
+const TOKEN = /u\d{3,}|e[a-e]\d{3,}/g;
 
 /** The people of a session, in order. */
 export const PEOPLE = [
@@ -26,7 +26,7 @@ export const handleOfLetter = (letter: string): string | undefined =>
 export const typistOf = (token: string): string | undefined =>
   token.startsWith('e') ? token[1] : undefined;
 
-export function tokensOf(text: string): string[] {
+function tokensOf(text: string): string[] {
   return text.match(TOKEN) ?? [];
 }
 
@@ -55,7 +55,7 @@ export function joined(text: string): string[] {
 }
 
 /** How many times each token stands in a text. */
-export function tokenCounts(text: string): Map<string, number> {
+function tokenCounts(text: string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const token of tokensOf(text)) counts.set(token, (counts.get(token) ?? 0) + 1);
   return counts;

@@ -78,7 +78,7 @@ const MARKER = String.fromCharCode(0xe000);
 
 /** The constructs that pandoc reads by its own grammar (format §3.1 rule 9, §9.1), of a body, as a
  * sorted list. */
-export function pandocTokens(body: string): string[] {
+function pandocTokens(body: string): string[] {
   const found: string[] = [];
   for (const line of body.split('\n')) {
     if (/^[ \t]*:{3,}[ \t]*(?:\{[^\n]*\}|[A-Za-z][\w-]*)?[ \t]*:*[ \t]*$/.test(line))

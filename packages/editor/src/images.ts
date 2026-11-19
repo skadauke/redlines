@@ -85,6 +85,14 @@ const spots = ViewPlugin.define(() => ({
   },
 }));
 
+/** Why a project image isn't linked: it is on another drive from the document. */
+export const NO_LINK =
+  'This picture is on another drive from the document, so the document can’t link it.';
+
+/** Why the sidebar's pictures are not dropped into a document that is not saved: no folder to link from. */
+export const NO_FOLDER =
+  'Pictures can’t be added from the sidebar to a document that isn’t saved: save it, to add pictures from its folder.';
+
 /** What stands for the links in the probe that asks whether the document takes them. */
 const PROBE = imageLink('image.png');
 
@@ -267,7 +275,7 @@ export function imageSpot(
  * (the gaps of `image-drop.ts`): `before` and `after` are the line breaks that set the link apart
  * from the text on either side, written with it. Null when the document takes no image there.
  */
-export function blockSpot(
+function blockSpot(
   view: EditorView,
   pos: number,
   wrap: { before: string; after: string },
@@ -365,7 +373,7 @@ export const imageSaverFacet = Facet.define<
 >({ combine: (values) => values[0] });
 
 /** A picture the host fetched by its address: its bytes, their type and the extension to save with. */
-export interface FetchedImage {
+interface FetchedImage {
   bytes: Uint8Array<ArrayBuffer>;
   type: string;
   extension: string;
@@ -395,12 +403,13 @@ export function images(
   onImageFiles: ((files: File[], spot: ImageSpot, pasted: boolean) => void) | undefined,
   notice: ((message: string) => void) | undefined,
   projectImageLink?: (dragged: string) => string | null,
+  hasFolder?: () => boolean,
 ): Extension {
   const base = [
     imageSaverFacet.of(onImageFiles),
     spots,
     freshImageField,
-    ...(projectImageLink ? [projectDrops(projectImageLink, notice)] : []),
+    ...(projectImageLink ? [projectDrops(projectImageLink, notice, hasFolder)] : []),
   ];
   if (!onImageFiles) return base;
   const take = (
@@ -483,51 +492,108 @@ function carriesProjectImage(event: DragEvent): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes(PROJECT_IMAGE_TYPE);
 }
 
+/** What the host does with an image file of the project dragged into the document. */
+interface ProjectDrops {
+  linkFor: (dragged: string) => string | null;
+  notice: ((message: string) => void) | undefined;
+  /** Whether the document has a folder to link from; default yes. */
+  hasFolder?: (() => boolean) | undefined;
+}
+
+const projectDropsFacet = Facet.define<ProjectDrops, ProjectDrops | null>({
+  combine: (values) => values[0] ?? null,
+});
+
+const dropLines = new WeakMap<EditorView, ReturnType<typeof dropLine>>();
+const dropLineOf = (view: EditorView) => {
+  let line = dropLines.get(view);
+  if (!line) dropLines.set(view, (line = dropLine(view)));
+  return line;
+};
+
+/**
+ * The pointer of a drag of an image file from the sidebar is at client height `y`: a line shows the
+ * gap between blocks it is nearest. False where the document takes no such drag.
+ */
+export function overProjectImage(view: EditorView, y: number): boolean {
+  // Raw, with Track Changes on, takes no image: no line, and the drop is not allowed.
+  const drops = view.state.facet(projectDropsFacet);
+  // A document with no folder takes no such drag either: no line, and the drop is not allowed.
+  if (!drops || rawIsReadOnly(view.state) || drops.hasFolder?.() === false) return false;
+  const near = nearestGap(view, y);
+  if (near) dropLineOf(view).show(near.y);
+  else dropLineOf(view).hide();
+  return true;
+}
+
+/** The drag is over: the line goes. */
+export function leaveProjectImage(view: EditorView): void {
+  dropLineOf(view).hide();
+}
+
+/**
+ * An image file of the project, `dragged`, is dropped at client height `y`: a link to it is written
+ * as a block of its own at the nearest gap between blocks, as the person's own insertion (tracked
+ * while Track Changes is on, one step for Undo). The host says what to write (`projectImageLink`).
+ */
+export function dropProjectImage(view: EditorView, y: number, dragged: string): void {
+  dropLineOf(view).hide();
+  const drops = view.state.facet(projectDropsFacet);
+  if (!drops || rawIsReadOnly(view.state)) return;
+  if (drops.hasFolder?.() === false) {
+    drops.notice?.(NO_FOLDER);
+    return;
+  }
+  const link = dragged ? drops.linkFor(dragged) : null;
+  if (link === null) {
+    drops.notice?.(NO_LINK);
+    return;
+  }
+  const near = nearestGap(view, y);
+  if (!near) return;
+  const { gap } = near;
+  blockSpot(view, gap.pos, { before: gap.before, after: gap.after }, drops.notice)?.insert([link]);
+}
+
 /**
  * The drag of an image file from the sidebar (#681): a line shows the gap between blocks that the
- * pointer is nearest, and the drop writes a link, a block of its own, there, as the person's own
- * insertion (tracked while Track Changes is on, one step for Undo).
+ * pointer is nearest, and the drop writes a link, a block of its own, there. The sidebar's rows are
+ * dragged with the pointer (`overProjectImage`, `dropProjectImage`), since the app's web view
+ * delivers no drag events of the page's own; a drag that carries the file's path as data (a page
+ * that has them) is the same.
  */
 function projectDrops(
   linkFor: (dragged: string) => string | null,
   notice: ((message: string) => void) | undefined,
+  hasFolder?: () => boolean,
 ): Extension {
-  const lines = new WeakMap<EditorView, ReturnType<typeof dropLine>>();
-  const lineOf = (view: EditorView) => {
-    let line = lines.get(view);
-    if (!line) lines.set(view, (line = dropLine(view)));
-    return line;
-  };
-  return EditorView.domEventHandlers({
-    dragover(event, view) {
-      if (!carriesProjectImage(event)) return false;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-      const near = nearestGap(view, event.clientY);
-      if (near) lineOf(view).show(near.y);
-      return true;
-    },
-    dragleave(event, view) {
-      if (!carriesProjectImage(event)) return false;
-      if (!(event.relatedTarget instanceof Node) || !view.dom.contains(event.relatedTarget)) {
-        lineOf(view).hide();
-      }
-      return false;
-    },
-    drop(event, view) {
-      if (!carriesProjectImage(event)) return false;
-      event.preventDefault();
-      lineOf(view).hide();
-      if (rawIsReadOnly(view.state)) return true;
-      const dragged = event.dataTransfer?.getData(PROJECT_IMAGE_TYPE) ?? '';
-      const link = dragged ? linkFor(dragged) : null;
-      if (link === null) return true;
-      const near = nearestGap(view, event.clientY);
-      if (!near) return true;
-      const { gap } = near;
-      const spot = blockSpot(view, gap.pos, { before: gap.before, after: gap.after }, notice);
-      spot?.insert([link]);
-      return true;
-    },
-  });
+  return [
+    projectDropsFacet.of({ linkFor, notice, hasFolder }),
+    EditorView.domEventHandlers({
+      dragover(event, view) {
+        if (!carriesProjectImage(event)) return false;
+        if (!overProjectImage(view, event.clientY)) return false;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        return true;
+      },
+      dragleave(event, view) {
+        if (!carriesProjectImage(event)) return false;
+        if (!(event.relatedTarget instanceof Node) || !view.dom.contains(event.relatedTarget)) {
+          leaveProjectImage(view);
+        }
+        return false;
+      },
+      drop(event, view) {
+        if (!carriesProjectImage(event)) return false;
+        event.preventDefault();
+        dropProjectImage(
+          view,
+          event.clientY,
+          event.dataTransfer?.getData(PROJECT_IMAGE_TYPE) ?? '',
+        );
+        return true;
+      },
+    }),
+  ];
 }

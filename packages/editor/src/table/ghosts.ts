@@ -16,7 +16,7 @@ import { ghostPress, ghostTableLook } from './ghost-table.ts';
 import { type Table, tablesField } from './model.ts';
 
 /** A deleted row of a table, as it is drawn. */
-export interface Ghost {
+interface Ghost {
   /** The deletion's id. */
   id: string;
   /** The card that decides it: its own, or the moved row's, for the old place of a move. */
@@ -37,7 +37,7 @@ const POSITION = /^row=(\d+) ?/;
 
 /** The deleted rows of the tables of a state, in the order of their lines, with nothing for a
  * document that has none (the common case costs one pass over the marks). */
-export function ghostsOf(state: EditorState): Ghost[] {
+function ghostsOf(state: EditorState): Ghost[] {
   const parsed = state.field(parsedField);
   const marks = parsed.marks.filter(isRowDeletion);
   if (marks.length === 0) return [];

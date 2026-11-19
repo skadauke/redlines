@@ -119,7 +119,7 @@ export interface DocumentParts {
 const COLUMN_PX = 624;
 
 /** The size in px of an image given as a `data:` address, read from its header; null if unknown. */
-export function dataImageSize(url: string): { width: number; height: number } | null {
+function dataImageSize(url: string): { width: number; height: number } | null {
   const comma = url.indexOf(',');
   if (!/^data:image\/[\w+.-]+;base64$/i.test(url.slice(0, comma))) return null;
   let bytes: Uint8Array;
@@ -199,10 +199,19 @@ function pictureSize(shown: string, set: number | null): string {
   return ` width="${Math.round(width)}" height="${Math.max(1, Math.round((width * natural.height) / natural.width))}"`;
 }
 
+/** The face of the Word export (`BODY_FONT` in `packages/word`), then its metric twin; it takes the
+ * place of the default Calibri, and a theme's own face is kept. */
+const OFFICE_BODY = 'Arial, "Liberation Sans", Helvetica, sans-serif';
+/** The text width of a new document in Word: 6.5 in on Letter with 1 in margins. */
+const OFFICE_TABLE = 'border-collapse:collapse;width:6.5in';
+const OFFICE_PRE =
+  'background:#f2f2f2;mso-shading:#f2f2f2;color:#24292f;margin:0 0 6pt;padding:4pt 6pt;';
 const OFFICE_CODE = 'background:#f2f2f2;color:#24292f;';
 const OFFICE_CELL = 'border:1px solid #8c8c8c;padding:4px 8px;';
 const OFFICE_QUOTE =
   'margin:0 0 0 1.5em;padding:0 0 0 1em;border-left:3px solid #b0b0b0;color:#555555';
+/** A paragraph of a quote, which Word takes for its "Quote" style (`class=MsoQuote`). */
+const OFFICE_QUOTE_PARAGRAPH = '<p class="MsoQuote" style="mso-style-name:Quote">';
 
 /** A footnote's mark in prose: `[^1]`, not followed by the colon of its definition. */
 const FOOTNOTE_MARK = /\[\^([^\]\s&]+)\](?!:)/g;
@@ -215,6 +224,11 @@ function render(
   doc?: DocumentParts,
 ): string {
   const office = doc?.office === true;
+  // A program that pastes gets the face the Word export uses, not the editor's own (#1181).
+  if (office) {
+    const arial = (stack: string) => (stack === STACKS.carlito ? OFFICE_BODY : stack);
+    fonts = { body: arial(fonts.body), heading: arial(fonts.heading), mono: fonts.mono };
+  }
   // The parts of the language that a whole page draws and a selection leaves as text.
   const page = doc && !doc.clip ? doc : undefined;
   // A picture as data is what a program that pastes can always draw.
@@ -444,7 +458,7 @@ function render(
     const rows = node.getChildren('TableRow');
     columns = Math.max(1, aligns.length, head?.getChildren('TableCell').length ?? 0);
     return (
-      (office ? '<table style="border-collapse:collapse;width:100%">' : '<table>') +
+      (office ? `<table width="624" style="${OFFICE_TABLE}">` : '<table>') +
       (head ? `<thead>${cells(head, 'th', aligns)}</thead>` : '') +
       (rows.length
         ? `<tbody>${rows.map((row) => cells(row, 'td', aligns)).join('')}</tbody>`
@@ -453,7 +467,8 @@ function render(
     );
   }
 
-  function listItem(node: SyntaxNode): string {
+  /** An item's parts, as HTML, and whether it is a task item (a box, `☐` or `☑`, in front). */
+  function itemParts(node: SyntaxNode): { parts: string[]; task: boolean } {
     const parts: string[] = [];
     const prose = node.getChildren('Paragraph').length + node.getChildren('Task').length;
     for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -462,26 +477,76 @@ function render(
         const marker = child.getChild('TaskMarker');
         const checked = marker ? /x/i.test(slice(marker.from, marker.to)) : false;
         const body = inner(child, new Set(['TaskMarker'])).replace(/^\s+/, '');
-        parts.push(`${checked ? '\u2611' : '\u2610'} ${body}`);
+        parts.push(`${checked ? '☑' : '☐'} ${body}`);
       } else if (child.name === 'Paragraph' && prose === 1) {
         parts.push(inlines(child));
       } else {
         parts.push(block(child));
       }
     }
-    const task = doc && parts.some((part) => /^[\u2610\u2611]/.test(part));
-    // A task item is its box alone, with no bullet (Word and Docs draw one beside it otherwise).
-    const mark = !task ? '' : office ? ' style="list-style-type:none"' : ' class="rl-task"';
-    return `<li${mark}>${parts.join('')}</li>`;
+    return { parts, task: !!doc && parts.some((part) => /^[☐☑]/.test(part)) };
+  }
+
+  function listItem(node: SyntaxNode): string {
+    const { parts, task } = itemParts(node);
+    return `<li${task ? ' class="rl-task"' : ''}>${parts.join('')}</li>`;
+  }
+
+  /** How many lists the one being written is inside. */
+  let depth = 0;
+
+  /**
+   * The items of a list for a program that pastes: Word draws a bullet beside every item of a `<ul>`
+   * whatever its style says, so a task item is a paragraph of its own, indented as its bullet would
+   * be, and the bulleted items around it are lists of their own (#1181).
+   */
+  function officeItems(node: SyntaxNode, ordered: boolean, first: number): string {
+    let out = '';
+    let run: string[] = [];
+    let tasks = '';
+    let number = first;
+    let runStart = first;
+    const flush = () => {
+      if (run.length > 0) {
+        const open = ordered ? `<ol${runStart > 1 ? ` start="${runStart}"` : ''}>` : '<ul>';
+        out += `${open}${run.join('')}</${ordered ? 'ol' : 'ul'}>`;
+        run = [];
+      }
+      // The paragraphs of a run of task items stand in one element that a paste back reads as a list.
+      if (tasks) out += `<div data-rl-tasks>${tasks}</div>`;
+      tasks = '';
+    };
+    for (const item of node.getChildren('ListItem')) {
+      const { parts, task } = itemParts(item);
+      if (!task) {
+        if (tasks) flush();
+        if (run.length === 0) runStart = number;
+        run.push(`<li>${parts.join('')}</li>`);
+      } else {
+        if (run.length > 0) flush();
+        const [head = '', ...rest] = parts;
+        tasks += `<p style="margin:0 0 0 ${depth * 0.5}in">${head}</p>${rest.join('')}`;
+      }
+      number++;
+    }
+    flush();
+    return out;
   }
 
   function list(node: SyntaxNode): string {
-    if (node.name === 'BulletList') {
-      return `<ul>${node.getChildren('ListItem').map(listItem).join('')}</ul>`;
-    }
+    const ordered = node.name !== 'BulletList';
     const first = node.getChild('ListItem')?.getChild('ListMark');
-    const start = first ? Number.parseInt(slice(first.from, first.to), 10) : 1;
-    return `<ol${start > 1 ? ` start="${start}"` : ''}>${node.getChildren('ListItem').map(listItem).join('')}</ol>`;
+    const start = ordered && first ? Number.parseInt(slice(first.from, first.to), 10) : 1;
+    depth++;
+    try {
+      if (office) return officeItems(node, ordered, start);
+      const items = node.getChildren('ListItem').map(listItem).join('');
+      return ordered
+        ? `<ol${start > 1 ? ` start="${start}"` : ''}>${items}</ol>`
+        : `<ul>${items}</ul>`;
+    } finally {
+      depth--;
+    }
   }
 
   function code(node: SyntaxNode): string {
@@ -490,7 +555,10 @@ function render(
     const info = node.getChild('CodeInfo');
     const lang = info ? slice(info.from, info.to).trim().split(/\s+/)[0] : '';
     const className = lang && /^[\w+#.-]+$/.test(lang) ? ` class="language-${escape(lang)}"` : '';
-    return `<pre${style(fonts.mono)}><code${className}>${escape(body)}</code></pre>`;
+    const pre = office
+      ? ` style="font-family:${escape(fonts.mono)};${OFFICE_PRE}"`
+      : style(fonts.mono);
+    return `<pre${pre}><code${className}>${escape(body)}</code></pre>`;
   }
 
   function heading(node: SyntaxNode, level: number): string {
@@ -522,7 +590,9 @@ function render(
         const body = blocks(node);
         const alert = page ? /^<p>\[!([A-Za-z][A-Za-z0-9-]*)\][ \t]*/.exec(body) : null;
         if (!alert) {
-          return `<blockquote${office ? ` style="${OFFICE_QUOTE}"` : ''}>${body}</blockquote>`;
+          return office
+            ? `<blockquote style="${OFFICE_QUOTE}">${body.replaceAll('<p>', OFFICE_QUOTE_PARAGRAPH)}</blockquote>`
+            : `<blockquote>${body}</blockquote>`;
         }
         const type = alert[1]!.toLowerCase();
         const title = type.charAt(0).toUpperCase() + type.slice(1);

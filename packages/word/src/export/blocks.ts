@@ -45,7 +45,7 @@ export type Atom =
   /** `para`: the break between two blocks of a deleted text, not a line break in one. */
   | { kind: 'break'; from: number; to: number; para?: boolean };
 
-export interface ListContext {
+interface ListContext {
   ordered: boolean;
   /** 0 for an item of a list at the top. */
   level: number;
@@ -65,15 +65,17 @@ export interface Leaf {
   list: ListContext | null;
   /** How many block quotes it is in. */
   quote: number;
+  /** Of a code line: which code block it is a line of, so that two blocks side by side are two. */
+  codeBlock?: number;
 }
 
-export interface TableCell {
+interface TableCell {
   atoms: Atom[];
   from: number;
   to: number;
 }
 
-export interface TableBlock {
+interface TableBlock {
   type: 'table';
   from: number;
   to: number;
@@ -97,7 +99,7 @@ const NAMED: Record<string, string> = {
 };
 
 /** The text of a character reference, `&amp;` or `&#8212;`; the reference itself when unknown. */
-export function decodeReference(reference: string): string {
+function decodeReference(reference: string): string {
   const body = reference.slice(1, -1);
   const numeric = /^#(?:[xX]([0-9a-fA-F]+)|(\d+))$/.exec(body);
   if (numeric) {
@@ -210,6 +212,7 @@ export function markdownBlocks(text: string): Block[] {
   let quote = 0;
   let newItem = false;
   let inCode = false;
+  let codeBlocks = 0;
   let breakFollows = false;
 
   const fmt = (): Fmt => ({
@@ -301,9 +304,11 @@ export function markdownBlocks(text: string): Block[] {
         case 'codeFenced':
         case 'codeIndented':
           inCode = true;
+          codeBlocks++;
           break;
         case 'codeFlowValue': {
           const line = startLeaf('code', token);
+          line.codeBlock = codeBlocks;
           line.atoms.push({
             kind: 'text',
             text: slice(),

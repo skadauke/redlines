@@ -5,7 +5,7 @@
 
 import { parseAnswer } from './answer.ts';
 
-export interface AnswerDeps {
+interface AnswerDeps {
   /** Whether the passage `quote` is in the document now: a citation to it is a link. */
   has(quote: string): boolean;
   /** Shows the passage `quote` in the document. */
