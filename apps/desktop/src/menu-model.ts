@@ -35,8 +35,9 @@ export interface MenuCommands {
   /** Opens the About Redlines window, or brings it forward. */
   openAbout(): void;
   /**
-   * Shows a view of the View menu. Redlines is shown in the look that was shown last, and does
-   * nothing when it is shown already (`Editor.showView`).
+   * Shows a view of the View menu. Redlines is shown in the look that was shown last, as the full
+   * markup when the simple look shows, and does nothing when the full markup shows already
+   * (`Editor.showView`).
    */
   setView(view: MenuView): void;
   /**

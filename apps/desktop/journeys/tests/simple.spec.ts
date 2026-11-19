@@ -153,6 +153,14 @@ test.describe('the simple look @views', () => {
     expect(await j.page.evaluate(() => window.__redlines!.editor.getUiState()['view'])).toBe(
       'simple',
     );
+    // And from there, a click on a change bar leaves Simple, the card put away.
+    await j.page.keyboard.press('Escape');
+    const at = await j.page.locator('.rl-bar-seg').first().boundingBox();
+    await j.page.mouse.click(at!.x + at!.width / 2, at!.y + at!.height / 2);
+    await j.settle();
+    expect(await j.page.evaluate(() => window.__redlines!.editor.getUiState()['view'])).toBe(
+      'redlines',
+    );
   });
 
   test('Redlines, Simple, and back to Redlines, by a change bar and by the View menu (#1156)', async ({
