@@ -26,7 +26,8 @@ import {
   viewModeField,
 } from '../tracked/field.ts';
 import { heldEditEffect, untrackedAnswerAnnotation, untrackedAskFacet } from '../tracked/ask.ts';
-import { openBlock, setOpenEffect, takeBackChanges } from './open.ts';
+import { joinsNewestStep } from '../history/index.ts';
+import { openBlock, returnAnnotation, setOpenEffect, takeBackChanges } from './open.ts';
 import {
   authoredWrite,
   contextFor,
@@ -78,7 +79,7 @@ export function moveBlocksReason(state: EditorState, up: boolean): string | unde
   const run = runOfSelection(read.file);
   if (!run) return 'Put the caret in a paragraph, a list item or a block.';
   if (neighbourGap(run, up)) return undefined;
-  if (run.unclosed) return UNCLOSED_FENCE;
+  if (run.unclosed) return closingFence(read.file, run, up) ? undefined : UNCLOSED_FENCE;
   const many = run.count > 1;
   return `${many ? 'These blocks are' : 'This block is'} at the ${up ? 'top' : 'bottom'} already.`;
 }
@@ -97,8 +98,56 @@ export function moveBlocks(view: EditorView, up: boolean): boolean {
   const gap = neighbourGap(run, up);
   // Nothing above the first or below the last: the command is disabled (`moveBlocksReason` says why),
   // and the key does nothing, with no notice.
-  if (!gap) return true;
+  if (!gap) {
+    // Code that nothing closes holds the rest of its container, so it has nowhere to go: the
+    // closing fence is written first, tracked with Track Changes on, and the block moves (#1203).
+    const closing = !read.back && run.unclosed ? closingFence(read.file, run, up) : null;
+    if (!closing) return true;
+    view.dispatch({
+      changes: closing,
+      userEvent: 'input.break',
+      annotations: [isolateHistory.of('before'), returnAnnotation.of(true)],
+    });
+    // The move that follows is one step with it: one Undo gives both back.
+    const after = asFile(view.state);
+    const next = after && runOfSelection(after.file);
+    const to = next && neighbourGap(next, up);
+    return next && to ? moveRunTo(view, next, to, after, true) : true;
+  }
   return moveRunTo(view, run, gap, read);
+}
+
+/**
+ * The change that writes the closing fence of the one code block `run` is, when closing it lets the
+ * block move in the direction asked: on the last line when that is empty, and on a new line under
+ * it otherwise, in the opening fence's own container syntax, as ↓ at the end of such a block does.
+ */
+function closingFence(
+  state: EditorState,
+  run: BlockRun,
+  up: boolean,
+): { from: number; to: number; insert: string } | null {
+  if (run.kind !== 'code' || run.count !== 1) return null;
+  const { doc } = state;
+  const first = doc.lineAt(run.from);
+  const last = doc.lineAt(Math.min(run.to, doc.length));
+  const fence = /^[ \t>]*(?:`{3,}|~{3,})/.exec(first.text)?.[0];
+  if (!fence) return null;
+  const empty = /^[ \t>]*$/.test(last.text) && last.number > first.number;
+  const change = {
+    from: empty ? last.from : last.to,
+    to: last.to,
+    insert: (empty ? '' : '\n') + fence,
+  };
+  const closed = state.update({ changes: change, filter: false }).state;
+  const after = runOfSelection(
+    closed.update({
+      selection: EditorSelection.single(
+        state.changes(change).mapPos(state.selection.main.head, -1),
+      ),
+    }).state,
+  );
+  return after && !after.unclosed && neighbourGap(after, up) ? change : null;
 }
 
 /** Moves `run` to `gap` and keeps it selected, as it was (a caret stays at its place in the text). */
@@ -107,6 +156,7 @@ export function moveRunTo(
   run: BlockRun,
   gap: BlockGap,
   read?: FileRead,
+  joinsPrevious = false,
 ): boolean {
   // The state the run is read in: the file's, with an empty paragraph taken back (`asFile`), and
   // the changes that did it, which the step makes first.
@@ -165,7 +215,12 @@ export function moveRunTo(
   const recorded = recordedAs(
     intent.kind === 'typing' && back ? { ...intent, revert: changesOf(back) } : intent,
   );
-  const annotations = [trackedEditAnnotation.of(true), isolateHistory.of('full'), recorded];
+  const annotations = [
+    trackedEditAnnotation.of(true),
+    isolateHistory.of(joinsPrevious ? 'after' : 'full'),
+    ...(joinsPrevious ? [joinsNewestStep.of(true)] : []),
+    recorded,
+  ];
   // From the document as it was (the open paragraph in it): taken back, then moved, in one step.
   const whole = back ? back.compose(changes) : changes;
   if (tracking && untracked) {
