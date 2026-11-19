@@ -83,8 +83,10 @@ impl TokenStore for Tokens {
             .secret(&self.handle, Kind::NodeDeviceToken)
     }
 
-    fn shared(&self) -> Option<Secret> {
-        shared_token(&self.app.state::<Connections>(), &self.handle, Role::Node)
+    fn shared(&self, skip: usize) -> Option<Secret> {
+        shared_tokens(&self.app.state::<Connections>(), &self.handle, Role::Node)
+            .into_iter()
+            .nth(skip)
     }
 }
 
@@ -111,12 +113,17 @@ impl Role {
     }
 }
 
-/// A token that goes in `auth.token`: the one the person typed, else what an older build kept
-/// without saying where it came from (as that build sent it).
-fn shared_token(store: &Connections, handle: &str, role: Role) -> Option<Secret> {
-    store
-        .secret(handle, Kind::SharedToken)
-        .or_else(|| store.secret(handle, role.legacy()))
+/// The tokens that go in `auth.token`, in the order to try them: the one the person typed, then
+/// what an older build kept without saying where it came from (as that build sent it). A typed
+/// token that is wrong does not hide the older one.
+fn shared_tokens(store: &Connections, handle: &str, role: Role) -> Vec<Secret> {
+    let typed = store.secret(handle, Kind::SharedToken);
+    let legacy = store.secret(handle, role.legacy()).filter(|legacy| {
+        typed
+            .as_ref()
+            .is_none_or(|typed| typed.expose() != legacy.expose())
+    });
+    typed.into_iter().chain(legacy).collect()
 }
 
 /// What a connection can prove itself with, in the order to try them: the token the Gateway gave
@@ -125,7 +132,9 @@ pub(super) fn stored_secrets(store: &Connections, handle: &str, role: Role) -> V
     let device = store
         .secret(handle, role.device())
         .map(|token| (true, token));
-    let shared = shared_token(store, handle, role).map(|token| (false, token));
+    let shared = shared_tokens(store, handle, role)
+        .into_iter()
+        .map(|token| (false, token));
     device.into_iter().chain(shared).collect()
 }
 
@@ -511,7 +520,11 @@ mod tests {
         keep_typed_token(&store, handle, &Secret::new("typed").unwrap()).unwrap();
         assert_eq!(
             kinds(&store, Role::Node),
-            [(true, "dt-node".to_owned()), (false, "typed".to_owned())]
+            [
+                (true, "dt-node".to_owned()),
+                (false, "typed".to_owned()),
+                (false, "legacy".to_owned())
+            ]
         );
         assert!(store.views()[0].node_token && store.views()[0].operator_token);
         // A new code is the first thing sent, and nothing was deleted for it.
@@ -520,7 +533,7 @@ mod tests {
             first_credential(&store, handle, Some(code)).unwrap(),
             Credential::SetupCode(token) if token.expose() == "code-1"
         ));
-        assert_eq!(kinds(&store, Role::Node).len(), 2);
+        assert_eq!(kinds(&store, Role::Node).len(), 3);
         assert!(store.has(handle, Kind::NodeDeviceToken));
         assert!(store.has(handle, Kind::OperatorDeviceToken));
         // A code with no token in it is no code.
@@ -538,6 +551,25 @@ mod tests {
             kinds(&store, Role::Operator),
             [(false, "typed-1".to_owned())]
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A typed token that is wrong does not hide what an older build kept: that is tried last.
+    #[test]
+    fn a_typed_token_does_not_hide_the_older_file() {
+        let (store, root) = store_with("legacy-last");
+        let handle = "moby-ada";
+        store
+            .keep(handle, Kind::NodeToken, &Secret::new("legacy").unwrap())
+            .unwrap();
+        keep_typed_token(&store, handle, &Secret::new("typed").unwrap()).unwrap();
+        assert_eq!(
+            kinds(&store, Role::Node),
+            [(false, "typed".to_owned()), (false, "legacy".to_owned())]
+        );
+        // The same token twice is tried once.
+        keep_typed_token(&store, handle, &Secret::new("legacy").unwrap()).unwrap();
+        assert_eq!(kinds(&store, Role::Node), [(false, "legacy".to_owned())]);
         let _ = std::fs::remove_dir_all(root);
     }
 

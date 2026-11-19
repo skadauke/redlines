@@ -98,7 +98,7 @@ interface Mounted {
 const mounted: Mounted[] = [];
 
 /** A field in a box that behaves like the comment box: ⌘↩ posts, Escape closes, both on the field. */
-function mount(list: readonly AgentInfo[] = agents): Mounted {
+function mount(list: readonly AgentInfo[] = agents, connectOpenClaw?: () => void): Mounted {
   const box = document.createElement('div');
   const field = document.createElement('textarea');
   box.append(field);
@@ -110,7 +110,12 @@ function mount(list: readonly AgentInfo[] = agents): Mounted {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) posted();
     else if (event.key === 'Escape') closed();
   });
-  const detach = attachPicker(field, { getParsed: () => parsed, me: 'ada', agents: () => list });
+  const detach = attachPicker(field, {
+    getParsed: () => parsed,
+    me: 'ada',
+    agents: () => list,
+    ...(connectOpenClaw ? { connectOpenClaw } : {}),
+  });
   const result = { box, field, detach, posted, closed };
   mounted.push(result);
   return result;
@@ -322,6 +327,51 @@ describe('attachPicker', () => {
     type(field, 'again @');
     expect(isOpen(box)).toBe(false);
     expect(field.hasAttribute('aria-activedescendant')).toBe(false);
+  });
+});
+
+describe('the row that connects an OpenClaw agent', () => {
+  const CONNECT = 'Connect an OpenClaw agent…';
+
+  it('is the last row of an @ that has typed nothing, and opens the setup instead of mentioning', () => {
+    const open = vi.fn();
+    const { box, field } = mount(agents, open);
+    type(field, 'Ask @');
+    expect(rows(box)).toEqual(['Claude', 'Bo Chen', 'Claude for Bo', 'Cy Young', CONNECT]);
+    // Arrow up from the first row lands on the last one: Return picks it.
+    press(field, 'ArrowUp');
+    press(field, 'Enter');
+    expect(open).toHaveBeenCalledTimes(1);
+    // Nothing is mentioned, and the @ that asked for it is gone.
+    expect(field.value).toBe('Ask ');
+    expect(isOpen(box)).toBe(false);
+  });
+
+  it('is listed alone for the start of "openclaw", where nothing else matches', () => {
+    const open = vi.fn();
+    const { box, field } = mount(agents, open);
+    type(field, '@openc');
+    expect(rows(box)).toEqual([CONNECT]);
+    (box.querySelector('.rl-picker [role=option]') as HTMLElement).click();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(field.value).toBe('');
+  });
+
+  it('is not listed for another name, nor without a host that can open it', () => {
+    const { box, field } = mount(agents, vi.fn());
+    type(field, '@bo');
+    expect(rows(box)).toEqual(['Bo Chen', 'Claude for Bo']);
+    const plain = mount();
+    type(plain.field, '@');
+    expect(rows(plain.box)).not.toContain(CONNECT);
+  });
+
+  it('is not listed once an OpenClaw agent is connected', () => {
+    const moby: AgentInfo = { ...found('moby', 'Moby'), nodeTools: true };
+    const { box, field } = mount([...agents, moby], vi.fn());
+    type(field, '@');
+    expect(rows(box)).not.toContain(CONNECT);
+    expect(rows(box)).toContain('Moby');
   });
 });
 

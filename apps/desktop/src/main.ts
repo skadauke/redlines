@@ -22,7 +22,10 @@ import {
 import { codeFileHighlight, codeLanguagesFor } from '@redlines/code';
 import {
   createEditor,
+  dropProjectImage,
   editorDocumentHtml,
+  leaveProjectImage,
+  overProjectImage,
   PLAIN_ONLY_TRACKING,
   type Author,
   type CropRect,
@@ -78,7 +81,8 @@ import {
   type NativeMenu,
 } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
-import { requestPane } from './preferences/pane-request.ts';
+import { requestPane, type RequestedPane } from './preferences/pane-request.ts';
+import { menuPaletteCommands } from './menu-palette.ts';
 import { fillPrintPage, plainPageHtml, printPage } from './print.ts';
 import { exportToWord } from './word-export.ts';
 import { openWord } from './word-import.ts';
@@ -103,6 +107,8 @@ import { applyTextSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
 import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
+import { createDevLog, tauriDevLogLink } from './dev-log.ts';
+import { askDevNote } from './ui/dev-note.ts';
 import { createUntrackedAnswers } from './untracked-answers.ts';
 import { createUntrackedSheet } from './ui/untracked-sheet.ts';
 import { createNotifications } from './ui/notifications.ts';
@@ -176,6 +182,17 @@ const app = element('.rl-app');
 const main = element('.rl-main');
 const scroller = element('.rl-scroller');
 const notice = createNotice(main);
+// The dev log, in a build that isn't a release (dev-log.ts, #1205): what the person is told, and
+// what the editor refuses, is kept in it, and so are errors and agent runs below.
+const devLog = await createDevLog(isTauri ? tauriDevLogLink() : null);
+if (devLog.enabled) {
+  const flash = notice.flash.bind(notice);
+  notice.flash = (text) => {
+    devLog.log('alert', text);
+    flash(text);
+  };
+  devLog.watchKeys(document);
+}
 const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
@@ -227,7 +244,9 @@ function sessionStatus(): string | undefined {
   if (!session) return undefined;
   if (sessionState === 'offline') return 'Offline: your edits are kept';
   if (sessionState === 'ended') return 'No longer in the session';
-  return sessionPeers > 0 ? `In ${sessionPeers + 1} windows` : undefined;
+  // Which window this is, as Word numbers the windows of one document ("Window 2").
+  if (sessionPeers === 0) return undefined;
+  return session.number === null ? `In ${sessionPeers + 1} windows` : `Window ${session.number}`;
 }
 
 /** Joins the session of the document at `path`, as its leader when there is none yet. */
@@ -301,6 +320,22 @@ const openInNewWindow = (path?: string, line?: number) =>
  * has allowed the page to load from it (`showImages`). Null until then, and in a browser tab.
  */
 let imageFolder: string | null = null;
+/** Settles when the project of the open document is found (`showImages`): what reads beside it waits. */
+let projectKnown: Promise<void> = Promise.resolve();
+let projectPending = false;
+let projectFound: () => void = () => {};
+
+/** From the moment a document starts loading until its project is found, what reads beside it waits. */
+function awaitProject(): void {
+  if (projectPending) return;
+  projectPending = true;
+  projectKnown = new Promise<void>((resolve) => {
+    projectFound = () => {
+      projectPending = false;
+      resolve();
+    };
+  });
+}
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
@@ -428,7 +463,10 @@ const untrackedAnswers = createUntrackedAnswers();
 const editor = createEditor(element('#editor'), {
   doc: '',
   commandKeys: shortcutBook.commandKeys,
-  onError: (error) => crashes?.caught(error),
+  onError: (error) => {
+    devLog.log('error', error instanceof Error ? error.message : String(error));
+    crashes?.caught(error);
+  },
   author,
   // An edit no mark can hold (front matter, typing in Raw) asks first, and is made untracked on a yes.
   askUntracked: createUntrackedSheet({
@@ -483,14 +521,22 @@ const editor = createEditor(element('#editor'), {
     const file = path && imageFolder !== null ? localImagePath(src, path, imageFolder) : null;
     return file === null ? null : imageSizes.of(file);
   },
+  // Math is drawn as MathML by Temml, loaded when a document has a formula.
+  math: () => import('temml').then((module) => module.default),
   // An include of a Quarto document (`{{< include _part.qmd >}}`) is read and opened as a file of
   // its own, as a local image is found: relative to the document, and only inside its project (a
   // browser tab's one folder in memory has no path of its own).
   includes: {
     read: async (path) => {
+      // The project is found a moment after the document opens: an include asked for before that
+      // waits for it, and isn't "not found" for being early (#1175).
+      await projectKnown;
       const file = includedFile(path);
       if (file === null) return null;
       try {
+        // The file plugin reads only the files the person opened or saved: the app allows this one
+        // as it allows a document that the sidebar lists, if it is inside the document's project.
+        await host.allowDocument(file);
         return await host.read(file);
       } catch {
         return null;
@@ -498,7 +544,13 @@ const editor = createEditor(element('#editor'), {
     },
     open: (path) => {
       const file = includedFile(path);
-      if (file !== null) void controller.open(file);
+      if (file === null) return;
+      host
+        .allowDocument(file)
+        .then(() => controller.open(file))
+        .catch((error: unknown) => {
+          notice.flash(typeof error === 'string' ? error : 'Couldn’t open the included file.');
+        });
     },
   },
   // A double-click on a local image opens its file in Preview, which the app does, and a browser
@@ -524,7 +576,10 @@ const editor = createEditor(element('#editor'), {
     runsSawChange();
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
-  onNotice: (message) => notice.flash(message),
+  onNotice: (message) => {
+    devLog.log('refusal', message);
+    notice.flash(message);
+  },
   // Image files pasted into the document, or dropped on it where the page gets the drop itself (a
   // browser tab): saved in the project’s folder for images, and linked at the place they came to.
   onImageFiles: (files, spot, pasted) =>
@@ -660,6 +715,17 @@ const attachAgentPicker = (field: HTMLTextAreaElement, agentsOnly = false) => {
     // The default agent comes first in the list (#528).
     agents: () => defaultFirst(knownAgents, loadSettings().defaultAgent),
     agentsOnly,
+    // For someone with no OpenClaw agent yet: a last row that opens its setup, a window of its own.
+    ...(isTauri
+      ? {
+          connectOpenClaw: () => {
+            void invoke('open_openclaw_setup').catch((error: unknown) => {
+              console.error('Could not open the OpenClaw setup', error);
+              notice.flash('Couldn’t open the OpenClaw setup.');
+            });
+          },
+        }
+      : {}),
   });
 };
 
@@ -769,20 +835,24 @@ const review = createReview(editor, {
   },
 });
 
-// The toolbar: shown only when summoned (the title bar's wrench, ⇧⌘P at the caret, a right-click at
+// The toolbar: shown only when summoned (⇧⌘P at the caret, a right-click at
 // the pointer, in place of WebKit's own menu), or at the bottom of the window by preference
 // (settings.toolbarAtBottom, below). Its items are commands of the registry, so it
 // registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
 // A spelling suggestion comes from the system's checker (spelling.rs); a plain page has none.
 const toolbar = createToolbar(editor, {
   container: main,
+  // A right-click on a change, a comment or a highlight, and ⇧⌘P there, stack its review card above
+  // the bar, as one widget (#1190).
+  bubbleAt: (at) => review.bubbleAt(at),
   // The palette (type with the toolbar open) searches the app's own commands and settings beside
   // the registry's; a setting is a live control in its line (toolbar-commands.ts).
   appCommands: () => toolbarCommands(),
   // Ask has no way yet to start with a question typed: its box opens for the selection.
   askAbout: () => void editor.commands.run('ask.start'),
-  // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
+  // A bar at the pointer has the place's card in itself: hovering shows no other over the page.
+  onFloating: (floating) => review.holdCards(floating),
   tooltipMs: TOOLTIP_MS,
   notice: (message) => notice.flash(message),
   // Paste is the Mac's own where the host has it (the clipboard's HTML is converted as ⌘V does it),
@@ -804,6 +874,9 @@ const toolbar = createToolbar(editor, {
       }
     : {}),
 });
+
+// The title bar's outline button is pressed while the outline shows as a window.
+document.addEventListener('rl-outline-floating', () => render());
 
 const documentHost: Host = {
   ...host,
@@ -828,6 +901,7 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
     if (path === imageDocument) return;
     imageDocument = path;
     imageFolder = null;
+    awaitProject();
   },
   // A change on disk that is nothing but the work of this person's agents is a step to undo.
   author: () => author.handle,
@@ -907,6 +981,12 @@ function reportWindow(): void {
   if (doc) windows?.reportDocument(doc.path, doc.dirty || doc.writing || draftsPending);
 }
 
+/** Whether the client point is over the document's page, beside the sidebar and under the title bar. */
+function insidePage(at: { x: number; y: number }): boolean {
+  const box = editor.view.dom.getBoundingClientRect();
+  return at.x >= box.left && at.x <= box.right && at.y >= box.top && at.y <= box.bottom;
+}
+
 const sidebar = createSidebar(app, {
   host,
   openFile: (path, { newWindow }) => {
@@ -923,6 +1003,21 @@ const sidebar = createSidebar(app, {
   },
   isRunLive: () => runs.isLive(),
   showPlainOnly: () => settings.showPlainOnlyFiles,
+  // An image dragged out of the sidebar: over the page it shows where it goes, and letting go writes
+  // its link there (#1198). Elsewhere, such as over the sidebar itself, it goes nowhere.
+  imageDrag: {
+    over: (at) => {
+      if (insidePage(at)) overProjectImage(editor.view, at.y);
+      else leaveProjectImage(editor.view);
+    },
+    drop: (at, path) => {
+      if (insidePage(at)) {
+        dropProjectImage(editor.view, at.y, path);
+        editor.view.focus();
+      } else leaveProjectImage(editor.view);
+    },
+    leave: () => leaveProjectImage(editor.view),
+  },
   onResize: (sidebarWidth) => changeSettings({ sidebarWidth }),
   onClose: () => {
     changeSettings({ sidebarOpen: false });
@@ -941,12 +1036,20 @@ const projectOf = (path: string) => host.projectRoot(path);
  * Lets the preview load the images in the project of the document at `path`: its sidebar folder,
  * which the app allows the page to load from. The images are drawn again once that is so.
  */
-async function showImages(path: string | null): Promise<void> {
+function showImages(path: string | null): Promise<void> {
   imageFolder = null;
   imageWatch.forget();
   imageSizes.forget();
   editor.refreshImages();
-  if (path === null) return;
+  if (path === null) {
+    projectFound();
+    return Promise.resolve();
+  }
+  awaitProject();
+  return findProject(path).finally(() => projectFound());
+}
+
+async function findProject(path: string): Promise<void> {
   try {
     const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
     // Another file may have opened meanwhile.
@@ -1040,6 +1143,18 @@ const runs = createRuns({
   onEnded: () => void sidebar.refresh(),
 });
 runsSawChange = () => runs.documentChanged();
+// Each change of an agent run's line is a line of the dev log: which agent, and how it stands.
+if (devLog.enabled) {
+  runs.subscribe((thread) => {
+    const line = runs.line(thread);
+    devLog.log(
+      'agent',
+      line === null
+        ? `thread ${thread} line cleared`
+        : `thread ${thread} ${line.agentName} ${line.kind}${line.kind === 'failed' ? `: ${line.message}` : ''}`,
+    );
+  });
+}
 // Each thread's live line, drawn again in its note whenever it changes. A failure the person
 // can't see, or a question waiting where nobody sees it, in a thread scrolled away, is also told of
 // in the lower-right corner.
@@ -1206,8 +1321,13 @@ async function readImageForAgent(src: string): Promise<{ mimeType: string; data:
  * agent itself; it asks for the pane, and Preferences shows it.
  */
 function openAgentPreferences(): void {
+  openPreferencesPane('agents');
+}
+
+/** Opens Preferences on `pane` (the palette's lines for the panes, and the Agents pane above). */
+function openPreferencesPane(pane: RequestedPane): void {
   if (!isTauri) return notice.flash('Preferences are in the app.');
-  requestPane('agents');
+  requestPane(pane);
   invoke('open_preferences').catch((error: unknown) => {
     console.error('Could not open Preferences', error);
     notice.flash('Couldn’t open Preferences.');
@@ -1292,6 +1412,15 @@ const acceptAllAndStopTracking = () => {
 const changeSettings = (change: Partial<Settings>) => {
   settings = keepWindowOwn(settings, updateSettings(change), change);
 };
+
+/** The panes of the Preferences window, by name, for the palette. */
+const PREFERENCE_PANES: readonly (readonly [RequestedPane, string])[] = [
+  ['general', 'General'],
+  ['editor', 'Editor'],
+  ['appearance', 'Appearance'],
+  ['agents', 'Agents'],
+  ['shortcuts', 'Shortcuts'],
+];
 
 /**
  * What the toolbar's palette offers besides the registry's commands: the app's own commands and
@@ -1391,6 +1520,22 @@ function toolbarCommands(): AppCommand[] {
       run: () => commands.checkForUpdates(),
       available: () => updateNotifications !== undefined,
     },
+    // Each pane of Preferences, to go to it by name (the Preferences window has its own search).
+    ...PREFERENCE_PANES.map(([pane, label]): AppCommand => ({
+      id: `app.preferences.${pane}`,
+      title: `Open ${label} Preferences`,
+      synonyms: ['settings', 'options', 'preferences', label.toLowerCase()],
+      run: () => openPreferencesPane(pane),
+    })),
+    // Every other row of the menu bar (About Redlines, New, Open, the exports, zoom, …).
+    ...menuPaletteCommands(
+      menuModel,
+      () => menuState,
+      ({ row }) => {
+        const key = row.id ? shortcutBook.keyOf(row.id) : null;
+        return key ? displayKey(key) : undefined;
+      },
+    ),
   ];
 }
 
@@ -1463,7 +1608,7 @@ installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
   keyOf: (id) => shortcutBook.keyOf(id),
-  toggleToolbar: () => toolbar.toggle(),
+  toggleOutline: () => void editor.commands.run('outline.toggle'),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleTracking,
@@ -1673,6 +1818,26 @@ const commands: MenuCommands = {
     if (crashes) void crashes.revealLog();
     else notice.flash('The log is in the app.');
   },
+  // Dev builds only: a release build has no dev log, and its Help menu has neither row.
+  ...(devLog.enabled
+    ? {
+        writeToLog: () => {
+          void askDevNote({ container: app, restoreFocus: () => editor.focus() }).then((note) => {
+            if (note === null) return;
+            const { from, to } = editor.view.state.selection.main;
+            void devLog
+              .writeNote(note, {
+                text: editor.getDoc(),
+                selection: { from, to },
+                view: editor.getUiState().view,
+                tracking: editor.getUiState().tracking,
+              })
+              .then(() => notice.flash('Written to the dev log.'));
+          });
+        },
+        revealDevLog: () => devLog.reveal(),
+      }
+    : {}),
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. Of the
@@ -1775,7 +1940,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    toolbarShown: toolbar.isOpen(),
+    outlineShown: document.querySelector('.rl-outline[data-floating]') !== null,
   });
   menuState = {
     plainOnly: ui.kind === 'plain-only',
@@ -1955,6 +2120,7 @@ if (isTauri) {
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
     exposeForJourneys(editor, controller, {
+      dockToolbar: (docked) => toolbar.setAtBottom(docked),
       openFile: async (path, text) => {
         await host.write(path, text);
         await controller.open(path);
@@ -2034,6 +2200,16 @@ if (
   (import.meta.env['VITE_SYNC_CHECK'] || new URLSearchParams(location.search).has('sync-check'))
 ) {
   void import('./sync-check.ts').then(({ runSyncCheck }) => runSyncCheck());
+}
+
+// Debug only (sheet-check.ts): the sheet of every interface element, for the look sweep.
+if (
+  import.meta.env.DEV &&
+  (import.meta.env['VITE_SHEET_CHECK'] || new URLSearchParams(location.search).has('sheet-check'))
+) {
+  void import('./sheet-check.ts').then(({ runSheetCheck }) =>
+    runSheetCheck(editor, { notify: (options) => notifications.show(options) }),
+  );
 }
 
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.

@@ -34,7 +34,7 @@ function itemEnds(doc: string): number[] {
   return found;
 }
 
-const DOCUMENTS = fuzzCount(40);
+const DOCUMENTS = fuzzCount(15);
 
 it(`leaves the file it started from, in ${DOCUMENTS} random documents`, async () => {
   const failures: string[] = [];

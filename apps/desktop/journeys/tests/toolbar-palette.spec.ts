@@ -76,7 +76,7 @@ test.describe('the palette in the toolbar @views', () => {
 
   test('Esc gives the bar back, and the docked bar is searched too', async ({ start }) => {
     const j = await start({ doc: DOC, tracking: false, view: 'clean' });
-    await j.page.locator('.rl-wrench-button').click();
+    await j.dockToolbar();
     await j.press('Meta+Shift+P');
     await j.page.keyboard.type('bold');
     expect(await names(j)).toContain('Bold');
@@ -84,5 +84,21 @@ test.describe('the palette in the toolbar @views', () => {
     await expect(toolbar(j).locator('.rl-toolbar-input')).toHaveCount(0);
     await expect(toolbar(j).locator('.rl-toolbar-bar')).toBeVisible();
     await expect(toolbar(j)).toBeVisible();
+  });
+
+  test('finds the menu bar’s commands, About Redlines among them (#1192)', async ({ start }) => {
+    const j = await start({ doc: DOC, tracking: false, view: 'clean' });
+    await search(j, 'about');
+    expect(await names(j)).toContain('About Redlines');
+    await j.shot('menu-about');
+    await j.page.locator('.rl-toolbar-input').fill('export');
+    expect(await names(j)).toEqual(expect.arrayContaining(['Export to Word', 'Export as PDF']));
+    await j.page.locator('.rl-toolbar-input').fill('text');
+    expect(await names(j)).toEqual(expect.arrayContaining(['Larger Text', 'Smaller Text']));
+    await j.page.locator('.rl-toolbar-input').fill('preferences');
+    expect(await names(j)).toEqual(
+      expect.arrayContaining(['Open Preferences', 'Open Agents Preferences']),
+    );
+    await j.shot('menu-preferences');
   });
 });

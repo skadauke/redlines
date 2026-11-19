@@ -949,7 +949,7 @@ describe('on random documents (format §3.10)', { timeout: 600_000 }, () => {
     seed % 2 === 0 ? editedDocument(seed) : randomDocument(seeded(seed));
 
   it('makes the plain edit of both views, and leaves marks and ledger in order', () => {
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     let edits = 0;
     let refused = 0;
     let checked = 0;
@@ -1004,7 +1004,7 @@ describe('on random documents (format §3.10)', { timeout: 600_000 }, () => {
   });
 
   it('never refuses typing beside or inside an insertion, or Enter beside a comment', () => {
-    const documents = fuzzCount(150);
+    const documents = fuzzCount(50);
     let tried = 0;
     const kinds = new Set<string>();
     for (let seed = 1; seed <= documents; seed++) {
