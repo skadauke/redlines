@@ -115,6 +115,29 @@ describe('followTextZoom', () => {
     expect(say).toHaveBeenCalledWith('Text size 137%');
   });
 
+  it('keeps the notes and margins at the size they had while the fingers are down (#1157)', () => {
+    const { root } = setup(1.5);
+    const noteScale = () => root.style.getPropertyValue('--rl-note-scale');
+    expect(noteScale()).toBe('');
+    send('gesturestart');
+    // The rail is held beside the column: if its space grew with the text, the column, and a
+    // picture as wide as it, would shrink as the text grew.
+    expect(noteScale()).toBe('1.5');
+    send('gesturechange', 1.2);
+    send('gesturechange', 1.6);
+    expect(root.style.getPropertyValue(SCALE)).toBe('2.4');
+    expect(noteScale()).toBe('1.5');
+    send('gestureend');
+    expect(noteScale()).toBe('');
+  });
+
+  it('keeps the notes at 100% when a pinch starts below it', () => {
+    const { root } = setup(0.9);
+    send('gesturestart');
+    expect(root.style.getPropertyValue('--rl-note-scale')).toBe('1');
+    send('gestureend');
+  });
+
   it('lets the rail go when the window loses the focus with the fingers down', () => {
     const { holdRail, save } = setup();
     send('gesturestart');

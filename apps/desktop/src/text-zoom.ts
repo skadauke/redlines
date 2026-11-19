@@ -41,6 +41,9 @@ export interface TextZoom {
   stop(): void;
 }
 
+/** The theme's multiple for the notes and the margins (plugins/themes/src/tokens.css). */
+const NOTE_SCALE = '--rl-note-scale';
+
 /** How long after the person's wheel or touch the correction leaves the scroll alone. */
 const SCROLLING_MS = 150;
 
@@ -173,6 +176,11 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
       began = current;
       sticky = null;
       place = placeAt(view, scroller, point);
+      // The margin notes and the margins keep the size they have until the fingers lift: they grow
+      // with the text above 100% (`--rl-note-scale`), and a rail held beside the column would take
+      // more of the window with each frame, so that a picture, as wide as the column, shrank while
+      // the text grew (#1157).
+      root.style.setProperty(NOTE_SCALE, String(Math.max(1, current)));
       options.holdRail(true);
     },
     change: (size) => {
@@ -180,6 +188,8 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
     },
     end: (size) => {
       place = null;
+      // Before the rail is let go, so that it measures the size the notes are to have.
+      root.style.removeProperty(NOTE_SCALE);
       // Where the fingers stopped is the size; nothing snaps to the ladder.
       if (size !== began) {
         options.save(size);
