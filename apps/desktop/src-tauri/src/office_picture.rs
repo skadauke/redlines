@@ -14,9 +14,11 @@ const GVML_TYPE: &str = "com.microsoft.Art--GVML-ClipFormat";
 
 /// The largest package that is read, in bytes. A picture with a large original is worth the memory;
 /// a pasteboard larger than this is not one the app opens.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const MAX_PACKAGE_BYTES: usize = 50 * 1024 * 1024;
 
 /// Whether a package of `len` bytes is within the limit and holds something.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn readable(len: usize) -> bool {
     len > 0 && len <= MAX_PACKAGE_BYTES
 }
