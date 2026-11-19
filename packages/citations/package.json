@@ -1,0 +1,14 @@
+{
+  "name": "@redlines/citations",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Citations of a Quarto or pandoc document, formatted from its bibliography (BibTeX or CSL JSON) as author-date or numbers.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  }
+}

@@ -80,8 +80,7 @@ const STYLE = `
 .rl-crop-size { margin-right: 8px; color: var(--rl-ink-2); font-size: var(--rl-size-ui-small); font-variant-numeric: tabular-nums; }
 .rl-crop-button { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--rl-ink-2);
   font: inherit; font-size: var(--rl-size-ui); cursor: default; }
-.rl-crop-button:hover { background: var(--rl-pressed); color: var(--rl-ink); }
-.rl-crop-button:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: -2px; }
+.rl-crop-button:hover, .rl-crop-button:focus-visible { background: color-mix(in srgb, var(--rl-pressed) 55%, transparent); color: var(--rl-ink); outline: none; }
 .rl-crop-button[data-primary] { color: var(--rl-ink); font-weight: 600; }
 .rl-crop-button[aria-disabled='true'] { opacity: 0.5; }
 `;

@@ -94,11 +94,13 @@ import { FileView } from './tracked/file-view.ts';
 import { longLines } from './long-lines.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { math, mathFacet } from './preview/math.ts';
-import { quartoCites } from './preview/quarto-cites.ts';
+import { citationsFacet, quartoCites } from './preview/quarto-cites.ts';
 import { quartoHeadingAttributes } from './preview/quarto-heading-attrs.ts';
 import { quartoRefs } from './preview/quarto-refs.ts';
+import { quartoScripts } from './preview/quarto-script.ts';
 import { quartoTableCaptions } from './preview/quarto-table-caption.ts';
 import { includeFacet, quartoIncludes } from './preview/quarto-include.ts';
+import { quartoOutputs } from './preview/quarto-output.ts';
 import { htmlBlockKeys } from './preview/html-block.ts';
 import { linkOpening } from './preview/links.ts';
 import { tableKeymap } from './table/keys.ts';
@@ -479,6 +481,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableReach(),
     tableWidths(),
     quartoRefs(),
+    quartoScripts(),
     quartoHeadingAttributes(),
     quartoTableCaptions(),
     quartoCites(),
@@ -488,8 +491,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     options.imageSize ? imageSizer.of(options.imageSize) : [],
     options.openImage ? imageOpening(options.openImage) : [],
     options.includes ? includeFacet.of(options.includes) : [],
+    options.citations ? citationsFacet.of(options.citations) : [],
     options.math ? mathFacet.of(options.math) : [],
     quartoIncludes(),
+    quartoOutputs(),
     imageSelection(),
     undoHistory(),
     trackingBack,

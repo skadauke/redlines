@@ -161,7 +161,7 @@ describe('codexArgs at This folder and my home folder', () => {
       const line = codexArgs({ ...wide, ...(model ? { model } : {}) }, endpoint, homebrew);
       return line.indexOf('-m') < 0 ? null : line[line.indexOf('-m') + 1];
     };
-    expect(at('gpt-5-codex')).toBe('gpt-5-codex');
+    expect(at('gpt-6.2-sol')).toBe('gpt-6.2-sol');
     expect(at('--oss')).toBeNull();
     expect(at()).toBeNull();
   });
