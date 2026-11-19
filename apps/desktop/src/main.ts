@@ -794,7 +794,7 @@ const review = createReview(editor, {
   },
 });
 
-// The toolbar: shown only when summoned (the title bar's wrench, ⇧⌘P at the caret, a right-click at
+// The toolbar: shown only when summoned (⇧⌘P at the caret, a right-click at
 // the pointer, in place of WebKit's own menu), or at the bottom of the window by preference
 // (settings.toolbarAtBottom, below). Its items are commands of the registry, so it
 // registers after the plugins whose commands it shows, and, like them, before the menus are drawn.
@@ -809,7 +809,6 @@ const toolbar = createToolbar(editor, {
   appCommands: () => toolbarCommands(),
   // Ask has no way yet to start with a question typed: its box opens for the selection.
   askAbout: () => void editor.commands.run('ask.start'),
-  // The wrench follows the toolbar, however it came to show or go.
   onChange: () => render(),
   // A bar at the pointer has the place's card in itself: hovering shows no other over the page.
   onFloating: (floating) => review.holdCards(floating),
@@ -834,6 +833,9 @@ const toolbar = createToolbar(editor, {
       }
     : {}),
 });
+
+// The title bar's outline button is pressed while the outline shows as a window.
+document.addEventListener('rl-outline-floating', () => render());
 
 const documentHost: Host = {
   ...host,
@@ -1556,7 +1558,7 @@ installTitleHints();
 
 const titleBar = createTitleBar(element('#titlebar'), {
   keyOf: (id) => shortcutBook.keyOf(id),
-  toggleToolbar: () => toolbar.toggle(),
+  toggleOutline: () => void editor.commands.run('outline.toggle'),
   setView: (view) => editor.showView(view),
   switchLook: () => editor.switchLook(),
   toggleTracking,
@@ -1888,7 +1890,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    toolbarShown: toolbar.isOpen(),
+    outlineShown: document.querySelector('.rl-outline[data-floating]') !== null,
   });
   menuState = {
     plainOnly: ui.kind === 'plain-only',
@@ -2068,6 +2070,7 @@ if (isTauri) {
   // editor through this, in the plain page only. Nothing in a release build or the app has it.
   if (import.meta.env.DEV) {
     exposeForJourneys(editor, controller, {
+      dockToolbar: (docked) => toolbar.setAtBottom(docked),
       openFile: async (path, text) => {
         await host.write(path, text);
         await controller.open(path);

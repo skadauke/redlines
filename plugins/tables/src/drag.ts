@@ -1,6 +1,6 @@
 // Dragging rows or columns by their grip (design: tables, "Grips and +"): the rows (or columns) that
 // are selected with the one dragged move to any boundary, the last included. The moving ones dim, a copy
-// of them follows the pointer, a 3 px gray line (`--rl-ink-2`) marks the drop and shows only where the
+// of them follows the pointer, a 3 px faint blue line (`--rl-drop`) marks the drop and shows only where the
 // rows would go (never at their own place, where a drop changes nothing), the page scrolls near its
 // edges, and Esc cancels. The drop is the move command's operation with `to`.
 
