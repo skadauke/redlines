@@ -33,7 +33,15 @@ test.describe('Ask, with the selection starting above the window', () => {
         return -1;
       });
     const before = await scrolled();
-    expect(before, 'the view is down the page').toBeGreaterThan(500);
+    // The setup holds in any window size: the page is scrolled, and the selection's start is above
+    // the top of the window (the line's place in the window, not a pixel count of the scroll).
+    expect(before, 'the view is down the page').toBeGreaterThan(0);
+    const startAbove = await j.page.evaluate((from) => {
+      const { view } = window.__redlines!.editor;
+      // No coordinates means the line is not drawn at all: far above the window.
+      return view.coordsAtPos(from)?.bottom ?? -1;
+    }, text.indexOf('Paragraph 3 of'));
+    expect(startAbove, 'the selection starts above the window').toBeLessThan(0);
     await j.press('Alt+Meta+a');
     const bubble = j.page.locator('.rl-qa');
     await expect(bubble).toBeVisible();
