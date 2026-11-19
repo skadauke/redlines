@@ -1,0 +1,129 @@
+/*
+ * The first-launch onboarding (onboarding.ts, design §5.11a): the alert's sheet, a little wider, with
+ * the step's place above its title, and after the last screen a card of the tour that points at a
+ * button of the title bar. The grays and sizes are the theme's.
+ */
+
+.rl-onb {
+  width: min(460px, calc(100% - 32px));
+}
+
+.rl-onb-step {
+  margin-bottom: 4px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-onb-title {
+  font-size: var(--rl-size-ui);
+}
+
+.rl-onb-fields {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.rl-onb-label {
+  display: grid;
+  gap: 4px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-onb-label .rl-sheet-field {
+  margin-top: 0;
+}
+
+.rl-onb-note {
+  margin-top: 8px;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-onb-installs {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.rl-onb-install {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.rl-onb-install input {
+  margin-top: 3px;
+}
+
+.rl-onb-install-words {
+  display: grid;
+  gap: 2px;
+}
+
+.rl-onb-install-title {
+  font-weight: 700;
+}
+
+.rl-onb-install-text,
+.rl-onb-install-result {
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+}
+
+.rl-onb-failed {
+  color: var(--rl-ink);
+  font-style: italic;
+}
+
+.rl-onb-skip-all {
+  display: block;
+  height: auto;
+  margin: 10px 0 0 auto;
+  padding: 0;
+  border: 0;
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small);
+  text-decoration: underline;
+}
+
+.rl-onb-skip-all:hover {
+  background: transparent;
+  color: var(--rl-ink-2);
+}
+
+.rl-tour-target {
+  border-radius: 8px;
+  outline: 2px solid var(--rl-ink-2);
+  outline-offset: 2px;
+}
+
+.rl-tour-card {
+  position: fixed;
+  z-index: 410;
+  box-sizing: border-box;
+  width: min(300px, calc(100vw - 24px));
+  padding: 12px 14px 10px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 10px;
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink);
+  font-size: var(--rl-size-ui);
+  line-height: 1.4;
+}
+
+/* The arrow: a rotated square on the card's top edge, over the middle of what it points at. */
+.rl-tour-card::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: calc(var(--rl-tour-arrow, 30px) - 5px);
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid var(--rl-rule);
+  border-left: 1px solid var(--rl-rule);
+  background: var(--rl-card, Canvas);
+  transform: rotate(45deg);
+}
