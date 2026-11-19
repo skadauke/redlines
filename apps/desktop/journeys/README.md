@@ -142,17 +142,18 @@ in `--out` and nothing else.
 
 ## CI
 
-`.github/workflows/journeys.yml` runs them on a macOS runner (WebKit there is the app's engine, and
-baselines are drawn by it), as a job of its own in parallel with `check`:
+The journeys run on the dev Mac, and its WebKit draws the baselines. A lane runs the journeys of
+what it changes, and attaches the pictures to its PR. The Epic's sweep runs them all
+(`JOURNEYS_PROJECTS=all pnpm journeys`) and reports the result in the final PR. macOS runners are
+scarce and slow to start, and they draw some native controls differently, so CI runs the journeys
+only when someone asks:
 
 | When | What | Looks |
 |---|---|---|
-| a pull request | the `@smoke` journeys, and those of the areas its paths touch (`src/areas.ts`) | light |
-| a push to main | every journey, and the smoke journeys again; then the `@long` ones, alone | light; dark, 200% and dark 200% for the smoke ones |
-| manual dispatch (the sweep) | every journey, then the `@long` ones | all four |
+| `ci.yml` dispatched with `-f mac=true` | every journey, and the smoke journeys again; then the `@long` ones, alone | light; dark, 200% and dark 200% for the smoke ones |
+| `journeys.yml` dispatched | every journey, then the `@long` ones | all four |
 
-A change to a path every journey draws through (the format, the editor's core, the themes, the
-page's own code, the journeys, the workflow) runs every journey. The run uploads `journeys-test-results`
-(the pictures, and for a failed comparison the picture got, the approved one and the diff) and
-`look-review` (the pictures in order, with INDEX.md; see [look-review.md](look-review.md)). To
-approve a changed baseline, run `pnpm journeys:accept` on a Mac and commit the images.
+A CI run uploads `journeys-test-results` (the pictures, and for a failed comparison the picture
+got, the approved one and the diff) and `look-review` (the pictures in order, with INDEX.md; see
+[look-review.md](look-review.md)). To approve a changed baseline, run `pnpm journeys:accept` on the
+dev Mac, look at each image, and commit them.

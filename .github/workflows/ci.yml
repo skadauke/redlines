@@ -36,7 +36,15 @@ on:
   # hand, of that branch.
   schedule:
     - cron: '23 */2 * * *'
+  # The macOS jobs (Quick Look, journeys) run on the dev Mac instead: lanes run them for what they
+  # change, and the Epic's sweep runs them all (AGENTS.md). Here they run only when a dispatch asks
+  # for them with `-f mac=true`, which takes a macOS runner, the scarce kind.
   workflow_dispatch:
+    inputs:
+      mac:
+        description: 'Also run the macOS jobs (Quick Look, journeys), which otherwise run on the dev Mac'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -281,7 +289,7 @@ jobs:
   # apps/desktop/quicklook (apps/desktop/scripts/build-quicklook).
   quicklook:
     needs: changes
-    if: ${{ needs.changes.outputs.skip != 'true' && needs.changes.outputs.quicklook == 'true' }}
+    if: ${{ needs.changes.outputs.skip != 'true' && needs.changes.outputs.quicklook == 'true' && inputs.mac == true }}
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -365,11 +373,11 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo test
 
-  # The journeys of a full run: the middle tier, as on a push to main (journeys.yml). A push has
-  # its own run of that workflow, so only the schedule and a dispatch call it from here.
+  # The journeys, the middle tier (journeys.yml), only for a dispatch with `mac: true`: they run on
+  # the dev Mac, whose WebKit draws the baselines.
   journeys:
     needs: changes
-    if: ${{ needs.changes.outputs.skip != 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ needs.changes.outputs.skip != 'true' && github.event_name == 'workflow_dispatch' && inputs.mac == true }}
     uses: ./.github/workflows/journeys.yml
     with:
       main-tier: true
