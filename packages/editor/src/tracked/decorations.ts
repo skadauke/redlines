@@ -39,6 +39,7 @@ import {
   type Parsed,
   type Segment,
   plainPayload,
+  pictureOf,
 } from '@redlines/format';
 import {
   blankLines,
@@ -574,7 +575,13 @@ function analyze(state: EditorState, kept: number | null, zone?: Zone): Model {
         // A block drawn as a block takes its own bar, and leaves the lines around it alone.
         const asBlock = blocks?.struck.has(mark) || blocks?.absorbed.has(mark);
         if (!asBlock) {
-          const text = redlines ? deletedText(segment.payload, marks) : '';
+          // A picture that became another (a resize) is drawn as the new picture, and the bar and the
+          // card mark it: its old source is never shown struck through (#1197).
+          const picture =
+            mark.kind === 'sub' &&
+            pictureOf(plainPayload(segment.payload)) !== null &&
+            pictureOf(state.sliceDoc(from, to)) !== null;
+          const text = redlines && !picture ? deletedText(segment.payload, marks) : '';
           const whole =
             redlines &&
             text !== '' &&
