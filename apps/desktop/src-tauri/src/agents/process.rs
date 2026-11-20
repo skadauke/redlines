@@ -794,6 +794,34 @@ mod tests {
         }
     }
 
+    /// Starts `sleep` in place of the shell: the shell says its pid
+    /// and then `exec`s, so the stop that follows reaches one process, never a shell on its way to
+    /// the program, which a stop that lands in between would find waiting for a child.
+    fn start_sleeping(runs: &Runs, folder: &Path) -> (Started, Receiver<RunMessage>) {
+        start(runs, folder, &script("echo $$; exec sleep 300", ""))
+    }
+
+    /// Waits until what `start_sleeping` started is `sleep`.
+    fn wait_until_sleeping(receiver: &Receiver<RunMessage>) {
+        let pid = next_line(receiver);
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let named = Command::new("ps")
+                .args(["-o", "comm=", "-p", &pid])
+                .output()
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+                .unwrap_or_default();
+            if named.ends_with("sleep") {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the shell never became sleep: {named:?}"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     fn is_alive(pid: i32) -> bool {
         // SAFETY: signal 0 only asks whether the process exists.
         unsafe { libc::kill(pid, 0) == 0 }
@@ -1269,8 +1297,8 @@ mod tests {
     fn the_logs_end_says_a_run_was_stopped() {
         let folder = TempFolder::new("run-log-stop");
         let runs = Runs::default();
-        let (started, receiver) = start(&runs, folder.path(), &script("echo up; sleep 300", ""));
-        assert_eq!(next_line(&receiver), "up");
+        let (started, receiver) = start_sleeping(&runs, folder.path());
+        wait_until_sleeping(&receiver);
         runs.stop("main", started.id).unwrap();
         to_the_end(&receiver);
         let log = fs::read_to_string(&started.log_path).unwrap();
@@ -1289,9 +1317,9 @@ mod tests {
         let folder = TempFolder::new("run-ignored-sigint");
         let runs = Runs::default();
         let before = unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
-        let (started, receiver) = start(&runs, folder.path(), &script("echo up; sleep 300", ""));
+        let (started, receiver) = start_sleeping(&runs, folder.path());
         unsafe { libc::signal(libc::SIGINT, before) };
-        assert_eq!(next_line(&receiver), "up");
+        wait_until_sleeping(&receiver);
         runs.stop("main", started.id).unwrap();
         to_the_end(&receiver);
         let log = fs::read_to_string(&started.log_path).unwrap();
